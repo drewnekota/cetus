@@ -1,0 +1,120 @@
+{
+  "id": "research1",
+  "category": "research",
+  "lang": "en",
+  "query": "Compare Tavily, Serper, and Brave Search APIs for LLM agents in terms of pricing and features.",
+  "answerA": "Tavily, Serper, and Brave Search APIs differ in pricing and features; Tavily is known for structured data, Serper offers Google-quality results at a lower cost, and Brave Search emphasizes privacy and independent indexing.",
+  "sourcesA": [
+    {
+      "title": "Beyond Tavily - The Complete Guide to AI Search APIs in 2026",
+      "url": "http://websearchapi.ai/blog/tavily-alternatives"
+    },
+    {
+      "title": "How does the Brave Search API compare to other Web search API options? | Brave",
+      "url": "https://brave.com/search/api/guides/what-sets-brave-search-api-apart"
+    },
+    {
+      "title": "Agentic Search in 2026: Benchmark 8 Search APIs for Agents",
+      "url": "https://aimultiple.com/agentic-search"
+    },
+    {
+      "title": "Best Web Search APIs for AI Applications in 2026 - Firecrawl",
+      "url": "https://www.firecrawl.dev/blog/best-web-search-apis"
+    },
+    {
+      "title": "8 Web Search APIs You Need to Know About (If You're Building AI ...",
+      "url": "https://medium.com/@fardeenxyz/8-web-search-apis-you-need-to-know-about-if-youre-building-ai-agents-3028aab6e43d"
+    }
+  ],
+  "answerB": "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"web_search\">\n<｜｜DSML｜｜parameter name=\"query\" string=\"true\">Serper API pricing plans 2025 cost per 1000 requests</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>",
+  "sourcesB": [
+    {
+      "title": "Perplexity Search API vs. Tavily: RAG & Agent Choice 2025",
+      "url": "https://alphacorp.ai/blog/perplexity-search-api-vs-tavily-the-better-choice-for-rag-and-agents-in-2025"
+    },
+    {
+      "title": "Tavily | 面向 LLM 和 AI 代理的实时搜索 API - ToolMage",
+      "url": "https://www.toolmage.com/zh-hans/tool/tavily/"
+    },
+    {
+      "title": "Best SERP API Comparison 2025: SerpAPI vs Exa vs Tavily vs ScrapingDog vs ScrapingBee",
+      "url": "https://dev.to/ritza/best-serp-api-comparison-2025-serpapi-vs-exa-vs-tavily-vs-scrapingdog-vs-scrapingbee-2jci"
+    },
+    {
+      "title": "Tavily | Real-Time Search API for LLMs and AI Agents - ToolMage",
+      "url": "https://www.toolmage.com/en/tool/tavily/"
+    },
+    {
+      "title": "Comparison of web search APIs for AI applications and development projects.md",
+      "url": "https://gist.github.com/jonathanglasmeyer/ef13e542a42f81bf80a7e1bc241b39ef"
+    },
+    {
+      "title": "Costs - davidmarsoni/llog GitHub Wiki",
+      "url": "https://github-wiki-see.page/m/davidmarsoni/llog/wiki/Costs"
+    },
+    {
+      "title": "How to Add Real-Time Web Search to Your LLM Using Tavily",
+      "url": "https://www.freecodecamp.org/news/how-to-add-real-time-web-search-to-your-llm-using-tavily/"
+    },
+    {
+      "title": "Tavily vs Exa vs Perplexity vs YOU.com: The Complete AI Search API Comparison 2025",
+      "url": "https://www.humai.blog/tavily-vs-exa-vs-perplexity-vs-you-com-the-complete-ai-search-api-comparison-2025/#1-accuracy-does-it-actually-find-what-you-need"
+    },
+    {
+      "title": "个人学习工作分享",
+      "url": "https://www.lllyyb.com/archives/gsWnWneO"
+    },
+    {
+      "title": "Serper (Google Search)",
+      "url": "https://mcp.aibase.com/zh/server/1916359263478849538"
+    },
+    {
+      "title": "serper Google Search API介绍，与其它性价比对比",
+      "url": "https://sevnday.blog.csdn.net/article/details/150771276"
+    },
+    {
+      "title": "让 AI 联网：Serper 极速 Google 搜索 API 使用指南 可能是目前最适合 LLM 集成的搜索工具",
+      "url": "http://blog.einverne.info/post/2025/12/intro-to-serper-dev.html"
+    },
+    {
+      "title": "Brave Search API | Brave",
+      "url": "https://brave.com/search/api/?mtm_source=hacker-noon&mtm_medium=newsletter&mtm_campaign=search-api&mtm_content=API"
+    },
+    {
+      "title": "Introducing AI Grounding with Brave Search API, providing enhanced search performance in AI applications | Brave",
+      "url": "https://brave.com/blog/ai-grounding/?utm_source=aloa-ai.beehiiv.com&utm_medium=newsletter&utm_campaign=clay-raises-100m-openai-goes-open-source-more-august-6-2025&_bhlid=8048d5a77573e305d4bddc885dd80c7bc0acfb45"
+    },
+    {
+      "title": "Brave Announces AI Grounding API With Plans Starting At Free",
+      "url": "https://www.searchenginejournal.com/brave-announces-ai-grounding-api/553347/?utm_campaign=linkedin-auto-publish&utm_content=generative-ai-news&utm_medium=social&utm_source=linkedin&hss_channel=lcp-3611944"
+    },
+    {
+      "title": "Brave Search MCP Server · Apify",
+      "url": "https://apify.com/agentify/brave-search-mcp-server#main"
+    },
+    {
+      "title": "Brave Launches AI Grounding API to Boost Search Accuracy and Reduce AI Hallucinations",
+      "url": "https://web.swipeinsight.app/posts/brave-launches-ai-grounding-api-to-boost-search-accuracy-and-reduce-ai-hallucinations-18741"
+    },
+    {
+      "title": "Brave Unveils Free AI Grounding API",
+      "url": "https://digitalmarketingdesk.co.uk/brave-unveils-free-ai-grounding-api/#respond"
+    },
+    {
+      "title": "Brave launches AI Grounding for Search API - what changes for agents, speed and pricing",
+      "url": "https://www.etavrian.com/news/brave-ai-grounding-search-api-pricing"
+    },
+    {
+      "title": "Brave Search API Now Available Through AWS Marketplace",
+      "url": "https://www.searchenginejournal.com/brave-search-api-now-available-through-aws-marketplace/551382/"
+    },
+    {
+      "title": "Comparison of web search APIs for AI applications and development projects.md",
+      "url": "https://gist.github.com/jonathanglasmeyer/ef13e542a42f81bf80a7e1bc241b39ef"
+    },
+    {
+      "title": "Brave Announces AI Grounding API With Plans Starting At Free - No Agency Cube",
+      "url": "https://noagencycube.com/brave-announces-ai-grounding-api-with-plans-starting-at-free/"
+    }
+  ]
+}

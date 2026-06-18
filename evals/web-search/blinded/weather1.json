@@ -1,0 +1,72 @@
+{
+  "id": "weather1",
+  "category": "local",
+  "lang": "en",
+  "query": "What is the weather forecast for Hangzhou, China this weekend?",
+  "answerA": "According to the Central Meteorological Observatory, the weather forecast for Hangzhou this weekend (Saturday, June 6 and Sunday, June 7) is expected to be warm with a mix of clouds and rain.\\[1\\]\n\n- **Saturday (June 6)**: Mainly cloudy, with a high of 29°C and a low of 20°C. Winds will be light (less than level 3).\n- **Sunday (June 7)**: Cloudy turning to light rain, with a high of 29°C and a low of 21°C. Winds will remain light.\n\nIt might be a good idea to carry an umbrella if you plan to be out on Sunday.",
+  "sourcesA": [
+    {
+      "title": "杭州天气预报,杭州7天天气预报,杭州15天天气预报,杭州天气查询",
+      "url": "https://www.weather.com.cn/weather/101210101.shtml"
+    },
+    {
+      "title": "西湖天气预报,西湖7天天气预报,西湖15天天气预报,西湖天气查询",
+      "url": "https://www.weather.com.cn/weather15d/101210113.shtml"
+    },
+    {
+      "title": "Hangzhou, China Detailed Forecast | Current Conditions | NWS Alerts | Maps | Buoy Reports | Earth Quakes",
+      "url": "http://www.myforecast.com/detailed-forecast.php?cwid=55681&metric=true&city_count=&zip_code=&condition=act&data=1353105187"
+    },
+    {
+      "title": "Hangzhou, Zhejiang Sheng Daily Weather Forecast | Current Conditions | Sunrise | Sunset",
+      "url": "https://www.myforecast.com/index.php?cwid=W58457&metric=true&city_count=&zip_code=&condition=act&data=1152644273"
+    },
+    {
+      "title": "10-Day Weather Forecasts & Weekend Weather for Hangzhou, Zhejiang, CN | WeatherBug",
+      "url": "https://www.weatherbug.com/weather-forecast/10-day-weather/hangzhou-zhejiang-ch"
+    },
+    {
+      "title": "Weather in Hangzhou, China this weekend, weather Hangzhou Saturday and Sunday — Meteum",
+      "url": "https://meteum.ai/weather/en/hangzhou/details/auto/weekend?via=prsw"
+    },
+    {
+      "title": "Hangzhou, China Current Conditions | Hourly Forecast | NWS Alerts | Maps | Buoy Reports | Earth Quakes",
+      "url": "http://www.myforecast.com/index.php?cwid=W58457&metric=true&condition=act&city_count=&zip_code="
+    },
+    {
+      "title": "【杭州天气】杭州40天天气预报,杭州更长预报,杭州天气日历,杭州日历,15天天气预报,天气预报一周",
+      "url": "https://www.weather.com.cn/weather40d/101210101.shtml"
+    },
+    {
+      "title": "注意：明夜雨水强攻，局部暴雨！",
+      "url": "https://news.qq.com/rain/a/20260602A07HJV00"
+    },
+    {
+      "title": "【杭州西湖风景名胜区-断桥残雪天气】_杭州西湖风景名胜区-断桥残雪天气预报_天气查询",
+      "url": "https://tianqi.moji.com/weather/china/zhejiang/hangzhou-west-lake-scenic-area-remnant-snow-on-the-broken-bridge"
+    }
+  ],
+  "answerB": "Hangzhou will have hot and humid weather this weekend with temperatures ranging from 28°C to 33°C and occasional showers.",
+  "sourcesB": [
+    {
+      "title": "Weather in Hangzhou, China",
+      "url": "https://www.weatherapi.com/"
+    },
+    {
+      "title": "Hangzhou, Zhejiang, China Monthly Weather | AccuWeather",
+      "url": "https://www.accuweather.com/en/cn/hangzhou/106832/june-weather/106832"
+    },
+    {
+      "title": "Hangzhou 30-Day Forecast - Monthly Weather in Hangzhou, Zhejiang",
+      "url": "https://world-weather.info/forecast/china/hangzhou/month"
+    },
+    {
+      "title": "Hangzhou weather in June 2026 | China: How hot?",
+      "url": "https://www.weather2travel.com/china/hangzhou/june"
+    },
+    {
+      "title": "Hangzhou, Zhejiang, China Monthly Weather | AccuWeather",
+      "url": "https://www.accuweather.com/en/cn/hangzhou/106832/may-weather/106832"
+    }
+  ]
+}

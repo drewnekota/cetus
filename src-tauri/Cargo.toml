@@ -1,0 +1,88 @@
+[package]
+name = "cetus"
+version = "0.1.0"
+description = "Key of the Twilight — any-model desktop agent UI on top of pi."
+authors = ["Cetus"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "cetus_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "protocol-asset", "tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "io-util", "process", "time", "fs"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["clock"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+once_cell = "1"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+base64 = "0.22"
+# Doubao (Volcano Engine) real-time streaming ASR: a binary WebSocket protocol
+# with gzip'd frames. tokio-tungstenite for the wss session, flate2 for the
+# gzip payloads, futures-util for the split read/write sink+stream.
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+flate2 = "1"
+futures-util = "0.3"
+# Chinese word segmentation + POS tagging for recognition biasing: we mine
+# distinctive proper nouns (人名/地名/机构/专名) out of memory + past transcripts
+# to boost as hotwords. zh has no spaces, so a segmenter is required to pull
+# terms — the ASCII path can't. Dict loads once, lazily (off by default).
+jieba-rs = "0.7"
+# Screen-context collection (Rewind-like): periodic screenshot + on-device OCR.
+# xcap grabs monitor frames cross-platform; image handles resize/JPEG encode.
+# We decouple from xcap's bundled image version by lifting the raw RGBA bytes
+# out and rebuilding an image::RgbaImage with our own crate, so a version skew
+# never breaks type unification.
+xcap = "0.4"
+image = "0.25"
+tracing-appender = "0.2.5"
+
+# macOS-only: the global "double / both ⌘" launcher gesture is detected with a
+# CGEventTap (the OS hotkey API can't register modifier-only chords), and the
+# quick panel gets NSVisualEffectView vibrancy.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.24"
+core-foundation = "0.10"
+# Read the focused app's text field (Accessibility API) for dictation context
+# biasing — best-effort, gated on the Accessibility trust we already require.
+accessibility-sys = "0.2"
+window-vibrancy = "0.5"
+# Turn the launcher window into a non-activating NSPanel (Spotlight/Raycast
+# behavior: takes key focus without activating the app, rides onto any Space).
+# `exception` feature: lets us KVC-set NSWindow's private
+# `windowOcclusionDetectionEnabled` flag (see panel::disable_occlusion_throttling)
+# under an Obj-C @try guard, so an unsupported key logs instead of aborting.
+objc2 = { version = "0.6", features = ["exception"] }
+# Objective-C blocks (paired with objc2 0.6) — used for the global NSEvent
+# mouse-down monitor that dismisses the launcher on an outside click.
+block2 = "0.6"
+# Only for its bundle hook (`set_application`): it lets NSUserNotificationCenter
+# deliver from the unbundled `tauri dev` binary. We drive the notification +
+# click-routing delegate ourselves (see notify.rs) instead of its blocking send.
+mac-notification-sys = "0.6"
+# Used to kill the disclaim-shim's whole process group when a dictation is
+# cancelled (the helper it spawns is disclaimed into the same group).
+libc = "0.2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+# DEV-ONLY in-app eval/debug bridge. NEVER add to `default`; compiled out of release.
+devtest = []

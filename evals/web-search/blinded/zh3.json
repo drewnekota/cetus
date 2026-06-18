@@ -1,0 +1,112 @@
+{
+  "id": "zh3",
+  "category": "technical",
+  "lang": "zh",
+  "query": "字节跳动豆包（Doubao）大模型最新版本有哪些主要新功能？",
+  "answerA": "The latest version of ByteDance's Doubao model includes enhanced multimodal capabilities and a new real-time language model. It outperforms competitors in various benchmarks. The model is now available via API for developers.",
+  "sourcesA": [
+    {
+      "title": "字节跳动豆包大模型 1.5 Pro 发布，综合得分优于 GPT-4o、Claude 3.5 Sonnet - IT之家",
+      "url": "https://www.ithome.com/0/826/419.htm"
+    },
+    {
+      "title": "新发布！四款豆包大模型了解一下！",
+      "url": "https://zhuanlan.zhihu.com/p/1966168156985852480"
+    },
+    {
+      "title": "豆包大模型_百度百科",
+      "url": "https://baike.baidu.com/item/%E8%B1%86%E5%8C%85%E5%A4%A7%E6%A8%A1%E5%9E%8B/64418493"
+    },
+    {
+      "title": "字节跳动发布豆包大模型，日均处理千亿级Tokens - 新华网",
+      "url": "http://www.xinhuanet.com/tech/20240515/0cbd896c16e14a398c26f4195a360410/c.html"
+    },
+    {
+      "title": "豆包大模型 - 火山引擎",
+      "url": "https://www.volcengine.com/product/doubao"
+    }
+  ],
+  "answerB": "字节跳动在2025年12月18日的火山引擎FORCE原动力大会上，发布了**豆包大模型1.8**（Doubao-Seed-1.8）及多项配套更新。该版本主要面向多模态Agent场景进行定向优化，在理解、生成和智能体能力上跻身全球第一梯队。同时发布了音视频创作模型**Seedance 1.5 pro**和图像模型**Doubao-Seedream-4.5**。\n\n以下是最新版本的核心新功能概览：\n\n| 版本/模块 | 主要新功能 / 增强 |\n| :--- | :--- |\n| **豆包大模型 1.8** (旗舰文本/多模态模型) | **1. 多模态Agent能力增强**：工具调用、复杂指令遵循及OS Agent（操作系统智能体）能力显著提升，增强了处理复杂多步任务的规划与执行水平。<br>**2. 视觉理解升级**：单次视频理解帧数从640帧提升至**1280帧**，支持低帧率理解超长视频，并可调用工具对关键片段进行高帧率理解（可应用于在线教育、产品质检等）。<br>**3. 基础能力进步**：在视觉推理、通用视觉问答、空间理解及视频理解等任务中表现全球领先；通用智能体测评集**BrowserComp**上表现全球领先；数学与推理能力已接近全球顶尖通用模型水平。<br>**4. 超长上下文与API管理**：原生支持**256K超长上下文**和API上下文管理，能处理更长、更复杂的任务。 |\n| **Seedance 1.5 pro** (音视频创作模型) | **1. 原生音视频联合生成**：采用新架构，实现**毫秒级音画同步输出**，支持环境音、背景音乐和人声等多种元素。<br>**2. 多人多语言对话**：支持**多人多语言对话**，口型对齐精准，覆盖四川话、粤语等中文方言、英文及小语种，提升全球化创作潜力。<br>**3. 影视级生成能力**：具备影视级叙事张力，能精准捕捉运动细节并细腻呈现人物情绪。<br>**4. “Draft样片”功能**：可先生成低分辨率样片预览，关键要素与最终成片高度一致，可提升**65%** 的创作效率，减少**60%** 的无效创作成本。<br>**5. Seedance 1.0 Pro**：支持**2-12秒1080P**自由生成，满足影视级叙事需求。 |\n| **Doubao-Seedream-4.5** (图像创作模型) | 支持多图组合、创意写真、图片拆解、复杂组图、虚拟试穿与海报设计等能力。 |\n| **企业平台与工具** | **1. AgentKit**：全面升级的企业级AI Agent平台，覆盖Agent从开发、部署到管控的全生命周期，解决身份权限、模型确定性与系统集成等挑战。<br>**2. HiAgent智能体工作站**：构建统一的企业AI任务调度中心，提供开箱即用的通用智能体，支持个性化定制，实现Agent的规模化管理与应用。<br>**3. “AI节省计划”**：业内首个大模型节省计划，覆盖所有按量后付费的豆包大模型、视频图像创作模型及第三方开源模型，通过阶梯折扣帮助企业**最高节省47%** 的成本。 |\n| **规模与生态** | 截至12月，豆包大模型**日均token使用量突破50万亿**，较去年同期增长超10倍；已有**超过100家企业客户**累计token使用量超1万亿。 |\n\n**目前**，个人用户可在豆包、即梦AI等平台体验上述新模型能力；企业用户则可通过火山引擎API接入相关服务。",
+  "sourcesB": [
+    {
+      "title": "火山引擎发布豆包大模型1.8和音视频创作模型Seedance 1.5 pro",
+      "url": "http://www.news.cn/tech/20251219/617e255baf1b489886cd25d275b31b5f/c.html"
+    },
+    {
+      "title": "火山引擎发布豆包大模型1.8，多模态Agent能力进入全球第一梯队_发现频道_中国青年网",
+      "url": "http://d.youth.cn/newtech/202512/t20251218_16415527.htm"
+    },
+    {
+      "title": "火山引擎发布豆包大模型1.8 面向多模态场景优化",
+      "url": "https://www.sohu.com/a/966698340_255783?scm=10001.325_13-325_13.0.0-0-0-0-0.5_32"
+    },
+    {
+      "title": "火山引擎发布豆包大模型 1.8，多模态 Agent 能力进入全球第一梯队",
+      "url": "https://www.ithome.com/0/905/968.htm"
+    },
+    {
+      "title": "豆包大模型1.8发布，日均tokens超50万亿",
+      "url": "https://tech.gmw.cn/2025-12/18/content_38485511.htm"
+    },
+    {
+      "title": "火山引擎又有新动作，三大亮点值得期待",
+      "url": "https://m.cena.com.cn/ai/20251218/127904.html"
+    },
+    {
+      "title": "火山引擎发布豆包大模型1.8，多模态Agent能力进入全球第一梯队",
+      "url": "https://www.stnn.cc/c/2025-12-18/4024286.shtml"
+    },
+    {
+      "title": "豆包大模型1.6_百度百科",
+      "url": "https://wapbaike.baidu.com/item/%E8%B1%86%E5%8C%85%E5%A4%A7%E6%A8%A1%E5%9E%8B1.6/65767090?from=2001k"
+    },
+    {
+      "title": "豆包大模型1.8正式发布，拥有更强多模态Agent能力，豆包日均使用量超过50万亿，推出成本节省计划降幅达47%",
+      "url": "https://news.futunn.com/post/66344745/doubao-large-model-1-8-has-been-officially-released-featuring?level=1&data_ticket=1779743168344199"
+    },
+    {
+      "title": "FORCE LINK AI 创新巡展武汉站：火山引擎发布豆包系列模型升级 披露日均tokens超30万亿",
+      "url": "https://news.hubeidaily.net/pc/c_4659164.html"
+    },
+    {
+      "title": "火山引擎发布豆包大模型1.8和音视频创作模型Seedance 1.5 pro",
+      "url": "http://www.news.cn/tech/20251219/617e255baf1b489886cd25d275b31b5f/c.html"
+    },
+    {
+      "title": "火山引擎发布豆包大模型1.8 多模态Agent能力进入全球第一梯队",
+      "url": "https://www.stdaily.com/web/gdxw/2025-12/18/content_449412.html"
+    },
+    {
+      "title": "火山引擎发布双模型 多模态 Agent 能力入列全球第一梯队",
+      "url": "https://news.dayoo.com/finance/202512/19/171077_54907584.htm"
+    },
+    {
+      "title": "火山引擎发布豆包大模型1.8，多模态Agent能力进入全球第一梯队",
+      "url": "https://www.stnn.cc/c/2025-12-18/4024286.shtml"
+    },
+    {
+      "title": "火山引擎又有新动作，三大亮点值得期待",
+      "url": "https://m.cena.com.cn/ai/20251218/127904.html"
+    },
+    {
+      "title": "豆包大模型1.8发布，日均tokens超50万亿",
+      "url": "https://tech.gmw.cn/2025-12/18/content_38485511.htm"
+    },
+    {
+      "title": "计算机行业点评报告：字节跳动举办火山引擎冬季大会 AI大模型发展仍在提速",
+      "url": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/820402587727/index.phtml"
+    },
+    {
+      "title": "火山引擎，发布新模型",
+      "url": "https://www.163.com/dy/article/KH3HNMB605568W0A.html?referFrom="
+    },
+    {
+      "title": "字节AI棋局上的关键落子",
+      "url": "https://www.cena.com.cn/intelligence/20251223/127935.html"
+    },
+    {
+      "title": "豆包1.8杀入多模态Agent核心战场 在技术追赶、安全大考中 火山引擎寻找“加速度”",
+      "url": "https://news.ifeng.com/c/8pFVi74d0qV?ch=ttsearch"
+    }
+  ]
+}

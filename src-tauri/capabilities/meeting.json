@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "meeting",
+  "description": "Capability for the floating meeting-recording pill: poll the session status, stop it, and drag itself around. No dialog or notification surface.",
+  "windows": ["meeting"],
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
+}

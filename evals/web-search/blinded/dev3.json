@@ -1,0 +1,52 @@
+{
+  "id": "dev3",
+  "category": "technical",
+  "lang": "en",
+  "query": "What is the pricing of the Tavily web search API, including the free tier and cost per 1000 searches?",
+  "answerA": "Based on the most current information available, here is a breakdown of **Tavily**'s pricing structure (note: the correct spelling is **Tavily**, not Tavily, though they sound similar).\n\n### 🆓 Free Tier\n*   **Monthly Credits:** 1,000 credits per month, recurring.\n*   **Credit Card:** Not required.\n*   **Access:** All API features are accessible, with a rate limit of **100 requests per minute**.\n\n### 💳 Credit System\nTavily doesn't charge per 1,000 searches directly; it uses a credit system where different actions cost different amounts of credits:\n*   **Basic Search:** 1 credit\n*   **Advanced Search:** 2 credits\n*   **Content Extraction:** 1 credit per 5 successful URLs\n*   **Mapping:** 1 credit per 10 pages\n\n### 💰 Pay-As-You-Go & Cost per 1,000 Searches\nThe pay-as-you-go rate is **$0.008 per credit**.\n*   **Basic Search:** $8.00 per 1,000 searches (1,000 credits)\n*   **Advanced Search:** $16.00 per 1,000 searches (2,000 credits)\n\n### 📦 Subscription Plans (Monthly)\nSubscription tiers lower the effective cost per credit:\n\n| Plan | Monthly Price | Credits per Month | Effective Cost per 1,000 Basic Searches |\n| :--- | :--- | :--- | :--- |\n| **Project** | $30 | 4,000 | $7.50 |\n| **Bootstrap** | $100 | 15,000 | $6.67 |\n| **Startup** | $220 | 38,000 | ~$5.79 |\n| **Growth** | $500 | 100,000 | $5.00 |\n| **Enterprise** | Custom | Custom | Custom pricing |\n\nTavily sits in the mid-range pricing tier for SERP APIs—more expensive than budget options like Scrapingdog but less expensive than premium APIs like SerpAPI, while offering AI-optimized structured content ready for LLMs.\n\nLet me know if you need help comparing it to other APIs like SerpAPI or Exa.",
+  "sourcesA": [
+    {
+      "title": "Best SERP API Comparison 2025: SerpAPI vs Exa vs Tavily vs ScrapingDog vs ScrapingBee",
+      "url": "https://dev.to/ritza/best-serp-api-comparison-2025-serpapi-vs-exa-vs-tavily-vs-scrapingdog-vs-scrapingbee-2jci"
+    },
+    {
+      "title": "Perplexity Search API vs. Tavily: RAG & Agent Choice 2025",
+      "url": "https://alphacorp.ai/blog/perplexity-search-api-vs-tavily-the-better-choice-for-rag-and-agents-in-2025"
+    },
+    {
+      "title": "Costs - davidmarsoni/llog GitHub Wiki",
+      "url": "https://github-wiki-see.page/m/davidmarsoni/llog/wiki/Costs"
+    },
+    {
+      "title": "Tavily Web Search in NanoGPT: BYOK-friendly real-time browsing",
+      "url": "https://nano-gpt.com/blog/blog-tavily-web-search"
+    },
+    {
+      "title": "工具：Tavily搜索引擎",
+      "url": "https://www.cnblogs.com/fuminer/p/18828565"
+    }
+  ],
+  "answerB": "Tavily offers a free tier with 1,000 credits per month. Paid plans start with 4,000 credits per month. Pricing per additional 1,000 searches is not publicly disclosed.",
+  "sourcesB": [
+    {
+      "title": "5 Tavily Alternatives for Better Pricing, Performance, and Extraction ...",
+      "url": "https://www.firecrawl.dev/blog/tavily-alternatives"
+    },
+    {
+      "title": "TAVILY_API_KEY: Free Signup, Direct Link & Code Examples (2026)",
+      "url": "https://openclawlaunch.com/guides/tavily-api-key"
+    },
+    {
+      "title": "Perplexity Search API vs. Tavily: RAG & Agent Choice 2025",
+      "url": "https://alphacorp.ai/blog/perplexity-search-api-vs-tavily-the-better-choice-for-rag-and-agents-in-2025"
+    },
+    {
+      "title": "Find a plan to power your AI Agents - Tavily",
+      "url": "https://www.tavily.com/pricing"
+    },
+    {
+      "title": "Beyond Tavily - The Complete Guide to AI Search APIs in 2026",
+      "url": "http://websearchapi.ai/blog/tavily-alternatives"
+    }
+  ]
+}

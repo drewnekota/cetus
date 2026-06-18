@@ -1,0 +1,72 @@
+{
+  "id": "dev2",
+  "category": "technical",
+  "lang": "en",
+  "query": "What is the latest LTS version of Node.js and its notable new features?",
+  "answerA": "The latest LTS version of Node.js is 24.x. Notable new features include improved interoperability of ES Modules and phasing out 32-bit Windows support.",
+  "sourcesA": [
+    {
+      "title": "New Node.js features, Node latest version report",
+      "url": "https://tsh.io/blog/new-node-js-features"
+    },
+    {
+      "title": "Node.js - Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Node.js"
+    },
+    {
+      "title": "NodeJS 23: What's New in the latest version of Node",
+      "url": "https://builder.aws.com/content/3A9c0s0uoHBJ5KpHyA7IB7oDWST/nodejs-23-whats-new-in-the-latest-version-of-node"
+    },
+    {
+      "title": "Node.js v22 Enters Long Term Support (LTS) - NodeSource",
+      "url": "http://nodesource.com/blog/Node.js-v22-Long-Term-Support-LTS"
+    },
+    {
+      "title": "How does Node LTS work - Reddit",
+      "url": "https://www.reddit.com/r/node/comments/1dl6fm2/how_does_node_lts_work"
+    }
+  ],
+  "answerB": "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"web_search\">\n<｜｜DSML｜｜parameter name=\"query\" string=\"true\">Node.js 24 LTS features V8 test runner permission model 2025</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n<｜｜DSML｜｜invoke name=\"web_fetch\">\n<｜｜DSML｜｜parameter name=\"url\" string=\"true\">https://nodejs.org/en</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>",
+  "sourcesB": [
+    {
+      "title": "Node.js 24 Becomes LTS: What You Need to Know",
+      "url": "https://nodesource.com/blog/nodejs-24-becomes-lts?cmid=2651cf3c-2624-4174-b6ea-19fcb0a87a3f"
+    },
+    {
+      "title": "Release 2025-06-24, Version 22.17.0 'Jod' (LTS), @aduh95 · nodejs/node",
+      "url": "https://github.com/nodejs/node/releases/tag/v22.17.0"
+    },
+    {
+      "title": "Node.js 24 is now available on Azure App Service for Linux",
+      "url": "https://azure.github.io/AppService/2025/10/29/node24-available.html"
+    },
+    {
+      "title": "NodeJS 25 Updates You Should Know About | Metizsoft",
+      "url": "https://metizsoft.com/blog/nodejs-25-update-whats-new"
+    },
+    {
+      "title": "Release 2025-10-15, Version 25.0.0 (Current), @RafaelGSS · nodejs/node",
+      "url": "https://github.com/nodejs/node/releases/tag/v25.0.0"
+    },
+    {
+      "title": "WebDevPro #97: LTS-Level Node Upgrades, Rust Introduces Let Chains, Claude Now Lets You Create Apps in Chat",
+      "url": "https://www.packtpub.com/en-lt/learning/webdevpro/webdevpro-97-lts-level-node-upgrades-rust-introduces-let-chains-claude-now-lets-you-create-apps-in-chat"
+    },
+    {
+      "title": "Release 2025-08-27, Version 24.7.0 (Current), @targos · nodejs/node",
+      "url": "https://github.com/nodejs/node/releases/tag/v24.7.0"
+    },
+    {
+      "title": "Node.js 25 正式发布：性能、安全与标准化全面升级",
+      "url": "https://www.ithome.com/0/890/063.htm"
+    },
+    {
+      "title": "nodejs/node v25.0.0 on GitHub",
+      "url": "https://newreleases.io/project/github/nodejs/node/release/v25.0.0"
+    },
+    {
+      "title": "Release 2025-11-11, Version 25.2.0 (Current), @aduh95 · nodejs/node",
+      "url": "https://github.com/nodejs/node/releases/tag/v25.2.0"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "voice",
+  "description": "Minimal capability for the global dictation HUD window: it only listens for the voice-* transcript events. No command, dialog, or notification surface.",
+  "windows": ["voice"],
+  "permissions": ["core:default"]
+}

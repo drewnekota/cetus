@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability set for the cetus main window.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:webview:allow-set-webview-zoom",
+    "core:event:default",
+    "core:app:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-confirm",
+    "dialog:allow-message",
+    "notification:default",
+    "autostart:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "id": "zh2",
+  "category": "live-data",
+  "lang": "zh",
+  "query": "今天美元兑人民币的最新汇率是多少？",
+  "answerA": "根据中国外汇交易中心公布的数据，今天（2025年4月10日）银行间外汇市场**美元兑人民币的汇率中间价为 1美元 = 7.2092元人民币**。\n\n除了官方中间价，其他交易市场的参考汇率约为：\n*   **在岸人民币 (CNY)**：截至下午18时44分，离岸人民币对美元报7.3108，涨超0.5%。\n*   **离岸人民币 (CNH)**：根据当地时间4月10日的数据，1美元可兑换约7.3147元人民币。\n\n以上信息仅供参考，实际换汇汇率会根据所选银行和交易时间实时变动，建议交易前以银行柜台的实时成交价为准。",
+  "sourcesA": [
+    {
+      "title": "人民币对美元中间价报7.2092 调贬26个基点",
+      "url": "http://finance.ce.cn/fe/gdxw/202504/t20250410_1976739.shtml"
+    },
+    {
+      "title": "2025年4月10日中国外汇交易中心受权公布人民币汇率中间价公告",
+      "url": "https://nanjing.pbc.gov.cn/zhengcehuobisi/125207/125217/125925/5668485/index.html"
+    },
+    {
+      "title": "新聞內容",
+      "url": "http://fund.taipeifubon.com.tw/r/News/rNews_%7B09AAED56-4A62-4789-8DFD-5A02DDDEB0EA%7D_6_A.djhtm"
+    },
+    {
+      "title": "2025/04/10",
+      "url": "https://www.yicai.com/brief/102565389.html"
+    },
+    {
+      "title": "2025年4月10日人民币汇率中间价公告",
+      "url": "http://www.ce.cn/xwzx/gnsz/gdxw/202504/10/t20250410_39341459.shtml"
+    },
+    {
+      "title": "4月10日人民币对美元中间价报7.2092元 下调26个基点",
+      "url": "https://www.chinanews.com.cn/cj/2025/04-10/10397131.shtml"
+    },
+    {
+      "title": "",
+      "url": "https://fx.sauder.ubc.ca/pdf/20250410.pdf#1#1"
+    },
+    {
+      "title": "4月10日人民币兑美元中间价下调26个基点",
+      "url": "https://www.cnstock.com/commonDetail/393443"
+    },
+    {
+      "title": "4月10日人民币兑美元中间价下调26个基点",
+      "url": "https://www.sohu.com/a/881998977_120988576?scm=10001.325_13-109000.0.0.5_32&spm=smpc.channel_248.block3_308_NDdFbm_1_fd.11.1744249277194zfNPBGx_324"
+    },
+    {
+      "title": "人民币兑美元中间价报7.2092，下调26点；上一交易日中间价7.2066，上一交易日官方收盘价7.3498",
+      "url": "https://www.dzh.com.cn/index/detail?mod=txs&url=/wap/data/news/txs/2025/04/487367.json"
+    }
+  ],
+  "answerB": "Today's USD to CNY exchange rate is approximately 6.77 CNY per USD, according to multiple financial sources. This rate reflects the current market value and may fluctuate slightly.",
+  "sourcesB": [
+    {
+      "title": "美元至人民币汇率历史| 汇率换算器 - Wise",
+      "url": "https://wise.com/zh-cn/currency-converter/usd-to-cny-rate/history"
+    },
+    {
+      "title": "今日美元对离岸人民币汇率(USD CNH) - 英为财情",
+      "url": "https://cn.investing.com/currencies/usd-cnh"
+    },
+    {
+      "title": "1 USD to CNY - 美元 to 人民币 Exchange Rate",
+      "url": "https://www.xe.com/zh-cn/currencyconverter/convert?Amount=1&From=USD&To=CNY"
+    },
+    {
+      "title": "1 美元兑人民币汇率。将USD 兑换成CNY - Wise",
+      "url": "https://wise.com/zh-cn/currency-converter/usd-to-cny-rate?amount=1"
+    },
+    {
+      "title": "人民币汇率中间价",
+      "url": "http://m.safe.gov.cn/safe/rmbhlzjj/index.html"
+    }
+  ]
+}

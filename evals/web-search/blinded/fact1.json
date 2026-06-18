@@ -1,0 +1,72 @@
+{
+  "id": "fact1",
+  "category": "who-what-when",
+  "lang": "en",
+  "query": "Who is the current CEO of OpenAI?",
+  "answerA": "The current CEO of OpenAI is **Sam Altman**. He is also a co-founder of the company.",
+  "sourcesA": [
+    {
+      "title": "",
+      "url": "https://www.commerce.senate.gov/index.php/services/files/6B937B74-31EE-4777-B004-3D6DC0DC3FBA#1#1"
+    },
+    {
+      "title": "Sam Altman Says 'Shame on Me' If OpenAI Doesn't Become 'First Big Company' Run By An AI CEO",
+      "url": "https://www.benzinga.com/markets/tech/25/11/48683642/sam-altman-says-shame-on-me-if-openai-doesnt-become-first-big-company-run-by-an-ai-ceo"
+    },
+    {
+      "title": "OpenAI管理层职能重构：CEO奥特曼专注研发与产品，COO主管全球业务-36氪",
+      "url": "https://36kr.com/p/3221518477151368"
+    },
+    {
+      "title": "Sam Altman to Receive No Stake in OpenAI’s New Structure Despite Microsoft’s Major Investment | PYMNTS.com",
+      "url": "https://www.pymnts.com/cpi-posts/sam-altman-to-receive-no-stake-in-openais-new-structure-despite-microsofts-major-investment/"
+    },
+    {
+      "title": "OpenAI奥特曼交出ChatGPT指挥棒：女CEO接掌大权",
+      "url": "https://www.taibo.cn/p/98198"
+    },
+    {
+      "title": "OpenAI | Company Overview & News",
+      "url": "https://www.forbes.com/companies/openai/?sh=7bb8fcd64aa0"
+    },
+    {
+      "title": "OpenAI hires Slack CEO Dresser as 1st revenue chief to drive profitability",
+      "url": "https://www.business-standard.com/amp/world-news/openai-hires-slack-ceo-dresser-as-1st-revenue-chief-to-drive-profitability-125121000047_1.html"
+    },
+    {
+      "title": "OpenAI",
+      "url": "https://aiwiki.ai/wiki/OpenAI"
+    },
+    {
+      "title": "Leadership Changes at OpenAI, AI in Entertainment, and Advances in Voice Technology - The OpenAI Daily Brief | iHeart",
+      "url": "https://www.iheart.com/podcast/269-the-openai-daily-brief-255228593/episode/leadership-changes-at-openai-ai-in-270969031/"
+    },
+    {
+      "title": "Sam Altman | Merchant of the future",
+      "url": "https://www.thehindu.com/sci-tech/technology/sam-altman-merchant-of-the-future/article70366667.ece"
+    }
+  ],
+  "answerB": "As of 2026, Sam Altman is the CEO of OpenAI. He returned to the position after a brief interim, with Mira Murati serving as CTO and Greg Brockman as President. This leadership structure was announced in the initial board changes.",
+  "sourcesB": [
+    {
+      "title": "Who is the CEO of OpenAI in 2026? Sam Altman's Bio - Clay",
+      "url": "https://www.clay.com/dossier/openai-ceo"
+    },
+    {
+      "title": "Sam Altman returns as CEO, OpenAI has a new initial board",
+      "url": "https://openai.com/index/sam-altman-returns-as-ceo-openai-has-a-new-initial-board"
+    },
+    {
+      "title": "Sam Altman returns as CEO, OpenAI has a new initial board - LinkedIn",
+      "url": "https://www.linkedin.com/posts/openai_sam-altman-returns-as-ceo-openai-has-a-new-activity-7135807891181043712-pItO"
+    },
+    {
+      "title": "OpenAI - Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/OpenAI"
+    },
+    {
+      "title": "Sam Altman - Forbes",
+      "url": "https://www.forbes.com/profile/sam-altman"
+    }
+  ]
+}

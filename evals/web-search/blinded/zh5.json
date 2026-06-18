@@ -1,0 +1,112 @@
+{
+  "id": "zh5",
+  "category": "research",
+  "lang": "zh",
+  "query": "对比 DeepSeek 和阿里通义千问最新旗舰模型的上下文长度与 API 价格。",
+  "answerA": "DeepSeek V3 has a 64k context length; Alibaba's Tongyi Qianwen Max has a 32k context length. DeepSeek V3's input price is 0.025 yuan per million tokens; Tongyi Qianwen Max's input price is 2.4 yuan per million tokens.",
+  "sourcesA": [
+    {
+      "title": "AI模型排行榜横评：通义千问、Deepseek、Kimi谁才是性价比之王 | Solo 独立开发者社区-链接每一位独立开发者, 从 Solo 开始",
+      "url": "https://solo.xin/topic/3038"
+    },
+    {
+      "title": "2025大模型排行榜发布API比较：DeepSeek-v3对比通义千问-Max",
+      "url": "https://adg.csdn.net/694cfd8b5b9f5f31781abf4f.html"
+    },
+    {
+      "title": "[PDF] 大模型API 服务行业分析报告（2025）",
+      "url": "https://www.cdut.edu.cn/__local/0/71/D3/F5ED76CDE5391C517C545A6BA05_F75BD49A_50450F.pdf"
+    },
+    {
+      "title": "【工具自荐】旗舰大模型价格对比网站· Issue #8533 · ruanyf/weekly",
+      "url": "https://github.com/ruanyf/weekly/issues/8533"
+    },
+    {
+      "title": "模型& 价格 - DeepSeek API Docs",
+      "url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
+    }
+  ],
+  "answerB": "## DeepSeek vs 阿里通义千问：最新旗舰模型对比\n\n以下是截至 2025 年底双方最新旗舰模型的**上下文长度**与 **API 价格**对比。\n\n---\n\n### 🏆 旗舰模型一览\n\n| 维度 | **DeepSeek-V3.2-Exp** | **Qwen3-Max（通义千问）** |\n|:---|:---|:---|\n| **发布时间** | 2025 年 9 月 29 日 | 2025 年 9 月（预览版） |\n| **参数规模** | ~685B（MoE） | **~1T（万亿级，闭源）** |\n| **开源情况** | ✅ 全面开源 | ❌ 仅 API 访问 |\n| **核心技术** | DSA 稀疏注意力机制 | 千亿级稠密架构 + 混合推理 |\n\n---\n\n### 📏 上下文长度\n\n| 模型 | API 上下文长度 | 备注 |\n|:---|:---|:---|\n| **DeepSeek-V3.2-Exp** | **128K tokens** | 华为云适配后最高支持 **160K**；网页/App 端已支持 **1M**（2026 年 2 月更新） |\n| **Qwen3-Max** | **262K tokens** | 分级定价，支持超长文档深度处理 |\n| **Qwen-Plus（次旗舰）** | **1M tokens** | 2025 年 7 月上线，性价比之选 |\n\n> 📌 **结论**：API 层面 Qwen3-Max（262K）胜出；但若论极限，DeepSeek 网页端达 1M，Qwen-Plus 的 API 也达 1M。\n\n---\n\n### 💰 API 价格对比\n\n#### DeepSeek-V3.2-Exp（降价后）\n\n| 计费项 | 价格（元/百万 tokens） |\n|:",
+  "sourcesB": [
+    {
+      "title": "qiniu/deepseek/deepseek-v3.2",
+      "url": "https://www.showapi.com/ai/llm/qiniu/deepseek/deepseek-v3.2"
+    },
+    {
+      "title": "R2没等来，DeepSeek V3.1模型发布：价格涨了，智能体能力加强",
+      "url": "https://www.chinastarmarket.cn/detail/2122276"
+    },
+    {
+      "title": "计算机行业：AI产业跟踪：DEEPSEEK-V3.1正式发布 持续看好AIAGENT商业化落地进展",
+      "url": "http://stock.finance.sina.com.cn/stock/view/paper.php?reportid=809467996104&symbol=sh000001"
+    },
+    {
+      "title": "网心算力云接入DeepSeek-V3.1-Terminus",
+      "url": "https://www.onething.net/media/439.html"
+    },
+    {
+      "title": "DeepSeek-V3.1版本更新，双模式开放体验",
+      "url": "https://jiweipreview.laoyaoba.com/html/share/news/960076?source=app_android_v2&news_id=960076"
+    },
+    {
+      "title": "DeepSeek再上新，价格下降超50%",
+      "url": "https://cn.wicinternet.org/2025-09/30/content_38322807.htm"
+    },
+    {
+      "title": "深度解析DeepSeek V3.2-Exp：DSA稀疏注意力与API成本革命",
+      "url": "https://news.qiniu.com/archives/1765422057003"
+    },
+    {
+      "title": "DeepSeek-V3.2-Exp发布并开源，API成本将降低50%以上",
+      "url": "https://www.thepaper.cn/newsDetail_forward_31711879?commTag=true"
+    },
+    {
+      "title": "DeepSeek-V3.1",
+      "url": "https://baike.baidu.com/item/DeepSeek-V3.1/66327026"
+    },
+    {
+      "title": "南方财经网",
+      "url": "https://m.sfccn.com/2025/9-30/4MMDE0NDlfMjA2NzQ4MQ.html"
+    },
+    {
+      "title": "【大模型服务平台百炼】通义千问-MT-Plus/Turbo 模型更新通知",
+      "url": "https://www.aliyun.com/notice/117402"
+    },
+    {
+      "title": "qwen/qwen3-vl-235b-a22b-thinking - API 价格、文档与测评 | 302.AI (按量付费）",
+      "url": "https://302.ai/product/detail/ppio-qwen3-vl-235b-a22b-thinking"
+    },
+    {
+      "title": "sophnet/Qwen3-VL-235B-A22B-Instruct - API 价格、文档与测评 | 302.AI (按量付费）",
+      "url": "https://302.ai/product/detail/sophnet-qwen3-vl-235b-A22b-instruct"
+    },
+    {
+      "title": "更强的235B来了！白山云已上线升级版Qwen3模型-白山云 - 中国领先的独立边缘云服务提供商",
+      "url": "https://www.baishan.com/news-des/1.html"
+    },
+    {
+      "title": "qwen/qwen3-vl-235b-a22b-instruct - API 价格、文档与测评 | 302.AI (按量付费）",
+      "url": "https://302.ai/product/detail/ppio-qwen3-vl-235b-a22b-instruct"
+    },
+    {
+      "title": "阿里云百炼产品月刊【2025年7月】",
+      "url": "https://developer.aliyun.com/article/1675344"
+    },
+    {
+      "title": "qwen3-max-2025-09-23 - API 价格、文档与测评 | 302.AI (按量付费）",
+      "url": "https://302.ai/product/detail/2471"
+    },
+    {
+      "title": "参数量1T，阿里发布“通义最强语言模型”Qwen3-Max”预览版",
+      "url": "https://www.21cto.com/article/6448483923384772"
+    },
+    {
+      "title": "阿里云ai大模型费用：阿里云ai模型价格收费多少",
+      "url": "https://www.321.net/Other_help/773696.html"
+    },
+    {
+      "title": "PPIO上线Qwen3-Next，专为极长上下文和超大规模参数性能优化",
+      "url": "https://blog.csdn.net/bumblexbee/article/details/151607350"
+    }
+  ]
+}

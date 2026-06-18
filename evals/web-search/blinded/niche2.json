@@ -1,0 +1,112 @@
+{
+  "id": "niche2",
+  "category": "long-tail",
+  "lang": "en",
+  "query": "How does Anthropic's server-side web_search_20250305 tool return page content to the model, and is the content encrypted?",
+  "answerA": "Anthropic's web_search_20250305 tool returns page content to the model server-side, and the content is encrypted to protect privacy.",
+  "sourcesA": [
+    {
+      "title": "Anthropic Web Search Tool",
+      "url": "https://cobusgreyling.substack.com/p/anthropic-web-search-tool"
+    },
+    {
+      "title": "The Claude Code WebSearch Black Box - The VMUNIX Blues",
+      "url": "https://www.vmunix.com/posts/claude-websearch-blackbox"
+    },
+    {
+      "title": "Anthropic Vertex AI web_search tool breaks multi-turn conversations ...",
+      "url": "https://github.com/danny-avila/LibreChat/discussions/11855"
+    },
+    {
+      "title": "How Claude Code Search Actually Works: What I Learned from the ...",
+      "url": "https://trevorfox.com/2026/04/how-claude-code-search-actually-works"
+    },
+    {
+      "title": "Web search with Anthropic Claude models  |  Gemini Enterprise Agent Platform  |  Google Cloud Documentation",
+      "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/partner-models/claude/web-search"
+    }
+  ],
+  "answerB": "## How `web_search_20250305` Returns Page Content to the Model\n\n### Architecture Overview\n\n`web_search_20250305` is a **server-side tool** — Anthropic executes the search entirely on their infrastructure (powered by Brave Search), not on your machine or within your application. When Claude decides a search is needed, it emits a `server_tool_use` block, Anthropic's backend performs the search, and results flow back into the model's context as structured content blocks.\n\nThe response contains several distinct block types:\n\n| Block Type | What It Contains |\n|---|---|\n| `text` | Claude's narration of what it's doing |\n| `server_tool_use` | The exact search query Claude used |\n| `web_search_tool_result` | The collection of search results |\n| `web_search_result` | Individual results (title, URL, snippet) |\n| `citation` | Attributed text supporting Claude's claims |\n\nThe model sees both the **snippets** (clear text extracted from pages) and an **`encrypted_content`** field that contains the full page content.\n\n---\n\n### Is the Content Encrypted?\n\n**Yes — partially.** The search results contain an `encrypted_content` field that holds the full scraped page text in encrypted form. From the API consumer's perspective, it looks like this:\n\n```json\n{\n  \"content\": {\n    \"encrypted\": \"2f3a9b8c4d5e6f7a8b9c0d1e2f3a4b5c...\",\n    \"index\": \"encrypted_index_abc123...\"\n  },\n  \"citation\": {\n    \"url\": \"https://example.com/article\",\n    \"title\": \"Article Title\"\n  }\n}\n```\n\nKey details about this encryption:\n\n- **The model CAN read the decrypted content** — Anthropic's server-side infrastructure handles decryption transparently before the content reaches the model. Claude uses this to understand pages deeply and generate accurate answers.\n\n- **Developers/API users CANNOT read it** — the encrypted blob is opaque to you. This is effectively a **DRM/content-protection mechanism**. It prevents developers from extracting full page content and repurposing it (e.g., feeding it to other models like Gemini, which would not understand Anthropic's encryption format).\n\n- **Citations and snippets ARE in the clear** — titles, URLs, and brief text snippets that support Claude's claims are delivered unencrypted so you can display sources to users.\n\n- **Multi-turn preservation** — if you're building a multi-turn conversation where Claude references previous search results, you must pass the `encrypted_content` field back exactly as received. If you strip or alter it, Claude loses access to the underlying page content in subsequent turns.\n\n---\n\n### Why Anthropic Encrypts Page Content\n\nThe encryption serves several purposes:\n\n1. **Licensing/compliance** — search engines and publishers typically don't grant API users the right to reproduce full page content. Encryption ensures Anthropic's API users can't bypass those terms.\n\n2. **Model lock-in** — content encrypted by Anthropic can only be decrypted within Anthropic's infrastructure, making it non-portable to other model providers.\n\n3. **Citation-driven UX** — by keeping full content server-side, Anthropic encourages the model to use its citation system (with `<cite>` tags and sentence-level attribution) rather than regurgitating entire articles, which aligns with copyright compliance.\n\nThis is why some developers building multi-model agent pipelines (e.g., using both Claude and Gemini) have switched to alternatives like Exa or Tavily — those services return unencrypted content that any model can consume.",
+  "sourcesB": [
+    {
+      "title": "pi-wierd-web",
+      "url": "https://www.npmjs.com/package/pi-wierd-web"
+    },
+    {
+      "title": "Simon Willison on llm-tool-use",
+      "url": "https://simonwillison.net/tags/llm-tool-use/?page=2"
+    },
+    {
+      "title": "Web Search and Web Fetch Tools | hitmux/HitCC | DeepWiki",
+      "url": "https://deepwiki.com/hitmux/HitCC/6.1-web-search-and-web-fetch-tools"
+    },
+    {
+      "title": "Studio: per-model Anthropic server-side tool versions by danielhanchen · Pull Request #5679 · unslothai/unsloth",
+      "url": "https://github.com/unslothai/unsloth/pull/5679"
+    },
+    {
+      "title": "Simon Willison’s Weblog",
+      "url": "https://simonwillison.net/search/?tag=search&tag=claude&year=2025"
+    },
+    {
+      "title": "tools | @langchain/anthropic",
+      "url": "https://reference.langchain.com/javascript/langchain-anthropic/tools"
+    },
+    {
+      "title": "Phase 2: Native Tools & Web Search Integration · Issue #131 · synerops/syner",
+      "url": "https://github.com/synerops/syner/issues/131"
+    },
+    {
+      "title": "Using Claude's Built-In Web Search Tool",
+      "url": "https://anablock.com/blog/claude-web-search-tool"
+    },
+    {
+      "title": "Introducing web search on the Anthropic API",
+      "url": "https://simonwillison.net/2025/May/7/anthropic-api-search/"
+    },
+    {
+      "title": "pi-wierd-web - npm Package Security Analysis - Socket",
+      "url": "https://socket.dev/npm/package/pi-wierd-web"
+    },
+    {
+      "title": "Web & Search Tools | claude-code-best/claude-code | DeepWiki",
+      "url": "https://deepwiki.com/claude-code-best/claude-code/3.2-web-and-search-tools"
+    },
+    {
+      "title": "Why we switched from Claude web search to Exa for the BrainGrid agent",
+      "url": "https://www.braingrid.ai/blog/switching-claude-web-search-to-exa"
+    },
+    {
+      "title": "Web, MCP & Utility Tools | zackautocracy/claude-code | DeepWiki",
+      "url": "https://deepwiki.com/zackautocracy/claude-code/3.4-web-mcp-and-utility-tools"
+    },
+    {
+      "title": "Part 2: A CISO's Guide to Securing Claude in the Enterprise - Evoke Security",
+      "url": "https://www.evokesecurity.com/blogs/part-2-a-ciso-s-guide-to-securing-claude-in-the-enterprise"
+    },
+    {
+      "title": "MCP: Web Search | Claude Help Center",
+      "url": "https://support.claude.com/en/articles/14503775-mcp-web-search"
+    },
+    {
+      "title": "Owlibou/owlen - owlen",
+      "url": "https://gitea.puchstein.bayern/Owlibou/owlen/commits/commit/825dfc07222307ab0df753a17c8368887d5653f8?page=2"
+    },
+    {
+      "title": "Web Search and Web Fetch Tools | hitmux/HitCC | DeepWiki",
+      "url": "https://deepwiki.com/hitmux/HitCC/6.1-web-search-and-web-fetch-tools"
+    },
+    {
+      "title": "Search, Web Fetch, and Copyright Compliance | asgeirtj/system_prompts_leaks | DeepWiki",
+      "url": "https://deepwiki.com/asgeirtj/system_prompts_leaks/2.1.3-search-web-fetch-and-copyright-compliance"
+    },
+    {
+      "title": "Web search and web fetch - Claude.ai Documentation",
+      "url": "https://claude.com/docs/cowork/3p/web-tools"
+    },
+    {
+      "title": "Claude API web search complete tutorial: Native web_search tool and 3 implementation schemes comparison (2026) - Apiyi.com Blog",
+      "url": "https://help.apiyi.com/en/claude-api-web-search-guide-en.html"
+    }
+  ]
+}

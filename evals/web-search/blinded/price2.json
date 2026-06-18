@@ -1,0 +1,68 @@
+{
+  "id": "price2",
+  "category": "live-data",
+  "lang": "en",
+  "query": "What is NVIDIA's current stock price today?",
+  "answerA": "As of today, June 2, 2026, NVIDIA's stock price is $224.36, up by $13.22 or 6.26% from the previous close. This price reflects a notable increase from the recent trading range.",
+  "sourcesA": [
+    {
+      "title": "NVDA Stock Price | Analyst Target 310.14 & Consensus - eToro",
+      "url": "https://www.etoro.com/markets/nvda"
+    },
+    {
+      "title": "NVIDIA: NVDA Stock Price Quote & News - Robinhood",
+      "url": "https://robinhood.com/us/en/stocks/NVDA"
+    },
+    {
+      "title": "Buy NVIDIA Stock – NVDA Stock Quote Today & Investment Insights",
+      "url": "https://public.com/stocks/nvda"
+    },
+    {
+      "title": "Stock Quote & Chart - NVIDIA Investor Relations",
+      "url": "https://investor.nvidia.com/stock-info/stock-quote-and-chart/default.aspx"
+    },
+    {
+      "title": "NVDA - NVIDIA CORP | Stock Quotes from Fidelity Investments",
+      "url": "https://digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=NVDA"
+    }
+  ],
+  "answerB": "NVIDIA (NVDA) stock is currently trading in the range of **$207.82** (Google Finance) to **$219.43** (Yahoo Finance) as of the latest market data today. The most recent price shown on Yahoo Finance is **$219.43**, which is a decrease of approximately 1.81% from the previous close.\n\n> Please note that stock prices are highly volatile and subject to continuous change during market hours. This information is delayed and should not be considered financial advice. For real-time data, please refer to a dedicated financial platform or your brokerage service.",
+  "sourcesB": [
+    {
+      "title": "NVIDIA (NVDA) Stock Price Today, News, Chart, Earnings | Coinbase",
+      "url": "https://www.coinbase.com/en-gb/stock/NVDA"
+    },
+    {
+      "title": "NVIDIA Corporation (NVDA) Interactive Stock Chart - Yahoo Finance",
+      "url": "https://finance.yahoo.com/quote/NVDA/chart/"
+    },
+    {
+      "title": "Trade Nvidia (NVDA) – Live Price, News & Performance",
+      "url": "https://50k.trade/Instruments/Invest/NVDA"
+    },
+    {
+      "title": "US stocks today: US stocks end higher, boosted by tech gains, US-Iran peace hopes",
+      "url": "https://m.economictimes.com/markets/us-stocks/news/us-stocks-today-us-stocks-end-higher-boosted-by-tech-gains-us-iran-peace-hopes/amp_articleshow/131450016.cms"
+    },
+    {
+      "title": "NVIDIA Corporation (0R1I.IL)",
+      "url": "https://sg.finance.yahoo.com/quote/0R1I.IL/news/"
+    },
+    {
+      "title": "Google Finance",
+      "url": "https://www.google.com/finance/beta/quote/ARLO:NASDAQ"
+    },
+    {
+      "title": "On Monday, NVIDIA stock price gained an impressive 6.26%",
+      "url": "https://stockinvest.us/stock-news/on-monday-nvidia-stock-price-gained-an-impressive-626-2026-06-01"
+    },
+    {
+      "title": "Nvidia: The Top AI Stock to Buy Now",
+      "url": "https://intellectia.ai/news/stock/nvidia-the-top-ai-stock-to-buy-now"
+    },
+    {
+      "title": "NVDA Stock Price and Chart — GPW:NVDA — TradingView — India",
+      "url": "https://in-beta.tradingview.com/symbols/GPW-NVDA/?solution=43000699485"
+    }
+  ]
+}

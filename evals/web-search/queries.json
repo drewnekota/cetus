@@ -1,0 +1,20 @@
+[
+  { "id": "ce1",     "category": "current-events", "lang": "en", "query": "What were the major product announcements at Apple's WWDC 2025?" },
+  { "id": "ce2",     "category": "current-events", "lang": "en", "query": "Who won the 2025 Nobel Prize in Physics and for what work?" },
+  { "id": "price1",  "category": "live-data",      "lang": "en", "query": "What is the current price of Bitcoin in USD right now?" },
+  { "id": "price2",  "category": "live-data",      "lang": "en", "query": "What is NVIDIA's current stock price today?" },
+  { "id": "fact1",   "category": "who-what-when",  "lang": "en", "query": "Who is the current CEO of OpenAI?" },
+  { "id": "fact2",   "category": "who-what-when",  "lang": "en", "query": "When was Tauri 2.0 officially released?" },
+  { "id": "dev1",    "category": "technical",      "lang": "en", "query": "How do I fix the Rust error 'cannot borrow as mutable because it is also borrowed as immutable'?" },
+  { "id": "dev2",    "category": "technical",      "lang": "en", "query": "What is the latest LTS version of Node.js and its notable new features?" },
+  { "id": "dev3",    "category": "technical",      "lang": "en", "query": "What is the pricing of the Tavily web search API, including the free tier and cost per 1000 searches?" },
+  { "id": "research1","category": "research",      "lang": "en", "query": "Compare Tavily, Serper, and Brave Search APIs for LLM agents in terms of pricing and features." },
+  { "id": "niche1",  "category": "long-tail",      "lang": "en", "query": "What is the maximum context window and the token pricing of DeepSeek's latest model?" },
+  { "id": "niche2",  "category": "long-tail",      "lang": "en", "query": "How does Anthropic's server-side web_search_20250305 tool return page content to the model, and is the content encrypted?" },
+  { "id": "weather1","category": "local",          "lang": "en", "query": "What is the weather forecast for Hangzhou, China this weekend?" },
+  { "id": "zh1",     "category": "current-events", "lang": "zh", "query": "2025年诺贝尔文学奖得主是谁？获奖理由是什么？" },
+  { "id": "zh2",     "category": "live-data",      "lang": "zh", "query": "今天美元兑人民币的最新汇率是多少？" },
+  { "id": "zh3",     "category": "technical",      "lang": "zh", "query": "字节跳动豆包（Doubao）大模型最新版本有哪些主要新功能？" },
+  { "id": "zh4",     "category": "who-what-when",  "lang": "zh", "query": "杭州亚运会是哪一年举办的？共有多少个参赛代表团？" },
+  { "id": "zh5",     "category": "research",       "lang": "zh", "query": "对比 DeepSeek 和阿里通义千问最新旗舰模型的上下文长度与 API 价格。" }
+]

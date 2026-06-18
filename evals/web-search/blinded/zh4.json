@@ -1,0 +1,72 @@
+{
+  "id": "zh4",
+  "category": "who-what-when",
+  "lang": "zh",
+  "query": "杭州亚运会是哪一年举办的？共有多少个参赛代表团？",
+  "answerA": "杭州亚运会的举办年份是 **2023年**，这是中国第三次举办亚运会，也是继1990年北京亚运会和2010年广州亚运会之后的又一盛事。\n\n关于参赛代表团数量，本届亚运会共有 **45个** 代表团参赛。这一数字涵盖了亚奥理事会的全部成员，实现了所有成员的大团圆，也创下了亚运史上参赛代表团数量之最。",
+  "sourcesA": [
+    {
+      "title": "杭州亚运会今日开幕- 梅州日报数字报",
+      "url": "https://mzrb.meizhou.cn/html/2023-09/23/content_341475.htm"
+    },
+    {
+      "title": "梅州日报-杭州亚运会今日开幕",
+      "url": "https://mzrbh5.meizhou.cn/html5/2023-09/23/content_7227_8329637.htm"
+    },
+    {
+      "title": "杭州亚运会今日开幕",
+      "url": "https://zzrb.zznews.gov.cn/content/202309/23/c1640783.html"
+    },
+    {
+      "title": "杭州第19届 亚洲运动会23日开幕_《乐山日报》数字报",
+      "url": "https://rb.lsrbs.net/index.php?m=home&c=Nparticle&a=view&aid=17599"
+    },
+    {
+      "title": "今日开幕",
+      "url": "http://szb.eyesnews.cn/pc/cont/202309/23/content_105122.html"
+    },
+    {
+      "title": "杭州第19届亚洲运动会今日开幕--新安晚报",
+      "url": "http://epaper.ahwang.cn/xawb/20230923/html/content_20230923008001.htm"
+    },
+    {
+      "title": "杭州第十九届亚运会今日开幕",
+      "url": "http://mxrb.cn/dzb///mxrb/2023-09/23/content_128432.html"
+    },
+    {
+      "title": "杭州亚运会五大看点-----湖南日报数字报刊",
+      "url": "https://hnrb.hunantoday.cn/hnrb_epaper/html/2023-09/23/content_1649933.htm?div=1"
+    },
+    {
+      "title": "杭州第19届亚洲运动会23日开幕——驻马店日报",
+      "url": "http://zmdrb.zmdnews.cn/zmdrb/20230923/html/content_20230923001006.htm"
+    },
+    {
+      "title": "杭州第19届亚洲运动会23日开幕 --洛阳日报--洛阳晚报--河南省第一家数字报刊",
+      "url": "https://lyrb.lyd.com.cn/html2/2023-09/23/content_345166.htm"
+    }
+  ],
+  "answerB": "The Hangzhou Asian Games were held in 2023 from September 23 to October 8. A total of 45 countries and regions participated, with over 12,500 athletes competing.",
+  "sourcesB": [
+    {
+      "title": "杭州第19届亚运会_百度百科",
+      "url": "https://baike.baidu.com/item/%E6%9D%AD%E5%B7%9E%E7%AC%AC19%E5%B1%8A%E4%BA%9A%E8%BF%90%E4%BC%9A/63320713"
+    },
+    {
+      "title": "杭州第19届亚运会-可名百科",
+      "url": "https://www.kemingbaike.com/baike/202309637251.html"
+    },
+    {
+      "title": "关注杭州亚运会的五个理由 - BBC",
+      "url": "https://www.bbc.com/zhongwen/simp/sports-66816626"
+    },
+    {
+      "title": "杭州亚运会中国体育代表团成立，明确四大参赛总目标",
+      "url": "https://m.bjnews.com.cn/detail/1694488023168716.html"
+    },
+    {
+      "title": "中国第一次承办亚运会| 当年今日",
+      "url": "https://www.ourchinastory.com/cn/12812/%E4%B8%AD%E5%9B%BD%E7%AC%AC%E4%B8%80%E6%AC%A1%E6%89%BF%E5%8A%9E%E4%BA%9A%E8%BF%90%E4%BC%9A"
+    }
+  ]
+}

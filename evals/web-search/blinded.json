@@ -1,0 +1,1401 @@
+[
+  {
+    "id": "ce1",
+    "category": "current-events",
+    "lang": "en",
+    "query": "What were the major product announcements at Apple's WWDC 2025?",
+    "answerA": "I don't have information about WWDC 2025 in my training data (my knowledge cuts off in early 2024), and WWDC typically takes place in June. Let me search to see if it has already occurred and what was announced.\nApple’s WWDC 2025 (which took place on June 9, 2025) was a software-focused event with no hardware announcements. The major product reveals centered on a dramatic new design language, a unified OS naming scheme, and a deeper integration of Apple Intelligence across all platforms. Here are the highlights:\n\n### Liquid Glass Design Overhaul\nApple unveiled its most significant visual redesign since iOS 7 (2013), called **Liquid Glass**.\n*   **Unified Aesthetic**: This translucent, glass-like interface with layered reflections and dynamic shadows is applied across all operating systems—iOS, iPadOS, macOS, watchOS, tvOS, and visionOS.\n*   **More Personalization**: It offers new customization options, like the ability to make app icons and widgets completely transparent and set dynamic wallpapers that react to your movement.\n\n### Unified System Naming\nApple is moving away from sequential version numbers to a year-based naming convention for all its operating systems, aiming for greater consistency. The new names are: **iOS 26, iPadOS 26, macOS Tahoe 26, watchOS 26, tvOS 26, and visionOS 26**.\n\n### Apple Intelligence & AI Updates\nThe new AI features are designed to be deeply integrated and private, with most processing happening on-device.\n*   **Live Translation**: System-wide real-time translation is now available in Messages, FaceTime, and even live phone calls, all running on-device without needing an internet connection.\n*   **Visual Intelligence On-Screen**: You can now search for and ask questions about anything on your screen, not just images from the camera. For example, you can take a screenshot of an outfit to find it online or add an event from a flyer directly to your calendar.\n*   **Apple Intelligence for Developers**: Apple opened its on-device large language models (Foundation Models Framework) to third-party developers, allowing them to build AI features into their apps with no cloud computing costs and a strong focus on user privacy.\n*   **New & Delayed Features**: The **new Siri is delayed again** and will arrive \"later.\" However, other promised features like priority notifications, Genmoji, and the Image Playground are expanding.\n\n### Key OS-Specific Changes\n*   **iPadOS 26: More Like a Mac**: The iPad received a massive multitasking update with a new windowing system that allows for freely resizable, overlapping windows and a persistent menu bar, much like macOS.\n*   **macOS Tahoe 26: Smarter Shortcuts & Spotlight**: A new \"Quick Keys\" feature lets you perform actions with two-letter shortcuts. Spotlight search gets its biggest upgrade ever, now keeping a clipboard history and offering more intelligent, context-aware results.\n*   **watchOS 26: AI Fitness Coach**: A new **Workout Buddy** feature uses Apple Intelligence to analyze your workout history and current performance to offer real-time, personalized spoken motivation during exercises.\n*   **visionOS 26**: Apple Vision Pro expanded its accessory support, adding compatibility with **PlayStation VR2 Sense controllers** and a new Logitech “spatial stylus.” It also introduced spatial widgets that can be anchored in your physical space.\n*   **tvOS 26**: The interface gets the Liquid Glass treatment, with an unobtrusive glassy menu. A new karaoke feature using an iPhone as a microphone was also introduced.\n\n### New Dedicated Games App\nApple introduced a new **Games app** for iPhone, iPad, and Mac that serves as a central hub. It combines games from the App Store and Apple Arcade, tracks achievements, and includes social features like a \"Play Together\" tab to see what friends are playing and issue challenges.\n\nOverall, the theme of WWDC 2025 was a *refinement and unification* of the ecosystem through a cohesive design language and the deeper, more private integration of AI into core system functions, with the notable exception of the still-delayed new Siri.\n\nIs there a particular update you'd like to dive into more?",
+    "sourcesA": [
+      {
+        "title": "Apple’s liquid glass leap: A deep dive into the biggest updates from WWDC 2025 — TFN",
+        "url": "https://techfundingnews.com/wwdc-2025-comprehensive-roundup-of-apples-latest-announcements/"
+      },
+      {
+        "title": "史上最美苹果系统登场！六大OS大变样，AI模型免费开放，新Siri又鸽了，WWDC25一文看尽",
+        "url": "https://www.thepaper.cn/newsDetail_forward_30958407"
+      },
+      {
+        "title": "Liquid Glass to iOS 26: Apple's WWDC25 reveals include new interface, AI, design overhaul",
+        "url": "https://gulfbusiness.com/liquid-glass-to-ios26-apple-wwdc-2025-innovations/"
+      },
+      {
+        "title": "史上最美苹果系统登场！六大OS大变样，AI模型免费开放，新Siri又鸽了，WWDC25一文看尽",
+        "url": "https://www.163.com/dy/article/K1M184MT051180F7.html?spss=dy_author"
+      },
+      {
+        "title": "Apple's five biggest announcements from WWDC 2025",
+        "url": "https://ia.acs.org.au/article/2025/apple-s-five-biggest-announcements-from-wwdc-2025.html?utm_source=seedradar.ai&utm_medium=referral&utm_campaign=june-2025-recap-the-month-s-biggest-tech-leaps-funding-highlights"
+      },
+      {
+        "title": "Everything announced at WWDC 2025",
+        "url": "https://dataconomy.com/2025/06/10/everything-announced-at-wwdc-2025/"
+      },
+      {
+        "title": "Everything Apple Announced at WWDC 2025",
+        "url": "https://www.wired.com/story/everything-apple-announced-at-wwdc-2025/?_bhlid=5767d580b228d58827591f6c1733b8b9c0d79752&utm_campaign=10-06-2025"
+      },
+      {
+        "title": "ZDNET's WWDC 2025 recap with Sabrina Ortiz and Jason Hiner",
+        "url": "https://www.zdnet.com/article/zdnets-wwdc-2025-recap-with-sabrina-ortiz-and-jason-hiner/#respond"
+      },
+      {
+        "title": "Everything Apple announced at WWDC 2025: Liquid Glass design, iOS 26, new Apple Intelligence features, and more - The Times of India",
+        "url": "https://timesofindia.indiatimes.com/technology/tech-news/everything-apple-announced-at-wwdc-2025-liquid-glass-design-ios-26-new-apple-intelligence-features-and-more/articleshow/121737527.cms?utm_"
+      },
+      {
+        "title": "Apple unveils new AI features at WWDC 25: What it means for iPhone users",
+        "url": "https://tech.yahoo.com/ai/articles/apple-announces-ai-features-wwdc-180859433.html"
+      }
+    ],
+    "answerB": "At WWDC 2025, Apple announced iOS 26, iPadOS 26, macOS Tahoe 26, watchOS 26, visionOS 26, and tvOS 26, featuring a new Liquid Glass design language. The updates included enhanced AI capabilities and new software features across all platforms.",
+    "sourcesB": [
+      {
+        "title": "Which Apple Announcements to Expect From WWDC 2025",
+        "url": "https://lifehacker.com/tech/which-apple-announcements-to-expect-from-wwdc-2025"
+      },
+      {
+        "title": "WWDC 2025 Recap: All of Apple’s NEW Features in 10 Minutes!",
+        "url": "https://www.youtube.com/watch?v=TWbpwSIMkAE"
+      },
+      {
+        "title": "Apple’s WWDC 2025: How to Watch and What to Expect | WIRED",
+        "url": "https://www.wired.com/story/apple-wwdc-2025-how-to-watch-what-to-expect"
+      },
+      {
+        "title": "The biggest updates Apple just announced for the iPhone, Apple Watch and other major products | CNN Business",
+        "url": "https://www.cnn.com/2025/06/09/tech/apple-wwdc-iphone-ai-what-to-expect"
+      },
+      {
+        "title": "WWDC 2025 — June 9 | Apple - YouTube",
+        "url": "https://www.youtube.com/watch?v=0_DjDdfqtUE"
+      }
+    ]
+  },
+  {
+    "id": "ce2",
+    "category": "current-events",
+    "lang": "en",
+    "query": "Who won the 2025 Nobel Prize in Physics and for what work?",
+    "answerA": "The 2025 Nobel Prize in Physics was awarded to John Clarke, Michel H. Devoret, and John M. Martinis for discovering macroscopic quantum mechanical tunnelling and energy quantisation in an electric circuit. Their work advanced quantum physics research.",
+    "sourcesA": [
+      {
+        "title": "Nobel Prize in Physics 2025 - NobelPrize.org",
+        "url": "https://www.nobelprize.org/prizes/physics/2025/summary"
+      },
+      {
+        "title": "UCSB physics professors John Martinis and Michel Devoret win 2025 Nobel Prize in Physics | The Current",
+        "url": "https://news.ucsb.edu/2025/022111/ucsb-physics-professors-john-martinis-and-michel-devoret-win-2025-nobel-prize-physics"
+      },
+      {
+        "title": "Press release: Nobel Prize in Physics 2025 - NobelPrize.org",
+        "url": "https://www.nobelprize.org/prizes/physics/2025/press-release"
+      },
+      {
+        "title": "The 2025 Nobel Prize in Physics: Who, What, and Why - YouTube",
+        "url": "https://www.youtube.com/watch?v=f1AMV6btaw4"
+      },
+      {
+        "title": "The Nobel Prize winners of 2025 – and why their work matters | World Economic Forum",
+        "url": "https://www.weforum.org/stories/2025/10/nobel-prize-winners-2025-why-their-work-matters"
+      }
+    ],
+    "answerB": "Let me check on this for you. The Nobel Prizes are typically announced in October each year, and since my knowledge only goes up to early 2024, I want to make sure I'm not missing any information.\nThe **2025 Nobel Prize in Physics** was awarded jointly to **John Clarke**, **Michel H. Devoret**, and **John M. Martinis** on October 7, 2025.\n\nThey received the prize for their **“discovery of macroscopic quantum mechanical tunnelling and energy quantisation in an electric circuit.”**\n\nIn the mid-1980s, the trio (working together at UC Berkeley) demonstrated through experiments with superconducting circuits called Josephson junctions that quantum mechanical effects—specifically quantum tunnelling and quantized energy levels—could be observed not just at the microscopic scale but in systems large enough to be seen and held. This groundbreaking work laid the conceptual and practical foundation for many of today’s quantum technologies, including superconducting qubits used in quantum computers, quantum sensors, and quantum cryptography.",
+    "sourcesB": [
+      {
+        "title": "Congratulations to the winners of the Nobel Prize in Physics 2025 | Royal Society",
+        "url": "https://royalsociety.org/news/2025/10/nobel-prize-physics-john-clarke/"
+      },
+      {
+        "title": "News • World",
+        "url": "https://www.cbc.ca/lite/story/1.7652957"
+      },
+      {
+        "title": "John Clarke awarded 2025 Nobel Prize in Physics",
+        "url": "https://physics.berkeley.edu/news/john-clarke-awarded-2025-nobel-prize-physics"
+      },
+      {
+        "title": "AIP Congratulates 2025 Nobel Prize Winners in Physics - AIP Publishing LLC",
+        "url": "https://publishing.aip.org/about/news/aip-congratulates-2025-nobel-prize-winners-in-physics/"
+      },
+      {
+        "title": "Former Berkeley Lab Scientist John Clarke Wins 2025 Nobel Prize in Physics",
+        "url": "https://newscenter.lbl.gov/2025/10/07/former-berkeley-lab-scientist-john-clarke-wins-2025-nobel-prize-in-physics/"
+      },
+      {
+        "title": "Trio's work on quantum tech wins Nobel",
+        "url": "https://mobile.chinadaily.com.cn/cn/html5/2025-10/08/content_001_68e570caed50ccabe151ab9d.htm"
+      },
+      {
+        "title": "Three US-based scientists win 2025 Nobel Prize in Physics",
+        "url": "https://tvpworld.com/89337582/2025-nobel-prize-in-physics-clarke-devoret-and-martinis-awarded"
+      },
+      {
+        "title": "2025 Nobel Prizes awarded at Stockholm ceremony",
+        "url": "http://www.china.org.cn/2025-12/11/content_118221869.shtml"
+      },
+      {
+        "title": "Nobel Prize in Physics 2025 awarded to Michel Devoret and Sveriges Riksbank Prize in Economic Sciences in Memory of Alfred Nobel 2025 awarded to Philippe Aghion",
+        "url": "https://www.diplomatie.gouv.fr/en/presse-et-ressources/decouvrir-et-informer/actualites/remise-du-prix-nobel-de-physique-2025-a-michel-devoret-et-du-prix-de-la-banque-de-suede-des-sciences"
+      },
+      {
+        "title": "John Clarke, Michel Devoret and John Martinis win the 2025 Nobel Prize for Physics – Physics World",
+        "url": "https://physicsworld.com/a/john-clarke-michel-devoret-and-john-martinis-win-the-2025-nobel-prize-for-physics/"
+      }
+    ]
+  },
+  {
+    "id": "price1",
+    "category": "live-data",
+    "lang": "en",
+    "query": "What is the current price of Bitcoin in USD right now?",
+    "answerA": "I'll look up the current Bitcoin price for you.\nThe current price of Bitcoin (BTC) is approximately **$70,000 USD**, though it has been fluctuating heavily in the last few hours. \n\nRight now, multiple sources are showing significant downward movement, with BTC dipping below $70,000 for the first time in about two months. Here's a snapshot:\n- **Recent low:** $69,631\n- **Current trading range (live):** ~$69,700 – $70,700\n- **24-hour drop:** ~3.7%\n\nThis decline is reportedly being driven by geopolitical pressures (US-Iran tensions) and a broader exit from institutional positions, leading to nearly $800 million in liquidations across the crypto market.\n\n> Note: Crypto prices are extremely volatile and can vary slightly between exchanges. For the exact second-by-second price, you'd need to check a live ticker on an exchange like Binance, Coinbase, or Kraken.",
+    "sourcesA": [
+      {
+        "title": "Bitcoin Sinks Under $71,000: Crypto Market Turns Red Across the Board: Guest Post by Coindoo.com | CoinMarketCap",
+        "url": "https://coinmarketcap.com/community/articles/6a1e6b88649c6415f7d2b796/"
+      },
+      {
+        "title": "Bitcoin price falls under $70K as crypto markets liquidate $800M: Guest Post by Cointelegraph | CoinMarketCap",
+        "url": "https://coinmarketcap.com/community/articles/6a1ea16eaf259217deea4be8/"
+      },
+      {
+        "title": "BTC to USD | Convert Bitcoin to US Dollar",
+        "url": "https://www.okx.com/en-br/convert/btc-to-usd"
+      },
+      {
+        "title": "BTC 價格 | 比特幣實時價格趨勢圖 | BTC to USD | KuCoin",
+        "url": "https://www.kucoin.com/zh-hant/price/BTC"
+      },
+      {
+        "title": "Convert 0.58 Bitcoin to USD | Bitcoin Price in US Dollars | Revolut Singapore",
+        "url": "https://www.revolut.com/crypto/price/btc/usd?amount-to=0.58&__cf_chl_tk=ylIY3Nl1VORuBRj9aD4TBtNixEUBiUVcAKQq18pYu1c-1770969996-1.0.1.1-_4F0lf0W61hWBet7EJt0lQZ.oa3wul7F6wYdCEpyPDg"
+      },
+      {
+        "title": "Bitcoin | t.me/BitcoinCoreGroup今天价格｜BTC实时价格美元｜走势图",
+        "url": "https://web3.bitget.com/zh-CN/swap/bnb/0xA2B3d74bf2c9348C10c69A9F7D17E7e7A3ba40F0"
+      },
+      {
+        "title": "BTC/USD Price: Convert Bitcoin to United States Dollar - Crypto.com Singapore",
+        "url": "https://crypto.com/sg/price/bitcoin/usd"
+      },
+      {
+        "title": "Bitcoin 价格 | BTC 价格指数、实时图表和市值",
+        "url": "https://aws.okx.com/cn/price/bitcoin-btc"
+      },
+      {
+        "title": "bitcoin今天价格｜BITCOIN实时价格美元｜走势图",
+        "url": "https://bitkeep.com/zh/swap/bnb/0x71CCe0035d82c21Cf4b908bcd8F1117fFf0Fa623"
+      },
+      {
+        "title": "CoinTracking",
+        "url": "https://main.cointracking.info/coin_charts.php?cur=USD&language=en"
+      }
+    ],
+    "answerB": "The current price of Bitcoin is $69,014.38 per BTC. This price is based on real-time data from multiple exchanges, including Binance and Kraken.",
+    "sourcesB": [
+      {
+        "title": "Bitcoin price today, BTC to USD live price, marketcap and chart",
+        "url": "https://coinmarketcap.com/currencies/bitcoin"
+      },
+      {
+        "title": "Bitcoin Price Today | BTC to USD Live Price, Market Cap & Chart",
+        "url": "https://www.binance.com/en/price/bitcoin"
+      },
+      {
+        "title": "Bitcoin (BTC) Price USD Today, News, Charts, Market Cap | Coinbase",
+        "url": "https://www.coinbase.com/price/bitcoin"
+      },
+      {
+        "title": "Bitcoin price today - BTC price chart & live trends - Kraken",
+        "url": "https://www.kraken.com/prices/bitcoin"
+      },
+      {
+        "title": "Bitcoin price today, BTC to USD live price, marketcap and chart",
+        "url": "https://www.coindesk.com/price/bitcoin"
+      }
+    ]
+  },
+  {
+    "id": "price2",
+    "category": "live-data",
+    "lang": "en",
+    "query": "What is NVIDIA's current stock price today?",
+    "answerA": "As of today, June 2, 2026, NVIDIA's stock price is $224.36, up by $13.22 or 6.26% from the previous close. This price reflects a notable increase from the recent trading range.",
+    "sourcesA": [
+      {
+        "title": "NVDA Stock Price | Analyst Target 310.14 & Consensus - eToro",
+        "url": "https://www.etoro.com/markets/nvda"
+      },
+      {
+        "title": "NVIDIA: NVDA Stock Price Quote & News - Robinhood",
+        "url": "https://robinhood.com/us/en/stocks/NVDA"
+      },
+      {
+        "title": "Buy NVIDIA Stock – NVDA Stock Quote Today & Investment Insights",
+        "url": "https://public.com/stocks/nvda"
+      },
+      {
+        "title": "Stock Quote & Chart - NVIDIA Investor Relations",
+        "url": "https://investor.nvidia.com/stock-info/stock-quote-and-chart/default.aspx"
+      },
+      {
+        "title": "NVDA - NVIDIA CORP | Stock Quotes from Fidelity Investments",
+        "url": "https://digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=NVDA"
+      }
+    ],
+    "answerB": "NVIDIA (NVDA) stock is currently trading in the range of **$207.82** (Google Finance) to **$219.43** (Yahoo Finance) as of the latest market data today. The most recent price shown on Yahoo Finance is **$219.43**, which is a decrease of approximately 1.81% from the previous close.\n\n> Please note that stock prices are highly volatile and subject to continuous change during market hours. This information is delayed and should not be considered financial advice. For real-time data, please refer to a dedicated financial platform or your brokerage service.",
+    "sourcesB": [
+      {
+        "title": "NVIDIA (NVDA) Stock Price Today, News, Chart, Earnings | Coinbase",
+        "url": "https://www.coinbase.com/en-gb/stock/NVDA"
+      },
+      {
+        "title": "NVIDIA Corporation (NVDA) Interactive Stock Chart - Yahoo Finance",
+        "url": "https://finance.yahoo.com/quote/NVDA/chart/"
+      },
+      {
+        "title": "Trade Nvidia (NVDA) – Live Price, News & Performance",
+        "url": "https://50k.trade/Instruments/Invest/NVDA"
+      },
+      {
+        "title": "US stocks today: US stocks end higher, boosted by tech gains, US-Iran peace hopes",
+        "url": "https://m.economictimes.com/markets/us-stocks/news/us-stocks-today-us-stocks-end-higher-boosted-by-tech-gains-us-iran-peace-hopes/amp_articleshow/131450016.cms"
+      },
+      {
+        "title": "NVIDIA Corporation (0R1I.IL)",
+        "url": "https://sg.finance.yahoo.com/quote/0R1I.IL/news/"
+      },
+      {
+        "title": "Google Finance",
+        "url": "https://www.google.com/finance/beta/quote/ARLO:NASDAQ"
+      },
+      {
+        "title": "On Monday, NVIDIA stock price gained an impressive 6.26%",
+        "url": "https://stockinvest.us/stock-news/on-monday-nvidia-stock-price-gained-an-impressive-626-2026-06-01"
+      },
+      {
+        "title": "Nvidia: The Top AI Stock to Buy Now",
+        "url": "https://intellectia.ai/news/stock/nvidia-the-top-ai-stock-to-buy-now"
+      },
+      {
+        "title": "NVDA Stock Price and Chart — GPW:NVDA — TradingView — India",
+        "url": "https://in-beta.tradingview.com/symbols/GPW-NVDA/?solution=43000699485"
+      }
+    ]
+  },
+  {
+    "id": "fact1",
+    "category": "who-what-when",
+    "lang": "en",
+    "query": "Who is the current CEO of OpenAI?",
+    "answerA": "The current CEO of OpenAI is **Sam Altman**. He is also a co-founder of the company.",
+    "sourcesA": [
+      {
+        "title": "",
+        "url": "https://www.commerce.senate.gov/index.php/services/files/6B937B74-31EE-4777-B004-3D6DC0DC3FBA#1#1"
+      },
+      {
+        "title": "Sam Altman Says 'Shame on Me' If OpenAI Doesn't Become 'First Big Company' Run By An AI CEO",
+        "url": "https://www.benzinga.com/markets/tech/25/11/48683642/sam-altman-says-shame-on-me-if-openai-doesnt-become-first-big-company-run-by-an-ai-ceo"
+      },
+      {
+        "title": "OpenAI管理层职能重构：CEO奥特曼专注研发与产品，COO主管全球业务-36氪",
+        "url": "https://36kr.com/p/3221518477151368"
+      },
+      {
+        "title": "Sam Altman to Receive No Stake in OpenAI’s New Structure Despite Microsoft’s Major Investment | PYMNTS.com",
+        "url": "https://www.pymnts.com/cpi-posts/sam-altman-to-receive-no-stake-in-openais-new-structure-despite-microsofts-major-investment/"
+      },
+      {
+        "title": "OpenAI奥特曼交出ChatGPT指挥棒：女CEO接掌大权",
+        "url": "https://www.taibo.cn/p/98198"
+      },
+      {
+        "title": "OpenAI | Company Overview & News",
+        "url": "https://www.forbes.com/companies/openai/?sh=7bb8fcd64aa0"
+      },
+      {
+        "title": "OpenAI hires Slack CEO Dresser as 1st revenue chief to drive profitability",
+        "url": "https://www.business-standard.com/amp/world-news/openai-hires-slack-ceo-dresser-as-1st-revenue-chief-to-drive-profitability-125121000047_1.html"
+      },
+      {
+        "title": "OpenAI",
+        "url": "https://aiwiki.ai/wiki/OpenAI"
+      },
+      {
+        "title": "Leadership Changes at OpenAI, AI in Entertainment, and Advances in Voice Technology - The OpenAI Daily Brief | iHeart",
+        "url": "https://www.iheart.com/podcast/269-the-openai-daily-brief-255228593/episode/leadership-changes-at-openai-ai-in-270969031/"
+      },
+      {
+        "title": "Sam Altman | Merchant of the future",
+        "url": "https://www.thehindu.com/sci-tech/technology/sam-altman-merchant-of-the-future/article70366667.ece"
+      }
+    ],
+    "answerB": "As of 2026, Sam Altman is the CEO of OpenAI. He returned to the position after a brief interim, with Mira Murati serving as CTO and Greg Brockman as President. This leadership structure was announced in the initial board changes.",
+    "sourcesB": [
+      {
+        "title": "Who is the CEO of OpenAI in 2026? Sam Altman's Bio - Clay",
+        "url": "https://www.clay.com/dossier/openai-ceo"
+      },
+      {
+        "title": "Sam Altman returns as CEO, OpenAI has a new initial board",
+        "url": "https://openai.com/index/sam-altman-returns-as-ceo-openai-has-a-new-initial-board"
+      },
+      {
+        "title": "Sam Altman returns as CEO, OpenAI has a new initial board - LinkedIn",
+        "url": "https://www.linkedin.com/posts/openai_sam-altman-returns-as-ceo-openai-has-a-new-activity-7135807891181043712-pItO"
+      },
+      {
+        "title": "OpenAI - Wikipedia",
+        "url": "https://en.wikipedia.org/wiki/OpenAI"
+      },
+      {
+        "title": "Sam Altman - Forbes",
+        "url": "https://www.forbes.com/profile/sam-altman"
+      }
+    ]
+  },
+  {
+    "id": "fact2",
+    "category": "who-what-when",
+    "lang": "en",
+    "query": "When was Tauri 2.0 officially released?",
+    "answerA": "Tauri 2.0 was officially released on October 2, 2024, bringing mobile support for iOS and Android. The stable version included enhanced plugin development and system integration.",
+    "sourcesA": [
+      {
+        "title": "Roadmap to Tauri 2.0 | Tauri",
+        "url": "https://v2.tauri.app/blog/roadmap-to-tauri-2-0"
+      },
+      {
+        "title": "When will tauri 2.0 be officially released? #6734 - GitHub",
+        "url": "https://github.com/orgs/tauri-apps/discussions/6734"
+      },
+      {
+        "title": "Tauri 2.0 Release Candidate",
+        "url": "https://v2.tauri.app/blog/tauri-2-0-0-release-candidate"
+      },
+      {
+        "title": "Tauri 2.0 Stable Release",
+        "url": "https://v2.tauri.app/blog/tauri-20"
+      },
+      {
+        "title": "Tauri 2.0: A look at the Rust-based JS framework - iJS Blog",
+        "url": "https://javascript-conference.com/blog/tauri-2-0"
+      }
+    ],
+    "answerB": "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"web_fetch\">\n<｜｜DSML｜｜parameter name=\"url\" string=\"true\">https://v2.tauri.app/zh-cn/blog/tauri-20/</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>",
+    "sourcesB": [
+      {
+        "title": "博客 | Tauri",
+        "url": "https://tauri.org.cn/blog/#_top"
+      },
+      {
+        "title": "Blog",
+        "url": "https://v2.tauri.app/ko/blog/#_top"
+      },
+      {
+        "title": "Tillmann Weidinger",
+        "url": "https://tauri.app/ja/blog/authors/tillmann-weidinger/#_top"
+      },
+      {
+        "title": "Sur cette page",
+        "url": "https://v2.tauri.app/fr/blog/#_top"
+      },
+      {
+        "title": "版本发布",
+        "url": "https://v1.tauri.org.cn/releases/#__docusaurus_skipToContent_fallback"
+      },
+      {
+        "title": "Tauri 2.0 稳定版发布",
+        "url": "https://v2.tauri.org.cn/blog/tauri-20/"
+      },
+      {
+        "title": "Tauri 2.0 Stable Release",
+        "url": "https://v2.tauri.app/zh-cn/blog/tauri-20/"
+      },
+      {
+        "title": "跨平台开发的新纪元：Tauri 2.0 横空出世，移动端、桌面端一网打尽！",
+        "url": "https://developer.aliyun.com/article/1623653"
+      },
+      {
+        "title": "Tauri 2.0稳定版发布",
+        "url": "https://www.tauri.net.cn/421.html"
+      },
+      {
+        "title": "Tauri 2.0 发布候选版",
+        "url": "https://v2.tauri.org.cn/blog/tauri-2-0-0-release-candidate/"
+      }
+    ]
+  },
+  {
+    "id": "dev1",
+    "category": "technical",
+    "lang": "en",
+    "query": "How do I fix the Rust error 'cannot borrow as mutable because it is also borrowed as immutable'?",
+    "answerA": "# Fixing Rust's \"cannot borrow as mutable because it is also borrowed as immutable\"\n\nThis error occurs when you have an **immutable reference** (`&`) to a value that is still \"alive\" while you try to take a **mutable reference** (`&mut`) to the same value. Rust's borrow checker enforces this to prevent data races and memory unsafety.\n\n## A Common Example\n\n```rust\nfn main() {\n    let mut vec = vec![1, 2, 3];\n\n    let first = &vec[0];   // immutable borrow\n\n    vec.push(4);           // ERROR: mutable borrow while `first` is still live\n\n    println!(\"{}\", first); // `first` used here\n}\n```\n\n```\nerror[E0502]: cannot borrow `vec` as mutable because it is also borrowed as immutable\n```\n\nThe immutable borrow `first` is still in scope when `vec.push(4)` tries to take `&mut self`.\n\n---\n\n## Fix #1: Restructure scope (most common)\n\nEnd the immutable borrow **before** you need the mutable one:\n\n```rust\nfn main() {\n    let mut vec = vec![1, 2, 3];\n\n    let first = &vec[0];\n    println!(\"{}\", first); // last use of `first` — immutable borrow ends here\n    // `first` is no longer live\n\n    vec.push(4);           // ✅ now fine\n}\n```\n\nWith **Non-Lexical Lifetimes** (NLL, stable since Rust 2018), the compiler tracks when a reference is *last used*, not just when it goes out of scope.\n\n---\n\n## Fix #2: Clone the data\n\nIf the data is cheap to clone (or you need to keep both):\n\n```rust\nlet mut vec = vec![1, 2, 3];\n\nlet first = vec[0].clone(); // owns a copy, no borrow\nvec.push(4);                // ✅ fine\n\nprintln!(\"{}\", first);\n```\n\n---\n\n## Fix #3: Use an index instead of a reference\n\n```rust\nlet mut vec = vec![1, 2, 3];\n\nlet first_index = 0;        // no borrow at all\nvec.push(4);                // ✅ fine\n\nprintln!(\"{}\", vec[first_index]);\n```\n\n---\n\n## Fix #4: Split borrows on struct fields\n\nWhen borrowing *different fields* of a struct, you can destructure or access fields directly — the borrow checker is smart enough to track them separately:\n\n```rust\nstruct Player {\n    name: String,\n    score: u32,\n}\n\nlet mut player = Player { name: \"Alice\".into(), score: 0 };\n\nlet name = &mut player.name;\nlet score = &player.score;     // ✅ different fields — fine!\n\nname.push_str(\"!\");\n```\n\nIf you're inside a method that takes `&mut self`, use a block to scope the borrow, or refactor to take separate parameters.\n\n---\n\n## Fix #5: `RefCell` for runtime borrow checking\n\nWhen you *must* mutate through a shared reference (e.g., inside a closure or across API boundaries), use `RefCell`:\n\n```rust\nuse std::cell::RefCell;\n\nlet data = RefCell::new(vec![1, 2, 3]);\n\nlet borrowed = data.borrow();      // immutable borrow at runtime\n// data.borrow_mut();              // would panic! at runtime if uncommented\ndrop(borrowed);                    // end the immutable borrow\n\nlet mut borrowed_mut = data.borrow_mut(); // ✅ mutable borrow now OK\nborrowed_mut.push(4);\n```\n\n⚠️ `RefCell` panics at runtime if rules are violated — use with care.\n\n---\n\n## Fix #6: Reorder operations\n\nSometimes just moving the mutable operation *before* the immutable borrow solves it:\n\n```rust\nlet mut vec = vec![1, 2, 3];\n\nvec.push(4);               // mutate first\nlet first = &vec[0];       // ✅ then borrow\nprintln!(\"{}\", first);\n```\n\n---\n\n## Quick Decision Guide\n\n| Situation | Best Fix |\n|---|---|\n| Don't need both refs at the same time | Restructure scope (#1) |\n| Need a snapshot / independent copy | Clone (#2) |\n| Just need positional access | Index/key (#3) |\n| Borrowing different struct fields | Split borrows (#4) |\n| Must mutate through shared ref (callbacks, Rc) | `RefCell` / `Cell` (#5) |\n| Order of operations is flexible | Reorder (#6) |\n\nThe key insight: the borrow checker isn't being pedantic — it's preventing real bugs. If you find yourself fighting it, there's almost always a restructuring that makes the code both correct *and* clearer.",
+    "sourcesA": [],
+    "answerB": "To fix the Rust error, refactor code to avoid simultaneous mutable and immutable borrows. Use references before mutating or move values instead of borrowing. Ensure no conflicting borrows exist.",
+    "sourcesB": [
+      {
+        "title": "How to Fix 'Mutable borrow occurs here' Errors in Rust",
+        "url": "https://oneuptime.com/blog/post/2026-01-25-rust-mutable-borrow-errors/view"
+      },
+      {
+        "title": "How to Fix 'Cannot borrow as mutable' Errors in Rust - OneUptime",
+        "url": "https://oneuptime.com/blog/post/2026-01-25-fix-cannot-borrow-mutable-rust/view"
+      },
+      {
+        "title": "How to fix \"cannot borrow `*self` as mutable because it is also ...",
+        "url": "https://users.rust-lang.org/t/how-to-fix-cannot-borrow-self-as-mutable-because-it-is-also-borrowed-as-immutable/105443"
+      },
+      {
+        "title": "What is the best way of dealing with \"cannot borrow self as mutable ...",
+        "url": "https://www.reddit.com/r/rust/comments/q0uo6t/what_is_the_best_way_of_dealing_with_cannot"
+      },
+      {
+        "title": "Unlocking Rust: My Journey Through 7 Tricky Borrow Checker ...",
+        "url": "https://medium.com/@monikasinghal713/unlocking-rust-my-journey-through-7-tricky-borrow-checker-errors-and-their-solutions-bbab1f0a55a5"
+      }
+    ]
+  },
+  {
+    "id": "dev2",
+    "category": "technical",
+    "lang": "en",
+    "query": "What is the latest LTS version of Node.js and its notable new features?",
+    "answerA": "The latest LTS version of Node.js is 24.x. Notable new features include improved interoperability of ES Modules and phasing out 32-bit Windows support.",
+    "sourcesA": [
+      {
+        "title": "New Node.js features, Node latest version report",
+        "url": "https://tsh.io/blog/new-node-js-features"
+      },
+      {
+        "title": "Node.js - Wikipedia",
+        "url": "https://en.wikipedia.org/wiki/Node.js"
+      },
+      {
+        "title": "NodeJS 23: What's New in the latest version of Node",
+        "url": "https://builder.aws.com/content/3A9c0s0uoHBJ5KpHyA7IB7oDWST/nodejs-23-whats-new-in-the-latest-version-of-node"
+      },
+      {
+        "title": "Node.js v22 Enters Long Term Support (LTS) - NodeSource",
+        "url": "http://nodesource.com/blog/Node.js-v22-Long-Term-Support-LTS"
+      },
+      {
+        "title": "How does Node LTS work - Reddit",
+        "url": "https://www.reddit.com/r/node/comments/1dl6fm2/how_does_node_lts_work"
+      }
+    ],
+    "answerB": "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"web_search\">\n<｜｜DSML｜｜parameter name=\"query\" string=\"true\">Node.js 24 LTS features V8 test runner permission model 2025</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n<｜｜DSML｜｜invoke name=\"web_fetch\">\n<｜｜DSML｜｜parameter name=\"url\" string=\"true\">https://nodejs.org/en</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>",
+    "sourcesB": [
+      {
+        "title": "Node.js 24 Becomes LTS: What You Need to Know",
+        "url": "https://nodesource.com/blog/nodejs-24-becomes-lts?cmid=2651cf3c-2624-4174-b6ea-19fcb0a87a3f"
+      },
+      {
+        "title": "Release 2025-06-24, Version 22.17.0 'Jod' (LTS), @aduh95 · nodejs/node",
+        "url": "https://github.com/nodejs/node/releases/tag/v22.17.0"
+      },
+      {
+        "title": "Node.js 24 is now available on Azure App Service for Linux",
+        "url": "https://azure.github.io/AppService/2025/10/29/node24-available.html"
+      },
+      {
+        "title": "NodeJS 25 Updates You Should Know About | Metizsoft",
+        "url": "https://metizsoft.com/blog/nodejs-25-update-whats-new"
+      },
+      {
+        "title": "Release 2025-10-15, Version 25.0.0 (Current), @RafaelGSS · nodejs/node",
+        "url": "https://github.com/nodejs/node/releases/tag/v25.0.0"
+      },
+      {
+        "title": "WebDevPro #97: LTS-Level Node Upgrades, Rust Introduces Let Chains, Claude Now Lets You Create Apps in Chat",
+        "url": "https://www.packtpub.com/en-lt/learning/webdevpro/webdevpro-97-lts-level-node-upgrades-rust-introduces-let-chains-claude-now-lets-you-create-apps-in-chat"
+      },
+      {
+        "title": "Release 2025-08-27, Version 24.7.0 (Current), @targos · nodejs/node",
+        "url": "https://github.com/nodejs/node/releases/tag/v24.7.0"
+      },
+      {
+        "title": "Node.js 25 正式发布：性能、安全与标准化全面升级",
+        "url": "https://www.ithome.com/0/890/063.htm"
+      },
+      {
+        "title": "nodejs/node v25.0.0 on GitHub",
+        "url": "https://newreleases.io/project/github/nodejs/node/release/v25.0.0"
+      },
+      {
+        "title": "Release 2025-11-11, Version 25.2.0 (Current), @aduh95 · nodejs/node",
+        "url": "https://github.com/nodejs/node/releases/tag/v25.2.0"
+      }
+    ]
+  },
+  {
+    "id": "dev3",
+    "category": "technical",
+    "lang": "en",
+    "query": "What is the pricing of the Tavily web search API, including the free tier and cost per 1000 searches?",
+    "answerA": "Based on the most current information available, here is a breakdown of **Tavily**'s pricing structure (note: the correct spelling is **Tavily**, not Tavily, though they sound similar).\n\n### 🆓 Free Tier\n*   **Monthly Credits:** 1,000 credits per month, recurring.\n*   **Credit Card:** Not required.\n*   **Access:** All API features are accessible, with a rate limit of **100 requests per minute**.\n\n### 💳 Credit System\nTavily doesn't charge per 1,000 searches directly; it uses a credit system where different actions cost different amounts of credits:\n*   **Basic Search:** 1 credit\n*   **Advanced Search:** 2 credits\n*   **Content Extraction:** 1 credit per 5 successful URLs\n*   **Mapping:** 1 credit per 10 pages\n\n### 💰 Pay-As-You-Go & Cost per 1,000 Searches\nThe pay-as-you-go rate is **$0.008 per credit**.\n*   **Basic Search:** $8.00 per 1,000 searches (1,000 credits)\n*   **Advanced Search:** $16.00 per 1,000 searches (2,000 credits)\n\n### 📦 Subscription Plans (Monthly)\nSubscription tiers lower the effective cost per credit:\n\n| Plan | Monthly Price | Credits per Month | Effective Cost per 1,000 Basic Searches |\n| :--- | :--- | :--- | :--- |\n| **Project** | $30 | 4,000 | $7.50 |\n| **Bootstrap** | $100 | 15,000 | $6.67 |\n| **Startup** | $220 | 38,000 | ~$5.79 |\n| **Growth** | $500 | 100,000 | $5.00 |\n| **Enterprise** | Custom | Custom | Custom pricing |\n\nTavily sits in the mid-range pricing tier for SERP APIs—more expensive than budget options like Scrapingdog but less expensive than premium APIs like SerpAPI, while offering AI-optimized structured content ready for LLMs.\n\nLet me know if you need help comparing it to other APIs like SerpAPI or Exa.",
+    "sourcesA": [
+      {
+        "title": "Best SERP API Comparison 2025: SerpAPI vs Exa vs Tavily vs ScrapingDog vs ScrapingBee",
+        "url": "https://dev.to/ritza/best-serp-api-comparison-2025-serpapi-vs-exa-vs-tavily-vs-scrapingdog-vs-scrapingbee-2jci"
+      },
+      {
+        "title": "Perplexity Search API vs. Tavily: RAG & Agent Choice 2025",
+        "url": "https://alphacorp.ai/blog/perplexity-search-api-vs-tavily-the-better-choice-for-rag-and-agents-in-2025"
+      },
+      {
+        "title": "Costs - davidmarsoni/llog GitHub Wiki",
+        "url": "https://github-wiki-see.page/m/davidmarsoni/llog/wiki/Costs"
+      },
+      {
+        "title": "Tavily Web Search in NanoGPT: BYOK-friendly real-time browsing",
+        "url": "https://nano-gpt.com/blog/blog-tavily-web-search"
+      },
+      {
+        "title": "工具：Tavily搜索引擎",
+        "url": "https://www.cnblogs.com/fuminer/p/18828565"
+      }
+    ],
+    "answerB": "Tavily offers a free tier with 1,000 credits per month. Paid plans start with 4,000 credits per month. Pricing per additional 1,000 searches is not publicly disclosed.",
+    "sourcesB": [
+      {
+        "title": "5 Tavily Alternatives for Better Pricing, Performance, and Extraction ...",
+        "url": "https://www.firecrawl.dev/blog/tavily-alternatives"
+      },
+      {
+        "title": "TAVILY_API_KEY: Free Signup, Direct Link & Code Examples (2026)",
+        "url": "https://openclawlaunch.com/guides/tavily-api-key"
+      },
+      {
+        "title": "Perplexity Search API vs. Tavily: RAG & Agent Choice 2025",
+        "url": "https://alphacorp.ai/blog/perplexity-search-api-vs-tavily-the-better-choice-for-rag-and-agents-in-2025"
+      },
+      {
+        "title": "Find a plan to power your AI Agents - Tavily",
+        "url": "https://www.tavily.com/pricing"
+      },
+      {
+        "title": "Beyond Tavily - The Complete Guide to AI Search APIs in 2026",
+        "url": "http://websearchapi.ai/blog/tavily-alternatives"
+      }
+    ]
+  },
+  {
+    "id": "research1",
+    "category": "research",
+    "lang": "en",
+    "query": "Compare Tavily, Serper, and Brave Search APIs for LLM agents in terms of pricing and features.",
+    "answerA": "Tavily, Serper, and Brave Search APIs differ in pricing and features; Tavily is known for structured data, Serper offers Google-quality results at a lower cost, and Brave Search emphasizes privacy and independent indexing.",
+    "sourcesA": [
+      {
+        "title": "Beyond Tavily - The Complete Guide to AI Search APIs in 2026",
+        "url": "http://websearchapi.ai/blog/tavily-alternatives"
+      },
+      {
+        "title": "How does the Brave Search API compare to other Web search API options? | Brave",
+        "url": "https://brave.com/search/api/guides/what-sets-brave-search-api-apart"
+      },
+      {
+        "title": "Agentic Search in 2026: Benchmark 8 Search APIs for Agents",
+        "url": "https://aimultiple.com/agentic-search"
+      },
+      {
+        "title": "Best Web Search APIs for AI Applications in 2026 - Firecrawl",
+        "url": "https://www.firecrawl.dev/blog/best-web-search-apis"
+      },
+      {
+        "title": "8 Web Search APIs You Need to Know About (If You're Building AI ...",
+        "url": "https://medium.com/@fardeenxyz/8-web-search-apis-you-need-to-know-about-if-youre-building-ai-agents-3028aab6e43d"
+      }
+    ],
+    "answerB": "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"web_search\">\n<｜｜DSML｜｜parameter name=\"query\" string=\"true\">Serper API pricing plans 2025 cost per 1000 requests</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>",
+    "sourcesB": [
+      {
+        "title": "Perplexity Search API vs. Tavily: RAG & Agent Choice 2025",
+        "url": "https://alphacorp.ai/blog/perplexity-search-api-vs-tavily-the-better-choice-for-rag-and-agents-in-2025"
+      },
+      {
+        "title": "Tavily | 面向 LLM 和 AI 代理的实时搜索 API - ToolMage",
+        "url": "https://www.toolmage.com/zh-hans/tool/tavily/"
+      },
+      {
+        "title": "Best SERP API Comparison 2025: SerpAPI vs Exa vs Tavily vs ScrapingDog vs ScrapingBee",
+        "url": "https://dev.to/ritza/best-serp-api-comparison-2025-serpapi-vs-exa-vs-tavily-vs-scrapingdog-vs-scrapingbee-2jci"
+      },
+      {
+        "title": "Tavily | Real-Time Search API for LLMs and AI Agents - ToolMage",
+        "url": "https://www.toolmage.com/en/tool/tavily/"
+      },
+      {
+        "title": "Comparison of web search APIs for AI applications and development projects.md",
+        "url": "https://gist.github.com/jonathanglasmeyer/ef13e542a42f81bf80a7e1bc241b39ef"
+      },
+      {
+        "title": "Costs - davidmarsoni/llog GitHub Wiki",
+        "url": "https://github-wiki-see.page/m/davidmarsoni/llog/wiki/Costs"
+      },
+      {
+        "title": "How to Add Real-Time Web Search to Your LLM Using Tavily",
+        "url": "https://www.freecodecamp.org/news/how-to-add-real-time-web-search-to-your-llm-using-tavily/"
+      },
+      {
+        "title": "Tavily vs Exa vs Perplexity vs YOU.com: The Complete AI Search API Comparison 2025",
+        "url": "https://www.humai.blog/tavily-vs-exa-vs-perplexity-vs-you-com-the-complete-ai-search-api-comparison-2025/#1-accuracy-does-it-actually-find-what-you-need"
+      },
+      {
+        "title": "个人学习工作分享",
+        "url": "https://www.lllyyb.com/archives/gsWnWneO"
+      },
+      {
+        "title": "Serper (Google Search)",
+        "url": "https://mcp.aibase.com/zh/server/1916359263478849538"
+      },
+      {
+        "title": "serper Google Search API介绍，与其它性价比对比",
+        "url": "https://sevnday.blog.csdn.net/article/details/150771276"
+      },
+      {
+        "title": "让 AI 联网：Serper 极速 Google 搜索 API 使用指南 可能是目前最适合 LLM 集成的搜索工具",
+        "url": "http://blog.einverne.info/post/2025/12/intro-to-serper-dev.html"
+      },
+      {
+        "title": "Brave Search API | Brave",
+        "url": "https://brave.com/search/api/?mtm_source=hacker-noon&mtm_medium=newsletter&mtm_campaign=search-api&mtm_content=API"
+      },
+      {
+        "title": "Introducing AI Grounding with Brave Search API, providing enhanced search performance in AI applications | Brave",
+        "url": "https://brave.com/blog/ai-grounding/?utm_source=aloa-ai.beehiiv.com&utm_medium=newsletter&utm_campaign=clay-raises-100m-openai-goes-open-source-more-august-6-2025&_bhlid=8048d5a77573e305d4bddc885dd80c7bc0acfb45"
+      },
+      {
+        "title": "Brave Announces AI Grounding API With Plans Starting At Free",
+        "url": "https://www.searchenginejournal.com/brave-announces-ai-grounding-api/553347/?utm_campaign=linkedin-auto-publish&utm_content=generative-ai-news&utm_medium=social&utm_source=linkedin&hss_channel=lcp-3611944"
+      },
+      {
+        "title": "Brave Search MCP Server · Apify",
+        "url": "https://apify.com/agentify/brave-search-mcp-server#main"
+      },
+      {
+        "title": "Brave Launches AI Grounding API to Boost Search Accuracy and Reduce AI Hallucinations",
+        "url": "https://web.swipeinsight.app/posts/brave-launches-ai-grounding-api-to-boost-search-accuracy-and-reduce-ai-hallucinations-18741"
+      },
+      {
+        "title": "Brave Unveils Free AI Grounding API",
+        "url": "https://digitalmarketingdesk.co.uk/brave-unveils-free-ai-grounding-api/#respond"
+      },
+      {
+        "title": "Brave launches AI Grounding for Search API - what changes for agents, speed and pricing",
+        "url": "https://www.etavrian.com/news/brave-ai-grounding-search-api-pricing"
+      },
+      {
+        "title": "Brave Search API Now Available Through AWS Marketplace",
+        "url": "https://www.searchenginejournal.com/brave-search-api-now-available-through-aws-marketplace/551382/"
+      },
+      {
+        "title": "Comparison of web search APIs for AI applications and development projects.md",
+        "url": "https://gist.github.com/jonathanglasmeyer/ef13e542a42f81bf80a7e1bc241b39ef"
+      },
+      {
+        "title": "Brave Announces AI Grounding API With Plans Starting At Free - No Agency Cube",
+        "url": "https://noagencycube.com/brave-announces-ai-grounding-api-with-plans-starting-at-free/"
+      }
+    ]
+  },
+  {
+    "id": "niche1",
+    "category": "long-tail",
+    "lang": "en",
+    "query": "What is the maximum context window and the token pricing of DeepSeek's latest model?",
+    "answerA": "# DeepSeek 最新模型概览\n\n## 最新模型：DeepSeek-V3.2-Speciale（2025年12月1日发布）\n\n这是目前 DeepSeek 最新、最强的模型版本，基于 V3.2 进行了更大规模的后训练强化学习优化，专为推理和 Agent 任务设计。\n\n### 上下文窗口\n- **164K tokens** — 可以处理超长文档、长篇对话或大型代码库\n\n### Token 定价\n\n不同渠道的价格有所差异，以下是主要参考：\n\n| 渠道 | 输入价格 | 输出价格 |\n|------|----------|----------|\n| **OpenRouter** | $0.287/百万 tokens | $0.431/百万 tokens |\n| **对比参考（opentools.ai）** | $0.40/百万 tokens | $1.20/百万 tokens |\n\n> 💡 **缓存命中**时价格更低，约为 $0.20/百万 tokens。\n\n---\n\n## 对比：DeepSeek-V3.2-Exp（2025年9月发布）\n\n| 项目 | V3.2-Exp |\n|------|----------|\n| 上下文窗口 | 128K tokens（部分平台支持 164K） |\n| 输入（缓存命中） | $0.028/百万 tokens |\n| 输入（缓存未命中） | $0.28/百万 tokens |\n| 输出 | $0.42/百万 tokens |\n\n---\n\n## 中文用户参考（DeepSeek V3.1 官方人民币定价）\n\n> 2025年8月发布，9月6日起执行，夜间优惠已取消\n\n| 类型 | 价格 |\n|------|",
+    "sourcesA": [
+      {
+        "title": "R2没等来，DeepSeek V3.1模型发布：价格涨了，智能体能力加强",
+        "url": "https://www.chinastarmarket.cn/detail/2122276"
+      },
+      {
+        "title": "DeepSeek V3.2-Exp Release: Pricing, API Costs, Context Window & Benchmarks",
+        "url": "https://llm-stats.com/blog/research/deepseek-v3.2-ex-launch"
+      },
+      {
+        "title": "DeepSeek V3.2 Speciale - API Pricing & Providers",
+        "url": "https://openrouter.ai/deepseek/deepseek-v3.2-speciale"
+      },
+      {
+        "title": "DeepSeek-V3.2-Exp Now on SiliconFlow: Efficient Long-Context Reasoning at 50% Lower Cost",
+        "url": "https://www.siliconflow.com/blog/deepseek-v3-2-exp-now-on-siliconflow-efficient-long-context-reasoning-at-50-lower-cost?utm_source=capgo&utm_medium=organic_ugcblog&utm_campaign=202509_series&utm_id=000003&utm_term=2026%E5%B9%B4%E6%9C%80%E4%BD%B3%E5%BC%80%E6%BA%90%E7%BF%BB%E8%AF%91%E6%A8%A1%E5%9E%8B&utm_content=guide_model_intro"
+      },
+      {
+        "title": "DeepSeek Pricing for 2025: Costs, Features and How Australian Businesses Can Save",
+        "url": "https://wise.com/au/blog/deepseek-pricing"
+      },
+      {
+        "title": "DeepSeek API接口调用价格调整：夜间优惠取消",
+        "url": "https://article.pchome.net/news/5859.html"
+      },
+      {
+        "title": "DeepSeek-V3.1 on SiliconFlow: Hybrid Thinking, Smarter Tools and 164K Context Window",
+        "url": "https://www.siliconflow.com/blog/deepseek-v3-1-on-siliconflow-hybrid-thinking-smarter-tools-and-164k-context-window"
+      },
+      {
+        "title": "R2没等来，DeepSeek V3.1模型发布：价格涨了，智能体能力加强",
+        "url": "https://www.21jingji.com/article/20250822/herald/aabe9f90cc098fd66664f1411a6638dd.html"
+      },
+      {
+        "title": "DeepSeek-V3.2-Exp 現在在 SiliconFlow 上：高效長上下文推理，成本降低 50%",
+        "url": "https://www.siliconflow.com/zh-tw/blog/deepseek-v3-2-exp-now-on-siliconflow-efficient-long-context-reasoning-at-50-lower-cost?utm_source=capgo&utm_medium=organic_ugcblog&utm_campaign=202509_series&utm_id=000003&utm_term=2025%E5%B9%B4%E3%82%AF%E3%83%AA%E3%82%A8%E3%82%A4%E3%83%86%E3%82%A3%E3%83%96%E3%82%BF%E3%82%B9%E3%82%AF%E3%81%AB%E6%9C%80%E9%81%A9%E3%81%AA%E3%83%9E%E3%83%AB%E3%83%81%E3%83%A2%E3%83%BC%E3%83%80%E3%83%AB%E3%83%A2%E3%83%87%E3%83%AB&utm_content=guide_banner"
+      },
+      {
+        "title": "DeepSeek V3.1 Terminus vs DeepSeek V3.2 Speciale – Specs, Pricing & Capabilities",
+        "url": "https://opentools.ai/compare/llms/deepseek-v31-terminus-vs-deepseek-v32-speciale"
+      }
+    ],
+    "answerB": "The DeepSeek API V4 has a maximum context window of 1 million tokens and a token pricing of $0.20 per million input tokens and $0.77 per million output tokens.",
+    "sourcesB": [
+      {
+        "title": "DeepSeek Context Window, Token Limits, and Memory - Data Studios",
+        "url": "https://www.datastudios.org/post/deepseek-context-window-token-limits-and-memory-specifications-behavior-and-practical-use"
+      },
+      {
+        "title": "What is the context length of DeepSeek's models? - Milvus",
+        "url": "https://milvus.io/ai-quick-reference/what-is-the-context-length-of-deepseeks-models"
+      },
+      {
+        "title": "DeepSeek V4 Context Window: 1 Million Tokens Explained - Framia",
+        "url": "https://framia.pro/page/en-US/news/deepseek-v4-context-window"
+      },
+      {
+        "title": "What is the context length for DeepSeek-R1 - Microsoft Learn",
+        "url": "https://learn.microsoft.com/en-ie/answers/questions/2203138/what-is-the-context-length-for-deepseek-r1"
+      },
+      {
+        "title": "DeepSeek V3 0324 - API Pricing & Benchmarks | OpenRouter",
+        "url": "https://openrouter.ai/deepseek/deepseek-chat-v3-0324"
+      }
+    ]
+  },
+  {
+    "id": "niche2",
+    "category": "long-tail",
+    "lang": "en",
+    "query": "How does Anthropic's server-side web_search_20250305 tool return page content to the model, and is the content encrypted?",
+    "answerA": "Anthropic's web_search_20250305 tool returns page content to the model server-side, and the content is encrypted to protect privacy.",
+    "sourcesA": [
+      {
+        "title": "Anthropic Web Search Tool",
+        "url": "https://cobusgreyling.substack.com/p/anthropic-web-search-tool"
+      },
+      {
+        "title": "The Claude Code WebSearch Black Box - The VMUNIX Blues",
+        "url": "https://www.vmunix.com/posts/claude-websearch-blackbox"
+      },
+      {
+        "title": "Anthropic Vertex AI web_search tool breaks multi-turn conversations ...",
+        "url": "https://github.com/danny-avila/LibreChat/discussions/11855"
+      },
+      {
+        "title": "How Claude Code Search Actually Works: What I Learned from the ...",
+        "url": "https://trevorfox.com/2026/04/how-claude-code-search-actually-works"
+      },
+      {
+        "title": "Web search with Anthropic Claude models  |  Gemini Enterprise Agent Platform  |  Google Cloud Documentation",
+        "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/partner-models/claude/web-search"
+      }
+    ],
+    "answerB": "## How `web_search_20250305` Returns Page Content to the Model\n\n### Architecture Overview\n\n`web_search_20250305` is a **server-side tool** — Anthropic executes the search entirely on their infrastructure (powered by Brave Search), not on your machine or within your application. When Claude decides a search is needed, it emits a `server_tool_use` block, Anthropic's backend performs the search, and results flow back into the model's context as structured content blocks.\n\nThe response contains several distinct block types:\n\n| Block Type | What It Contains |\n|---|---|\n| `text` | Claude's narration of what it's doing |\n| `server_tool_use` | The exact search query Claude used |\n| `web_search_tool_result` | The collection of search results |\n| `web_search_result` | Individual results (title, URL, snippet) |\n| `citation` | Attributed text supporting Claude's claims |\n\nThe model sees both the **snippets** (clear text extracted from pages) and an **`encrypted_content`** field that contains the full page content.\n\n---\n\n### Is the Content Encrypted?\n\n**Yes — partially.** The search results contain an `encrypted_content` field that holds the full scraped page text in encrypted form. From the API consumer's perspective, it looks like this:\n\n```json\n{\n  \"content\": {\n    \"encrypted\": \"2f3a9b8c4d5e6f7a8b9c0d1e2f3a4b5c...\",\n    \"index\": \"encrypted_index_abc123...\"\n  },\n  \"citation\": {\n    \"url\": \"https://example.com/article\",\n    \"title\": \"Article Title\"\n  }\n}\n```\n\nKey details about this encryption:\n\n- **The model CAN read the decrypted content** — Anthropic's server-side infrastructure handles decryption transparently before the content reaches the model. Claude uses this to understand pages deeply and generate accurate answers.\n\n- **Developers/API users CANNOT read it** — the encrypted blob is opaque to you. This is effectively a **DRM/content-protection mechanism**. It prevents developers from extracting full page content and repurposing it (e.g., feeding it to other models like Gemini, which would not understand Anthropic's encryption format).\n\n- **Citations and snippets ARE in the clear** — titles, URLs, and brief text snippets that support Claude's claims are delivered unencrypted so you can display sources to users.\n\n- **Multi-turn preservation** — if you're building a multi-turn conversation where Claude references previous search results, you must pass the `encrypted_content` field back exactly as received. If you strip or alter it, Claude loses access to the underlying page content in subsequent turns.\n\n---\n\n### Why Anthropic Encrypts Page Content\n\nThe encryption serves several purposes:\n\n1. **Licensing/compliance** — search engines and publishers typically don't grant API users the right to reproduce full page content. Encryption ensures Anthropic's API users can't bypass those terms.\n\n2. **Model lock-in** — content encrypted by Anthropic can only be decrypted within Anthropic's infrastructure, making it non-portable to other model providers.\n\n3. **Citation-driven UX** — by keeping full content server-side, Anthropic encourages the model to use its citation system (with `<cite>` tags and sentence-level attribution) rather than regurgitating entire articles, which aligns with copyright compliance.\n\nThis is why some developers building multi-model agent pipelines (e.g., using both Claude and Gemini) have switched to alternatives like Exa or Tavily — those services return unencrypted content that any model can consume.",
+    "sourcesB": [
+      {
+        "title": "pi-wierd-web",
+        "url": "https://www.npmjs.com/package/pi-wierd-web"
+      },
+      {
+        "title": "Simon Willison on llm-tool-use",
+        "url": "https://simonwillison.net/tags/llm-tool-use/?page=2"
+      },
+      {
+        "title": "Web Search and Web Fetch Tools | hitmux/HitCC | DeepWiki",
+        "url": "https://deepwiki.com/hitmux/HitCC/6.1-web-search-and-web-fetch-tools"
+      },
+      {
+        "title": "Studio: per-model Anthropic server-side tool versions by danielhanchen · Pull Request #5679 · unslothai/unsloth",
+        "url": "https://github.com/unslothai/unsloth/pull/5679"
+      },
+      {
+        "title": "Simon Willison’s Weblog",
+        "url": "https://simonwillison.net/search/?tag=search&tag=claude&year=2025"
+      },
+      {
+        "title": "tools | @langchain/anthropic",
+        "url": "https://reference.langchain.com/javascript/langchain-anthropic/tools"
+      },
+      {
+        "title": "Phase 2: Native Tools & Web Search Integration · Issue #131 · synerops/syner",
+        "url": "https://github.com/synerops/syner/issues/131"
+      },
+      {
+        "title": "Using Claude's Built-In Web Search Tool",
+        "url": "https://anablock.com/blog/claude-web-search-tool"
+      },
+      {
+        "title": "Introducing web search on the Anthropic API",
+        "url": "https://simonwillison.net/2025/May/7/anthropic-api-search/"
+      },
+      {
+        "title": "pi-wierd-web - npm Package Security Analysis - Socket",
+        "url": "https://socket.dev/npm/package/pi-wierd-web"
+      },
+      {
+        "title": "Web & Search Tools | claude-code-best/claude-code | DeepWiki",
+        "url": "https://deepwiki.com/claude-code-best/claude-code/3.2-web-and-search-tools"
+      },
+      {
+        "title": "Why we switched from Claude web search to Exa for the BrainGrid agent",
+        "url": "https://www.braingrid.ai/blog/switching-claude-web-search-to-exa"
+      },
+      {
+        "title": "Web, MCP & Utility Tools | zackautocracy/claude-code | DeepWiki",
+        "url": "https://deepwiki.com/zackautocracy/claude-code/3.4-web-mcp-and-utility-tools"
+      },
+      {
+        "title": "Part 2: A CISO's Guide to Securing Claude in the Enterprise - Evoke Security",
+        "url": "https://www.evokesecurity.com/blogs/part-2-a-ciso-s-guide-to-securing-claude-in-the-enterprise"
+      },
+      {
+        "title": "MCP: Web Search | Claude Help Center",
+        "url": "https://support.claude.com/en/articles/14503775-mcp-web-search"
+      },
+      {
+        "title": "Owlibou/owlen - owlen",
+        "url": "https://gitea.puchstein.bayern/Owlibou/owlen/commits/commit/825dfc07222307ab0df753a17c8368887d5653f8?page=2"
+      },
+      {
+        "title": "Web Search and Web Fetch Tools | hitmux/HitCC | DeepWiki",
+        "url": "https://deepwiki.com/hitmux/HitCC/6.1-web-search-and-web-fetch-tools"
+      },
+      {
+        "title": "Search, Web Fetch, and Copyright Compliance | asgeirtj/system_prompts_leaks | DeepWiki",
+        "url": "https://deepwiki.com/asgeirtj/system_prompts_leaks/2.1.3-search-web-fetch-and-copyright-compliance"
+      },
+      {
+        "title": "Web search and web fetch - Claude.ai Documentation",
+        "url": "https://claude.com/docs/cowork/3p/web-tools"
+      },
+      {
+        "title": "Claude API web search complete tutorial: Native web_search tool and 3 implementation schemes comparison (2026) - Apiyi.com Blog",
+        "url": "https://help.apiyi.com/en/claude-api-web-search-guide-en.html"
+      }
+    ]
+  },
+  {
+    "id": "weather1",
+    "category": "local",
+    "lang": "en",
+    "query": "What is the weather forecast for Hangzhou, China this weekend?",
+    "answerA": "According to the Central Meteorological Observatory, the weather forecast for Hangzhou this weekend (Saturday, June 6 and Sunday, June 7) is expected to be warm with a mix of clouds and rain.\\[1\\]\n\n- **Saturday (June 6)**: Mainly cloudy, with a high of 29°C and a low of 20°C. Winds will be light (less than level 3).\n- **Sunday (June 7)**: Cloudy turning to light rain, with a high of 29°C and a low of 21°C. Winds will remain light.\n\nIt might be a good idea to carry an umbrella if you plan to be out on Sunday.",
+    "sourcesA": [
+      {
+        "title": "杭州天气预报,杭州7天天气预报,杭州15天天气预报,杭州天气查询",
+        "url": "https://www.weather.com.cn/weather/101210101.shtml"
+      },
+      {
+        "title": "西湖天气预报,西湖7天天气预报,西湖15天天气预报,西湖天气查询",
+        "url": "https://www.weather.com.cn/weather15d/101210113.shtml"
+      },
+      {
+        "title": "Hangzhou, China Detailed Forecast | Current Conditions | NWS Alerts | Maps | Buoy Reports | Earth Quakes",
+        "url": "http://www.myforecast.com/detailed-forecast.php?cwid=55681&metric=true&city_count=&zip_code=&condition=act&data=1353105187"
+      },
+      {
+        "title": "Hangzhou, Zhejiang Sheng Daily Weather Forecast | Current Conditions | Sunrise | Sunset",
+        "url": "https://www.myforecast.com/index.php?cwid=W58457&metric=true&city_count=&zip_code=&condition=act&data=1152644273"
+      },
+      {
+        "title": "10-Day Weather Forecasts & Weekend Weather for Hangzhou, Zhejiang, CN | WeatherBug",
+        "url": "https://www.weatherbug.com/weather-forecast/10-day-weather/hangzhou-zhejiang-ch"
+      },
+      {
+        "title": "Weather in Hangzhou, China this weekend, weather Hangzhou Saturday and Sunday — Meteum",
+        "url": "https://meteum.ai/weather/en/hangzhou/details/auto/weekend?via=prsw"
+      },
+      {
+        "title": "Hangzhou, China Current Conditions | Hourly Forecast | NWS Alerts | Maps | Buoy Reports | Earth Quakes",
+        "url": "http://www.myforecast.com/index.php?cwid=W58457&metric=true&condition=act&city_count=&zip_code="
+      },
+      {
+        "title": "【杭州天气】杭州40天天气预报,杭州更长预报,杭州天气日历,杭州日历,15天天气预报,天气预报一周",
+        "url": "https://www.weather.com.cn/weather40d/101210101.shtml"
+      },
+      {
+        "title": "注意：明夜雨水强攻，局部暴雨！",
+        "url": "https://news.qq.com/rain/a/20260602A07HJV00"
+      },
+      {
+        "title": "【杭州西湖风景名胜区-断桥残雪天气】_杭州西湖风景名胜区-断桥残雪天气预报_天气查询",
+        "url": "https://tianqi.moji.com/weather/china/zhejiang/hangzhou-west-lake-scenic-area-remnant-snow-on-the-broken-bridge"
+      }
+    ],
+    "answerB": "Hangzhou will have hot and humid weather this weekend with temperatures ranging from 28°C to 33°C and occasional showers.",
+    "sourcesB": [
+      {
+        "title": "Weather in Hangzhou, China",
+        "url": "https://www.weatherapi.com/"
+      },
+      {
+        "title": "Hangzhou, Zhejiang, China Monthly Weather | AccuWeather",
+        "url": "https://www.accuweather.com/en/cn/hangzhou/106832/june-weather/106832"
+      },
+      {
+        "title": "Hangzhou 30-Day Forecast - Monthly Weather in Hangzhou, Zhejiang",
+        "url": "https://world-weather.info/forecast/china/hangzhou/month"
+      },
+      {
+        "title": "Hangzhou weather in June 2026 | China: How hot?",
+        "url": "https://www.weather2travel.com/china/hangzhou/june"
+      },
+      {
+        "title": "Hangzhou, Zhejiang, China Monthly Weather | AccuWeather",
+        "url": "https://www.accuweather.com/en/cn/hangzhou/106832/may-weather/106832"
+      }
+    ]
+  },
+  {
+    "id": "zh1",
+    "category": "current-events",
+    "lang": "zh",
+    "query": "2025年诺贝尔文学奖得主是谁？获奖理由是什么？",
+    "answerA": "The 2025 Nobel Prize in Literature was awarded to Hungarian author László Krasznahorkai for his imaginative and insightful works that reaffirm the power of art amidst apocalyptic fears. The official award ceremony took place on October 9, 2025.",
+    "sourcesA": [
+      {
+        "title": "匈牙利作家拉斯洛·卡撒兹纳霍凯获2025年诺贝尔文学奖 - 大湾区时报",
+        "url": "https://www.dwqsb.com/m/guoji/hwsc/20251009/5223.html"
+      },
+      {
+        "title": "匈牙利作家拉斯洛获2025诺贝尔文学奖 喜欢中国文化尤其迷恋李白",
+        "url": "https://m.thecover.cn/news_details.html?eid=Uf22FEyDGrmH90qSdq8Jkw%3D%3D"
+      },
+      {
+        "title": "如何阅读2025年诺贝尔文学奖得主拉斯洛？丨张杰读书笔记 - 四川新闻",
+        "url": "https://sichuan.scol.com.cn/ggxw/202510/83139982.html"
+      },
+      {
+        "title": "2025年诺贝尔文学奖揭晓-高校科技-中国教育和科研计算机网CERNET",
+        "url": "https://www.edu.cn/rd/special_topic/nobel/wx/202510/t20251010_2693501.shtml"
+      },
+      {
+        "title": "1911-1920 | 诺贝尔文学奖得主及获奖理由-图书馆",
+        "url": "https://tsg.gzist.edu.cn/info/2071/3386.htm"
+      }
+    ],
+    "answerB": "2025年诺贝尔文学奖得主是匈牙利作家**拉斯洛·克拉斯诺霍尔考伊**（László Krasznahorkai，也有译为卡撒兹纳霍凯、克拉斯诺霍尔卡伊·拉斯洛等）。\n\n**获奖理由**是：“**他那震撼人心、富有远见的创作，在灾难与恐惧的时代，重申了艺术的力量。**”（英文原文为：“for his compelling and visionary oeuvre that, in the midst of apocalyptic terror, reaffirms the power of art.”）",
+    "sourcesB": [
+      {
+        "title": "2025年诺贝尔文学奖揭晓，获奖者处女作曾被改编为7小时电影，在影坛享有崇高地位",
+        "url": "https://m.gmw.cn/2025-10/10/content_1304179233.htm"
+      },
+      {
+        "title": "2025年诺贝尔文学奖得主是“李白粉丝” 曾将南京写入其作品中",
+        "url": "https://news.sohu.com/a/942562453_121455647"
+      },
+      {
+        "title": "2025諾貝爾獎｜匈牙利作家克拉斯諾霍爾卡伊獲文學獎",
+        "url": "https://www.stheadline.com/realtime-world/3506910/2025%E8%AB%BE%E8%B2%9D%E7%88%BE%E7%8D%8E%E5%8C%88%E7%89%99%E5%88%A9%E4%BD%9C%E5%AE%B6%E5%85%8B%E6%8B%89%E6%96%AF%E8%AB%BE%E9%9C%8D%E7%88%BE%E5%8D%A1%E4%BC%8A%E7%8D%B2%E6%96%87%E5%AD%B8%E7%8D%8E"
+      },
+      {
+        "title": "匈牙利作家克拉斯納霍爾凱 奪文學諾獎",
+        "url": "https://orientaldaily.on.cc/content/%E5%85%A9%E5%B2%B8%E5%9C%8B%E9%9A%9B/odn-20251010-1010_00180_042/%E5%8C%88%E7%89%99%E5%88%A9%E4%BD%9C%E5%AE%B6%E5%85%8B%E6%8B%89%E6%96%AF%E7%B4%8D%E9%9C%8D%E7%88%BE%E5%87%B1--%E5%A5%AA%E6%96%87%E5%AD%B8%E8%AB%BE%E7%8D%8E"
+      },
+      {
+        "title": "匈作家卡撒茲納霍凱擅寫末日 作品蘊含遠見獲諾貝爾文學獎 ｜ 公視新聞網 PNN",
+        "url": "https://news.pts.org.tw/article/774594?utm_campaign=news"
+      },
+      {
+        "title": "匈牙利作家拉斯洛·卡撒兹纳霍凯获2025年诺贝尔文学奖，以长句著称",
+        "url": "https://m.sohu.com/a/942339069_638785/?pvid=000115_3w_a&scm=10001.325_13-325_13.0.0.5_32&spm=smpc.channel_248.block3_308_NDdFbm_1_fd.1.1760017237220U8Ewlva_324"
+      },
+      {
+        "title": "2025诺贝尔文学奖揭晓！71岁匈牙利作家是中国诗人李白的粉丝",
+        "url": "https://www.jfdaily.com/wx/detail.do?id=996171"
+      },
+      {
+        "title": "2025诺贝尔奖｜匈牙利作家克拉斯诺霍尔卡伊获文学奖",
+        "url": "https://dushi.singtao.ca/toronto/%e6%96%b0%e9%97%bb/%e5%8d%b3%e6%97%b6%e5%9b%bd%e9%99%85/2025%e8%af%ba%e8%b4%9d%e5%b0%94%e5%a5%96%ef%bd%9c%e6%96%87%e5%ad%a6%e5%a5%96%e5%be%97%e4%b8%bb%e4%bb%8a%e6%97%a5%e5%87%ba%e7%82%89%e3%80%80%e5%8e%bb%e5%b9%b4%e8%af%9e%e7%94%9f%e9%a6%96%e4%bd%8d/?variant=zh-hk"
+      },
+      {
+        "title": "News • Entertainment",
+        "url": "https://www.cbc.ca/lite/story/9.6932746"
+      },
+      {
+        "title": "匈牙利作家拉斯洛·卡撒兹纳霍凯获2025年诺贝尔文学奖",
+        "url": "https://www.thepaper.cn/newsDetail_forward_31749764?commTag=true"
+      }
+    ]
+  },
+  {
+    "id": "zh2",
+    "category": "live-data",
+    "lang": "zh",
+    "query": "今天美元兑人民币的最新汇率是多少？",
+    "answerA": "根据中国外汇交易中心公布的数据，今天（2025年4月10日）银行间外汇市场**美元兑人民币的汇率中间价为 1美元 = 7.2092元人民币**。\n\n除了官方中间价，其他交易市场的参考汇率约为：\n*   **在岸人民币 (CNY)**：截至下午18时44分，离岸人民币对美元报7.3108，涨超0.5%。\n*   **离岸人民币 (CNH)**：根据当地时间4月10日的数据，1美元可兑换约7.3147元人民币。\n\n以上信息仅供参考，实际换汇汇率会根据所选银行和交易时间实时变动，建议交易前以银行柜台的实时成交价为准。",
+    "sourcesA": [
+      {
+        "title": "人民币对美元中间价报7.2092 调贬26个基点",
+        "url": "http://finance.ce.cn/fe/gdxw/202504/t20250410_1976739.shtml"
+      },
+      {
+        "title": "2025年4月10日中国外汇交易中心受权公布人民币汇率中间价公告",
+        "url": "https://nanjing.pbc.gov.cn/zhengcehuobisi/125207/125217/125925/5668485/index.html"
+      },
+      {
+        "title": "新聞內容",
+        "url": "http://fund.taipeifubon.com.tw/r/News/rNews_%7B09AAED56-4A62-4789-8DFD-5A02DDDEB0EA%7D_6_A.djhtm"
+      },
+      {
+        "title": "2025/04/10",
+        "url": "https://www.yicai.com/brief/102565389.html"
+      },
+      {
+        "title": "2025年4月10日人民币汇率中间价公告",
+        "url": "http://www.ce.cn/xwzx/gnsz/gdxw/202504/10/t20250410_39341459.shtml"
+      },
+      {
+        "title": "4月10日人民币对美元中间价报7.2092元 下调26个基点",
+        "url": "https://www.chinanews.com.cn/cj/2025/04-10/10397131.shtml"
+      },
+      {
+        "title": "",
+        "url": "https://fx.sauder.ubc.ca/pdf/20250410.pdf#1#1"
+      },
+      {
+        "title": "4月10日人民币兑美元中间价下调26个基点",
+        "url": "https://www.cnstock.com/commonDetail/393443"
+      },
+      {
+        "title": "4月10日人民币兑美元中间价下调26个基点",
+        "url": "https://www.sohu.com/a/881998977_120988576?scm=10001.325_13-109000.0.0.5_32&spm=smpc.channel_248.block3_308_NDdFbm_1_fd.11.1744249277194zfNPBGx_324"
+      },
+      {
+        "title": "人民币兑美元中间价报7.2092，下调26点；上一交易日中间价7.2066，上一交易日官方收盘价7.3498",
+        "url": "https://www.dzh.com.cn/index/detail?mod=txs&url=/wap/data/news/txs/2025/04/487367.json"
+      }
+    ],
+    "answerB": "Today's USD to CNY exchange rate is approximately 6.77 CNY per USD, according to multiple financial sources. This rate reflects the current market value and may fluctuate slightly.",
+    "sourcesB": [
+      {
+        "title": "美元至人民币汇率历史| 汇率换算器 - Wise",
+        "url": "https://wise.com/zh-cn/currency-converter/usd-to-cny-rate/history"
+      },
+      {
+        "title": "今日美元对离岸人民币汇率(USD CNH) - 英为财情",
+        "url": "https://cn.investing.com/currencies/usd-cnh"
+      },
+      {
+        "title": "1 USD to CNY - 美元 to 人民币 Exchange Rate",
+        "url": "https://www.xe.com/zh-cn/currencyconverter/convert?Amount=1&From=USD&To=CNY"
+      },
+      {
+        "title": "1 美元兑人民币汇率。将USD 兑换成CNY - Wise",
+        "url": "https://wise.com/zh-cn/currency-converter/usd-to-cny-rate?amount=1"
+      },
+      {
+        "title": "人民币汇率中间价",
+        "url": "http://m.safe.gov.cn/safe/rmbhlzjj/index.html"
+      }
+    ]
+  },
+  {
+    "id": "zh3",
+    "category": "technical",
+    "lang": "zh",
+    "query": "字节跳动豆包（Doubao）大模型最新版本有哪些主要新功能？",
+    "answerA": "The latest version of ByteDance's Doubao model includes enhanced multimodal capabilities and a new real-time language model. It outperforms competitors in various benchmarks. The model is now available via API for developers.",
+    "sourcesA": [
+      {
+        "title": "字节跳动豆包大模型 1.5 Pro 发布，综合得分优于 GPT-4o、Claude 3.5 Sonnet - IT之家",
+        "url": "https://www.ithome.com/0/826/419.htm"
+      },
+      {
+        "title": "新发布！四款豆包大模型了解一下！",
+        "url": "https://zhuanlan.zhihu.com/p/1966168156985852480"
+      },
+      {
+        "title": "豆包大模型_百度百科",
+        "url": "https://baike.baidu.com/item/%E8%B1%86%E5%8C%85%E5%A4%A7%E6%A8%A1%E5%9E%8B/64418493"
+      },
+      {
+        "title": "字节跳动发布豆包大模型，日均处理千亿级Tokens - 新华网",
+        "url": "http://www.xinhuanet.com/tech/20240515/0cbd896c16e14a398c26f4195a360410/c.html"
+      },
+      {
+        "title": "豆包大模型 - 火山引擎",
+        "url": "https://www.volcengine.com/product/doubao"
+      }
+    ],
+    "answerB": "字节跳动在2025年12月18日的火山引擎FORCE原动力大会上，发布了**豆包大模型1.8**（Doubao-Seed-1.8）及多项配套更新。该版本主要面向多模态Agent场景进行定向优化，在理解、生成和智能体能力上跻身全球第一梯队。同时发布了音视频创作模型**Seedance 1.5 pro**和图像模型**Doubao-Seedream-4.5**。\n\n以下是最新版本的核心新功能概览：\n\n| 版本/模块 | 主要新功能 / 增强 |\n| :--- | :--- |\n| **豆包大模型 1.8** (旗舰文本/多模态模型) | **1. 多模态Agent能力增强**：工具调用、复杂指令遵循及OS Agent（操作系统智能体）能力显著提升，增强了处理复杂多步任务的规划与执行水平。<br>**2. 视觉理解升级**：单次视频理解帧数从640帧提升至**1280帧**，支持低帧率理解超长视频，并可调用工具对关键片段进行高帧率理解（可应用于在线教育、产品质检等）。<br>**3. 基础能力进步**：在视觉推理、通用视觉问答、空间理解及视频理解等任务中表现全球领先；通用智能体测评集**BrowserComp**上表现全球领先；数学与推理能力已接近全球顶尖通用模型水平。<br>**4. 超长上下文与API管理**：原生支持**256K超长上下文**和API上下文管理，能处理更长、更复杂的任务。 |\n| **Seedance 1.5 pro** (音视频创作模型) | **1. 原生音视频联合生成**：采用新架构，实现**毫秒级音画同步输出**，支持环境音、背景音乐和人声等多种元素。<br>**2. 多人多语言对话**：支持**多人多语言对话**，口型对齐精准，覆盖四川话、粤语等中文方言、英文及小语种，提升全球化创作潜力。<br>**3. 影视级生成能力**：具备影视级叙事张力，能精准捕捉运动细节并细腻呈现人物情绪。<br>**4. “Draft样片”功能**：可先生成低分辨率样片预览，关键要素与最终成片高度一致，可提升**65%** 的创作效率，减少**60%** 的无效创作成本。<br>**5. Seedance 1.0 Pro**：支持**2-12秒1080P**自由生成，满足影视级叙事需求。 |\n| **Doubao-Seedream-4.5** (图像创作模型) | 支持多图组合、创意写真、图片拆解、复杂组图、虚拟试穿与海报设计等能力。 |\n| **企业平台与工具** | **1. AgentKit**：全面升级的企业级AI Agent平台，覆盖Agent从开发、部署到管控的全生命周期，解决身份权限、模型确定性与系统集成等挑战。<br>**2. HiAgent智能体工作站**：构建统一的企业AI任务调度中心，提供开箱即用的通用智能体，支持个性化定制，实现Agent的规模化管理与应用。<br>**3. “AI节省计划”**：业内首个大模型节省计划，覆盖所有按量后付费的豆包大模型、视频图像创作模型及第三方开源模型，通过阶梯折扣帮助企业**最高节省47%** 的成本。 |\n| **规模与生态** | 截至12月，豆包大模型**日均token使用量突破50万亿**，较去年同期增长超10倍；已有**超过100家企业客户**累计token使用量超1万亿。 |\n\n**目前**，个人用户可在豆包、即梦AI等平台体验上述新模型能力；企业用户则可通过火山引擎API接入相关服务。",
+    "sourcesB": [
+      {
+        "title": "火山引擎发布豆包大模型1.8和音视频创作模型Seedance 1.5 pro",
+        "url": "http://www.news.cn/tech/20251219/617e255baf1b489886cd25d275b31b5f/c.html"
+      },
+      {
+        "title": "火山引擎发布豆包大模型1.8，多模态Agent能力进入全球第一梯队_发现频道_中国青年网",
+        "url": "http://d.youth.cn/newtech/202512/t20251218_16415527.htm"
+      },
+      {
+        "title": "火山引擎发布豆包大模型1.8 面向多模态场景优化",
+        "url": "https://www.sohu.com/a/966698340_255783?scm=10001.325_13-325_13.0.0-0-0-0-0.5_32"
+      },
+      {
+        "title": "火山引擎发布豆包大模型 1.8，多模态 Agent 能力进入全球第一梯队",
+        "url": "https://www.ithome.com/0/905/968.htm"
+      },
+      {
+        "title": "豆包大模型1.8发布，日均tokens超50万亿",
+        "url": "https://tech.gmw.cn/2025-12/18/content_38485511.htm"
+      },
+      {
+        "title": "火山引擎又有新动作，三大亮点值得期待",
+        "url": "https://m.cena.com.cn/ai/20251218/127904.html"
+      },
+      {
+        "title": "火山引擎发布豆包大模型1.8，多模态Agent能力进入全球第一梯队",
+        "url": "https://www.stnn.cc/c/2025-12-18/4024286.shtml"
+      },
+      {
+        "title": "豆包大模型1.6_百度百科",
+        "url": "https://wapbaike.baidu.com/item/%E8%B1%86%E5%8C%85%E5%A4%A7%E6%A8%A1%E5%9E%8B1.6/65767090?from=2001k"
+      },
+      {
+        "title": "豆包大模型1.8正式发布，拥有更强多模态Agent能力，豆包日均使用量超过50万亿，推出成本节省计划降幅达47%",
+        "url": "https://news.futunn.com/post/66344745/doubao-large-model-1-8-has-been-officially-released-featuring?level=1&data_ticket=1779743168344199"
+      },
+      {
+        "title": "FORCE LINK AI 创新巡展武汉站：火山引擎发布豆包系列模型升级 披露日均tokens超30万亿",
+        "url": "https://news.hubeidaily.net/pc/c_4659164.html"
+      },
+      {
+        "title": "火山引擎发布豆包大模型1.8和音视频创作模型Seedance 1.5 pro",
+        "url": "http://www.news.cn/tech/20251219/617e255baf1b489886cd25d275b31b5f/c.html"
+      },
+      {
+        "title": "火山引擎发布豆包大模型1.8 多模态Agent能力进入全球第一梯队",
+        "url": "https://www.stdaily.com/web/gdxw/2025-12/18/content_449412.html"
+      },
+      {
+        "title": "火山引擎发布双模型 多模态 Agent 能力入列全球第一梯队",
+        "url": "https://news.dayoo.com/finance/202512/19/171077_54907584.htm"
+      },
+      {
+        "title": "火山引擎发布豆包大模型1.8，多模态Agent能力进入全球第一梯队",
+        "url": "https://www.stnn.cc/c/2025-12-18/4024286.shtml"
+      },
+      {
+        "title": "火山引擎又有新动作，三大亮点值得期待",
+        "url": "https://m.cena.com.cn/ai/20251218/127904.html"
+      },
+      {
+        "title": "豆包大模型1.8发布，日均tokens超50万亿",
+        "url": "https://tech.gmw.cn/2025-12/18/content_38485511.htm"
+      },
+      {
+        "title": "计算机行业点评报告：字节跳动举办火山引擎冬季大会 AI大模型发展仍在提速",
+        "url": "http://vip.stock.finance.sina.com.cn/q/go.php/vReport_Show/kind/lastest/rptid/820402587727/index.phtml"
+      },
+      {
+        "title": "火山引擎，发布新模型",
+        "url": "https://www.163.com/dy/article/KH3HNMB605568W0A.html?referFrom="
+      },
+      {
+        "title": "字节AI棋局上的关键落子",
+        "url": "https://www.cena.com.cn/intelligence/20251223/127935.html"
+      },
+      {
+        "title": "豆包1.8杀入多模态Agent核心战场 在技术追赶、安全大考中 火山引擎寻找“加速度”",
+        "url": "https://news.ifeng.com/c/8pFVi74d0qV?ch=ttsearch"
+      }
+    ]
+  },
+  {
+    "id": "zh4",
+    "category": "who-what-when",
+    "lang": "zh",
+    "query": "杭州亚运会是哪一年举办的？共有多少个参赛代表团？",
+    "answerA": "杭州亚运会的举办年份是 **2023年**，这是中国第三次举办亚运会，也是继1990年北京亚运会和2010年广州亚运会之后的又一盛事。\n\n关于参赛代表团数量，本届亚运会共有 **45个** 代表团参赛。这一数字涵盖了亚奥理事会的全部成员，实现了所有成员的大团圆，也创下了亚运史上参赛代表团数量之最。",
+    "sourcesA": [
+      {
+        "title": "杭州亚运会今日开幕- 梅州日报数字报",
+        "url": "https://mzrb.meizhou.cn/html/2023-09/23/content_341475.htm"
+      },
+      {
+        "title": "梅州日报-杭州亚运会今日开幕",
+        "url": "https://mzrbh5.meizhou.cn/html5/2023-09/23/content_7227_8329637.htm"
+      },
+      {
+        "title": "杭州亚运会今日开幕",
+        "url": "https://zzrb.zznews.gov.cn/content/202309/23/c1640783.html"
+      },
+      {
+        "title": "杭州第19届 亚洲运动会23日开幕_《乐山日报》数字报",
+        "url": "https://rb.lsrbs.net/index.php?m=home&c=Nparticle&a=view&aid=17599"
+      },
+      {
+        "title": "今日开幕",
+        "url": "http://szb.eyesnews.cn/pc/cont/202309/23/content_105122.html"
+      },
+      {
+        "title": "杭州第19届亚洲运动会今日开幕--新安晚报",
+        "url": "http://epaper.ahwang.cn/xawb/20230923/html/content_20230923008001.htm"
+      },
+      {
+        "title": "杭州第十九届亚运会今日开幕",
+        "url": "http://mxrb.cn/dzb///mxrb/2023-09/23/content_128432.html"
+      },
+      {
+        "title": "杭州亚运会五大看点-----湖南日报数字报刊",
+        "url": "https://hnrb.hunantoday.cn/hnrb_epaper/html/2023-09/23/content_1649933.htm?div=1"
+      },
+      {
+        "title": "杭州第19届亚洲运动会23日开幕——驻马店日报",
+        "url": "http://zmdrb.zmdnews.cn/zmdrb/20230923/html/content_20230923001006.htm"
+      },
+      {
+        "title": "杭州第19届亚洲运动会23日开幕 --洛阳日报--洛阳晚报--河南省第一家数字报刊",
+        "url": "https://lyrb.lyd.com.cn/html2/2023-09/23/content_345166.htm"
+      }
+    ],
+    "answerB": "The Hangzhou Asian Games were held in 2023 from September 23 to October 8. A total of 45 countries and regions participated, with over 12,500 athletes competing.",
+    "sourcesB": [
+      {
+        "title": "杭州第19届亚运会_百度百科",
+        "url": "https://baike.baidu.com/item/%E6%9D%AD%E5%B7%9E%E7%AC%AC19%E5%B1%8A%E4%BA%9A%E8%BF%90%E4%BC%9A/63320713"
+      },
+      {
+        "title": "杭州第19届亚运会-可名百科",
+        "url": "https://www.kemingbaike.com/baike/202309637251.html"
+      },
+      {
+        "title": "关注杭州亚运会的五个理由 - BBC",
+        "url": "https://www.bbc.com/zhongwen/simp/sports-66816626"
+      },
+      {
+        "title": "杭州亚运会中国体育代表团成立，明确四大参赛总目标",
+        "url": "https://m.bjnews.com.cn/detail/1694488023168716.html"
+      },
+      {
+        "title": "中国第一次承办亚运会| 当年今日",
+        "url": "https://www.ourchinastory.com/cn/12812/%E4%B8%AD%E5%9B%BD%E7%AC%AC%E4%B8%80%E6%AC%A1%E6%89%BF%E5%8A%9E%E4%BA%9A%E8%BF%90%E4%BC%9A"
+      }
+    ]
+  },
+  {
+    "id": "zh5",
+    "category": "research",
+    "lang": "zh",
+    "query": "对比 DeepSeek 和阿里通义千问最新旗舰模型的上下文长度与 API 价格。",
+    "answerA": "DeepSeek V3 has a 64k context length; Alibaba's Tongyi Qianwen Max has a 32k context length. DeepSeek V3's input price is 0.025 yuan per million tokens; Tongyi Qianwen Max's input price is 2.4 yuan per million tokens.",
+    "sourcesA": [
+      {
+        "title": "AI模型排行榜横评：通义千问、Deepseek、Kimi谁才是性价比之王 | Solo 独立开发者社区-链接每一位独立开发者, 从 Solo 开始",
+        "url": "https://solo.xin/topic/3038"
+      },
+      {
+        "title": "2025大模型排行榜发布API比较：DeepSeek-v3对比通义千问-Max",
+        "url": "https://adg.csdn.net/694cfd8b5b9f5f31781abf4f.html"
+      },
+      {
+        "title": "[PDF] 大模型API 服务行业分析报告（2025）",
+        "url": "https://www.cdut.edu.cn/__local/0/71/D3/F5ED76CDE5391C517C545A6BA05_F75BD49A_50450F.pdf"
+      },
+      {
+        "title": "【工具自荐】旗舰大模型价格对比网站· Issue #8533 · ruanyf/weekly",
+        "url": "https://github.com/ruanyf/weekly/issues/8533"
+      },
+      {
+        "title": "模型& 价格 - DeepSeek API Docs",
+        "url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
+      }
+    ],
+    "answerB": "## DeepSeek vs 阿里通义千问：最新旗舰模型对比\n\n以下是截至 2025 年底双方最新旗舰模型的**上下文长度**与 **API 价格**对比。\n\n---\n\n### 🏆 旗舰模型一览\n\n| 维度 | **DeepSeek-V3.2-Exp** | **Qwen3-Max（通义千问）** |\n|:---|:---|:---|\n| **发布时间** | 2025 年 9 月 29 日 | 2025 年 9 月（预览版） |\n| **参数规模** | ~685B（MoE） | **~1T（万亿级，闭源）** |\n| **开源情况** | ✅ 全面开源 | ❌ 仅 API 访问 |\n| **核心技术** | DSA 稀疏注意力机制 | 千亿级稠密架构 + 混合推理 |\n\n---\n\n### 📏 上下文长度\n\n| 模型 | API 上下文长度 | 备注 |\n|:---|:---|:---|\n| **DeepSeek-V3.2-Exp** | **128K tokens** | 华为云适配后最高支持 **160K**；网页/App 端已支持 **1M**（2026 年 2 月更新） |\n| **Qwen3-Max** | **262K tokens** | 分级定价，支持超长文档深度处理 |\n| **Qwen-Plus（次旗舰）** | **1M tokens** | 2025 年 7 月上线，性价比之选 |\n\n> 📌 **结论**：API 层面 Qwen3-Max（262K）胜出；但若论极限，DeepSeek 网页端达 1M，Qwen-Plus 的 API 也达 1M。\n\n---\n\n### 💰 API 价格对比\n\n#### DeepSeek-V3.2-Exp（降价后）\n\n| 计费项 | 价格（元/百万 tokens） |\n|:",
+    "sourcesB": [
+      {
+        "title": "qiniu/deepseek/deepseek-v3.2",
+        "url": "https://www.showapi.com/ai/llm/qiniu/deepseek/deepseek-v3.2"
+      },
+      {
+        "title": "R2没等来，DeepSeek V3.1模型发布：价格涨了，智能体能力加强",
+        "url": "https://www.chinastarmarket.cn/detail/2122276"
+      },
+      {
+        "title": "计算机行业：AI产业跟踪：DEEPSEEK-V3.1正式发布 持续看好AIAGENT商业化落地进展",
+        "url": "http://stock.finance.sina.com.cn/stock/view/paper.php?reportid=809467996104&symbol=sh000001"
+      },
+      {
+        "title": "网心算力云接入DeepSeek-V3.1-Terminus",
+        "url": "https://www.onething.net/media/439.html"
+      },
+      {
+        "title": "DeepSeek-V3.1版本更新，双模式开放体验",
+        "url": "https://jiweipreview.laoyaoba.com/html/share/news/960076?source=app_android_v2&news_id=960076"
+      },
+      {
+        "title": "DeepSeek再上新，价格下降超50%",
+        "url": "https://cn.wicinternet.org/2025-09/30/content_38322807.htm"
+      },
+      {
+        "title": "深度解析DeepSeek V3.2-Exp：DSA稀疏注意力与API成本革命",
+        "url": "https://news.qiniu.com/archives/1765422057003"
+      },
+      {
+        "title": "DeepSeek-V3.2-Exp发布并开源，API成本将降低50%以上",
+        "url": "https://www.thepaper.cn/newsDetail_forward_31711879?commTag=true"
+      },
+      {
+        "title": "DeepSeek-V3.1",
+        "url": "https://baike.baidu.com/item/DeepSeek-V3.1/66327026"
+      },
+      {
+        "title": "南方财经网",
+        "url": "https://m.sfccn.com/2025/9-30/4MMDE0NDlfMjA2NzQ4MQ.html"
+      },
+      {
+        "title": "【大模型服务平台百炼】通义千问-MT-Plus/Turbo 模型更新通知",
+        "url": "https://www.aliyun.com/notice/117402"
+      },
+      {
+        "title": "qwen/qwen3-vl-235b-a22b-thinking - API 价格、文档与测评 | 302.AI (按量付费）",
+        "url": "https://302.ai/product/detail/ppio-qwen3-vl-235b-a22b-thinking"
+      },
+      {
+        "title": "sophnet/Qwen3-VL-235B-A22B-Instruct - API 价格、文档与测评 | 302.AI (按量付费）",
+        "url": "https://302.ai/product/detail/sophnet-qwen3-vl-235b-A22b-instruct"
+      },
+      {
+        "title": "更强的235B来了！白山云已上线升级版Qwen3模型-白山云 - 中国领先的独立边缘云服务提供商",
+        "url": "https://www.baishan.com/news-des/1.html"
+      },
+      {
+        "title": "qwen/qwen3-vl-235b-a22b-instruct - API 价格、文档与测评 | 302.AI (按量付费）",
+        "url": "https://302.ai/product/detail/ppio-qwen3-vl-235b-a22b-instruct"
+      },
+      {
+        "title": "阿里云百炼产品月刊【2025年7月】",
+        "url": "https://developer.aliyun.com/article/1675344"
+      },
+      {
+        "title": "qwen3-max-2025-09-23 - API 价格、文档与测评 | 302.AI (按量付费）",
+        "url": "https://302.ai/product/detail/2471"
+      },
+      {
+        "title": "参数量1T，阿里发布“通义最强语言模型”Qwen3-Max”预览版",
+        "url": "https://www.21cto.com/article/6448483923384772"
+      },
+      {
+        "title": "阿里云ai大模型费用：阿里云ai模型价格收费多少",
+        "url": "https://www.321.net/Other_help/773696.html"
+      },
+      {
+        "title": "PPIO上线Qwen3-Next，专为极长上下文和超大规模参数性能优化",
+        "url": "https://blog.csdn.net/bumblexbee/article/details/151607350"
+      }
+    ]
+  }
+]

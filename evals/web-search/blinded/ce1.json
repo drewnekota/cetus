@@ -1,0 +1,72 @@
+{
+  "id": "ce1",
+  "category": "current-events",
+  "lang": "en",
+  "query": "What were the major product announcements at Apple's WWDC 2025?",
+  "answerA": "I don't have information about WWDC 2025 in my training data (my knowledge cuts off in early 2024), and WWDC typically takes place in June. Let me search to see if it has already occurred and what was announced.\nApple’s WWDC 2025 (which took place on June 9, 2025) was a software-focused event with no hardware announcements. The major product reveals centered on a dramatic new design language, a unified OS naming scheme, and a deeper integration of Apple Intelligence across all platforms. Here are the highlights:\n\n### Liquid Glass Design Overhaul\nApple unveiled its most significant visual redesign since iOS 7 (2013), called **Liquid Glass**.\n*   **Unified Aesthetic**: This translucent, glass-like interface with layered reflections and dynamic shadows is applied across all operating systems—iOS, iPadOS, macOS, watchOS, tvOS, and visionOS.\n*   **More Personalization**: It offers new customization options, like the ability to make app icons and widgets completely transparent and set dynamic wallpapers that react to your movement.\n\n### Unified System Naming\nApple is moving away from sequential version numbers to a year-based naming convention for all its operating systems, aiming for greater consistency. The new names are: **iOS 26, iPadOS 26, macOS Tahoe 26, watchOS 26, tvOS 26, and visionOS 26**.\n\n### Apple Intelligence & AI Updates\nThe new AI features are designed to be deeply integrated and private, with most processing happening on-device.\n*   **Live Translation**: System-wide real-time translation is now available in Messages, FaceTime, and even live phone calls, all running on-device without needing an internet connection.\n*   **Visual Intelligence On-Screen**: You can now search for and ask questions about anything on your screen, not just images from the camera. For example, you can take a screenshot of an outfit to find it online or add an event from a flyer directly to your calendar.\n*   **Apple Intelligence for Developers**: Apple opened its on-device large language models (Foundation Models Framework) to third-party developers, allowing them to build AI features into their apps with no cloud computing costs and a strong focus on user privacy.\n*   **New & Delayed Features**: The **new Siri is delayed again** and will arrive \"later.\" However, other promised features like priority notifications, Genmoji, and the Image Playground are expanding.\n\n### Key OS-Specific Changes\n*   **iPadOS 26: More Like a Mac**: The iPad received a massive multitasking update with a new windowing system that allows for freely resizable, overlapping windows and a persistent menu bar, much like macOS.\n*   **macOS Tahoe 26: Smarter Shortcuts & Spotlight**: A new \"Quick Keys\" feature lets you perform actions with two-letter shortcuts. Spotlight search gets its biggest upgrade ever, now keeping a clipboard history and offering more intelligent, context-aware results.\n*   **watchOS 26: AI Fitness Coach**: A new **Workout Buddy** feature uses Apple Intelligence to analyze your workout history and current performance to offer real-time, personalized spoken motivation during exercises.\n*   **visionOS 26**: Apple Vision Pro expanded its accessory support, adding compatibility with **PlayStation VR2 Sense controllers** and a new Logitech “spatial stylus.” It also introduced spatial widgets that can be anchored in your physical space.\n*   **tvOS 26**: The interface gets the Liquid Glass treatment, with an unobtrusive glassy menu. A new karaoke feature using an iPhone as a microphone was also introduced.\n\n### New Dedicated Games App\nApple introduced a new **Games app** for iPhone, iPad, and Mac that serves as a central hub. It combines games from the App Store and Apple Arcade, tracks achievements, and includes social features like a \"Play Together\" tab to see what friends are playing and issue challenges.\n\nOverall, the theme of WWDC 2025 was a *refinement and unification* of the ecosystem through a cohesive design language and the deeper, more private integration of AI into core system functions, with the notable exception of the still-delayed new Siri.\n\nIs there a particular update you'd like to dive into more?",
+  "sourcesA": [
+    {
+      "title": "Apple’s liquid glass leap: A deep dive into the biggest updates from WWDC 2025 — TFN",
+      "url": "https://techfundingnews.com/wwdc-2025-comprehensive-roundup-of-apples-latest-announcements/"
+    },
+    {
+      "title": "史上最美苹果系统登场！六大OS大变样，AI模型免费开放，新Siri又鸽了，WWDC25一文看尽",
+      "url": "https://www.thepaper.cn/newsDetail_forward_30958407"
+    },
+    {
+      "title": "Liquid Glass to iOS 26: Apple's WWDC25 reveals include new interface, AI, design overhaul",
+      "url": "https://gulfbusiness.com/liquid-glass-to-ios26-apple-wwdc-2025-innovations/"
+    },
+    {
+      "title": "史上最美苹果系统登场！六大OS大变样，AI模型免费开放，新Siri又鸽了，WWDC25一文看尽",
+      "url": "https://www.163.com/dy/article/K1M184MT051180F7.html?spss=dy_author"
+    },
+    {
+      "title": "Apple's five biggest announcements from WWDC 2025",
+      "url": "https://ia.acs.org.au/article/2025/apple-s-five-biggest-announcements-from-wwdc-2025.html?utm_source=seedradar.ai&utm_medium=referral&utm_campaign=june-2025-recap-the-month-s-biggest-tech-leaps-funding-highlights"
+    },
+    {
+      "title": "Everything announced at WWDC 2025",
+      "url": "https://dataconomy.com/2025/06/10/everything-announced-at-wwdc-2025/"
+    },
+    {
+      "title": "Everything Apple Announced at WWDC 2025",
+      "url": "https://www.wired.com/story/everything-apple-announced-at-wwdc-2025/?_bhlid=5767d580b228d58827591f6c1733b8b9c0d79752&utm_campaign=10-06-2025"
+    },
+    {
+      "title": "ZDNET's WWDC 2025 recap with Sabrina Ortiz and Jason Hiner",
+      "url": "https://www.zdnet.com/article/zdnets-wwdc-2025-recap-with-sabrina-ortiz-and-jason-hiner/#respond"
+    },
+    {
+      "title": "Everything Apple announced at WWDC 2025: Liquid Glass design, iOS 26, new Apple Intelligence features, and more - The Times of India",
+      "url": "https://timesofindia.indiatimes.com/technology/tech-news/everything-apple-announced-at-wwdc-2025-liquid-glass-design-ios-26-new-apple-intelligence-features-and-more/articleshow/121737527.cms?utm_"
+    },
+    {
+      "title": "Apple unveils new AI features at WWDC 25: What it means for iPhone users",
+      "url": "https://tech.yahoo.com/ai/articles/apple-announces-ai-features-wwdc-180859433.html"
+    }
+  ],
+  "answerB": "At WWDC 2025, Apple announced iOS 26, iPadOS 26, macOS Tahoe 26, watchOS 26, visionOS 26, and tvOS 26, featuring a new Liquid Glass design language. The updates included enhanced AI capabilities and new software features across all platforms.",
+  "sourcesB": [
+    {
+      "title": "Which Apple Announcements to Expect From WWDC 2025",
+      "url": "https://lifehacker.com/tech/which-apple-announcements-to-expect-from-wwdc-2025"
+    },
+    {
+      "title": "WWDC 2025 Recap: All of Apple’s NEW Features in 10 Minutes!",
+      "url": "https://www.youtube.com/watch?v=TWbpwSIMkAE"
+    },
+    {
+      "title": "Apple’s WWDC 2025: How to Watch and What to Expect | WIRED",
+      "url": "https://www.wired.com/story/apple-wwdc-2025-how-to-watch-what-to-expect"
+    },
+    {
+      "title": "The biggest updates Apple just announced for the iPhone, Apple Watch and other major products | CNN Business",
+      "url": "https://www.cnn.com/2025/06/09/tech/apple-wwdc-iphone-ai-what-to-expect"
+    },
+    {
+      "title": "WWDC 2025 — June 9 | Apple - YouTube",
+      "url": "https://www.youtube.com/watch?v=0_DjDdfqtUE"
+    }
+  ]
+}

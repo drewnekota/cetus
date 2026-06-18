@@ -1,0 +1,31 @@
+{
+  "id": "dev1",
+  "category": "technical",
+  "lang": "en",
+  "query": "How do I fix the Rust error 'cannot borrow as mutable because it is also borrowed as immutable'?",
+  "answerA": "# Fixing Rust's \"cannot borrow as mutable because it is also borrowed as immutable\"\n\nThis error occurs when you have an **immutable reference** (`&`) to a value that is still \"alive\" while you try to take a **mutable reference** (`&mut`) to the same value. Rust's borrow checker enforces this to prevent data races and memory unsafety.\n\n## A Common Example\n\n```rust\nfn main() {\n    let mut vec = vec![1, 2, 3];\n\n    let first = &vec[0];   // immutable borrow\n\n    vec.push(4);           // ERROR: mutable borrow while `first` is still live\n\n    println!(\"{}\", first); // `first` used here\n}\n```\n\n```\nerror[E0502]: cannot borrow `vec` as mutable because it is also borrowed as immutable\n```\n\nThe immutable borrow `first` is still in scope when `vec.push(4)` tries to take `&mut self`.\n\n---\n\n## Fix #1: Restructure scope (most common)\n\nEnd the immutable borrow **before** you need the mutable one:\n\n```rust\nfn main() {\n    let mut vec = vec![1, 2, 3];\n\n    let first = &vec[0];\n    println!(\"{}\", first); // last use of `first` — immutable borrow ends here\n    // `first` is no longer live\n\n    vec.push(4);           // ✅ now fine\n}\n```\n\nWith **Non-Lexical Lifetimes** (NLL, stable since Rust 2018), the compiler tracks when a reference is *last used*, not just when it goes out of scope.\n\n---\n\n## Fix #2: Clone the data\n\nIf the data is cheap to clone (or you need to keep both):\n\n```rust\nlet mut vec = vec![1, 2, 3];\n\nlet first = vec[0].clone(); // owns a copy, no borrow\nvec.push(4);                // ✅ fine\n\nprintln!(\"{}\", first);\n```\n\n---\n\n## Fix #3: Use an index instead of a reference\n\n```rust\nlet mut vec = vec![1, 2, 3];\n\nlet first_index = 0;        // no borrow at all\nvec.push(4);                // ✅ fine\n\nprintln!(\"{}\", vec[first_index]);\n```\n\n---\n\n## Fix #4: Split borrows on struct fields\n\nWhen borrowing *different fields* of a struct, you can destructure or access fields directly — the borrow checker is smart enough to track them separately:\n\n```rust\nstruct Player {\n    name: String,\n    score: u32,\n}\n\nlet mut player = Player { name: \"Alice\".into(), score: 0 };\n\nlet name = &mut player.name;\nlet score = &player.score;     // ✅ different fields — fine!\n\nname.push_str(\"!\");\n```\n\nIf you're inside a method that takes `&mut self`, use a block to scope the borrow, or refactor to take separate parameters.\n\n---\n\n## Fix #5: `RefCell` for runtime borrow checking\n\nWhen you *must* mutate through a shared reference (e.g., inside a closure or across API boundaries), use `RefCell`:\n\n```rust\nuse std::cell::RefCell;\n\nlet data = RefCell::new(vec![1, 2, 3]);\n\nlet borrowed = data.borrow();      // immutable borrow at runtime\n// data.borrow_mut();              // would panic! at runtime if uncommented\ndrop(borrowed);                    // end the immutable borrow\n\nlet mut borrowed_mut = data.borrow_mut(); // ✅ mutable borrow now OK\nborrowed_mut.push(4);\n```\n\n⚠️ `RefCell` panics at runtime if rules are violated — use with care.\n\n---\n\n## Fix #6: Reorder operations\n\nSometimes just moving the mutable operation *before* the immutable borrow solves it:\n\n```rust\nlet mut vec = vec![1, 2, 3];\n\nvec.push(4);               // mutate first\nlet first = &vec[0];       // ✅ then borrow\nprintln!(\"{}\", first);\n```\n\n---\n\n## Quick Decision Guide\n\n| Situation | Best Fix |\n|---|---|\n| Don't need both refs at the same time | Restructure scope (#1) |\n| Need a snapshot / independent copy | Clone (#2) |\n| Just need positional access | Index/key (#3) |\n| Borrowing different struct fields | Split borrows (#4) |\n| Must mutate through shared ref (callbacks, Rc) | `RefCell` / `Cell` (#5) |\n| Order of operations is flexible | Reorder (#6) |\n\nThe key insight: the borrow checker isn't being pedantic — it's preventing real bugs. If you find yourself fighting it, there's almost always a restructuring that makes the code both correct *and* clearer.",
+  "sourcesA": [],
+  "answerB": "To fix the Rust error, refactor code to avoid simultaneous mutable and immutable borrows. Use references before mutating or move values instead of borrowing. Ensure no conflicting borrows exist.",
+  "sourcesB": [
+    {
+      "title": "How to Fix 'Mutable borrow occurs here' Errors in Rust",
+      "url": "https://oneuptime.com/blog/post/2026-01-25-rust-mutable-borrow-errors/view"
+    },
+    {
+      "title": "How to Fix 'Cannot borrow as mutable' Errors in Rust - OneUptime",
+      "url": "https://oneuptime.com/blog/post/2026-01-25-fix-cannot-borrow-mutable-rust/view"
+    },
+    {
+      "title": "How to fix \"cannot borrow `*self` as mutable because it is also ...",
+      "url": "https://users.rust-lang.org/t/how-to-fix-cannot-borrow-self-as-mutable-because-it-is-also-borrowed-as-immutable/105443"
+    },
+    {
+      "title": "What is the best way of dealing with \"cannot borrow self as mutable ...",
+      "url": "https://www.reddit.com/r/rust/comments/q0uo6t/what_is_the_best_way_of_dealing_with_cannot"
+    },
+    {
+      "title": "Unlocking Rust: My Journey Through 7 Tricky Borrow Checker ...",
+      "url": "https://medium.com/@monikasinghal713/unlocking-rust-my-journey-through-7-tricky-borrow-checker-errors-and-their-solutions-bbab1f0a55a5"
+    }
+  ]
+}

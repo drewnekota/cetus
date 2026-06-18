@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged into the generated bundle Info.plist by Tauri. These usage
+	     strings are required for the macOS Microphone and Speech Recognition
+	     TCC prompts (voice dictation). -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>cetus uses your microphone to transcribe speech to text for voice input.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>cetus transcribes your speech on-device so you can dictate instead of type.</string>
+	<!-- macOS 14.2+ system-audio recording prompt (meeting memory transcribes
+	     the other participants from the system output). -->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>cetus transcribes the other meeting participants from your system audio. No audio is stored.</string>
+</dict>
+</plist>

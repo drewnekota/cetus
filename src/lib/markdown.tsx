@@ -1,0 +1,98 @@
+import { type ReactNode } from "react";
+import { type Components } from "react-markdown";
+import { invoke } from "@tauri-apps/api/core";
+
+/**
+ * Models emit math in LaTeX delimiters (`\[ … \]` for display, `\( … \)` for
+ * inline), but remark-math only understands `$$ … $$` / `$ … $`. Worse, raw
+ * markdown treats `\[` as an *escaped* bracket, so untouched output renders as
+ * literal `[ … ]` with bare TeX inside. Rewrite the delimiters to dollar form
+ * so remark-math + KaTeX can pick them up — but skip fenced/inline code so a
+ * literal `\(` in a code sample isn't mangled.
+ */
+export function normalizeMath(text: string): string {
+  // Odd indices are the captured code spans/blocks; leave those untouched.
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part
+            .replace(/\\\[([\s\S]+?)\\\]/g, (_, body) => `$$${body}$$`)
+            .replace(/\\\(([\s\S]+?)\\\)/g, (_, body) => `$${body}$`),
+    )
+    .join("");
+}
+
+/**
+ * Open a link in the default browser instead of letting the WKWebView navigate.
+ *
+ * A bare in-webview `<a>` click both replaces the cetus UI and triggers macOS
+ * Universal Links — so Lark/Feishu doc links (`*.larksuite.com`, `*.feishu.cn`)
+ * open the Feishu app instead of the page. Routing through `open_external`
+ * resolves the http(s) scheme to the browser, so the page actually opens there.
+ */
+export function openExternal(href: string) {
+  invoke("open_external", { url: href }).catch(console.error);
+}
+
+/** Link renderer for assistant markdown — relies on prose styles for color. */
+export const markdownComponents: Components = {
+  a({ href, children, ...props }) {
+    return (
+      <a
+        {...props}
+        href={href}
+        onClick={(e) => {
+          if (!href) return;
+          e.preventDefault();
+          openExternal(href);
+        }}
+      >
+        {children}
+      </a>
+    );
+  },
+};
+
+// Bare http(s):// or www. URLs. Trailing sentence punctuation is peeled off the
+// match below so "see https://x.com." doesn't swallow the period.
+const URL_RE = /(https?:\/\/[^\s<]+|www\.[a-z0-9][^\s<]*)/gi;
+const TRAILING_PUNCT = /[.,;:!?)\]}'"]+$/;
+
+/**
+ * Render plain text, turning bare URLs into clickable links while leaving
+ * everything else literal. Used for user messages, which are intentionally not
+ * markdown-rendered (so a stray `**` or `#` isn't reinterpreted) but should
+ * still surface a pasted URL as a styled, openable link.
+ */
+export function LinkifiedText({ text }: { text: string }) {
+  const parts: ReactNode[] = [];
+  const re = new RegExp(URL_RE);
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const raw = m[0];
+    const trail = raw.match(TRAILING_PUNCT)?.[0] ?? "";
+    const url = raw.slice(0, raw.length - trail.length);
+    const href = url.startsWith("www.") ? `https://${url}` : url;
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    parts.push(
+      <a
+        key={m.index}
+        href={href}
+        onClick={(e) => {
+          e.preventDefault();
+          openExternal(href);
+        }}
+        className="underline underline-offset-2 decoration-1 hover:decoration-2 break-all"
+      >
+        {url}
+      </a>,
+    );
+    if (trail) parts.push(trail);
+    last = m.index + raw.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
+}

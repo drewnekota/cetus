@@ -1,0 +1,72 @@
+{
+  "id": "ce2",
+  "category": "current-events",
+  "lang": "en",
+  "query": "Who won the 2025 Nobel Prize in Physics and for what work?",
+  "answerA": "The 2025 Nobel Prize in Physics was awarded to John Clarke, Michel H. Devoret, and John M. Martinis for discovering macroscopic quantum mechanical tunnelling and energy quantisation in an electric circuit. Their work advanced quantum physics research.",
+  "sourcesA": [
+    {
+      "title": "Nobel Prize in Physics 2025 - NobelPrize.org",
+      "url": "https://www.nobelprize.org/prizes/physics/2025/summary"
+    },
+    {
+      "title": "UCSB physics professors John Martinis and Michel Devoret win 2025 Nobel Prize in Physics | The Current",
+      "url": "https://news.ucsb.edu/2025/022111/ucsb-physics-professors-john-martinis-and-michel-devoret-win-2025-nobel-prize-physics"
+    },
+    {
+      "title": "Press release: Nobel Prize in Physics 2025 - NobelPrize.org",
+      "url": "https://www.nobelprize.org/prizes/physics/2025/press-release"
+    },
+    {
+      "title": "The 2025 Nobel Prize in Physics: Who, What, and Why - YouTube",
+      "url": "https://www.youtube.com/watch?v=f1AMV6btaw4"
+    },
+    {
+      "title": "The Nobel Prize winners of 2025 – and why their work matters | World Economic Forum",
+      "url": "https://www.weforum.org/stories/2025/10/nobel-prize-winners-2025-why-their-work-matters"
+    }
+  ],
+  "answerB": "Let me check on this for you. The Nobel Prizes are typically announced in October each year, and since my knowledge only goes up to early 2024, I want to make sure I'm not missing any information.\nThe **2025 Nobel Prize in Physics** was awarded jointly to **John Clarke**, **Michel H. Devoret**, and **John M. Martinis** on October 7, 2025.\n\nThey received the prize for their **“discovery of macroscopic quantum mechanical tunnelling and energy quantisation in an electric circuit.”**\n\nIn the mid-1980s, the trio (working together at UC Berkeley) demonstrated through experiments with superconducting circuits called Josephson junctions that quantum mechanical effects—specifically quantum tunnelling and quantized energy levels—could be observed not just at the microscopic scale but in systems large enough to be seen and held. This groundbreaking work laid the conceptual and practical foundation for many of today’s quantum technologies, including superconducting qubits used in quantum computers, quantum sensors, and quantum cryptography.",
+  "sourcesB": [
+    {
+      "title": "Congratulations to the winners of the Nobel Prize in Physics 2025 | Royal Society",
+      "url": "https://royalsociety.org/news/2025/10/nobel-prize-physics-john-clarke/"
+    },
+    {
+      "title": "News • World",
+      "url": "https://www.cbc.ca/lite/story/1.7652957"
+    },
+    {
+      "title": "John Clarke awarded 2025 Nobel Prize in Physics",
+      "url": "https://physics.berkeley.edu/news/john-clarke-awarded-2025-nobel-prize-physics"
+    },
+    {
+      "title": "AIP Congratulates 2025 Nobel Prize Winners in Physics - AIP Publishing LLC",
+      "url": "https://publishing.aip.org/about/news/aip-congratulates-2025-nobel-prize-winners-in-physics/"
+    },
+    {
+      "title": "Former Berkeley Lab Scientist John Clarke Wins 2025 Nobel Prize in Physics",
+      "url": "https://newscenter.lbl.gov/2025/10/07/former-berkeley-lab-scientist-john-clarke-wins-2025-nobel-prize-in-physics/"
+    },
+    {
+      "title": "Trio's work on quantum tech wins Nobel",
+      "url": "https://mobile.chinadaily.com.cn/cn/html5/2025-10/08/content_001_68e570caed50ccabe151ab9d.htm"
+    },
+    {
+      "title": "Three US-based scientists win 2025 Nobel Prize in Physics",
+      "url": "https://tvpworld.com/89337582/2025-nobel-prize-in-physics-clarke-devoret-and-martinis-awarded"
+    },
+    {
+      "title": "2025 Nobel Prizes awarded at Stockholm ceremony",
+      "url": "http://www.china.org.cn/2025-12/11/content_118221869.shtml"
+    },
+    {
+      "title": "Nobel Prize in Physics 2025 awarded to Michel Devoret and Sveriges Riksbank Prize in Economic Sciences in Memory of Alfred Nobel 2025 awarded to Philippe Aghion",
+      "url": "https://www.diplomatie.gouv.fr/en/presse-et-ressources/decouvrir-et-informer/actualites/remise-du-prix-nobel-de-physique-2025-a-michel-devoret-et-du-prix-de-la-banque-de-suede-des-sciences"
+    },
+    {
+      "title": "John Clarke, Michel Devoret and John Martinis win the 2025 Nobel Prize for Physics – Physics World",
+      "url": "https://physicsworld.com/a/john-clarke-michel-devoret-and-john-martinis-win-the-2025-nobel-prize-for-physics/"
+    }
+  ]
+}

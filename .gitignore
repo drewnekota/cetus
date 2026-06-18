@@ -1,0 +1,43 @@
+# node
+node_modules
+.pnpm-store
+
+# next
+.next
+out
+*.tsbuildinfo
+next-env.d.ts
+
+# tauri / rust
+src-tauri/target
+src-tauri/gen
+
+# os
+.DS_Store
+.idea
+.vscode
+
+# cetus additions
+*.log
+
+# pi install tree (~260 MB, platform-specific). Rebuild via
+# scripts/build-pi-sidecar.sh on each developer machine.
+src-tauri/pi-install/
+# Legacy locations from the previous sidecar approach.
+src-tauri/binaries/
+
+# In-repo clones used only for code reading (e.g. deepseek-tui).
+research/
+
+# Claude Code runtime locks
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+*.original.backup.*
+
+# Scratch image-generation outputs
+output/
+
+# Local secrets / env
+.env
+.env.local
+.env*.local

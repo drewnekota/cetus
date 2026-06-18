@@ -1,0 +1,72 @@
+{
+  "id": "fact2",
+  "category": "who-what-when",
+  "lang": "en",
+  "query": "When was Tauri 2.0 officially released?",
+  "answerA": "Tauri 2.0 was officially released on October 2, 2024, bringing mobile support for iOS and Android. The stable version included enhanced plugin development and system integration.",
+  "sourcesA": [
+    {
+      "title": "Roadmap to Tauri 2.0 | Tauri",
+      "url": "https://v2.tauri.app/blog/roadmap-to-tauri-2-0"
+    },
+    {
+      "title": "When will tauri 2.0 be officially released? #6734 - GitHub",
+      "url": "https://github.com/orgs/tauri-apps/discussions/6734"
+    },
+    {
+      "title": "Tauri 2.0 Release Candidate",
+      "url": "https://v2.tauri.app/blog/tauri-2-0-0-release-candidate"
+    },
+    {
+      "title": "Tauri 2.0 Stable Release",
+      "url": "https://v2.tauri.app/blog/tauri-20"
+    },
+    {
+      "title": "Tauri 2.0: A look at the Rust-based JS framework - iJS Blog",
+      "url": "https://javascript-conference.com/blog/tauri-2-0"
+    }
+  ],
+  "answerB": "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"web_fetch\">\n<｜｜DSML｜｜parameter name=\"url\" string=\"true\">https://v2.tauri.app/zh-cn/blog/tauri-20/</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>",
+  "sourcesB": [
+    {
+      "title": "博客 | Tauri",
+      "url": "https://tauri.org.cn/blog/#_top"
+    },
+    {
+      "title": "Blog",
+      "url": "https://v2.tauri.app/ko/blog/#_top"
+    },
+    {
+      "title": "Tillmann Weidinger",
+      "url": "https://tauri.app/ja/blog/authors/tillmann-weidinger/#_top"
+    },
+    {
+      "title": "Sur cette page",
+      "url": "https://v2.tauri.app/fr/blog/#_top"
+    },
+    {
+      "title": "版本发布",
+      "url": "https://v1.tauri.org.cn/releases/#__docusaurus_skipToContent_fallback"
+    },
+    {
+      "title": "Tauri 2.0 稳定版发布",
+      "url": "https://v2.tauri.org.cn/blog/tauri-20/"
+    },
+    {
+      "title": "Tauri 2.0 Stable Release",
+      "url": "https://v2.tauri.app/zh-cn/blog/tauri-20/"
+    },
+    {
+      "title": "跨平台开发的新纪元：Tauri 2.0 横空出世，移动端、桌面端一网打尽！",
+      "url": "https://developer.aliyun.com/article/1623653"
+    },
+    {
+      "title": "Tauri 2.0稳定版发布",
+      "url": "https://www.tauri.net.cn/421.html"
+    },
+    {
+      "title": "Tauri 2.0 发布候选版",
+      "url": "https://v2.tauri.org.cn/blog/tauri-2-0-0-release-candidate/"
+    }
+  ]
+}

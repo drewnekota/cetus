@@ -1,0 +1,72 @@
+{
+  "id": "price1",
+  "category": "live-data",
+  "lang": "en",
+  "query": "What is the current price of Bitcoin in USD right now?",
+  "answerA": "I'll look up the current Bitcoin price for you.\nThe current price of Bitcoin (BTC) is approximately **$70,000 USD**, though it has been fluctuating heavily in the last few hours. \n\nRight now, multiple sources are showing significant downward movement, with BTC dipping below $70,000 for the first time in about two months. Here's a snapshot:\n- **Recent low:** $69,631\n- **Current trading range (live):** ~$69,700 – $70,700\n- **24-hour drop:** ~3.7%\n\nThis decline is reportedly being driven by geopolitical pressures (US-Iran tensions) and a broader exit from institutional positions, leading to nearly $800 million in liquidations across the crypto market.\n\n> Note: Crypto prices are extremely volatile and can vary slightly between exchanges. For the exact second-by-second price, you'd need to check a live ticker on an exchange like Binance, Coinbase, or Kraken.",
+  "sourcesA": [
+    {
+      "title": "Bitcoin Sinks Under $71,000: Crypto Market Turns Red Across the Board: Guest Post by Coindoo.com | CoinMarketCap",
+      "url": "https://coinmarketcap.com/community/articles/6a1e6b88649c6415f7d2b796/"
+    },
+    {
+      "title": "Bitcoin price falls under $70K as crypto markets liquidate $800M: Guest Post by Cointelegraph | CoinMarketCap",
+      "url": "https://coinmarketcap.com/community/articles/6a1ea16eaf259217deea4be8/"
+    },
+    {
+      "title": "BTC to USD | Convert Bitcoin to US Dollar",
+      "url": "https://www.okx.com/en-br/convert/btc-to-usd"
+    },
+    {
+      "title": "BTC 價格 | 比特幣實時價格趨勢圖 | BTC to USD | KuCoin",
+      "url": "https://www.kucoin.com/zh-hant/price/BTC"
+    },
+    {
+      "title": "Convert 0.58 Bitcoin to USD | Bitcoin Price in US Dollars | Revolut Singapore",
+      "url": "https://www.revolut.com/crypto/price/btc/usd?amount-to=0.58&__cf_chl_tk=ylIY3Nl1VORuBRj9aD4TBtNixEUBiUVcAKQq18pYu1c-1770969996-1.0.1.1-_4F0lf0W61hWBet7EJt0lQZ.oa3wul7F6wYdCEpyPDg"
+    },
+    {
+      "title": "Bitcoin | t.me/BitcoinCoreGroup今天价格｜BTC实时价格美元｜走势图",
+      "url": "https://web3.bitget.com/zh-CN/swap/bnb/0xA2B3d74bf2c9348C10c69A9F7D17E7e7A3ba40F0"
+    },
+    {
+      "title": "BTC/USD Price: Convert Bitcoin to United States Dollar - Crypto.com Singapore",
+      "url": "https://crypto.com/sg/price/bitcoin/usd"
+    },
+    {
+      "title": "Bitcoin 价格 | BTC 价格指数、实时图表和市值",
+      "url": "https://aws.okx.com/cn/price/bitcoin-btc"
+    },
+    {
+      "title": "bitcoin今天价格｜BITCOIN实时价格美元｜走势图",
+      "url": "https://bitkeep.com/zh/swap/bnb/0x71CCe0035d82c21Cf4b908bcd8F1117fFf0Fa623"
+    },
+    {
+      "title": "CoinTracking",
+      "url": "https://main.cointracking.info/coin_charts.php?cur=USD&language=en"
+    }
+  ],
+  "answerB": "The current price of Bitcoin is $69,014.38 per BTC. This price is based on real-time data from multiple exchanges, including Binance and Kraken.",
+  "sourcesB": [
+    {
+      "title": "Bitcoin price today, BTC to USD live price, marketcap and chart",
+      "url": "https://coinmarketcap.com/currencies/bitcoin"
+    },
+    {
+      "title": "Bitcoin Price Today | BTC to USD Live Price, Market Cap & Chart",
+      "url": "https://www.binance.com/en/price/bitcoin"
+    },
+    {
+      "title": "Bitcoin (BTC) Price USD Today, News, Charts, Market Cap | Coinbase",
+      "url": "https://www.coinbase.com/price/bitcoin"
+    },
+    {
+      "title": "Bitcoin price today - BTC price chart & live trends - Kraken",
+      "url": "https://www.kraken.com/prices/bitcoin"
+    },
+    {
+      "title": "Bitcoin price today, BTC to USD live price, marketcap and chart",
+      "url": "https://www.coindesk.com/price/bitcoin"
+    }
+  ]
+}

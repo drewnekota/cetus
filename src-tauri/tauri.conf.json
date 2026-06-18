@@ -1,0 +1,96 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Cetus",
+  "version": "0.1.0",
+  "identifier": "dev.cetus.app",
+  "build": {
+    "frontendDist": "../out",
+    "devUrl": "http://localhost:17381",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Cetus",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 700,
+        "minHeight": 480,
+        "decorations": true,
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "acceptFirstMouse": true
+      },
+      {
+        "label": "quick",
+        "title": "Cetus",
+        "width": 800,
+        "height": 196,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "center": true,
+        "shadow": true,
+        "visible": false
+      },
+      {
+        "label": "voice",
+        "title": "Cetus",
+        "width": 380,
+        "height": 52,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "shadow": false,
+        "visible": false
+      },
+      {
+        "label": "meeting",
+        "title": "Cetus",
+        "width": 220,
+        "height": 52,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "shadow": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "pi-install"
+    ],
+    "macOS": {
+      "signingIdentity": "Apple Development: William Jin (H8NRJ9BUBQ)"
+    }
+  }
+}

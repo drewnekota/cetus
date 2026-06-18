@@ -1,0 +1,72 @@
+{
+  "id": "niche1",
+  "category": "long-tail",
+  "lang": "en",
+  "query": "What is the maximum context window and the token pricing of DeepSeek's latest model?",
+  "answerA": "# DeepSeek 最新模型概览\n\n## 最新模型：DeepSeek-V3.2-Speciale（2025年12月1日发布）\n\n这是目前 DeepSeek 最新、最强的模型版本，基于 V3.2 进行了更大规模的后训练强化学习优化，专为推理和 Agent 任务设计。\n\n### 上下文窗口\n- **164K tokens** — 可以处理超长文档、长篇对话或大型代码库\n\n### Token 定价\n\n不同渠道的价格有所差异，以下是主要参考：\n\n| 渠道 | 输入价格 | 输出价格 |\n|------|----------|----------|\n| **OpenRouter** | $0.287/百万 tokens | $0.431/百万 tokens |\n| **对比参考（opentools.ai）** | $0.40/百万 tokens | $1.20/百万 tokens |\n\n> 💡 **缓存命中**时价格更低，约为 $0.20/百万 tokens。\n\n---\n\n## 对比：DeepSeek-V3.2-Exp（2025年9月发布）\n\n| 项目 | V3.2-Exp |\n|------|----------|\n| 上下文窗口 | 128K tokens（部分平台支持 164K） |\n| 输入（缓存命中） | $0.028/百万 tokens |\n| 输入（缓存未命中） | $0.28/百万 tokens |\n| 输出 | $0.42/百万 tokens |\n\n---\n\n## 中文用户参考（DeepSeek V3.1 官方人民币定价）\n\n> 2025年8月发布，9月6日起执行，夜间优惠已取消\n\n| 类型 | 价格 |\n|------|",
+  "sourcesA": [
+    {
+      "title": "R2没等来，DeepSeek V3.1模型发布：价格涨了，智能体能力加强",
+      "url": "https://www.chinastarmarket.cn/detail/2122276"
+    },
+    {
+      "title": "DeepSeek V3.2-Exp Release: Pricing, API Costs, Context Window & Benchmarks",
+      "url": "https://llm-stats.com/blog/research/deepseek-v3.2-ex-launch"
+    },
+    {
+      "title": "DeepSeek V3.2 Speciale - API Pricing & Providers",
+      "url": "https://openrouter.ai/deepseek/deepseek-v3.2-speciale"
+    },
+    {
+      "title": "DeepSeek-V3.2-Exp Now on SiliconFlow: Efficient Long-Context Reasoning at 50% Lower Cost",
+      "url": "https://www.siliconflow.com/blog/deepseek-v3-2-exp-now-on-siliconflow-efficient-long-context-reasoning-at-50-lower-cost?utm_source=capgo&utm_medium=organic_ugcblog&utm_campaign=202509_series&utm_id=000003&utm_term=2026%E5%B9%B4%E6%9C%80%E4%BD%B3%E5%BC%80%E6%BA%90%E7%BF%BB%E8%AF%91%E6%A8%A1%E5%9E%8B&utm_content=guide_model_intro"
+    },
+    {
+      "title": "DeepSeek Pricing for 2025: Costs, Features and How Australian Businesses Can Save",
+      "url": "https://wise.com/au/blog/deepseek-pricing"
+    },
+    {
+      "title": "DeepSeek API接口调用价格调整：夜间优惠取消",
+      "url": "https://article.pchome.net/news/5859.html"
+    },
+    {
+      "title": "DeepSeek-V3.1 on SiliconFlow: Hybrid Thinking, Smarter Tools and 164K Context Window",
+      "url": "https://www.siliconflow.com/blog/deepseek-v3-1-on-siliconflow-hybrid-thinking-smarter-tools-and-164k-context-window"
+    },
+    {
+      "title": "R2没等来，DeepSeek V3.1模型发布：价格涨了，智能体能力加强",
+      "url": "https://www.21jingji.com/article/20250822/herald/aabe9f90cc098fd66664f1411a6638dd.html"
+    },
+    {
+      "title": "DeepSeek-V3.2-Exp 現在在 SiliconFlow 上：高效長上下文推理，成本降低 50%",
+      "url": "https://www.siliconflow.com/zh-tw/blog/deepseek-v3-2-exp-now-on-siliconflow-efficient-long-context-reasoning-at-50-lower-cost?utm_source=capgo&utm_medium=organic_ugcblog&utm_campaign=202509_series&utm_id=000003&utm_term=2025%E5%B9%B4%E3%82%AF%E3%83%AA%E3%82%A8%E3%82%A4%E3%83%86%E3%82%A3%E3%83%96%E3%82%BF%E3%82%B9%E3%82%AF%E3%81%AB%E6%9C%80%E9%81%A9%E3%81%AA%E3%83%9E%E3%83%AB%E3%83%81%E3%83%A2%E3%83%BC%E3%83%80%E3%83%AB%E3%83%A2%E3%83%87%E3%83%AB&utm_content=guide_banner"
+    },
+    {
+      "title": "DeepSeek V3.1 Terminus vs DeepSeek V3.2 Speciale – Specs, Pricing & Capabilities",
+      "url": "https://opentools.ai/compare/llms/deepseek-v31-terminus-vs-deepseek-v32-speciale"
+    }
+  ],
+  "answerB": "The DeepSeek API V4 has a maximum context window of 1 million tokens and a token pricing of $0.20 per million input tokens and $0.77 per million output tokens.",
+  "sourcesB": [
+    {
+      "title": "DeepSeek Context Window, Token Limits, and Memory - Data Studios",
+      "url": "https://www.datastudios.org/post/deepseek-context-window-token-limits-and-memory-specifications-behavior-and-practical-use"
+    },
+    {
+      "title": "What is the context length of DeepSeek's models? - Milvus",
+      "url": "https://milvus.io/ai-quick-reference/what-is-the-context-length-of-deepseeks-models"
+    },
+    {
+      "title": "DeepSeek V4 Context Window: 1 Million Tokens Explained - Framia",
+      "url": "https://framia.pro/page/en-US/news/deepseek-v4-context-window"
+    },
+    {
+      "title": "What is the context length for DeepSeek-R1 - Microsoft Learn",
+      "url": "https://learn.microsoft.com/en-ie/answers/questions/2203138/what-is-the-context-length-for-deepseek-r1"
+    },
+    {
+      "title": "DeepSeek V3 0324 - API Pricing & Benchmarks | OpenRouter",
+      "url": "https://openrouter.ai/deepseek/deepseek-chat-v3-0324"
+    }
+  ]
+}
