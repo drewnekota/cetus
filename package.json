@@ -10,7 +10,9 @@
     "lint": "next lint",
     "tauri": "tauri",
     "app": "NEXT_PUBLIC_CETUS_DEVTEST=1 CETUS_DEVTEST=1 CETUS_DEVTEST_SOCK=/tmp/cetus-devtest.sock tauri dev --features devtest",
-    "app:build": "tauri build"
+    "app:build": "tauri build",
+    "app:signed": "scripts/build-local-signed.sh",
+    "app:release": "scripts/build-release.sh"
   },
   "dependencies": {
     "@fontsource-variable/fraunces": "^5.2.9",

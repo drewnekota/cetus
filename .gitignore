@@ -44,3 +44,4 @@ output/
 
 # Local signing config (identity string is private; never commit)
 scripts/signing.env
+scripts/release.env
