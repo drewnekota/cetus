@@ -487,14 +487,22 @@ fn spawn_pill_watcher(app: AppHandle, session_id: String) {
 /// without stealing key focus from the meeting app.
 #[cfg(target_os = "macos")]
 fn show_pill(app: &AppHandle) {
+    // Stamp the open so the app-activation observer / Dock-`Reopen` handler ignore
+    // the activation presenting the pill can cause — otherwise a closed (parked)
+    // or ⌘H-hidden main window gets yanked forward when a meeting auto-starts.
+    // Same guard the launcher and the voice HUD use (see `quick::open_panel`).
+    app.state::<AppState>()
+        .quick
+        .last_open_ms
+        .store(crate::store::now_ms(), Ordering::Relaxed);
     let app = app.clone();
     let _ = app.clone().run_on_main_thread(move || {
         if let Some(win) = app.get_webview_window("meeting") {
             if let Ok(ptr) = win.ns_window() {
+                // Mirror the voice HUD: position + `present_inactive` only.
+                // Deliberately NOT `win.show()` (= `makeKeyAndOrderFront:`), which
+                // activates cetus even for this non-activating panel.
                 crate::panel::top_center_on_mouse_screen(ptr);
-            }
-            let _ = win.show();
-            if let Ok(ptr) = win.ns_window() {
                 crate::panel::present_inactive(ptr);
             }
         }

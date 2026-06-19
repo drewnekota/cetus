@@ -27,7 +27,6 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { api, onAppEvent, onUpdateAvailable, type Screenshot } from "@/lib/tauri";
-import { tt } from "@/lib/i18n/standalone";
 import {
   useChatStore,
   useChatError,

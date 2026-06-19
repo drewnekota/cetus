@@ -1107,6 +1107,16 @@ pub fn show_hud(app: &AppHandle) {
     {
         play_start_chime();
     }
+    // Stamp the open so the app-activation observer and the Dock-`Reopen` handler
+    // ignore the activation that presenting the HUD can cause. Without this, a
+    // closed (parked off-screen) or ⌘H-hidden main window gets yanked to the
+    // foreground on every push-to-talk — the whole app "summons" itself just
+    // because dictation started. Same guard the launcher uses (see
+    // `quick::open_panel`); both read it via `last_open_ms` + the 1.5s window.
+    app.state::<AppState>()
+        .quick
+        .last_open_ms
+        .store(crate::store::now_ms(), std::sync::atomic::Ordering::Relaxed);
     let app = app.clone();
     let _ = app.clone().run_on_main_thread(move || {
         let Some(win) = app.get_webview_window("voice") else {
