@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the MAIN cetus app binary (Contents/MacOS/cetus).
+  Only applied when signing with the harden flag (Developer ID / notarized release
+  builds); ad-hoc and plain local-dev signing ignore this file.
+
+  - audio-input:               meeting + voice dictation capture (mic TCC prompt still applies).
+  - disable-library-validation: the app process loads frameworks/dylibs not signed by our
+                                Team ID; required so hardened runtime doesn't kill it on load.
+  The bun-compiled `pi` sidecar runs as a SEPARATE process with its own, looser
+  entitlements — see entitlements-pi.plist.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

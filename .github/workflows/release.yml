@@ -1,0 +1,107 @@
+name: Release (macOS, signed + notarized)
+
+# Builds cetus, signs it with a Developer ID Application certificate, notarizes
+# it with Apple, and attaches the signed .dmg to a GitHub Release. Because every
+# release is signed with the SAME stable Developer ID, users grant Accessibility
+# / Screen Recording ONCE and the grant survives future updates — and Gatekeeper
+# opens it with a double-click (no right-click bypass).
+#
+# No secret material lives in this repo. Configure these GitHub repository
+# secrets (Settings → Secrets and variables → Actions):
+#
+#   APPLE_CERTIFICATE           base64 of your Developer ID Application .p12
+#                               (base64 -i cert.p12 | pbcopy)
+#   APPLE_CERTIFICATE_PASSWORD  the password you set when exporting the .p12
+#   APPLE_SIGNING_IDENTITY      e.g. "Developer ID Application: Your Name (TEAMID)"
+#   APPLE_ID                    your Apple Developer account email
+#   APPLE_PASSWORD              an app-specific password (appleid.apple.com → Sign-In & Security)
+#   APPLE_TEAM_ID               your 10-char Team ID (e.g. H8NRJ9BUBQ)
+#   KEYCHAIN_PASSWORD           any random string (temp keychain password for this run)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: macos-14 # Apple Silicon runner → aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pi sidecar tree
+        run: scripts/build-pi-sidecar.sh
+
+      - name: Import Developer ID certificate into a temporary keychain
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/cetus-signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # Make the temp keychain searchable so codesign finds the identity.
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build app bundle (unsigned — we sign nested binaries ourselves)
+        run: pnpm tauri build --bundles app
+
+      - name: Sign + notarize + staple the .app
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
+          scripts/macos-sign.sh "$APP" --notarize
+
+      - name: Package signed .app into a .dmg, then sign + notarize the .dmg
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          DMG="$RUNNER_TEMP/Cetus_${VERSION}_aarch64.dmg"
+          # The .app inside is already notarized+stapled; we package, then sign and
+          # notarize the dmg container itself so the download is Gatekeeper-clean.
+          hdiutil create -volname "Cetus" -srcfolder "$APP" -ov -format UDZO "$DMG"
+          scripts/macos-sign.sh "$DMG" --notarize
+          echo "DMG=$DMG" >> "$GITHUB_ENV"
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.DMG }}
+          fail_on_unmatched_files: true

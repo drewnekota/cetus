@@ -85,10 +85,14 @@ const sendArtifactTool = defineTool({
 	label: "Send Artifact",
 	description:
 		"Deliver a local file to the cetus chat UI for inline display. " +
-		"Use whenever you produce something the user should look at: a generated " +
-		"image, a downloaded video, a rendered PDF, a diagram, a markdown report, etc. " +
-		"Pass the path you just wrote to. The user sees the file rendered inline; " +
-		"do not also print the path in your reply.",
+		"Call this REQUIRED tool right after you create or write any file the user " +
+		"is meant to read, view, or open: any markdown (.md), HTML (.html), PDF, " +
+		"image, video, audio, diagram, OR data export such as CSV (.csv), JSON " +
+		"(.json), or a plain-text (.txt) report. " +
+		"This is mandatory even when the user did not explicitly ask to 'see' the file — " +
+		"a generated markdown report, HTML page, or CSV export MUST come back as an " +
+		"artifact, never as a bare path. Pass the path you just wrote to. The user sees the file " +
+		"rendered inline; do not also print the path in your reply.",
 	parameters: PARAMS,
 
 	async execute(_toolCallId, params) {

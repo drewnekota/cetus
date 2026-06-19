@@ -78,13 +78,17 @@ chmod 0755 "$DEST_DIR/pi"
 # Overlay cetus's own pi extensions (vision-bridge, etc.). These live under
 # version control at src-tauri/cetus-extensions/ and must be re-deployed here on
 # every sidecar build because this whole tree is wiped (rm -rf above) and is
-# itself gitignored. pi loads `<bindir>/cetus-extensions/*.ts` at spawn time
+# itself gitignored. pi loads `<bindir>/<EXT_DIR>/*.ts` at spawn time
 # (see src-tauri/src/pi_rpc.rs), and the host re-syncs this dir into the app's
 # writable install tree on launch (src-tauri/src/lib.rs::sync_cetus_extensions).
-CETUS_EXT_SRC="$REPO_ROOT/src-tauri/cetus-extensions"
+# EXT_DIR_NAME MUST match pi_rpc::CETUS_EXTENSIONS_DIR — if you rename it, change
+# it in pi_rpc.rs (loader), lib.rs (sync), AND here, or the loader reads an empty
+# path and the agent launches with zero of its own tools.
+EXT_DIR_NAME="cetus-extensions"
+CETUS_EXT_SRC="$REPO_ROOT/src-tauri/$EXT_DIR_NAME"
 if [ -d "$CETUS_EXT_SRC" ]; then
-  cp -R "$CETUS_EXT_SRC" "$DEST_DIR/cetus-extensions"
-  echo "→ cetus-extensions overlaid ($(ls "$CETUS_EXT_SRC" | wc -l | tr -d ' ') file(s))"
+  cp -R "$CETUS_EXT_SRC" "$DEST_DIR/$EXT_DIR_NAME"
+  echo "→ $EXT_DIR_NAME overlaid ($(ls "$CETUS_EXT_SRC" | wc -l | tr -d ' ') file(s))"
 fi
 
 # Harden pi-ai's request-side message conversion. Every provider routes its
@@ -121,5 +125,49 @@ if [ -d "$CLIP_SRC" ]; then
   fi
   echo "→ Clipboard module present ($CLIP_PLATFORM)"
 fi
+
+# Slim the install tree. pi ships as a bun-compiled binary with its JS bundled
+# in; this tree exists only so pi's runtime relative-path reads (package.json,
+# theme/, assets/) and jiti's runtime `.ts` extension loading — which resolves
+# real deps (pi-ai, mcporter, …) from node_modules — keep working. None of that
+# reads source maps, TypeScript declarations, or package docs/changelogs, so
+# drop them. Keep package.json, .js, .ts, .json, native binaries, and LICENSE
+# files (redistribution compliance). This is the safe tier (~100 MB); it does
+# NOT touch the build-time deps (typescript, rolldown, esbuild) — those may be
+# reachable via dynamic import at runtime and need a smoke test before removal.
+echo "→ Slimming install tree (strip source maps, type defs, docs)..."
+BEFORE_SZ="$(du -sh "$DEST_DIR" | awk '{print $1}')"
+find "$DEST_DIR" -type f \( -name '*.map' -o -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' \) -delete
+rm -rf "$DEST_DIR/docs" "$DEST_DIR/examples" "$DEST_DIR/CHANGELOG.md"
+
+# Drop deps that the shipped runtime never resolves. pi is bun-compiled with its
+# JS (incl. pi-ai's providers, which call provider HTTP APIs via raw fetch)
+# bundled into the `pi` binary, and jiti transpiles `.ts` extensions with its own
+# transformer — so neither the build/compile toolchain nor the per-provider SDK
+# packages are loaded from this node_modules at runtime. Verified by smoke test
+# (./pi --provider deepseek/anthropic --print → reaches the real API; -e *.ts →
+# jiti loads it) with all of these removed. cetus is DeepSeek-only; the OpenAI
+# SDK stays because DeepSeek rides pi-ai's openai-completions path. NOTE: this
+# also disables pi's standalone `install`/`update` extension-build commands and
+# trims non-DeepSeek model adapters — fine for the bundled app, revisit if either
+# assumption changes.
+echo "→ Pruning build toolchain + unused provider SDKs (DeepSeek-only)..."
+for dep in typescript @rolldown @esbuild rollup vite \
+           @anthropic-ai @google @mistralai @aws-sdk @smithy; do
+  rm -rf "$DEST_DIR/node_modules/$dep"
+done
+
+# Pruning the toolchain orphans the .bin shims that pointed into it (e.g.
+# node_modules/.bin/tsserver -> ../typescript/bin/tsserver). Tauri's resource
+# bundler dereferences every symlink under the bundled tree and ABORTS the build
+# on a dangling one ("resource path pi-install/... doesn't exist"). Sweep broken
+# links so the slimmed tree stays bundleable. (`! -exec test -e {}` matches a
+# symlink whose target no longer resolves.)
+DANGLING="$(find "$DEST_DIR" -type l ! -exec test -e {} \; -print -delete)"
+if [ -n "$DANGLING" ]; then
+  echo "→ removed dangling symlinks after prune:"
+  echo "$DANGLING" | sed 's/^/    /'
+fi
+echo "  install tree: $BEFORE_SZ → $(du -sh "$DEST_DIR" | awk '{print $1}')"
 
 echo "✓ Done. $DEST_DIR ($(du -sh "$DEST_DIR" | awk '{print $1}'))"

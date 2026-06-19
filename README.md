@@ -45,6 +45,12 @@ The three factors describe a single moment. What makes an agent _yours_ is how i
 
 The per-moment factors are being commoditized for everyone. The compounding loop is what's personal — and what's defensible.
 
+### Where this is going: multimodal, because life is
+
+Today Cetus reasons over text — screen OCR, transcripts, typed prompts. That's a waypoint, not the destination. As models keep improving, a single multimodal model that's both smart enough and cheap enough to run all day is coming — and the reason to bet on it is almost embarrassingly simple: **life itself is multimodal.** A person's day is video, sound, speech, and gesture — not a stream of tokens.
+
+So a real life assistant has to meet life on its own terms: take multimodal input and produce multimodal output — _natively_. By multimodal we mean genuinely _understanding_ video and speech and _responding_ in kind — not the workarounds we lean on today (sampling frames out of a video, flattening speech to text). Those are bridges for an era when multimodal intelligence is still scarce and expensive. When it isn't, the bridges come down, and the agent simply perceives and acts in the same modalities you already live in.
+
 ## What this maps to in the app
 
 | Axis                      | In Cetus today                                                                                                                                                                                                                                                                                                                                       |

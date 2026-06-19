@@ -41,3 +41,6 @@ output/
 .env
 .env.local
 .env*.local
+
+# Local signing config (identity string is private; never commit)
+scripts/signing.env

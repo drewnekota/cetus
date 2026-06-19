@@ -31,7 +31,46 @@ export const settings = {
     "nav.agent-control": "Computer & Browser",
     "nav.appearance": "Appearance",
     "nav.notifications": "Notifications",
+    "nav.permissions": "Permissions",
     "nav.archived": "Archived chats",
+
+    // --- Permissions (shared with first-run onboarding) -------------------
+    "permissions.title": "Permissions",
+    "permissions.description":
+      "What cetus can access on this Mac, and what each unlocks. Grant only what you need — every feature works without the others.",
+    "permissions.note":
+      "macOS may ask you to quit and reopen cetus after granting a permission for it to take effect.",
+    "permissions.recheck": "Re-check",
+    "permissions.grant": "Grant",
+    "permissions.openSettings": "Open Settings",
+    "permissions.status.granted": "Granted",
+    "permissions.status.needed": "Needed",
+    "permissions.notifications.label": "Notifications",
+    "permissions.notifications.description":
+      "Alerts when a task finishes, needs your input, or a meeting is captured.",
+    "permissions.accessibility.label": "Accessibility",
+    "permissions.accessibility.description":
+      "Global hotkeys, the quick launcher, and typing dictated or agent text into other apps.",
+    "permissions.screen.label": "Screen Recording",
+    "permissions.screen.description":
+      "Screenshot launcher and screen-context memory (capturing what's on screen).",
+    "permissions.microphone.label": "Microphone",
+    "permissions.microphone.description":
+      "Voice dictation and meeting transcription.",
+
+    // --- Onboarding (first run) -------------------------------------------
+    "onboarding.welcome.title": "Welcome to cetus",
+    "onboarding.welcome.subtitle":
+      "An affordable desktop agent that perceives, remembers, and acts. Let's set up a few permissions so it can do its thing.",
+    "onboarding.welcome.start": "Set up permissions",
+    "onboarding.skip": "Skip for now",
+    "onboarding.back": "Back",
+    "onboarding.done": "Done",
+    "onboarding.permissions.title": "Grant permissions",
+    "onboarding.permissions.subtitle":
+      "Grant what you'd like to use now. You can change any of these later in Settings → Permissions.",
+    "onboarding.permissions.note":
+      "All optional — cetus runs fine without them, and each feature only needs the ones it uses.",
 
     // --- General ----------------------------------------------------------
     "general.title": "General",
@@ -63,8 +102,6 @@ export const settings = {
     "notifications.behavior": "Behavior",
     "notifications.mute.label": "Mute while Cetus is focused",
     "notifications.mute.description": "Only notify when the window is in the background.",
-    "notifications.test": "Send a test notification",
-    "notifications.testing": "Sending…",
     // Event catalog (notifications.ts).
     "notifications.event.task_finished.label": "Task finished",
     "notifications.event.task_finished.description":
@@ -72,7 +109,6 @@ export const settings = {
     "notifications.event.awaiting_input.label": "Needs your input",
     "notifications.event.awaiting_input.description":
       "The agent is waiting for you to answer a prompt.",
-    "notifications.testBody": "Notifications are working.",
 
     // --- Launcher ---------------------------------------------------------
     "launcher.title": "Quick launcher",
@@ -468,7 +504,45 @@ export const settings = {
     "nav.agent-control": "电脑与浏览器",
     "nav.appearance": "外观",
     "nav.notifications": "通知",
+    "nav.permissions": "权限",
     "nav.archived": "已归档对话",
+
+    // --- 权限（与首次引导共用）-------------------------------------------
+    "permissions.title": "权限",
+    "permissions.description":
+      "cetus 在这台 Mac 上能访问什么，以及每项权限分别解锁哪些功能。按需授权即可——少给某项不会影响其它功能。",
+    "permissions.note":
+      "授予某项权限后，macOS 可能需要你退出并重新打开 cetus 才会生效。",
+    "permissions.recheck": "重新检查",
+    "permissions.grant": "授权",
+    "permissions.openSettings": "打开系统设置",
+    "permissions.status.granted": "已授权",
+    "permissions.status.needed": "待授权",
+    "permissions.notifications.label": "通知",
+    "permissions.notifications.description":
+      "任务完成、需要你确认、或会议被记录时弹出提醒。",
+    "permissions.accessibility.label": "辅助功能",
+    "permissions.accessibility.description":
+      "全局快捷键、快速启动器，以及把听写或智能体生成的文字输入到其它应用。",
+    "permissions.screen.label": "屏幕录制",
+    "permissions.screen.description":
+      "截图启动器与屏幕上下文记忆（捕捉屏幕上的内容）。",
+    "permissions.microphone.label": "麦克风",
+    "permissions.microphone.description": "语音听写与会议转录。",
+
+    // --- 首次引导 ---------------------------------------------------------
+    "onboarding.welcome.title": "欢迎使用 cetus",
+    "onboarding.welcome.subtitle":
+      "一个用得起的桌面智能体，能感知、能记忆、能行动。先设置几项权限，让它把活儿干起来。",
+    "onboarding.welcome.start": "设置权限",
+    "onboarding.skip": "暂时跳过",
+    "onboarding.back": "返回",
+    "onboarding.done": "完成",
+    "onboarding.permissions.title": "授予权限",
+    "onboarding.permissions.subtitle":
+      "现在授予你想用的权限即可。这些都能稍后在「设置 → 权限」里随时更改。",
+    "onboarding.permissions.note":
+      "全部可选——没有它们 cetus 也能正常运行，每项功能只需要它自己用到的权限。",
 
     "providers.deepseek": "DeepSeek",
     "providers.tavily": "Tavily（网页搜索）",
@@ -493,14 +567,11 @@ export const settings = {
     "notifications.behavior": "行为",
     "notifications.mute.label": "Cetus 处于前台时静音",
     "notifications.mute.description": "仅在窗口处于后台时通知。",
-    "notifications.test": "发送测试通知",
-    "notifications.testing": "发送中…",
     "notifications.event.task_finished.label": "任务完成",
     "notifications.event.task_finished.description":
       "一次智能体运行已结束——可能是对话回复、看板任务或定时自动化（无论成功或出错）。",
     "notifications.event.awaiting_input.label": "需要你的输入",
     "notifications.event.awaiting_input.description": "智能体正在等待你回应提示。",
-    "notifications.testBody": "通知功能正常。",
 
     "launcher.title": "快速启动器",
     "launcher.description":
@@ -854,6 +925,7 @@ export const settings = {
     "nav.agent-control": "コンピュータとブラウザ",
     "nav.appearance": "外観",
     "nav.notifications": "通知",
+    "nav.permissions": "権限",
     "nav.archived": "アーカイブ済みチャット",
 
     "providers.deepseek": "DeepSeek",
@@ -880,15 +952,12 @@ export const settings = {
     "notifications.behavior": "動作",
     "notifications.mute.label": "Cetus がアクティブな間はミュート",
     "notifications.mute.description": "ウィンドウがバックグラウンドのときのみ通知します。",
-    "notifications.test": "テスト通知を送信",
-    "notifications.testing": "送信中…",
     "notifications.event.task_finished.label": "タスク完了",
     "notifications.event.task_finished.description":
       "エージェントの実行が完了しました（チャットの返信、ボードのタスク、または定期実行の自動化のいずれか。成功・失敗を問わず）。",
     "notifications.event.awaiting_input.label": "入力が必要です",
     "notifications.event.awaiting_input.description":
       "エージェントがプロンプトへの回答を待っています。",
-    "notifications.testBody": "通知は正常に動作しています。",
 
     "launcher.title": "クイックランチャー",
     "launcher.description":
@@ -1226,6 +1295,7 @@ export const settings = {
     "nav.agent-control": "컴퓨터 및 브라우저",
     "nav.appearance": "모양",
     "nav.notifications": "알림",
+    "nav.permissions": "권한",
     "nav.archived": "보관된 대화",
 
     "providers.deepseek": "DeepSeek",
@@ -1252,15 +1322,12 @@ export const settings = {
     "notifications.behavior": "동작",
     "notifications.mute.label": "Cetus가 활성 상태일 때 음소거",
     "notifications.mute.description": "창이 백그라운드에 있을 때만 알립니다.",
-    "notifications.test": "테스트 알림 보내기",
-    "notifications.testing": "보내는 중…",
     "notifications.event.task_finished.label": "작업 완료",
     "notifications.event.task_finished.description":
       "에이전트 실행이 완료되었습니다 — 대화 답변, 보드 작업 또는 예약된 자동화(성공 또는 오류 여부와 관계없이).",
     "notifications.event.awaiting_input.label": "입력이 필요함",
     "notifications.event.awaiting_input.description":
       "에이전트가 프롬프트에 대한 답변을 기다리고 있습니다.",
-    "notifications.testBody": "알림이 정상적으로 작동합니다.",
 
     "launcher.title": "빠른 런처",
     "launcher.description":
@@ -1594,6 +1661,7 @@ export const settings = {
     "nav.agent-control": "Ordenador y navegador",
     "nav.appearance": "Apariencia",
     "nav.notifications": "Notificaciones",
+    "nav.permissions": "Permisos",
     "nav.archived": "Chats archivados",
 
     "providers.deepseek": "DeepSeek",
@@ -1620,15 +1688,12 @@ export const settings = {
     "notifications.behavior": "Comportamiento",
     "notifications.mute.label": "Silenciar mientras Cetus está en primer plano",
     "notifications.mute.description": "Notificar solo cuando la ventana está en segundo plano.",
-    "notifications.test": "Enviar una notificación de prueba",
-    "notifications.testing": "Enviando…",
     "notifications.event.task_finished.label": "Tarea finalizada",
     "notifications.event.task_finished.description":
       "Una ejecución de agente ha terminado: una respuesta de chat, una tarea del tablero o una automatización programada (haya tenido éxito o haya fallado).",
     "notifications.event.awaiting_input.label": "Necesita tu intervención",
     "notifications.event.awaiting_input.description":
       "El agente está esperando que respondas a una indicación.",
-    "notifications.testBody": "Las notificaciones funcionan.",
 
     "launcher.title": "Lanzador rápido",
     "launcher.description":
@@ -1963,6 +2028,7 @@ export const settings = {
     "nav.agent-control": "Computador e navegador",
     "nav.appearance": "Aparência",
     "nav.notifications": "Notificações",
+    "nav.permissions": "Permissões",
     "nav.archived": "Conversas arquivadas",
 
     "providers.deepseek": "DeepSeek",
@@ -1989,15 +2055,12 @@ export const settings = {
     "notifications.behavior": "Comportamento",
     "notifications.mute.label": "Silenciar enquanto o Cetus estiver em foco",
     "notifications.mute.description": "Notificar somente quando a janela estiver em segundo plano.",
-    "notifications.test": "Enviar uma notificação de teste",
-    "notifications.testing": "Enviando…",
     "notifications.event.task_finished.label": "Tarefa concluída",
     "notifications.event.task_finished.description":
       "Uma execução de agente terminou — uma resposta de conversa, uma tarefa do quadro ou uma automação agendada (tenha tido sucesso ou erro).",
     "notifications.event.awaiting_input.label": "Precisa da sua intervenção",
     "notifications.event.awaiting_input.description":
       "O agente está aguardando que você responda a uma solicitação.",
-    "notifications.testBody": "As notificações estão funcionando.",
 
     "launcher.title": "Inicializador rápido",
     "launcher.description":
@@ -2329,6 +2392,7 @@ export const settings = {
     "nav.agent-control": "Ordinateur et navigateur",
     "nav.appearance": "Apparence",
     "nav.notifications": "Notifications",
+    "nav.permissions": "Autorisations",
     "nav.archived": "Conversations archivées",
 
     "providers.deepseek": "DeepSeek",
@@ -2355,15 +2419,12 @@ export const settings = {
     "notifications.behavior": "Comportement",
     "notifications.mute.label": "Couper le son quand Cetus est au premier plan",
     "notifications.mute.description": "Notifier uniquement quand la fenêtre est en arrière-plan.",
-    "notifications.test": "Envoyer une notification de test",
-    "notifications.testing": "Envoi…",
     "notifications.event.task_finished.label": "Tâche terminée",
     "notifications.event.task_finished.description":
       "Une exécution d'agent s'est terminée — une réponse de conversation, une tâche du tableau ou une automatisation planifiée (qu'elle ait réussi ou échoué).",
     "notifications.event.awaiting_input.label": "Nécessite votre intervention",
     "notifications.event.awaiting_input.description":
       "L'agent attend que vous répondiez à une invite.",
-    "notifications.testBody": "Les notifications fonctionnent.",
 
     "launcher.title": "Lanceur rapide",
     "launcher.description":
@@ -2695,6 +2756,7 @@ export const settings = {
     "nav.agent-control": "Computer & Browser",
     "nav.appearance": "Erscheinungsbild",
     "nav.notifications": "Benachrichtigungen",
+    "nav.permissions": "Berechtigungen",
     "nav.archived": "Archivierte Chats",
 
     "providers.deepseek": "DeepSeek",
@@ -2721,15 +2783,12 @@ export const settings = {
     "notifications.behavior": "Verhalten",
     "notifications.mute.label": "Stummschalten, während Cetus im Fokus ist",
     "notifications.mute.description": "Nur benachrichtigen, wenn das Fenster im Hintergrund ist.",
-    "notifications.test": "Testbenachrichtigung senden",
-    "notifications.testing": "Wird gesendet…",
     "notifications.event.task_finished.label": "Aufgabe abgeschlossen",
     "notifications.event.task_finished.description":
       "Ein Agenten-Lauf wurde abgeschlossen — eine Chat-Antwort, eine Board-Aufgabe oder eine geplante Automatisierung (ob erfolgreich oder mit Fehler).",
     "notifications.event.awaiting_input.label": "Benötigt deine Eingabe",
     "notifications.event.awaiting_input.description":
       "Der Agent wartet darauf, dass du auf eine Eingabeaufforderung antwortest.",
-    "notifications.testBody": "Benachrichtigungen funktionieren.",
 
     "launcher.title": "Schnellstarter",
     "launcher.description":
@@ -3061,6 +3120,7 @@ export const settings = {
     "nav.agent-control": "Computer e browser",
     "nav.appearance": "Aspetto",
     "nav.notifications": "Notifiche",
+    "nav.permissions": "Autorizzazioni",
     "nav.archived": "Chat archiviate",
 
     "providers.deepseek": "DeepSeek",
@@ -3087,15 +3147,12 @@ export const settings = {
     "notifications.behavior": "Comportamento",
     "notifications.mute.label": "Silenzia mentre Cetus è in primo piano",
     "notifications.mute.description": "Avvisa solo quando la finestra è in background.",
-    "notifications.test": "Invia una notifica di prova",
-    "notifications.testing": "Invio in corso…",
     "notifications.event.task_finished.label": "Attività completata",
     "notifications.event.task_finished.description":
       "Un'esecuzione dell'agente è terminata — una risposta in chat, un'attività sulla board o un'automazione pianificata (riuscita o con errore).",
     "notifications.event.awaiting_input.label": "Richiede il tuo input",
     "notifications.event.awaiting_input.description":
       "L'agente sta aspettando che tu risponda a una richiesta.",
-    "notifications.testBody": "Le notifiche funzionano.",
 
     "launcher.title": "Avvio rapido",
     "launcher.description":
@@ -3427,6 +3484,7 @@ export const settings = {
     "nav.agent-control": "Компьютер и браузер",
     "nav.appearance": "Оформление",
     "nav.notifications": "Уведомления",
+    "nav.permissions": "Разрешения",
     "nav.archived": "Архивные чаты",
 
     "providers.deepseek": "DeepSeek",
@@ -3453,15 +3511,12 @@ export const settings = {
     "notifications.behavior": "Поведение",
     "notifications.mute.label": "Без звука, пока Cetus в фокусе",
     "notifications.mute.description": "Уведомлять только когда окно в фоне.",
-    "notifications.test": "Отправить тестовое уведомление",
-    "notifications.testing": "Отправка…",
     "notifications.event.task_finished.label": "Задача завершена",
     "notifications.event.task_finished.description":
       "Запуск агента завершён — ответ в чате, задача на доске или запланированная автоматизация (успешно или с ошибкой).",
     "notifications.event.awaiting_input.label": "Требуется ваш ввод",
     "notifications.event.awaiting_input.description":
       "Агент ждёт, пока вы ответите на запрос.",
-    "notifications.testBody": "Уведомления работают.",
 
     "launcher.title": "Быстрый запуск",
     "launcher.description":

@@ -1484,7 +1484,10 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
 /// Cheap (tiny number of small .ts files) and keeps tool updates flowing
 /// without bumping the install version or wiping the cache.
 fn sync_cetus_extensions(resource: &Path, target: &Path) -> std::io::Result<()> {
-    sync_cetus_extensions_from(&resource.join("cetus-extensions"), target)
+    sync_cetus_extensions_from(
+        &resource.join(crate::pi_rpc::CETUS_EXTENSIONS_DIR),
+        target,
+    )
 }
 
 /// Recursively copy `src` into `dst`, creating `dst`. Best-effort helper used
@@ -1508,12 +1511,29 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 /// Copy a cetus-extensions source directory over `<target>/cetus-extensions`,
-/// replacing it wholesale so removed tool files don't linger. No-op when `src`
+/// replacing it wholesale so removed tool files don't linger, and pruning any
+/// dir left behind by a previous name for the extensions tree. No-op when `src`
 /// is absent.
 fn sync_cetus_extensions_from(src: &Path, target: &Path) -> std::io::Result<()> {
-    let dst = target.join("cetus-extensions");
+    let dst = target.join(crate::pi_rpc::CETUS_EXTENSIONS_DIR);
     if !src.exists() {
         return Ok(());
+    }
+    // A valid replacement is going in, so drop any extensions dir left by an
+    // earlier name. The loader reads only CETUS_EXTENSIONS_DIR, so a renamed-away
+    // copy is dead weight that hides rename bugs (it can leave an install with
+    // tools the loader never sees). Pruned only once `src` is confirmed present
+    // so we never strip the install down to no extensions at all.
+    for legacy in crate::pi_rpc::LEGACY_EXTENSION_DIRS {
+        let stale = target.join(legacy);
+        if stale.is_dir() {
+            match std::fs::remove_dir_all(&stale) {
+                Ok(()) => tracing::info!("pruned stale extensions dir {}", stale.display()),
+                Err(e) => {
+                    tracing::warn!("pruning stale extensions dir {} failed: {e}", stale.display())
+                }
+            }
+        }
     }
     if dst.exists() {
         std::fs::remove_dir_all(&dst)?;
@@ -1526,7 +1546,7 @@ fn sync_cetus_extensions_from(src: &Path, target: &Path) -> std::io::Result<()> 
 /// in by `env!`), and returns `None` once that directory is gone — so a shipped
 /// release, whose resources live elsewhere, never touches it.
 fn dev_ext_src() -> Option<PathBuf> {
-    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("cetus-extensions");
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join(crate::pi_rpc::CETUS_EXTENSIONS_DIR);
     p.is_dir().then_some(p)
 }
 

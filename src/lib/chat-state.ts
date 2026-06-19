@@ -39,6 +39,12 @@ export interface ChatState {
   // of re-scanning every message×block on each store tick.
   hasArtifacts: boolean;
   error: string | null;
+  // True when the current/just-finished run was deliberately cancelled by the
+  // user (pi emits an assistant error event with reason "aborted", or we call
+  // endStream on the abort button). Suppresses the trailing agent_end's
+  // "empty response" hint — a manual cancel isn't a model failure. Reset at the
+  // start of the next run (agent_start).
+  aborted: boolean;
 }
 
 export const emptyChatState: ChatState = {
@@ -50,6 +56,7 @@ export const emptyChatState: ChatState = {
   awaitingAssistant: false,
   hasArtifacts: false,
   error: null,
+  aborted: false,
 };
 
 /** True if any block is a settled send_artifact tool result. Used once on
@@ -326,6 +333,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         isStreaming: false,
         awaitingAssistant: false,
         activeAssistantIdx: null,
+        // endStream is only dispatched on a user abort — flag it so a trailing
+        // agent_end doesn't mistake the empty bubble for a model failure.
+        aborted: true,
       };
     }
     case "pi_event":
@@ -353,7 +363,7 @@ function assistantHasVisibleContent(m: RenderedMessage): boolean {
 function reducePiEvent(state: ChatState, event: PiEvent): ChatState {
   switch (event.type) {
     case "agent_start":
-      return { ...state, isStreaming: true, awaitingAssistant: true, error: null };
+      return { ...state, isStreaming: true, awaitingAssistant: true, error: null, aborted: false };
     case "agent_end": {
       // Catch a turn that ended with NO visible answer (empty/degenerate
       // completion — see assistantHasVisibleContent) and surface a recoverable
@@ -369,7 +379,7 @@ function reducePiEvent(state: ChatState, event: PiEvent): ChatState {
         awaitingAssistant: false,
         activeAssistantIdx: null,
         error:
-          emptyAnswer && !state.error
+          emptyAnswer && !state.error && !state.aborted
             ? "The model returned an empty response — no answer was produced. Tap Regenerate to try again."
             : state.error,
       };
@@ -423,8 +433,17 @@ function reducePiEvent(state: ChatState, event: PiEvent): ChatState {
       messages[state.activeAssistantIdx] = m;
       return { ...state, messages };
     }
-    case "message_update":
-      return reduceAssistantDelta(state, event.assistantMessageEvent);
+    case "message_update": {
+      // A user-initiated cancel surfaces as an assistant error event with
+      // reason "aborted". Catch it here, before delegating: the abort button's
+      // endStream has already nulled activeAssistantIdx, which would make
+      // reduceAssistantDelta early-return without recording the abort.
+      const amEvent = event.assistantMessageEvent;
+      if (amEvent.type === "error" && amEvent.reason === "aborted") {
+        return { ...state, aborted: true };
+      }
+      return reduceAssistantDelta(state, amEvent);
+    }
     case "tool_execution_start":
     case "tool_execution_update":
     case "tool_execution_end":

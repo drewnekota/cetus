@@ -10,9 +10,7 @@ import {
 } from "@/components/chat/composer";
 import { ChatPane } from "@/components/chat/chat-pane";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
-import { ArtifactsPanel } from "@/components/chat/artifacts-panel";
 import { CommandPalette } from "@/components/command-palette";
-import { PanelRight } from "lucide-react";
 import { AppSidebar } from "@/components/sidebar/app-sidebar";
 import type { SidebarView } from "@/components/sidebar/view-toggle";
 import { BoardView } from "@/components/board/board-view";
@@ -67,6 +65,14 @@ import { composeWithContext } from "@/lib/quick-context";
 // until first open; it then stays mounted so reopen is instant.
 const SettingsPage = dynamic(
   () => import("@/components/settings/settings-page").then((m) => m.SettingsPage),
+  { ssr: false },
+);
+
+// First-run welcome + permission setup. Self-gating (a localStorage flag), so
+// it's safe to always mount; renders nothing once dismissed. ssr:false for the
+// same reason as SettingsPage — static-export SPA, no server render.
+const Onboarding = dynamic(
+  () => import("@/components/onboarding/onboarding").then((m) => m.Onboarding),
   { ssr: false },
 );
 
@@ -160,7 +166,6 @@ export default function Home() {
   const error = useChatError(activeId);
   const isStreaming = useIsStreaming(activeId);
   const hasMessages = useHasMessages(activeId);
-  const hasArtifacts = useHasArtifacts(activeId);
   const streamingIds = useStreamingIds();
   const [modelChoice, setModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
   useEffect(() => {
@@ -618,12 +623,6 @@ export default function Home() {
     saveLastActive(activeId);
   }, [activeId]);
 
-  const [artifactsOpen, setArtifactsOpen] = useState(false);
-  // Auto-pop the panel the first time an artifact lands in this conversation.
-  useEffect(() => {
-    if (hasArtifacts) setArtifactsOpen(true);
-  }, [hasArtifacts]);
-
   // Global keyboard shortcuts (parallels macOS app conventions):
   //   ⌘R    — reload the webview (works even behind a modal)
   //   ⌘K    — command palette
@@ -661,14 +660,8 @@ export default function Home() {
       )
         return;
       const mod = e.metaKey || e.ctrlKey;
-      // Esc — close the artifacts panel first if it's open, otherwise abort the
-      // current stream. (No mod key; palette owns its own Esc.)
+      // Esc — abort the current stream. (No mod key; palette owns its own Esc.)
       if (e.key === "Escape" && !mod && !paletteOpen) {
-        if (artifactsOpen && hasArtifacts && view === "chat") {
-          e.preventDefault();
-          setArtifactsOpen(false);
-          return;
-        }
         if (isStreaming && activeId) {
           e.preventDefault();
           api.abort(activeId).catch(console.error);
@@ -680,15 +673,6 @@ export default function Home() {
       if (k === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
-        return;
-      }
-      // ⌘⇧A — toggle the artifacts panel (only meaningful in chat view with
-      // artifacts present).
-      if (e.shiftKey && k === "a") {
-        if (hasArtifacts && view === "chat") {
-          e.preventDefault();
-          setArtifactsOpen((v) => !v);
-        }
         return;
       }
       if (!e.shiftKey && k === "n") {
@@ -711,7 +695,7 @@ export default function Home() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, paletteOpen, isStreaming, activeId, settingsOpen, automationDialogOpen, newTaskOpen, detailId, artifactsOpen, hasArtifacts]);
+  }, [view, paletteOpen, isStreaming, activeId, settingsOpen, automationDialogOpen, newTaskOpen, detailId]);
 
   /** "New chat" only resets the local view to the hero — the backend
    *  conversation row is created lazily on the first send. This way clicking
@@ -1350,6 +1334,7 @@ export default function Home() {
     >
       <DialogHost />
       <ZoomHud />
+      <Onboarding />
       {/* DEV-ONLY eval bridge — no-ops unless NEXT_PUBLIC_CETUS_DEVTEST === "1"
           (gated both here and internally). Always-mounted host. */}
       {process.env.NEXT_PUBLIC_CETUS_DEVTEST === "1" && <TestHook />}
@@ -1484,16 +1469,7 @@ export default function Home() {
             {error && !hasMessages && (
               <span className="text-destructive">{error}</span>
             )}
-            {hasArtifacts && view === "chat" && (
-              <button
-                type="button"
-                onClick={() => setArtifactsOpen((v) => !v)}
-                className="ml-1 rounded p-1 hover:bg-muted hover:text-foreground"
-                title="Toggle artifacts panel (⌘⇧A)"
-              >
-                <PanelRight className="h-3.5 w-3.5" />
-              </button>
-            )}
+
           </header>
           {view === "automations" ? (
             <AutomationsView
@@ -1574,11 +1550,7 @@ export default function Home() {
             </div>
           )}
         </div>
-        <ArtifactsPanel
-          convId={activeId}
-          open={artifactsOpen && hasArtifacts && view === "chat"}
-          onClose={() => setArtifactsOpen(false)}
-        />
+
       </SidebarInset>
     </SidebarProvider>
   );

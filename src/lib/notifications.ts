@@ -16,7 +16,6 @@ import {
   requestPermission,
 } from "@tauri-apps/plugin-notification";
 import { api } from "@/lib/tauri";
-import { tt } from "@/lib/i18n";
 
 /** By-event catalog. Each kind is an independent toggle in the settings page.
  *
@@ -209,25 +208,5 @@ export async function dispatchNotification(
     });
   } catch (e) {
     console.error("postNotification failed:", e);
-  }
-}
-
-/** Fire a sample notification so the user can confirm the OS plumbing works. */
-export async function sendTestNotification(): Promise<boolean> {
-  const granted = await ensurePermission();
-  if (!granted) return false;
-  try {
-    // Route through the native command (not the plugin's sendNotification): the
-    // plugin fires-and-forgets on desktop, so clicking the test banner couldn't
-    // bring cetus forward — the very behavior this button exists to confirm. With
-    // no conversationId the click just focuses the app (see notify.rs did_activate).
-    await api.postNotification({
-      title: "cetus",
-      body: tt("settings", "notifications.testBody"),
-    });
-    return true;
-  } catch (e) {
-    console.error("test notification failed:", e);
-    return false;
   }
 }
