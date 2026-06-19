@@ -42,6 +42,7 @@ mod text_input;
 mod titling;
 mod transcripts;
 mod ultra;
+mod updater;
 mod voice;
 mod window_geom;
 
@@ -879,8 +880,25 @@ pub fn run() {
             notify::init(app.handle());
             // Register the user's summon hotkey (if any) now the plugin is up.
             apply_summon_hotkey(app.handle(), &quick_settings.summon_hotkey);
+            // Check for an app update in the background. When auto-update is on
+            // it installs silently (applied on next launch); when off it only
+            // surfaces a passive "update-available" toast. Release builds only —
+            // dev never self-updates.
+            #[cfg(not(debug_assertions))]
+            {
+                let updater_handle = app.handle().clone();
+                tauri::async_runtime::spawn(updater::startup_check(
+                    updater_handle,
+                    quick_settings.auto_update,
+                ));
+            }
             Ok(())
         });
+
+    // Self-update plugin. Registered only in release builds so `tauri dev` never
+    // tries to parse the (release-only) signing pubkey or hit the update server.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 
     // The invoke_handler list is duplicated across the two cfg branches because
     // the devtest commands only exist when the `devtest` feature is enabled.
@@ -979,6 +997,9 @@ pub fn run() {
         discovery::set_discovery_settings,
         quick::get_quick_settings,
         quick::set_quick_settings,
+        updater::check_for_update,
+        updater::install_update,
+        updater::ignore_update_version,
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,
         quick::quick_submit,
@@ -1092,6 +1113,9 @@ pub fn run() {
         discovery::set_discovery_settings,
         quick::get_quick_settings,
         quick::set_quick_settings,
+        updater::check_for_update,
+        updater::install_update,
+        updater::ignore_update_version,
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,
         quick::quick_submit,

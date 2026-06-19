@@ -17,6 +17,13 @@ name: Release (macOS, signed + notarized)
 #   APPLE_PASSWORD              an app-specific password (appleid.apple.com → Sign-In & Security)
 #   APPLE_TEAM_ID               your 10-char Team ID (e.g. H8NRJ9BUBQ)
 #   KEYCHAIN_PASSWORD           any random string (temp keychain password for this run)
+#
+# In-app auto-update signing (separate from Apple — a minisign keypair). Generate
+# once with `pnpm tauri signer generate -w ~/.cetus-updater.key`, paste the
+# PUBLIC key into src-tauri/tauri.conf.json (plugins.updater.pubkey), and set:
+#
+#   TAURI_SIGNING_PRIVATE_KEY            contents of the generated private key file
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   the password you set during generation
 
 on:
   push:
@@ -103,9 +110,67 @@ jobs:
           scripts/macos-sign.sh "$DMG" --notarize
           echo "DMG=$DMG" >> "$GITHUB_ENV"
 
-      - name: Publish to GitHub Release
+      - name: Build + sign the updater artifact and manifest
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          # The in-app updater downloads a gzipped tar of the already
+          # signed+notarized .app and swaps it in place. Build it AFTER
+          # notarization so the Developer ID grant (Accessibility / Screen
+          # Recording) survives the update — a tarball of the unsigned app would
+          # silently break those permissions on the next launch.
+          TARBALL="$RUNNER_TEMP/Cetus.app.tar.gz"
+          tar -C "$(dirname "$APP")" -czf "$TARBALL" "$(basename "$APP")"
+          # Minisign the tarball with the updater key (entirely separate from the
+          # Apple Developer ID signature). The app verifies this against the
+          # pubkey baked into tauri.conf.json before installing.
+          pnpm tauri signer sign \
+            -k "$TAURI_SIGNING_PRIVATE_KEY" \
+            -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+            "$TARBALL"
+          # Emit latest.json — the manifest the app polls. The signature is the
+          # contents of the .sig file; the URL must resolve to the uploaded asset.
+          SIGNATURE="$(cat "$TARBALL.sig")" \
+          VERSION="$VERSION" \
+          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/Cetus.app.tar.gz" \
+          MANIFEST="$RUNNER_TEMP/latest.json" \
+          node -e '
+            const fs = require("fs");
+            fs.writeFileSync(process.env.MANIFEST, JSON.stringify({
+              version: process.env.VERSION,
+              notes: "See the GitHub release page for details.",
+              pub_date: process.env.PUB_DATE,
+              platforms: {
+                "darwin-aarch64": {
+                  signature: process.env.SIGNATURE,
+                  url: process.env.URL,
+                },
+              },
+            }, null, 2));
+          '
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          echo "MANIFEST=$RUNNER_TEMP/latest.json" >> "$GITHUB_ENV"
+
+      # Created as a DRAFT so it's invisible to the in-app updater until you
+      # hit "Publish release" in the GitHub UI. GitHub's
+      # releases/latest/download/latest.json only resolves to published,
+      # non-prerelease releases — so a draft lets you download the dmg, test the
+      # exact build that will ship, and only then go live to users. Not happy?
+      # Delete the draft + tag, fix, re-tag.
+      - name: Create draft GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.DMG }}
+          draft: true
+          generate_release_notes: true
+          files: |
+            ${{ env.DMG }}
+            ${{ env.TARBALL }}
+            ${{ env.MANIFEST }}
           fail_on_unmatched_files: true

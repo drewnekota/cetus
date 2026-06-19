@@ -20,6 +20,11 @@ tauri-plugin-fs = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
+# Silent in-app auto-update: checks the GitHub Release `latest.json`, downloads
+# the signed `.app.tar.gz`, and swaps the bundle in place (applied on next
+# launch). Wired only in release builds and gated behind the `auto_update`
+# setting; the crate is always compiled so its capability permissions resolve.
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "io-util", "process", "time", "fs"] }

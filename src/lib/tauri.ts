@@ -33,6 +33,7 @@ import type {
   QuickScreenshot,
   QuickSettings,
   ReviewState,
+  UpdateMeta,
   VoiceInsertMode,
   VoicePermissions,
   DevtestDomOp,
@@ -311,6 +312,17 @@ export const api = {
   getQuickSettings: () => invoke<QuickSettings>("get_quick_settings"),
   setQuickSettings: (settings: QuickSettings) =>
     invoke<void>("set_quick_settings", { settings }),
+
+  // Self-update -----------------------------------------------------------
+  /** Manually check for an update. Resolves to its metadata, or null if the
+   *  app is up to date (always null in dev builds). */
+  checkForUpdate: () => invoke<UpdateMeta | null>("check_for_update"),
+  /** Download + install the available update (applied on next launch). */
+  installUpdate: () => invoke<void>("install_update"),
+  /** Remember a version dismissed from the passive toast (no re-prompt until a
+   *  newer one ships). */
+  ignoreUpdateVersion: (version: string) =>
+    invoke<void>("ignore_update_version", { version }),
   /** Hide panel, capture screen, restore panel. For the in-panel toggle. */
   quickRecaptureScreenshot: () =>
     invoke<QuickScreenshot | null>("quick_recapture_screenshot"),
@@ -396,6 +408,14 @@ export const api = {
 
 export async function onAppEvent(handler: (e: AppEvent) => void): Promise<UnlistenFn> {
   return listen<AppEvent>("app-event", (e) => handler(e.payload));
+}
+
+/** Fired (main window only) when a background check finds an update and
+ *  auto-update is off — drives the passive "update available" toast. */
+export async function onUpdateAvailable(
+  handler: (u: UpdateMeta) => void,
+): Promise<UnlistenFn> {
+  return listen<UpdateMeta>("update-available", (e) => handler(e.payload));
 }
 
 export async function onPiEvent(handler: (e: PiEvent) => void): Promise<UnlistenFn> {

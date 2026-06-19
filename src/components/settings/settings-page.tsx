@@ -74,7 +74,9 @@ import {
   type Meeting,
   type MeetingSettings,
   type MeetingStatus,
+  type UpdateMeta,
 } from "@/lib/tauri";
+import { toast } from "sonner";
 import type {
   AgentSettings,
   AutoArchiveSettings,
@@ -382,15 +384,51 @@ function GeneralSection() {
   const { t: tc } = useTranslation("common");
   const { preference: localePref, setPreference: setLocalePref } = useLocale();
   const [settings, setSettings] = useState<QuickSettings>(DEFAULT_QUICK_SETTINGS);
+  const [appVersion, setAppVersion] = useState("");
+  const [checkState, setCheckState] = useState<
+    "idle" | "checking" | "upToDate" | "available" | "installing" | "failed"
+  >("idle");
+  const [pending, setPending] = useState<UpdateMeta | null>(null);
 
   useEffect(() => {
     api.getQuickSettings().then(setSettings).catch(() => {});
+    import("@tauri-apps/api/app")
+      .then(({ getVersion }) => getVersion())
+      .then(setAppVersion)
+      .catch(() => {});
   }, []);
 
   function update(patch: Partial<QuickSettings>) {
     const next = { ...settings, ...patch };
     setSettings(next);
     api.setQuickSettings(next).catch(() => {});
+  }
+
+  async function checkUpdates() {
+    setCheckState("checking");
+    try {
+      const u = await api.checkForUpdate();
+      if (u) {
+        setPending(u);
+        setCheckState("available");
+      } else {
+        setCheckState("upToDate");
+      }
+    } catch {
+      setCheckState("failed");
+    }
+  }
+
+  async function installNow() {
+    setCheckState("installing");
+    try {
+      await api.installUpdate();
+      setPending(null);
+      setCheckState("idle");
+      toast.success(t("update.installed"));
+    } catch {
+      setCheckState("failed");
+    }
   }
 
   return (
@@ -435,6 +473,55 @@ function GeneralSection() {
           checked={settings.launchOnStartup}
           onCheckedChange={(v) => update({ launchOnStartup: v })}
         />
+        <ToggleRow
+          id="auto-update"
+          label={t("general.autoUpdate.label")}
+          description={t("general.autoUpdate.description")}
+          checked={settings.autoUpdate}
+          onCheckedChange={(v) => update({ autoUpdate: v })}
+        />
+        <div className="flex items-center justify-between gap-4 pt-1">
+          <div className="min-w-0 space-y-0.5">
+            <Label className="font-medium">{t("update.check.label")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {checkState === "checking"
+                ? t("update.check.checking")
+                : checkState === "upToDate"
+                  ? t("update.check.upToDate")
+                  : checkState === "available" && pending
+                    ? t("update.check.available", { version: pending.version })
+                    : checkState === "failed"
+                      ? t("update.failed")
+                      : appVersion
+                        ? t("update.check.current", { version: appVersion })
+                        : ""}
+            </p>
+          </div>
+          {checkState === "available" || checkState === "installing" ? (
+            <Button
+              size="sm"
+              className="shrink-0"
+              disabled={checkState === "installing"}
+              onClick={installNow}
+            >
+              {checkState === "installing"
+                ? t("update.installing")
+                : t("update.check.install")}
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              disabled={checkState === "checking"}
+              onClick={checkUpdates}
+            >
+              {checkState === "checking"
+                ? t("update.check.checking")
+                : t("update.check.button")}
+            </Button>
+          )}
+        </div>
       </div>
     </section>
   );

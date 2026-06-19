@@ -26,7 +26,8 @@ import { ScreenHistoryPage } from "@/components/screen-history/screen-history-pa
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
-import { api, onAppEvent, type Screenshot } from "@/lib/tauri";
+import { api, onAppEvent, onUpdateAvailable, type Screenshot } from "@/lib/tauri";
+import { tt } from "@/lib/i18n/standalone";
 import {
   useChatStore,
   useChatError,
@@ -867,6 +868,45 @@ export default function Home() {
       unlisten?.();
     };
   }, [onSelectChat, refreshList]);
+
+  // Passive "update available" toast: fired only when auto-update is off and a
+  // background check finds a (not-yet-dismissed) newer version. Install applies
+  // on next launch; Ignore remembers this version so it won't re-prompt.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    onUpdateAvailable((u) => {
+      toast(tt("settings", "update.toast.title", { version: u.version }), {
+        description: tt("settings", "update.toast.body"),
+        duration: Infinity,
+        action: {
+          label: tt("settings", "update.toast.install"),
+          onClick: () => {
+            const id = toast.loading(tt("settings", "update.installing"));
+            api
+              .installUpdate()
+              .then(() =>
+                toast.success(tt("settings", "update.installed"), { id }),
+              )
+              .catch(() => toast.error(tt("settings", "update.failed"), { id }));
+          },
+        },
+        cancel: {
+          label: tt("settings", "update.toast.ignore"),
+          onClick: () => {
+            void api.ignoreUpdateVersion(u.version);
+          },
+        },
+      });
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const onOpenDetail = useCallback((id: string) => setDetailId(id), []);
 

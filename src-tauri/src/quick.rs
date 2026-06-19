@@ -95,6 +95,11 @@ pub struct QuickSettings {
     /// time settings are saved, so the OS login item tracks this flag.
     #[serde(default)]
     pub launch_on_startup: bool,
+    /// Silently check for, download, and install app updates in the background
+    /// at launch (applied on the next launch). On by default — read once at
+    /// startup; toggling it takes effect next launch. Release builds only.
+    #[serde(default = "default_true")]
+    pub auto_update: bool,
 }
 
 fn default_voice_start_sound() -> bool {
@@ -144,6 +149,7 @@ impl Default for QuickSettings {
             voice_boosting_table_id: String::new(),
             voice_start_sound: true,
             launch_on_startup: false,
+            auto_update: true,
         }
     }
 }

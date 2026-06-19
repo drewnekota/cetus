@@ -58,6 +58,9 @@ export interface QuickSettings {
   voiceStartSound: boolean;
   /** Register cetus as a login item so it starts (in the tray) at login. */
   launchOnStartup: boolean;
+  /** Silently check for and install app updates in the background at launch
+   *  (applied on next launch). On by default; takes effect next launch. */
+  autoUpdate: boolean;
 }
 
 export const DEFAULT_QUICK_SETTINGS: QuickSettings = {
@@ -77,7 +80,18 @@ export const DEFAULT_QUICK_SETTINGS: QuickSettings = {
   voiceBoostingTableId: "",
   voiceStartSound: true,
   launchOnStartup: false,
+  autoUpdate: true,
 };
+
+/** Metadata for an available app update (from the release manifest). */
+export interface UpdateMeta {
+  /** Version offered by the manifest. */
+  version: string;
+  /** Version currently running. */
+  currentVersion: string;
+  /** Release notes, if any. */
+  notes?: string | null;
+}
 
 /** Bare base64 screen capture (no `data:` prefix), as pi-ai ImageContent. */
 export interface QuickScreenshot {

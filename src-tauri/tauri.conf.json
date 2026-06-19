@@ -76,6 +76,14 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/drewnekota/cetus/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM2RDUzQUNCNDJFQTk4MzgKUldRNG1PcEN5enJWeGlNdHFOTWRFMitkckRvS2cvL3RCQUNEMnBuZmxpbi9FSURPSHk3dWVqdDAK"
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
