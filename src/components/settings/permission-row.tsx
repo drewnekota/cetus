@@ -88,7 +88,7 @@ export function PermissionRow({
           className={cn(
             "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border",
             granted
-              ? "border-emerald-600/30 bg-emerald-600/10 text-emerald-600"
+              ? "border-success/30 bg-success/10 text-success"
               : "border-border bg-muted text-muted-foreground",
           )}
         >
@@ -101,14 +101,14 @@ export function PermissionRow({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {granted ? (
-          <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
+          <span className="flex items-center gap-1 text-xs font-medium text-success">
             <Check className="size-3.5" />
             {t("permissions.status.granted")}
           </span>
         ) : (
           <>
             {status === "needed" && (
-              <span className="hidden text-xs text-amber-500 sm:inline">
+              <span className="hidden text-xs text-warning sm:inline">
                 {t("permissions.status.needed")}
               </span>
             )}

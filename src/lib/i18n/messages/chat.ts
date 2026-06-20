@@ -16,14 +16,15 @@ export const chat = {
     "composer.placeholderQueue":
       "Agent is running… ⏎ to queue a follow-up (⇧⏎ newline)",
     "composer.placeholderRunning": "Agent is running… (⇧⏎ for newline)",
-    "composer.placeholderHero": "Do anything",
     "composer.placeholderDocked": "Message the agent. ⏎ send, ⇧⏎ newline.",
     "composer.attachFile": "Attach file",
     "composer.abort": "Abort",
     "composer.send": "Send",
+    "composer.bashHint": "Bash mode — runs locally, the agent won't see it",
+    "composer.bashPlaceholder": "Run a shell command. ⏎ run, ⇧⏎ newline.",
+    "composer.runBash": "Run command",
 
     // Chat pane
-    "pane.emptyHeadline": "What should we work on?",
     "pane.assistant": "assistant",
     "pane.queued": "Queued",
     "pane.attachmentCount": "{count} attachment(s)",
@@ -78,6 +79,11 @@ export const chat = {
     "vision.image": "{count} image",
     "vision.image_plural": "{count} images",
 
+    // Bash card (local `!` command output)
+    "bash.exit": "exit {code}",
+    "bash.timedOut": "timed out",
+    "bash.noOutput": "(no output)",
+
     // Agent control card
     "agent.controlling": "Controlling {surface}…",
     "agent.step": "{count} step",
@@ -118,13 +124,11 @@ export const chat = {
     "composer.unnamedFile": "文件",
     "composer.placeholderQueue": "智能体运行中……按 ⏎ 排队后续消息（⇧⏎ 换行）",
     "composer.placeholderRunning": "智能体运行中……（⇧⏎ 换行）",
-    "composer.placeholderHero": "想做什么都可以",
     "composer.placeholderDocked": "给智能体发消息。⏎ 发送，⇧⏎ 换行。",
     "composer.attachFile": "添加文件",
     "composer.abort": "中止",
     "composer.send": "发送",
 
-    "pane.emptyHeadline": "我们来做点什么？",
     "pane.assistant": "助手",
     "pane.queued": "已排队",
     "pane.attachmentCount": "{count} 个附件",
@@ -208,13 +212,11 @@ export const chat = {
     "composer.placeholderQueue":
       "エージェント実行中… ⏎ で続きのメッセージをキューに追加（⇧⏎ で改行）",
     "composer.placeholderRunning": "エージェント実行中…（⇧⏎ で改行）",
-    "composer.placeholderHero": "何でもどうぞ",
     "composer.placeholderDocked": "エージェントにメッセージ。⏎ 送信、⇧⏎ 改行。",
     "composer.attachFile": "ファイルを添付",
     "composer.abort": "中止",
     "composer.send": "送信",
 
-    "pane.emptyHeadline": "何に取り組みましょうか？",
     "pane.assistant": "アシスタント",
     "pane.queued": "キュー待ち",
     "pane.attachmentCount": "添付 {count} 件",
@@ -293,13 +295,11 @@ export const chat = {
     "composer.placeholderQueue":
       "에이전트 실행 중… ⏎ 로 후속 메시지를 대기열에 추가 (⇧⏎ 줄바꿈)",
     "composer.placeholderRunning": "에이전트 실행 중… (⇧⏎ 줄바꿈)",
-    "composer.placeholderHero": "무엇이든 해보세요",
     "composer.placeholderDocked": "에이전트에게 메시지. ⏎ 전송, ⇧⏎ 줄바꿈.",
     "composer.attachFile": "파일 첨부",
     "composer.abort": "중단",
     "composer.send": "전송",
 
-    "pane.emptyHeadline": "무엇을 작업할까요?",
     "pane.assistant": "어시스턴트",
     "pane.queued": "대기 중",
     "pane.attachmentCount": "첨부 {count}개",
@@ -378,13 +378,11 @@ export const chat = {
     "composer.placeholderQueue":
       "El agente está en ejecución… ⏎ para poner en cola un seguimiento (⇧⏎ salto de línea)",
     "composer.placeholderRunning": "El agente está en ejecución… (⇧⏎ salto de línea)",
-    "composer.placeholderHero": "Haz lo que quieras",
     "composer.placeholderDocked": "Envía un mensaje al agente. ⏎ enviar, ⇧⏎ salto de línea.",
     "composer.attachFile": "Adjuntar archivo",
     "composer.abort": "Cancelar",
     "composer.send": "Enviar",
 
-    "pane.emptyHeadline": "¿En qué trabajamos?",
     "pane.assistant": "asistente",
     "pane.queued": "En cola",
     "pane.attachmentCount": "{count} adjunto(s)",
@@ -464,13 +462,11 @@ export const chat = {
     "composer.placeholderQueue":
       "O agente está em execução… ⏎ para enfileirar um acompanhamento (⇧⏎ nova linha)",
     "composer.placeholderRunning": "O agente está em execução… (⇧⏎ nova linha)",
-    "composer.placeholderHero": "Faça qualquer coisa",
     "composer.placeholderDocked": "Envie uma mensagem ao agente. ⏎ enviar, ⇧⏎ nova linha.",
     "composer.attachFile": "Anexar arquivo",
     "composer.abort": "Cancelar",
     "composer.send": "Enviar",
 
-    "pane.emptyHeadline": "No que vamos trabalhar?",
     "pane.assistant": "assistente",
     "pane.queued": "Na fila",
     "pane.attachmentCount": "{count} anexo(s)",
@@ -550,13 +546,11 @@ export const chat = {
     "composer.placeholderQueue":
       "L'agent est en cours d'exécution… ⏎ pour mettre en file un suivi (⇧⏎ saut de ligne)",
     "composer.placeholderRunning": "L'agent est en cours d'exécution… (⇧⏎ saut de ligne)",
-    "composer.placeholderHero": "Faites ce que vous voulez",
     "composer.placeholderDocked": "Envoyez un message à l'agent. ⏎ envoyer, ⇧⏎ saut de ligne.",
     "composer.attachFile": "Joindre un fichier",
     "composer.abort": "Annuler",
     "composer.send": "Envoyer",
 
-    "pane.emptyHeadline": "Sur quoi travaillons-nous ?",
     "pane.assistant": "assistant",
     "pane.queued": "En file",
     "pane.attachmentCount": "{count} pièce(s) jointe(s)",
@@ -636,13 +630,11 @@ export const chat = {
     "composer.placeholderQueue":
       "Agent läuft… ⏎ um eine Folgenachricht einzureihen (⇧⏎ Zeilenumbruch)",
     "composer.placeholderRunning": "Agent läuft… (⇧⏎ Zeilenumbruch)",
-    "composer.placeholderHero": "Mach, was du willst",
     "composer.placeholderDocked": "Nachricht an den Agenten. ⏎ senden, ⇧⏎ Zeilenumbruch.",
     "composer.attachFile": "Datei anhängen",
     "composer.abort": "Abbrechen",
     "composer.send": "Senden",
 
-    "pane.emptyHeadline": "Woran sollen wir arbeiten?",
     "pane.assistant": "Assistent",
     "pane.queued": "In Warteschlange",
     "pane.attachmentCount": "{count} Anhang/Anhänge",
@@ -722,13 +714,11 @@ export const chat = {
     "composer.placeholderQueue":
       "L'agente è in esecuzione… ⏎ per mettere in coda un follow-up (⇧⏎ a capo)",
     "composer.placeholderRunning": "L'agente è in esecuzione… (⇧⏎ a capo)",
-    "composer.placeholderHero": "Fai qualsiasi cosa",
     "composer.placeholderDocked": "Invia un messaggio all'agente. ⏎ invia, ⇧⏎ a capo.",
     "composer.attachFile": "Allega file",
     "composer.abort": "Annulla",
     "composer.send": "Invia",
 
-    "pane.emptyHeadline": "A cosa lavoriamo?",
     "pane.assistant": "assistente",
     "pane.queued": "In coda",
     "pane.attachmentCount": "{count} allegato/i",
@@ -808,13 +798,11 @@ export const chat = {
     "composer.placeholderQueue":
       "Агент работает… ⏎ чтобы поставить следующее сообщение в очередь (⇧⏎ новая строка)",
     "composer.placeholderRunning": "Агент работает… (⇧⏎ новая строка)",
-    "composer.placeholderHero": "Делайте что угодно",
     "composer.placeholderDocked": "Сообщение агенту. ⏎ отправить, ⇧⏎ новая строка.",
     "composer.attachFile": "Прикрепить файл",
     "composer.abort": "Прервать",
     "composer.send": "Отправить",
 
-    "pane.emptyHeadline": "Над чем будем работать?",
     "pane.assistant": "ассистент",
     "pane.queued": "В очереди",
     "pane.attachmentCount": "Вложений: {count}",

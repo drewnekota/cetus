@@ -9,18 +9,12 @@
 //! pi's `extension_ui_response` — the same round-trip the agent-control and Ultra
 //! paths use.
 //!
-//! ## Safety gate
+//! ## Enabling
 //!
-//! Agent-created automations are a recurring background task that itself spawns
-//! agents (token spend) — so the model must never silently arm one. Two rules
-//! enforce the "confirmation gate" we'd otherwise only get from prompting:
-//!
-//! * **create** always lands `enabled = false`. The user reviews it in the
-//!   Automations view (⌘3) and flips it on — a deliberate human action. The
-//!   reply tells the agent to say so.
-//! * **update** never changes the enabled state (it carries the existing flag
-//!   forward), so the agent can fix a schedule/prompt but cannot turn a
-//!   dormant automation live. There is deliberately no delete/enable tool.
+//! The agent may arm automations directly: **create** defaults to `enabled =
+//! true` (pass `enabled: false` for a draft) and **update** can flip the flag.
+//! `next_run_at` is (re)computed from the schedule whenever an automation is
+//! enabled, and cleared when it's disabled. There is still no delete tool.
 
 use crate::automation::{Automation, AutomationSchedule};
 use crate::host_tunnel::{self, str_field};
@@ -117,9 +111,10 @@ fn op_create(ctx: &AutomationToolCtx, p: &Value) -> Value {
     let workspace = str_field(p, "workspaceDir")
         .unwrap_or_else(|| ctx.default_workspace.to_string_lossy().to_string());
     let now = now_ms();
-    // SAFETY GATE: agent-created automations always land disabled; the user
-    // enables them by hand in the Automations view. `next_run_at` stays None
-    // until then.
+    // The agent arms automations directly now. Default to enabled; honor an
+    // explicit `enabled: false` for a draft the user reviews first.
+    let enabled = p.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+    let next_run_at = if enabled { schedule.initial_next_run(now) } else { None };
     let automation = Automation {
         id: Uuid::new_v4().to_string(),
         name,
@@ -127,10 +122,10 @@ fn op_create(ctx: &AutomationToolCtx, p: &Value) -> Value {
         workspace_dir: workspace,
         model: build_model(p),
         schedule,
-        enabled: false,
+        enabled,
         created_at: now,
         updated_at: now,
-        next_run_at: None,
+        next_run_at,
         last_run_at: None,
         last_conversation_id: None,
         last_status: None,
@@ -144,11 +139,17 @@ fn op_create(ctx: &AutomationToolCtx, p: &Value) -> Value {
     let _ = ctx
         .handle
         .emit("app-event", AppEvent::AutomationUpdated { automation: automation.clone() });
+    let note = if enabled {
+        "Saved and ENABLED — it will run on its schedule. Tell the user it's active; \
+they can review or pause it in Automations (⌘3)."
+    } else {
+        "Saved as a DISABLED draft — it won't run until enabled. Tell the user where to \
+find it (Automations, ⌘3)."
+    };
     json!({
         "ok": true,
         "automation": summarize(&automation),
-        "note": "Created but DISABLED for safety. Tell the user it's saved and ask them \
-to review and enable it in Automations (⌘3) — it will not run until they do.",
+        "note": note,
     })
 }
 
@@ -185,9 +186,10 @@ fn op_update(ctx: &AutomationToolCtx, p: &Value) -> Value {
         return json!({ "ok": false, "error": format!("invalid schedule: {e}") });
     }
     let now = now_ms();
-    // SAFETY GATE: carry the existing enabled flag forward; the agent cannot arm
-    // a dormant automation. Recompute next_run only when it's already enabled.
-    let next_run = if existing.enabled {
+    // The agent may flip `enabled` now; carry the existing flag forward when it
+    // doesn't. Recompute next_run when the (possibly new) state is enabled.
+    let enabled = p.get("enabled").and_then(|v| v.as_bool()).unwrap_or(existing.enabled);
+    let next_run = if enabled {
         schedule.initial_next_run(now)
     } else {
         None
@@ -199,7 +201,7 @@ fn op_update(ctx: &AutomationToolCtx, p: &Value) -> Value {
         workspace_dir: workspace,
         model,
         schedule,
-        enabled: existing.enabled,
+        enabled,
         created_at: existing.created_at,
         updated_at: now,
         next_run_at: next_run,

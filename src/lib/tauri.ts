@@ -7,6 +7,7 @@ import type {
   AutoArchiveSettings,
   Automation,
   AutomationInput,
+  BashResult,
   Conversation,
   DiscoverySettings,
   McpImportEntry,
@@ -136,6 +137,12 @@ export const api = {
       images: images && images.length ? images : null,
     }),
   abort: (id: string) => invoke<void>("abort", { id }),
+  /** Run a one-shot shell command locally (the composer's `!` bash mode) in
+   *  `cwd` (defaults to the workspace). Bypasses the agent; the result is
+   *  rendered inline in the chat. Rejects only on spawn failure — a non-zero
+   *  exit is a normal result in `exitCode`. */
+  runBash: (command: string, cwd?: string | null) =>
+    invoke<BashResult>("run_bash", { command, cwd: cwd ?? null }),
   /** Roll back the last (failed/empty) turn and return the user text to resend
    *  plus the truncated history. See commands::retry_last_turn. */
   retryLastTurn: (id: string) =>
@@ -171,6 +178,10 @@ export const api = {
     invoke<void>("set_api_key", { provider, key }),
   deleteApiKey: (provider: string) =>
     invoke<void>("delete_api_key", { provider }),
+  /** Custom DeepSeek base URL ("" = stock api.deepseek.com). */
+  getDeepseekBaseUrl: () => invoke<string>("get_deepseek_base_url"),
+  setDeepseekBaseUrl: (url: string) =>
+    invoke<void>("set_deepseek_base_url_cmd", { url }),
 
   // Automations ------------------------------------------------------------
   listAutomations: () => invoke<Automation[]>("list_automations"),

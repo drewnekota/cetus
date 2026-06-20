@@ -45,9 +45,9 @@ export function ActivityGroup({
         {running ? (
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
         ) : hasError ? (
-          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning" />
         ) : (
-          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
         )}
         {running ? (
           <>

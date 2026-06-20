@@ -27,7 +27,7 @@ export function GlyphBackdrop({ className }: { className?: string }) {
       <svg
         viewBox="0 0 1024 1024"
         fill="none"
-        className="absolute left-1/2 top-1/2 h-[96vmin] w-[96vmin] -translate-x-1/2 -translate-y-[52%] text-[oklch(0.45_0.05_322)]/[0.16] dark:text-white/[0.10]"
+        className="absolute left-1/2 top-1/2 h-[96vmin] w-[96vmin] -translate-x-1/2 -translate-y-[52%] text-primary/[0.10] dark:text-primary/[0.14]"
         style={{
           maskImage:
             "radial-gradient(70% 70% at 50% 47%, #000 48%, transparent 86%)",

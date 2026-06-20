@@ -30,6 +30,8 @@ interface Props {
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
   onSend: (text: string, attachments: ComposerAttachment[]) => void;
+  /** Run a local `!` bash-mode command in this conversation's workspace. */
+  onBash?: (command: string) => void;
   onAbort: () => void;
   focusToken: number;
 }
@@ -46,6 +48,7 @@ export function SessionDetailDialog({
   defaultWorkspace,
   onWorkspaceChange,
   onSend,
+  onBash,
   onAbort,
   focusToken,
 }: Props) {
@@ -110,8 +113,8 @@ export function SessionDetailDialog({
               {isStreaming && (
                 <>
                   <span>·</span>
-                  <span className="inline-flex items-center gap-1.5 text-amber-400">
-                    <span className="size-1.5 animate-pulse rounded-full bg-amber-400" />
+                  <span className="inline-flex items-center gap-1.5 text-warning">
+                    <span className="size-1.5 animate-pulse rounded-full bg-warning" />
                     {t("session.streaming")}
                   </span>
                 </>
@@ -172,6 +175,7 @@ export function SessionDetailDialog({
               defaultWorkspace={defaultWorkspace}
               onWorkspaceChange={onWorkspaceChange}
               onSend={onSend}
+              onBash={onBash}
               onAbort={onAbort}
               focusToken={focusToken}
               disabled={!conversation}

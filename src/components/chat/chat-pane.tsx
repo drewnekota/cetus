@@ -19,6 +19,7 @@ import {
   useMessageRoles,
 } from "@/lib/chat-store";
 import { useTranslation } from "@/lib/i18n";
+import { flavorHeadline } from "@/lib/chat-flavor";
 import type { ModelChoice } from "@/lib/types";
 
 interface Props {
@@ -30,6 +31,8 @@ interface Props {
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
   onSend: (text: string, attachments: ComposerAttachment[]) => void;
+  /** Run a local `!` bash-mode command (forwarded to the Composer). */
+  onBash?: (command: string) => void;
   onAbort: () => void;
   /** Roll back + rerun the last turn. Wired only on the last assistant message.
    *  Omitted (e.g. detail dialog) → no Regenerate button. */
@@ -49,6 +52,9 @@ interface Props {
   ultra?: boolean;
   onUltraToggle?: () => void;
   focusToken: number;
+  /** Persist the composer's unsent draft under this key (forwarded to Composer).
+   *  Omit to keep the draft ephemeral (e.g. the detail dialog). */
+  draftKey?: string;
   /** Headline shown above the composer when no messages exist yet. */
   emptyHeadline?: string;
   /** Visually pause the composer (e.g. detail dialog before history loads). */
@@ -68,6 +74,7 @@ export function ChatPane({
   defaultWorkspace,
   onWorkspaceChange,
   onSend,
+  onBash,
   onAbort,
   onRegenerate,
   onRetry,
@@ -79,13 +86,21 @@ export function ChatPane({
   ultra,
   onUltraToggle,
   focusToken,
+  draftKey,
   emptyHeadline,
   disabled,
 }: Props) {
-  const { t } = useTranslation("chat");
+  const { locale } = useTranslation("chat");
   const hasMessages = useHasMessages(convId);
   const isStreaming = useIsStreaming(convId);
-  const headline = emptyHeadline ?? t("pane.emptyHeadline");
+  // A fresh greeting per new chat. Keyed on focusToken (bumped when "New chat"
+  // is clicked) + convId + locale so it re-rolls on a new chat but stays put
+  // across keystrokes/re-renders. An explicit emptyHeadline prop still wins.
+  const randomHeadline = useMemo(
+    () => flavorHeadline(locale),
+    [locale, convId, focusToken],
+  );
+  const headline = emptyHeadline ?? randomHeadline;
 
   if (!hasMessages) {
     return (
@@ -98,6 +113,7 @@ export function ChatPane({
           <Composer
             variant="hero"
             focusToken={focusToken}
+            draftKey={draftKey}
             disabled={disabled}
             streaming={isStreaming}
             modelChoice={modelChoice}
@@ -106,6 +122,7 @@ export function ChatPane({
             defaultWorkspace={defaultWorkspace}
             onWorkspaceChange={onWorkspaceChange}
             onSend={onSend}
+            onBash={onBash}
             onAbort={onAbort}
             ultra={ultra}
             onUltraToggle={onUltraToggle}
@@ -135,6 +152,7 @@ export function ChatPane({
           <Composer
             variant="docked"
             focusToken={focusToken}
+            draftKey={draftKey}
             disabled={disabled}
             streaming={isStreaming}
             modelChoice={modelChoice}
@@ -144,6 +162,7 @@ export function ChatPane({
             onWorkspaceChange={onWorkspaceChange}
             onSend={onSend}
             onQueue={onQueue}
+            onBash={onBash}
             onAbort={onAbort}
             ultra={ultra}
             onUltraToggle={onUltraToggle}

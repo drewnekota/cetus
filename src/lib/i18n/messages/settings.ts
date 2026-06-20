@@ -105,6 +105,9 @@ export const settings = {
     "apiKeys.stored": "● stored",
     "apiKeys.unsaved": "● unsaved",
     "apiKeys.replace": "Replace",
+    "apiKeys.deepseekUrl.label": "DeepSeek API URL",
+    "apiKeys.deepseekUrl.hint":
+      "Optional. Routes all DeepSeek traffic — the agent plus titling, dream, skill review and meeting minutes — through a custom OpenAI-compatible base URL (proxy or self-host). Blank uses the default api.deepseek.com.",
 
     // --- Notifications ----------------------------------------------------
     "notifications.title": "Notifications",
@@ -588,6 +591,9 @@ export const settings = {
     "apiKeys.stored": "● 已保存",
     "apiKeys.unsaved": "● 未保存",
     "apiKeys.replace": "替换",
+    "apiKeys.deepseekUrl.label": "DeepSeek API 地址",
+    "apiKeys.deepseekUrl.hint":
+      "可选。将所有 DeepSeek 请求（主 agent，以及标题生成、dream、技能复盘、会议纪要）改走自定义的 OpenAI 兼容地址（代理或自建）。留空则使用默认 api.deepseek.com。",
 
     "notifications.title": "通知",
     "notifications.description":
@@ -975,6 +981,9 @@ export const settings = {
     "apiKeys.stored": "● 保存済み",
     "apiKeys.unsaved": "● 未保存",
     "apiKeys.replace": "差し替え",
+    "apiKeys.deepseekUrl.label": "DeepSeek API URL",
+    "apiKeys.deepseekUrl.hint":
+      "任意。すべての DeepSeek 通信（エージェント本体に加え、タイトル生成・dream・スキルレビュー・議事録）を、カスタムの OpenAI 互換ベース URL（プロキシ／セルフホスト）経由にします。空欄ならデフォルトの api.deepseek.com を使用します。",
 
     "notifications.title": "通知",
     "notifications.description":

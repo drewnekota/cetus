@@ -83,8 +83,8 @@ export function MeetingHud() {
         className="flex h-8 items-center gap-2 rounded-full bg-black pl-3 pr-1.5 shadow-[0_2px_10px_rgba(0,0,0,0.45)]"
       >
         <span className="pointer-events-none relative flex size-2 shrink-0">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-60" />
-          <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-60" />
+          <span className="relative inline-flex size-2 rounded-full bg-destructive" />
         </span>
         <span className="pointer-events-none text-xs font-medium tabular-nums text-white">
           {elapsed}

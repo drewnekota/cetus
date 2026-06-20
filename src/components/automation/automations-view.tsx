@@ -142,7 +142,7 @@ function AutomationCard({
             {a.enabled ? (
               <span>{t("card.next", { time: formatNextRun(a.nextRunAt) })}</span>
             ) : (
-              <span className="text-amber-500/80">{t("card.paused")}</span>
+              <span className="text-warning/80">{t("card.paused")}</span>
             )}
             <span className="inline-flex min-w-0 items-center gap-1">
               <Folder className="size-3 shrink-0" />

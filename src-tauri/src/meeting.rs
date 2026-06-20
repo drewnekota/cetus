@@ -59,7 +59,6 @@ const RECALL_TEXT_CAP: usize = 2000;
 /// How often the monitor loop runs retention pruning.
 const PRUNE_INTERVAL_SECS: u64 = 3600;
 
-const DEEPSEEK_URL: &str = "https://api.deepseek.com/chat/completions";
 const SUMMARY_MODEL: &str = "deepseek-v4-pro";
 
 const SUMMARY_SYSTEM_PROMPT: &str = "\
@@ -648,7 +647,7 @@ async fn summarize(
         "response_format": { "type": "json_object" },
     });
     let resp = reqwest::Client::new()
-        .post(DEEPSEEK_URL)
+        .post(crate::provider::deepseek_chat_url(store))
         .bearer_auth(&api_key)
         .json(&body)
         .timeout(Duration::from_secs(90))

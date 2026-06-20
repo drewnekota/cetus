@@ -6,12 +6,17 @@
 
 import type {
   AssistantMessageEvent,
+  BashResult,
   PiContentBlock,
   PiEvent,
   PiMessage,
   RenderedBlock,
   RenderedMessage,
 } from "./types";
+
+/** Captured output of a finished `!` bash-mode command, as stored in the
+ *  custom block's `details`. Mirrors BashResult plus a settled status. */
+export type BashExecResult = BashResult;
 import { stripAttachmentRefs } from "./attachments";
 import { userTextBlocks } from "./quick-context";
 import { isArtifactDetails } from "./artifact";
@@ -87,7 +92,12 @@ export type ChatAction =
     }
   | { type: "pi_event"; event: PiEvent }
   | { type: "set_error"; message: string | null }
-  | { type: "end_stream" };
+  | { type: "end_stream" }
+  // Local `!` bash-mode command: append a running breadcrumb (bash_start) then
+  // settle it with the captured output (bash_done). The key is minted by the
+  // caller so the two phases address the same message.
+  | { type: "bash_start"; key: string; command: string; cwd?: string }
+  | { type: "bash_done"; key: string; result: BashExecResult };
 
 function nowMs() {
   return Date.now();
@@ -337,6 +347,36 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         // agent_end doesn't mistake the empty bubble for a model failure.
         aborted: true,
       };
+    }
+    case "bash_start": {
+      const msg: RenderedMessage = {
+        key: action.key,
+        role: "custom",
+        blocks: [
+          {
+            kind: "custom",
+            customType: "bash_exec",
+            text: action.command,
+            details: { status: "running", cwd: action.cwd },
+          },
+        ],
+        createdAt: nowMs(),
+      };
+      return { ...state, messages: [...state.messages, msg] };
+    }
+    case "bash_done": {
+      const idx = state.messages.findIndex((m) => m.key === action.key);
+      if (idx === -1) return state;
+      const messages = [...state.messages];
+      messages[idx] = {
+        ...messages[idx],
+        blocks: messages[idx].blocks.map((b) =>
+          b.kind === "custom" && b.customType === "bash_exec"
+            ? { ...b, details: { status: "done", result: action.result } }
+            : b,
+        ),
+      };
+      return { ...state, messages };
     }
     case "pi_event":
       return reducePiEvent(state, action.event);

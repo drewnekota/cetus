@@ -94,13 +94,13 @@ export const ToolUseCard = memo(function ToolUseCard({ block }: { block: ToolUse
         )}
         <span className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
           {isError ? (
-            <AlertCircle className="h-3 w-3 text-amber-500" />
+            <AlertCircle className="h-3 w-3 text-warning" />
           ) : isRunning ? (
             <Loader2 className="h-3 w-3 animate-spin" />
           ) : isIncomplete ? (
             <CircleSlash className="h-3 w-3 text-muted-foreground" />
           ) : (
-            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+            <CheckCircle2 className="h-3 w-3 text-success" />
           )}
         </span>
       </button>
@@ -120,7 +120,7 @@ export const ToolUseCard = memo(function ToolUseCard({ block }: { block: ToolUse
               <pre
                 className={cn(
                   "max-h-72 overflow-auto whitespace-pre-wrap rounded bg-background/60 px-2 py-1.5 font-mono text-[11px]",
-                  isError && "text-amber-600 dark:text-amber-500",
+                  isError && "text-warning dark:text-warning",
                 )}
               >
                 {Array.isArray(block.result.content) ? flattenResultContent(block.result.content) : ""}

@@ -76,7 +76,7 @@
 │  │  cua.rs              Computer-Use Agent（macOS AX API）               │ │
 │  │  quick.rs            全局启动器设置 + 截屏                            │ │
 │  │  secrets.rs          macOS Keychain 操作                              │ │
-│  │  mcp.rs / composio.rs  MCP 连接器 + Composio 集成                    │ │
+│  │  mcp.rs              MCP 连接器（本地命令或远程 URL）                 │ │
 │  │  skills.rs           技能（SKILL.md）管理                             │ │
 │  │  titling.rs          对话自动标题（DeepSeek 生成）                    │ │
 │  │  dream.rs            Dreaming（空闲时反思并整合 Memory）              │ │
@@ -129,7 +129,7 @@
 | **`voice.rs`** | 语音输入：macOS 语音识别 + Swift 辅助程序。支持应用内和全局 push-to-talk。 |
 | **`cua.rs`** | Computer-Use Agent：通过 macOS Accessibility API（`cetus-cua-helper.swift`）dump 元素树、执行点击/键入等操作。支持 OCR 降级（AX-blind 应用如 Chrome）。 |
 | **`secrets.rs`** | macOS Keychain 操作：存储/读取/删除 DeepSeek、Groq、Tavily 等 API 密钥。密钥变更时 recycle 所有 pi 子进程以应用新 env。 |
-| **`mcp.rs`** + **`composio.rs`** | MCP 连接器管理：本地命令或远程 URL。`mcp-bridge.ts` 扩展通过 mcporter 读取配置并注册工具。Composio 集成提供 250+ SaaS 连接器。 |
+| **`mcp.rs`** | MCP 连接器管理：本地命令或远程 URL。`mcp-bridge.ts` 扩展通过 mcporter 读取配置并注册工具。 |
 
 ### 2.3 pi 扩展层（`src-tauri/cetus-extensions/`）
 

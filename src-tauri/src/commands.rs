@@ -282,7 +282,8 @@ fn spawn_auto_title(
             Ok(Some(k)) => k,
             _ => return, // no key → keep the mechanical fallback
         };
-        let title = match crate::titling::generate_title(&api_key, &message).await {
+        let url = crate::provider::deepseek_chat_url(&store);
+        let title = match crate::titling::generate_title(&api_key, &url, &message).await {
             Ok(t) => t,
             Err(e) => {
                 tracing::warn!("auto-title failed for {id}: {e}");

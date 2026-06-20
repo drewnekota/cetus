@@ -18,7 +18,7 @@ import {
   type ChatAction,
   type ChatState,
 } from "./chat-state";
-import type { PiEvent, PiMessage, RenderedMessage } from "./types";
+import type { BashResult, PiEvent, PiMessage, RenderedMessage } from "./types";
 
 interface ChatsStore {
   chats: Record<string, ChatState>;
@@ -39,6 +39,10 @@ interface ChatsStore {
     files?: { name: string; path: string; mimeType: string; sizeBytes: number }[],
   ) => void;
   piEvent: (id: string, event: PiEvent) => void;
+  /** Append a "running" breadcrumb for a local `!` bash command. */
+  bashStart: (id: string, key: string, command: string, cwd?: string) => void;
+  /** Settle a bash breadcrumb (by key) with its captured output. */
+  bashDone: (id: string, key: string, result: BashResult) => void;
   setError: (id: string, message: string | null) => void;
   /** Locally end an interrupted run (abort emits no agent_end). Flips
    *  isStreaming false so the write-through cache flushes the rendered turn. */
@@ -107,6 +111,10 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   userSent: (id, text, images, files) =>
     set((s) => step(s, id, { type: "user_sent", text, images, files })),
   piEvent: (id, event) => set((s) => step(s, id, { type: "pi_event", event })),
+  bashStart: (id, key, command, cwd) =>
+    set((s) => step(s, id, { type: "bash_start", key, command, cwd })),
+  bashDone: (id, key, result) =>
+    set((s) => step(s, id, { type: "bash_done", key, result })),
   setError: (id, message) =>
     set((s) => step(s, id, { type: "set_error", message })),
   endStream: (id) => set((s) => step(s, id, { type: "end_stream" })),

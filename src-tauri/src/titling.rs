@@ -13,10 +13,6 @@ use anyhow::{anyhow, bail, Result};
 use serde_json::json;
 use std::time::Duration;
 
-/// OpenAI-compatible chat completions endpoint (see pi's models.generated.js,
-/// provider "deepseek").
-const DEEPSEEK_URL: &str = "https://api.deepseek.com/chat/completions";
-
 /// The model used for conversation titling. cetus ships DeepSeek V4 Pro; we keep
 /// this call in its fast, non-thinking path by omitting `reasoning_effort`.
 const TITLE_MODEL: &str = "deepseek-v4-pro";
@@ -62,9 +58,10 @@ Title: OAuth Refresh Token Lifecycle";
 /// Longest title we keep; mirrors the mechanical fallback's cap in commands.rs.
 const MAX_TITLE_CHARS: usize = 60;
 
-/// Generate a concise title for `user_message` via DeepSeek V4 Pro. Returns
-/// the sanitized title, or an error if the request fails or comes back empty.
-pub async fn generate_title(api_key: &str, user_message: &str) -> Result<String> {
+/// Generate a concise title for `user_message` via DeepSeek V4 Pro. `url` is the
+/// chat-completions endpoint (honors a custom DeepSeek base URL). Returns the
+/// sanitized title, or an error if the request fails or comes back empty.
+pub async fn generate_title(api_key: &str, url: &str, user_message: &str) -> Result<String> {
     let body = json!({
         "model": TITLE_MODEL,
         // V4 always reasons — `low` is the floor; there is no non-thinking
@@ -86,7 +83,7 @@ pub async fn generate_title(api_key: &str, user_message: &str) -> Result<String>
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(DEEPSEEK_URL)
+        .post(url)
         .bearer_auth(api_key)
         .json(&body)
         .timeout(Duration::from_secs(30))

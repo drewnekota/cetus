@@ -3,6 +3,7 @@ mod auto_archive;
 mod automation;
 mod automation_tool;
 mod ax;
+mod bash;
 mod biasing;
 mod caps_remap;
 mod capture;
@@ -28,6 +29,7 @@ mod ocr;
 #[cfg(target_os = "macos")]
 mod panel;
 mod pi_rpc;
+mod provider;
 mod quick;
 mod run_engine;
 mod scheduler;
@@ -163,6 +165,12 @@ impl AppState {
         let workspace = PathBuf::from(&conv.workspace_dir);
         std::fs::create_dir_all(&workspace).ok();
         let mut env = secrets::load_env();
+        // Custom DeepSeek endpoint (proxy / self-host / region). The
+        // deepseek-endpoint extension reads this and overrides the provider's
+        // baseUrl; absent → pi uses the stock api.deepseek.com.
+        if let Some(base) = provider::deepseek_base_url(&self.store) {
+            env.push(("DEEPSEEK_BASE_URL".into(), base));
+        }
         // Per-conversation freeze: each conversation gets its own agent dir
         // (skills) + mcp.json, materialized once from the current global config on
         // first spawn. Pointing pi at these via env (overriding the process-global
@@ -964,6 +972,8 @@ pub fn run() {
         transcripts::clear_transcripts,
         ultra::get_ultra_settings,
         ultra::set_ultra_settings,
+        provider::get_deepseek_base_url,
+        provider::set_deepseek_base_url_cmd,
         locale::get_ui_locale,
         locale::set_ui_locale,
         dream::get_dream_settings,
@@ -1017,6 +1027,7 @@ pub fn run() {
         agent::set_agent_settings,
         agent::agent_stop,
         notify::post_notification,
+        bash::run_bash,
     ]);
 
     #[cfg(feature = "devtest")]
@@ -1080,6 +1091,8 @@ pub fn run() {
         transcripts::clear_transcripts,
         ultra::get_ultra_settings,
         ultra::set_ultra_settings,
+        provider::get_deepseek_base_url,
+        provider::set_deepseek_base_url_cmd,
         locale::get_ui_locale,
         locale::set_ui_locale,
         dream::get_dream_settings,
@@ -1133,6 +1146,7 @@ pub fn run() {
         agent::set_agent_settings,
         agent::agent_stop,
         notify::post_notification,
+        bash::run_bash,
         devtest::test_eval,
         devtest::test_screenshot,
         devtest::test_ax,

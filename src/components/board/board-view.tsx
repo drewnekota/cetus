@@ -36,9 +36,9 @@ const COLUMNS: {
   labelKey: string;
   pill: string;
 }[] = [
-  { id: "in_progress", labelKey: "column.inProgress", pill: "bg-amber-500/15 text-amber-300" },
-  { id: "needs_review", labelKey: "column.needsReview", pill: "bg-sky-500/15 text-sky-300" },
-  { id: "done", labelKey: "column.done", pill: "bg-emerald-500/15 text-emerald-300" },
+  { id: "in_progress", labelKey: "column.inProgress", pill: "bg-warning/15 text-warning" },
+  { id: "needs_review", labelKey: "column.needsReview", pill: "bg-info/15 text-info" },
+  { id: "done", labelKey: "column.done", pill: "bg-success/15 text-success" },
 ];
 
 // Cap on how many cards the board warms from the IDB cache on mount (newest
@@ -231,7 +231,7 @@ const Card = memo(function Card({
       <div className="flex items-start gap-1.5 text-sm font-medium leading-snug text-foreground">
         {streaming && (
           <span
-            className="mt-1.5 inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-amber-400"
+            className="mt-1.5 inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-warning"
             aria-label={t("card.streaming")}
           />
         )}
@@ -244,15 +244,15 @@ const Card = memo(function Card({
         <span className="line-clamp-2">{conversation.title || t("card.untitled")}</span>
       </div>
       {conversation.reviewState === "approved" && (
-        <div className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+        <div className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-medium text-success dark:text-success">
           <Check className="size-3" />
           {t("card.reviewed")}
         </div>
       )}
       <LastReplyPreview convId={conversation.id} />
       {pendingReview && (
-        <div className="mt-2 rounded-md border border-sky-500/30 bg-sky-500/5 px-2 py-1.5">
-          <div className="flex items-center gap-1 text-[11px] font-medium text-sky-700 dark:text-sky-300">
+        <div className="mt-2 rounded-md border border-info/30 bg-info/5 px-2 py-1.5">
+          <div className="flex items-center gap-1 text-[11px] font-medium text-info dark:text-info">
             <MessageCircleQuestion className="size-3.5 shrink-0" />
             {t("card.needsYourReview")}
           </div>
@@ -268,7 +268,7 @@ const Card = memo(function Card({
                   key={i}
                   className="flex gap-1 text-[11px] leading-snug text-muted-foreground"
                 >
-                  <span className="text-sky-500">•</span>
+                  <span className="text-info">•</span>
                   <span className="line-clamp-2">{q}</span>
                 </li>
               ))}

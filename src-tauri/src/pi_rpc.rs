@@ -147,9 +147,10 @@ command or remote URL). THIS is where third-party integrations live. Click Add \
 connector, pick stdio (a local command) or HTTP (a remote MCP endpoint URL plus \
 optional request headers), Test the handshake, and Save; a saved connector's \
 details (the tools it exposes) can be viewed inline. For Gmail, Calendar, Slack, \
-Google/Meta Ads and 250+ apps, a hosted aggregator like Composio works well: \
-authorize the accounts in its dashboard, then add its MCP URL + key here as an \
-HTTP connector. The connector's tools become available to the agent in the next \
+Google/Meta Ads and other SaaS apps, run that service's MCP server (a local stdio \
+command, or a remote/hosted HTTP MCP endpoint) and add it here: pick stdio and \
+point at the command, or pick HTTP and paste the MCP URL plus any auth header. The \
+connector's tools become available to the agent in the next \
 message. So \"add a Gmail connector\" = Settings → Connectors → Add connector.\n\
 - **Launcher** (Input & Capture): the global quick-launch panel — summon a \
 floating composer from anywhere, optionally with a screenshot as context.\n\

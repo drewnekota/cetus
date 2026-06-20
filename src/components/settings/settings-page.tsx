@@ -74,7 +74,6 @@ import {
   type Meeting,
   type MeetingSettings,
   type MeetingStatus,
-  type UpdateMeta,
 } from "@/lib/tauri";
 import { toast } from "sonner";
 import type {
@@ -97,6 +96,7 @@ import type {
   SkillState,
   DiscoveredSkill,
   SlashCommand,
+  UpdateMeta,
 } from "@/lib/types";
 import {
   DEFAULT_AGENT_SETTINGS,
@@ -549,6 +549,11 @@ function ApiKeysSection({
   const [saving, setSaving] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Custom DeepSeek base URL. `dsUrl` is the live field; `dsUrlSaved` is what's
+  // persisted, so the Save button only lights up on a real change.
+  const [dsUrl, setDsUrl] = useState("");
+  const [dsUrlSaved, setDsUrlSaved] = useState("");
+  const [dsUrlBusy, setDsUrlBusy] = useState(false);
 
   useEffect(() => {
     setRows({});
@@ -558,6 +563,31 @@ function ApiKeysSection({
       .then(setMasked)
       .catch((e) => setError(String(e)));
   }, [storedProviders]);
+
+  useEffect(() => {
+    api
+      .getDeepseekBaseUrl()
+      .then((u) => {
+        setDsUrl(u);
+        setDsUrlSaved(u);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function saveDsUrl() {
+    setDsUrlBusy(true);
+    setError(null);
+    try {
+      const v = dsUrl.trim();
+      await api.setDeepseekBaseUrl(v);
+      setDsUrl(v);
+      setDsUrlSaved(v);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setDsUrlBusy(false);
+    }
+  }
 
   async function copy(provider: string) {
     setError(null);
@@ -663,12 +693,12 @@ function ApiKeysSection({
                   </span>
                 </label>
                 {stored && !editing && (
-                  <span className="text-xs text-emerald-600">
+                  <span className="text-xs text-success">
                     {t("apiKeys.stored")}
                   </span>
                 )}
                 {editing && (
-                  <span className="text-xs text-amber-500">
+                  <span className="text-xs text-warning">
                     {t("apiKeys.unsaved")}
                   </span>
                 )}
@@ -753,6 +783,45 @@ function ApiKeysSection({
             </div>
           );
         })}
+
+        {/* Custom DeepSeek endpoint — redirects every DeepSeek call (the main
+            agent plus titling / dream / skill review / meeting minutes) to an
+            OpenAI-compatible base URL. Blank = stock api.deepseek.com. */}
+        <div className="space-y-1.5 border-t border-border pt-5">
+          <div className="flex items-center justify-between text-sm">
+            <label htmlFor="deepseek-base-url" className="font-medium">
+              {t("apiKeys.deepseekUrl.label")}
+            </label>
+            {dsUrl.trim() !== dsUrlSaved && (
+              <span className="text-xs text-warning">{t("apiKeys.unsaved")}</span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Input
+              id="deepseek-base-url"
+              type="text"
+              placeholder="https://api.deepseek.com"
+              value={dsUrl}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && dsUrl.trim() !== dsUrlSaved) {
+                  e.preventDefault();
+                  saveDsUrl();
+                }
+              }}
+              onChange={(e) => setDsUrl(e.target.value)}
+              disabled={dsUrlBusy}
+              className="font-mono"
+            />
+            {dsUrl.trim() !== dsUrlSaved && (
+              <Button size="sm" onClick={saveDsUrl} disabled={dsUrlBusy}>
+                {tc("action.save")}
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("apiKeys.deepseekUrl.hint")}
+          </p>
+        </div>
       </div>
       {error && <div className="mt-4 text-xs text-destructive">{error}</div>}
     </section>
@@ -806,7 +875,7 @@ function NotificationsSection() {
       </div>
 
       {blocked && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-500/50 bg-amber-500/5 px-3 py-2 text-xs text-amber-600">
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-warning/50 bg-warning/5 px-3 py-2 text-xs text-warning">
           <span>{t("notifications.blocked")}</span>
           <Button
             size="sm"
@@ -989,7 +1058,7 @@ function LauncherSection() {
       />
 
       {isMac && trusted === false && (
-        <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-amber-500/50 bg-amber-500/5 px-3 py-2 text-xs text-amber-600">
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-warning/50 bg-warning/5 px-3 py-2 text-xs text-warning">
           <span>{t("launcher.needAccessibility")}</span>
           <div className="flex shrink-0 gap-2">
             <Button size="sm" variant="outline" onClick={onGrant}>
@@ -1006,12 +1075,12 @@ function LauncherSection() {
         </div>
       )}
       {isMac && trusted === true && (
-        <p className="mt-3 text-xs text-emerald-600">
+        <p className="mt-3 text-xs text-success">
           {t("launcher.accessibilityGranted")}
         </p>
       )}
       {isMac && wantsScreenshot && screenRec === false && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-500/50 bg-amber-500/5 px-3 py-2 text-xs text-amber-600">
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-warning/50 bg-warning/5 px-3 py-2 text-xs text-warning">
           <span>{t("launcher.needScreenRecording")}</span>
           <div className="flex shrink-0 gap-2">
             <Button size="sm" variant="outline" onClick={onGrantScreen}>
@@ -1028,7 +1097,7 @@ function LauncherSection() {
         </div>
       )}
       {isMac && wantsScreenshot && screenRec === true && (
-        <p className="mt-2 text-xs text-emerald-600">
+        <p className="mt-2 text-xs text-success">
           {t("launcher.screenRecordingGranted")}
         </p>
       )}
@@ -1295,7 +1364,7 @@ function VoiceSection() {
       )}
 
       {isMac && perms && !voiceReady && (
-        <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-amber-500/50 bg-amber-500/5 px-3 py-2 text-xs text-amber-600">
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-warning/50 bg-warning/5 px-3 py-2 text-xs text-warning">
           <span>{t("voice.needPerms")}</span>
           <div className="flex shrink-0 gap-2">
             <Button size="sm" variant="outline" onClick={onGrantVoice}>
@@ -1312,7 +1381,7 @@ function VoiceSection() {
         </div>
       )}
       {isMac && voiceReady && (
-        <p className="mt-3 text-xs text-emerald-600">
+        <p className="mt-3 text-xs text-success">
           {t("voice.permsGranted")}
         </p>
       )}
@@ -1347,7 +1416,7 @@ function VoiceSection() {
       </div>
 
       {isMac && settings.voiceEnabled && trusted === false && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-500/50 bg-amber-500/5 px-3 py-2 text-xs text-amber-600">
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-warning/50 bg-warning/5 px-3 py-2 text-xs text-warning">
           <span>{t("voice.needAccessibility")}</span>
           <div className="flex shrink-0 gap-2">
             <Button size="sm" variant="outline" onClick={onGrantAx}>
@@ -1829,8 +1898,8 @@ function MeetingsSection({ open }: { open: boolean }) {
           <>
             <div className="flex min-w-0 items-center gap-2.5">
               <span className="relative flex size-2.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-60" />
-                <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-60" />
+                <span className="relative inline-flex size-2.5 rounded-full bg-destructive" />
               </span>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">
@@ -2118,7 +2187,7 @@ function AgentControlSection() {
             </p>
           </div>
           {axTrusted ? (
-            <span className="text-xs font-medium text-emerald-600">
+            <span className="text-xs font-medium text-success">
               {t("agentControl.enabled")}
             </span>
           ) : (
@@ -2149,7 +2218,7 @@ function AgentControlSection() {
             </p>
           </div>
           {screenTrusted ? (
-            <span className="text-xs font-medium text-emerald-600">
+            <span className="text-xs font-medium text-success">
               {t("agentControl.enabled")}
             </span>
           ) : (
@@ -2521,7 +2590,7 @@ function DreamingSection() {
 
       <p className="mt-4 text-xs text-muted-foreground">
         {t("dreaming.footnotePrefix")}
-        <span className="rounded bg-violet-500/10 px-1 py-0.5 font-medium text-violet-600 dark:text-violet-400">
+        <span className="rounded bg-skill/10 px-1 py-0.5 font-medium text-skill dark:text-skill">
           {t("dreaming.tagAgent")}
         </span>
         {t("dreaming.footnoteSuffix")}
@@ -2890,7 +2959,7 @@ function MemoryRow({
             className={cn(
               "rounded px-1.5 py-0.5 font-medium",
               agentAuthored
-                ? "bg-violet-500/10 text-violet-600 dark:text-violet-400"
+                ? "bg-skill/10 text-skill dark:text-skill"
                 : "bg-muted text-muted-foreground",
             )}
           >
@@ -3414,7 +3483,7 @@ function SkillRow({
             className={cn(
               "rounded px-1.5 py-0.5 font-medium",
               entry.source === "agent"
-                ? "bg-violet-500/10 text-violet-600 dark:text-violet-400"
+                ? "bg-skill/10 text-skill dark:text-skill"
                 : "bg-muted",
             )}
           >
@@ -4662,7 +4731,7 @@ function ConnectorEditor({
           className={cn(
             "rounded-md border px-3 py-2 text-xs",
             testResult.ok
-              ? "border-emerald-500/40 bg-emerald-500/5 text-emerald-600"
+              ? "border-success/40 bg-success/5 text-success"
               : "border-destructive/40 bg-destructive/5 text-destructive",
           )}
         >

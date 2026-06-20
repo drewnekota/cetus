@@ -66,7 +66,6 @@ const MAX_OPS: usize = 5;
 
 /// cetus ships only DeepSeek V4 Pro; consolidation runs against it without
 /// `reasoning_effort` to keep the pass fast. Matches `titling.rs`'s model choice.
-const DEEPSEEK_URL: &str = "https://api.deepseek.com/chat/completions";
 const DREAM_MODEL: &str = "deepseek-v4-pro";
 
 const DREAM_SYSTEM_PROMPT: &str = "\
@@ -291,7 +290,7 @@ async fn run_dream(state: &AppState, handle: &AppHandle, quiet_minutes: u32) -> 
          RECENT CONVERSATIONS TO CONSOLIDATE:\n{transcript}"
     );
 
-    let ops = distill(&api_key, &user_msg).await?;
+    let ops = distill(&api_key, &crate::provider::deepseek_chat_url(&state.store), &user_msg).await?;
     let ops = parse_ops(&ops);
     if !ops.is_empty() {
         match memory::consolidate(&state.app_data_dir, ops) {
@@ -461,7 +460,7 @@ pub(crate) fn read_i64(store: &Store, key: &str) -> Option<i64> {
 
 /// One-shot, out-of-band consolidation call (mirrors `titling::generate_title`,
 /// with JSON mode on). Returns the raw model content (expected to be JSON).
-async fn distill(api_key: &str, user_msg: &str) -> Result<String> {
+async fn distill(api_key: &str, url: &str, user_msg: &str) -> Result<String> {
     let body = json!({
         "model": DREAM_MODEL,
         "messages": [
@@ -476,7 +475,7 @@ async fn distill(api_key: &str, user_msg: &str) -> Result<String> {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(DEEPSEEK_URL)
+        .post(url)
         .bearer_auth(api_key)
         .json(&body)
         .timeout(Duration::from_secs(60))

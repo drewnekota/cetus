@@ -43,7 +43,10 @@ import { createRuntime, type Runtime, type ServerToolInfo } from "mcporter";
 /** Absolute path to the exported `{ mcpServers }` config (set by the host). */
 const CONFIG_PATH = process.env.CETUS_MCP_CONFIG?.trim() || process.env.MCPORTER_CONFIG?.trim();
 /** Per-server connect + tools/list budget. A cold `npx`/`uvx` server downloads on
- *  first run, so this is generous; a server slower than this is skipped, not fatal. */
+ *  first run, so this is generous; a server slower than this is skipped, not fatal.
+ *  Since the catalog is now built OFF the critical path (see session_start below),
+ *  this no longer races the host's RPC timeout — it only bounds how long a hung
+ *  server delays the appearance of the OTHER servers' tools. */
 const LIST_TIMEOUT_MS = 30_000;
 /** Per tool-call budget. */
 const CALL_TIMEOUT_MS = 120_000;
@@ -94,82 +97,152 @@ export default function mcpBridge(pi: ExtensionAPI) {
     return runtime;
   };
 
-  pi.on("session_start", async (_event: unknown, _ctx: any) => {
-    let rt: Runtime;
-    let servers: string[];
-    try {
-      rt = await getRuntime();
-      servers = rt.listServers();
-    } catch {
-      return; // config missing / unparseable → treat as "no MCP configured"
+  // Cached once a build SUCCEEDS, so a later session_start (a reload /
+  // switch_session re-emits the event) re-registers instantly from memory
+  // instead of re-hitting the network. A build that finds NOTHING is not cached,
+  // so a server that was down at startup can still be picked up later.
+  let cached: { rt: Runtime; catalog: CatalogEntry[] } | null = null;
+  // De-dupes concurrent builds: the startup session_start plus an immediate
+  // new_session would otherwise kick off two identical listTools sweeps. Held
+  // while a build is in flight; cleared on completion so a failed/empty build
+  // can be retried by a later session_start.
+  let inFlight: Promise<{ rt: Runtime; catalog: CatalogEntry[] } | null> | null = null;
+
+  // CRITICAL — why this handler must NOT await the MCP work:
+  // pi awaits session_start BEFORE it starts reading stdin (rpc-mode binds the
+  // input reader only after the startup session_start resolves). If this handler
+  // blocked on MCP connections, the host's first RPC (new_session/switch_session)
+  // would sit unread in the pipe until a slow/hung server timed out — and the
+  // host's 30s RPC budget (== LIST_TIMEOUT_MS) would fire first, surfacing as
+  // "pi request timed out after 30s" and a dead conversation. So we kick the
+  // catalog build off in the BACKGROUND and return synchronously. MCP tools
+  // appear a moment later (once servers connect); a down/hung server only delays
+  // its OWN tools, never session readiness — matching Claude Code's "an MCP
+  // server erroring degrades silently and never blocks the agent" behavior.
+  pi.on("session_start", () => {
+    if (cached) {
+      // Already built this process: re-register into the now-live session
+      // (cheap, no network) so a switched-in session sees the tools too.
+      registerCatalog(pi, cached.rt, cached.catalog);
+      return;
     }
-    if (servers.length === 0) return;
+    if (!inFlight) {
+      inFlight = buildCatalog(getRuntime);
+      void inFlight
+        .then((res) => {
+          inFlight = null;
+          if (!res) return; // no config / no servers / no tools
+          cached = res;
+          registerCatalog(pi, res.rt, res.catalog);
+        })
+        .catch((err) => {
+          inFlight = null; // let a later session_start retry
+          console.warn(`[cetus mcp-bridge] init failed: ${errMsg(err)}`);
+        });
+    }
+    // else: a build is already running; its .then() registers for everyone.
+    // Either way, return synchronously — session_start must never block.
+  });
+}
 
-    // --- Build the catalog (one entry per tool, names de-duplicated) ---------
-    // Collect every (server, tool) pair first, then sort by (server, toolName)
-    // BEFORE assigning fq-names. Promise.all settles in network-resolution order,
-    // which varies run-to-run; this catalog feeds the tool list at position 0 of
-    // every DeepSeek request, and uniqueName()'s de-dup suffixes depend on
-    // encounter order — so without a deterministic sort the SAME connector set
-    // yields a different tool prefix (and different colliding-tool names) across
-    // spawns, defeating the prompt cache. Comparison is by UTF-16 code unit
-    // (locale-independent), not localeCompare.
-    const collected: { server: string; tool: ServerToolInfo }[] = [];
-    await Promise.all(
-      servers.map(async (server) => {
-        let tools: ServerToolInfo[];
-        try {
-          tools = await listServerTools(rt, server);
-        } catch (err) {
-          // A down / misconfigured / un-authorised server (e.g. an OAuth-gated
-          // remote needing sign-in) is expected and non-fatal: its tools simply
-          // don't get catalogued. Log to stderr for diagnosis, but DON'T fire a
-          // UI toast — session_start runs in every pi (main conversation AND
-          // every Ultra sub-agent / parallel candidate), so a single bad server
-          // would otherwise spam a burst of identical warning toasts on each turn.
-          console.warn(`[cetus mcp-bridge] server "${server}" unavailable: ${errMsg(err)}`);
-          return;
-        }
-        for (const tool of tools) collected.push({ server, tool });
-      }),
-    );
-    if (collected.length === 0) return;
-    const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-    collected.sort((a, b) => cmp(a.server, b.server) || cmp(a.tool.name, b.tool.name));
-    const taken = new Set<string>();
-    const catalog: CatalogEntry[] = collected.map(({ server, tool }) => ({
-      fqName: uniqueName(`mcp__${server}__${tool.name}`, taken),
-      server,
-      toolName: tool.name,
-      description: tool.description?.trim() || "",
-      inputSchema: tool.inputSchema,
-    }));
+// ---- catalog build / registration ------------------------------------------
 
-    // --- Decide eager vs. progressive ---------------------------------------
-    const bridged = catalog.filter((e) => !EAGER_SERVERS.has(e.server));
-    const eager = catalog.filter((e) => EAGER_SERVERS.has(e.server));
-    const useBridge = bridged.length > EAGER_IF_FEW;
+/** Connect every configured server, list its tools, and assemble a sorted,
+ *  de-duplicated catalog. Runs OFF the session_start critical path (see the
+ *  handler). Resolves to `null` when there's nothing to bridge (no config, no
+ *  servers, or every server down) so the caller knows not to cache it. Never
+ *  rejects for an individual down server — that's skipped with a stderr note. */
+async function buildCatalog(
+  getRuntime: () => Promise<Runtime>,
+): Promise<{ rt: Runtime; catalog: CatalogEntry[] } | null> {
+  let rt: Runtime;
+  let servers: string[];
+  try {
+    rt = await getRuntime();
+    servers = rt.listServers();
+  } catch {
+    return null; // config missing / unparseable → treat as "no MCP configured"
+  }
+  if (servers.length === 0) return null;
 
-    // EAGER_SERVERS' tools are always direct. When not bridging, everything is direct.
-    for (const e of useBridge ? eager : catalog) registerConcrete(pi, rt, e);
+  // Collect every (server, tool) pair first, then sort by (server, toolName)
+  // BEFORE assigning fq-names. Promise.all settles in network-resolution order,
+  // which varies run-to-run; this catalog feeds the tool list at position 0 of
+  // every DeepSeek request, and uniqueName()'s de-dup suffixes depend on
+  // encounter order — so without a deterministic sort the SAME connector set
+  // yields a different tool prefix (and different colliding-tool names) across
+  // spawns, defeating the prompt cache. Waiting for ALL servers before naming is
+  // also why we don't register each server's tools as it connects: that would
+  // reintroduce encounter-order non-determinism. Comparison is by UTF-16 code
+  // unit (locale-independent), not localeCompare.
+  const collected: { server: string; tool: ServerToolInfo }[] = [];
+  await Promise.all(
+    servers.map(async (server) => {
+      let tools: ServerToolInfo[];
+      try {
+        tools = await listServerTools(rt, server);
+      } catch (err) {
+        // A down / misconfigured / un-authorised server (e.g. an OAuth-gated
+        // remote needing sign-in) is expected and non-fatal: its tools simply
+        // don't get catalogued. Log to stderr for diagnosis, but DON'T fire a
+        // UI toast — session_start runs in every pi (main conversation AND
+        // every Ultra sub-agent / parallel candidate), so a single bad server
+        // would otherwise spam a burst of identical warning toasts on each turn.
+        console.warn(`[cetus mcp-bridge] server "${server}" unavailable: ${errMsg(err)}`);
+        return;
+      }
+      for (const tool of tools) collected.push({ server, tool });
+    }),
+  );
+  if (collected.length === 0) return null;
+  collected.sort((a, b) => cmp(a.server, b.server) || cmp(a.tool.name, b.tool.name));
+  const taken = new Set<string>();
+  const catalog: CatalogEntry[] = collected.map(({ server, tool }) => ({
+    fqName: uniqueName(`mcp__${server}__${tool.name}`, taken),
+    server,
+    toolName: tool.name,
+    description: tool.description?.trim() || "",
+    inputSchema: tool.inputSchema,
+  }));
+  return { rt, catalog };
+}
 
-    if (!useBridge) return;
+/** Register a built catalog into the live session — either as direct
+ *  `mcp__server__tool` tools (few tools, or EAGER_SERVERS) or behind the three
+ *  progressive-disclosure bridge tools. Idempotent (re-registering a name
+ *  overwrites), so it's safe to call on every session_start. Never throws: if
+ *  the captured `pi` went stale because the session was replaced mid-build, the
+ *  registration is a silent no-op and the replacement's own session_start
+ *  re-runs this. */
+function registerCatalog(pi: ExtensionAPI, rt: Runtime, catalog: CatalogEntry[]) {
+  // --- Decide eager vs. progressive -----------------------------------------
+  const bridged = catalog.filter((e) => !EAGER_SERVERS.has(e.server));
+  const eager = catalog.filter((e) => EAGER_SERVERS.has(e.server));
+  const useBridge = bridged.length > EAGER_IF_FEW;
 
-    // --- Progressive disclosure: three bridge tools over the catalog ---------
-    // mcp_call/mcp_describe resolve against the FULL catalog (so any tool name
-    // works), while mcp_search surfaces only the bridged tools the model can't
-    // already see as direct tools.
-    const byName = new Map<string, CatalogEntry>(catalog.map((e) => [e.fqName, e]));
-    const resolve = (name: string): CatalogEntry | undefined => {
-      const want = String(name || "").trim();
-      if (byName.has(want)) return byName.get(want);
-      // Tolerate a bare tool name when it's unambiguous across servers.
-      const hits = catalog.filter((e) => e.toolName === want);
-      return hits.length === 1 ? hits[0] : undefined;
-    };
+  // EAGER_SERVERS' tools are always direct. When not bridging, everything is direct.
+  for (const e of useBridge ? eager : catalog) registerConcrete(pi, rt, e);
 
-    const serverNames = [...new Set(bridged.map((e) => e.server))].sort(cmp);
+  if (!useBridge) return;
 
+  // --- Progressive disclosure: three bridge tools over the catalog ----------
+  // mcp_call/mcp_describe resolve against the FULL catalog (so any tool name
+  // works), while mcp_search surfaces only the bridged tools the model can't
+  // already see as direct tools.
+  const byName = new Map<string, CatalogEntry>(catalog.map((e) => [e.fqName, e]));
+  const resolve = (name: string): CatalogEntry | undefined => {
+    const want = String(name || "").trim();
+    if (byName.has(want)) return byName.get(want);
+    // Tolerate a bare tool name when it's unambiguous across servers.
+    const hits = catalog.filter((e) => e.toolName === want);
+    return hits.length === 1 ? hits[0] : undefined;
+  };
+
+  const serverNames = [...new Set(bridged.map((e) => e.server))].sort(cmp);
+
+  // A stale captured ctx (session replaced while the background build ran) makes
+  // pi.registerTool throw; swallow it — a fresh session_start will re-register.
+  try {
     pi.registerTool({
       name: "mcp_search",
       label: "MCP: search tools",
@@ -252,10 +325,16 @@ export default function mcpBridge(pi: ExtensionAPI) {
         return callMcp(rt, e, args);
       },
     });
-  });
+  } catch (err) {
+    console.warn(`[cetus mcp-bridge] bridge tools skipped: ${errMsg(err)}`);
+  }
 }
 
 // ---- helpers ---------------------------------------------------------------
+
+/** Order two strings by UTF-16 code unit (locale-independent — see buildCatalog
+ *  on why determinism matters for the prompt cache). */
+const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Register one catalogued tool as a first-class pi tool proxying to its server. */
 function registerConcrete(pi: ExtensionAPI, rt: Runtime, e: CatalogEntry) {

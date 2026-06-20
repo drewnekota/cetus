@@ -964,6 +964,59 @@ export default function Home() {
     refreshList().catch(() => {});
   }
 
+  /** Execute a local `!` bash-mode command against an existing conversation:
+   *  append a "running" breadcrumb, run it in `cwd`, then settle the card with
+   *  its output. Bypasses the agent entirely (the model never sees it). Shared
+   *  by the main chat and the detail dialog. */
+  async function execBash(convId: string, cwd: string | undefined, command: string) {
+    const store = chatStore.getState();
+    store.ensure(convId);
+    const key =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `bash-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    store.bashStart(convId, key, command, cwd);
+    try {
+      const res = await api.runBash(command, cwd);
+      store.bashDone(convId, key, res);
+    } catch (e) {
+      // A spawn failure (bad shell, missing cwd) — surface it as stderr in the
+      // same card rather than a separate error row.
+      store.bashDone(convId, key, {
+        stdout: "",
+        stderr: String(e),
+        exitCode: -1,
+        timedOut: false,
+        cwd: cwd ?? "",
+      });
+    }
+    refreshList().catch(() => {});
+  }
+
+  /** Main-chat bash entry: mints a conversation on the hero (mirroring onSend's
+   *  lazy create), then runs the command in the active workspace. */
+  async function onBash(command: string) {
+    let id = activeId;
+    if (!id) {
+      const c = await api.newConversation(workspaceDir ?? undefined);
+      id = c.id;
+      setConversations((cs) => mergeConversation(cs, c));
+      setActiveId(id);
+      setWorkspaceDir(c.workspaceDir);
+      api.setModelChoice(id, modelChoice).catch(console.error);
+    }
+    setFocusToken((t) => t + 1);
+    await execBash(id, workspaceDir ?? undefined, command);
+  }
+
+  /** Detail-dialog bash entry: the conversation always exists, so run straight
+   *  against detailId in its own workspace. */
+  async function onDetailBash(command: string) {
+    if (!detailId) return;
+    setDetailFocusToken((t) => t + 1);
+    await execBash(detailId, detailWorkspaceDir ?? undefined, command);
+  }
+
   async function onAbort() {
     if (!activeId) return;
     // Bailing out of the run: drop anything parked for it rather than
@@ -1435,6 +1488,7 @@ export default function Home() {
         defaultWorkspace={defaultWorkspace}
         onWorkspaceChange={onDetailWorkspaceChange}
         onSend={onDetailSend}
+        onBash={onDetailBash}
         onAbort={onDetailAbort}
         focusToken={detailFocusToken}
       />
@@ -1538,12 +1592,14 @@ export default function Home() {
           ) : hasMessages ? (
             <ChatPane
               convId={activeId}
+              draftKey={activeId ? `chat:${activeId}` : "chat:new"}
               modelChoice={modelChoice}
               onModelChange={onModelChange}
               workspaceDir={workspaceDir}
               defaultWorkspace={defaultWorkspace}
               onWorkspaceChange={onWorkspaceChange}
               onSend={onSend}
+              onBash={onBash}
               onAbort={onAbort}
               onRegenerate={retrying ? undefined : onRetry}
               onRetry={onRetry}
@@ -1573,6 +1629,7 @@ export default function Home() {
                 <Composer
                   variant="hero"
                   focusToken={focusToken}
+                  draftKey={activeId ? `chat:${activeId}` : "chat:new"}
                   disabled={!piReady}
                   streaming={isStreaming}
                   modelChoice={modelChoice}
@@ -1581,6 +1638,7 @@ export default function Home() {
                   defaultWorkspace={defaultWorkspace}
                   onWorkspaceChange={onWorkspaceChange}
                   onSend={onSend}
+                  onBash={onBash}
                   onAbort={onAbort}
                   ultra={ultraEnabled}
                   onUltraToggle={onUltraToggle}

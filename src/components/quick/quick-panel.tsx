@@ -272,7 +272,7 @@ export function QuickPanel() {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden rounded-[18px] bg-[oklch(0.985_0.006_320_/_0.72)] font-medium text-foreground ring-1 ring-black/[0.04] dark:bg-[oklch(0.24_0.04_322_/_0.58)] dark:ring-white/[0.06] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:text-[11px]">
+    <div className="flex h-screen w-screen flex-col overflow-hidden rounded-[18px] bg-[color-mix(in_oklab,var(--surface),transparent_18%)] font-medium text-foreground ring-1 ring-[var(--ink)]/[0.06] dark:bg-[color-mix(in_oklab,var(--card),transparent_28%)] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:text-[11px]">
       {/* The input owns the whole region above the action strip: the textarea
           fills it so typing wraps and uses the full height, and the screenshot
           chip (when present) tucks in at the bottom of the same region. */}
@@ -321,7 +321,7 @@ export function QuickPanel() {
                 </button>
               </div>
             ) : screenshotDenied ? (
-              <span className="flex items-center gap-1.5 text-xs text-amber-500">
+              <span className="flex items-center gap-1.5 text-xs text-warning">
                 <ImageOff className="size-3.5" />
                 {t("screenshot.permission")}
               </span>

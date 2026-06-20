@@ -14,11 +14,11 @@
  *   model tool ──ui.input(title="__cetus_automation__", placeholder=JSON)──► Rust
  *              ◄────────────────── JSON reply (value) ───────────────────────
  *
- * SAFETY: the host always creates automations DISABLED and never lets `update`
- * arm a dormant one — enabling is a deliberate human action in the UI. So these
- * tools cannot silently schedule recurring background work. Keep the sentinel
- * and the field names in sync with src-tauri/src/automation_tool.rs and the
- * `AUTOMATION_TOOL_TITLE` constant in src-tauri/src/pi_rpc.rs.
+ * ENABLING: the agent may arm automations directly — `create` defaults to
+ * enabled (pass `enabled: false` for a draft) and `update` can flip the flag.
+ * Keep the sentinel and the field names in sync with
+ * src-tauri/src/automation_tool.rs and the `AUTOMATION_TOOL_TITLE` constant in
+ * src-tauri/src/pi_rpc.rs.
  */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -114,6 +114,14 @@ const scheduleFields = {
   reasoning: Type.Optional(
     Type.String({ description: "Reasoning level: 'non_think' | 'think_high' (default) | 'think_max'." }),
   ),
+  enabled: Type.Optional(
+    Type.Boolean({
+      description:
+        "Whether the automation is armed. On create, defaults to true (it runs on " +
+        "schedule immediately); pass false to save a draft. On update, pass true to " +
+        "enable a disabled automation or false to pause it.",
+    }),
+  ),
 };
 
 export default function (pi: ExtensionAPI) {
@@ -124,10 +132,9 @@ export default function (pi: ExtensionAPI) {
       "Save a recurring (or one-shot) automation: a prompt that fires on a " +
       "schedule as a background conversation. Use this when the user wants " +
       "something to happen on a schedule ('every morning…', 'each weekday at " +
-      "9…', 'in 2 hours…'). The automation is created DISABLED for safety — tell " +
-      "the user it's saved and that they need to review and enable it in the " +
-      "Automations view; it will not run until they do. Returns the saved " +
-      "automation or a validation error you should fix and retry.",
+      "9…', 'in 2 hours…'). It is enabled and will start running on schedule by " +
+      "default; pass `enabled: false` to save it as a draft instead. Returns the " +
+      "saved automation or a validation error you should fix and retry.",
     parameters: Type.Object({
       name: Type.String({ description: "Short human label for the automation." }),
       prompt: Type.String({
@@ -159,11 +166,12 @@ export default function (pi: ExtensionAPI) {
     name: "update_automation",
     label: "Update automation",
     description:
-      "Change an existing automation's name, prompt, schedule, workspace, or " +
-      "model. Pass the automation's `id` (get it from list_automations) plus only " +
-      "the fields you want to change; for the schedule, pass `scheduleKind` and " +
-      "its fields. This canNOT enable a disabled automation (enabling is a " +
-      "human action) — it only edits. Returns the updated automation or an error.",
+      "Change an existing automation's name, prompt, schedule, workspace, model, " +
+      "or enabled state. Pass the automation's `id` (get it from list_automations) " +
+      "plus only the fields you want to change; for the schedule, pass " +
+      "`scheduleKind` and its fields. Pass `enabled: true` to arm a disabled " +
+      "automation or `enabled: false` to pause it. Returns the updated automation " +
+      "or an error.",
     parameters: Type.Object({
       id: Type.String({ description: "Id of the automation to update (from list_automations)." }),
       name: Type.Optional(Type.String({ description: "New label." })),

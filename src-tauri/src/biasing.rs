@@ -385,10 +385,13 @@ fn prune(store: &mut LearnedStore) {
 #[cfg(target_os = "macos")]
 fn focused_snippet(max_chars: usize) -> Option<String> {
     use accessibility_sys::{
-        kAXErrorSuccess, kAXFocusedUIElementAttribute, kAXRoleAttribute,
+        kAXChildrenAttribute, kAXErrorSuccess, kAXFocusedUIElementAttribute, kAXRoleAttribute,
         kAXSelectedTextAttribute, kAXSubroleAttribute, kAXValueAttribute, AXIsProcessTrusted,
         AXUIElementCopyAttributeValue, AXUIElementCreateSystemWide, AXUIElementRef,
         AXUIElementSetMessagingTimeout,
+    };
+    use core_foundation::array::{
+        CFArrayGetCount, CFArrayGetTypeID, CFArrayGetValueAtIndex, CFArrayRef,
     };
     use core_foundation::base::{CFGetTypeID, CFType, CFTypeRef, TCFType};
     use core_foundation::string::{CFString, CFStringRef};
@@ -415,6 +418,69 @@ fn focused_snippet(max_chars: usize) -> Option<String> {
         Some(s.to_string())
     }
 
+    // An element's own editable text: the whole value (so the correction re-read
+    // sees the full field, not just a stray selection), the active selection as a
+    // fallback for elements that only expose that.
+    unsafe fn own_text(el: AXUIElementRef) -> Option<String> {
+        copy_string(el, kAXValueAttribute)
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                copy_string(el, kAXSelectedTextAttribute).filter(|s| !s.trim().is_empty())
+            })
+    }
+
+    // Append leaf text from `el`'s subtree into `out`, in reading order. A node
+    // with its own non-empty value is a text leaf (take it, don't recurse —
+    // children just re-expose the same runs); otherwise descend. Bounded three
+    // ways — character budget, node budget (each node is one AX round-trip), and
+    // depth — because a focused web area can be a whole document and every read
+    // costs an IPC. Each element gets its own messaging timeout: only the root
+    // inherited the 0.25s bound, children default to the ~6s global otherwise.
+    unsafe fn gather(
+        el: AXUIElementRef,
+        out: &mut String,
+        chars_left: &mut usize,
+        nodes_left: &mut usize,
+        depth: usize,
+    ) {
+        if *chars_left == 0 || *nodes_left == 0 || depth > 6 {
+            return;
+        }
+        *nodes_left -= 1;
+        AXUIElementSetMessagingTimeout(el, 0.25);
+        if let Some(t) = own_text(el) {
+            for c in t.trim().chars() {
+                if *chars_left == 0 {
+                    break;
+                }
+                out.push(c);
+                *chars_left -= 1;
+            }
+            if *chars_left > 0 {
+                out.push(' ');
+                *chars_left -= 1;
+            }
+            return;
+        }
+        let Some(children) = copy_attr(el, kAXChildrenAttribute) else {
+            return;
+        };
+        if CFGetTypeID(children.as_CFTypeRef()) != CFArrayGetTypeID() {
+            return;
+        }
+        let arr = children.as_CFTypeRef() as CFArrayRef;
+        let count = CFArrayGetCount(arr);
+        for i in 0..count {
+            if *chars_left == 0 || *nodes_left == 0 {
+                break;
+            }
+            let child = CFArrayGetValueAtIndex(arr, i) as AXUIElementRef;
+            if !child.is_null() {
+                gather(child, out, chars_left, nodes_left, depth + 1);
+            }
+        }
+    }
+
     if !unsafe { AXIsProcessTrusted() } {
         return None;
     }
@@ -435,20 +501,51 @@ fn focused_snippet(max_chars: usize) -> Option<String> {
         // Re-bound on the focused element itself for the role/value reads.
         AXUIElementSetMessagingTimeout(focused_el, 0.25);
 
-        // Role gate: only real text controls, and never a secure (password) field.
         let role = copy_string(focused_el, kAXRoleAttribute).unwrap_or_default();
         let subrole = copy_string(focused_el, kAXSubroleAttribute).unwrap_or_default();
+        // Never read a secure (password) field, whatever its role looks like.
         if role == "AXSecureTextField" || subrole == "AXSecureTextField" {
             return None;
         }
-        if !matches!(role.as_str(), "AXTextField" | "AXTextArea" | "AXComboBox") {
-            return None;
+
+        // 1) The focused element's own text — covers native fields and standard
+        //    web <input>/<textarea> (a real text role with a populated value).
+        let mut text = own_text(focused_el);
+
+        // 2) Empty value? Rich/contenteditable web composers (Slack, Discord,
+        //    ChatGPT, Notion…) focus an editable root that exposes no AXValue and
+        //    keep the text in descendant AXStaticText nodes — that's the bulk of
+        //    the "focused field unreadable" misses. Crawl the subtree for them,
+        //    gated to container-ish roles so we never sweep a focused button/list.
+        if text.is_none() {
+            let descend = subrole == "AXContentEditable"
+                || matches!(
+                    role.as_str(),
+                    "AXTextArea"
+                        | "AXTextField"
+                        | "AXComboBox"
+                        | "AXScrollArea"
+                        | "AXGroup"
+                        | "AXWebArea"
+                        | "AXUnknown"
+                        | ""
+                );
+            if descend {
+                let mut buf = String::new();
+                let mut chars_left = max_chars.saturating_mul(2).max(256);
+                let mut nodes_left = 250usize;
+                gather(focused_el, &mut buf, &mut chars_left, &mut nodes_left, 0);
+                let buf = buf.trim();
+                if !buf.is_empty() {
+                    text = Some(buf.to_string());
+                }
+            }
         }
 
-        // Prefer the active selection; fall back to the whole field value.
-        let text = copy_string(focused_el, kAXSelectedTextAttribute)
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| copy_string(focused_el, kAXValueAttribute))?;
+        let Some(text) = text else {
+            tracing::debug!("focused_snippet: no readable text (role {role:?}, subrole {subrole:?})");
+            return None;
+        };
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return None;

@@ -109,8 +109,8 @@ export function AgentControlCard({ conversationId }: AgentControlCardProps) {
     <div className="rounded-lg border border-border bg-card text-card-foreground shadow-sm">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <span className="relative flex h-2.5 w-2.5 shrink-0">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-success" />
         </span>
         <SurfaceIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="text-sm font-medium">
@@ -124,8 +124,8 @@ export function AgentControlCard({ conversationId }: AgentControlCardProps) {
           onClick={handleStop}
           disabled={stopped}
           className={cn(
-            "ml-auto inline-flex items-center gap-1 rounded-md border border-red-500/30 px-2 py-1 text-xs font-medium text-red-500 transition-colors",
-            "hover:bg-red-500/10",
+            "ml-auto inline-flex items-center gap-1 rounded-md border border-destructive/30 px-2 py-1 text-xs font-medium text-destructive transition-colors",
+            "hover:bg-destructive/10",
             "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent",
           )}
         >

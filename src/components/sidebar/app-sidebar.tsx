@@ -133,11 +133,15 @@ export const AppSidebar = memo(function AppSidebar({
             <SidebarMenuButton
               tooltip={newLabel}
               onClick={onNew}
-              className="min-w-8 bg-primary text-primary-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+              // Subtle elevated surface (lighter than the sidebar/background in
+              // dark mode) rather than a bold primary fill — matches the calmer
+              // selected-row treatment. Brightness hover keeps it reading as the
+              // primary action in both themes.
+              className="min-w-8 bg-sidebar-accent text-sidebar-accent-foreground transition-[filter] duration-200 ease-linear hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:brightness-110 active:brightness-95 dark:hover:brightness-125"
             >
               <PlusCircle />
               <span>{newLabel}</span>
-              <Kbd className="ml-auto border-transparent bg-primary-foreground/10 text-primary-foreground/70">
+              <Kbd className="ml-auto border-transparent bg-foreground/10 text-muted-foreground">
                 ⌘N
               </Kbd>
             </SidebarMenuButton>

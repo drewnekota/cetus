@@ -736,6 +736,18 @@ export type RenderedBlock =
       streaming?: boolean;
     };
 
+/** Result of a local `!` bash-mode command (run_bash). Mirrors the Rust
+ *  BashResult; rendered inline by BashCard. */
+export interface BashResult {
+  stdout: string;
+  stderr: string;
+  /** Process exit code; -1 when killed by signal or the timeout. */
+  exitCode: number;
+  timedOut: boolean;
+  /** Directory the command actually ran in. */
+  cwd: string;
+}
+
 export interface RenderedMessage {
   // Stable client-side id; for user messages we synthesize one.
   key: string;

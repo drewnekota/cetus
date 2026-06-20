@@ -303,7 +303,7 @@ function ToastStack({ toasts }: { toasts: Toast[] }) {
             className={cn(
               "pointer-events-auto flex items-start gap-2 rounded-md border bg-card px-3 py-2 text-xs shadow-lg",
               t.notifyType === "error" && "border-destructive/60 text-destructive",
-              t.notifyType === "warning" && "border-amber-500/60",
+              t.notifyType === "warning" && "border-warning/60",
               t.notifyType === "info" && "border-border"
             )}
           >

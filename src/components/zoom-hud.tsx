@@ -34,7 +34,7 @@ export function ZoomHud() {
     <div className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center">
       <div
         className={cn(
-          "rounded-xl bg-neutral-900/90 px-5 py-3 text-lg tabular-nums text-white shadow-lg backdrop-blur-sm",
+          "rounded-xl bg-foreground/90 px-5 py-3 text-lg tabular-nums text-background shadow-lg backdrop-blur-sm",
           "transition-opacity duration-200 ease-out",
           visible ? "opacity-100" : "opacity-0",
         )}

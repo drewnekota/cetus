@@ -2,6 +2,7 @@
 import type { RenderedBlock, RenderedMessage } from "@/lib/types";
 import { useMessage } from "@/lib/chat-store";
 import { VisionCard } from "./vision-card";
+import { BashCard } from "./bash-card";
 import { AnswerBlock, MessageActions } from "./message-blocks";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
@@ -56,11 +57,14 @@ function MessageBubbleView({
     return (
       <div className="flex w-full justify-start py-2">
         <div className="flex w-full max-w-[88%] flex-col gap-2 items-start">
-          {message.blocks.map((b, i) =>
-            b.kind === "custom" && b.customType === "vision_describe" ? (
-              <VisionCard key={i} text={b.text} details={b.details} />
-            ) : null,
-          )}
+          {message.blocks.map((b, i) => {
+            if (b.kind !== "custom") return null;
+            if (b.customType === "vision_describe")
+              return <VisionCard key={i} text={b.text} details={b.details} />;
+            if (b.customType === "bash_exec")
+              return <BashCard key={i} command={b.text} details={b.details} />;
+            return null;
+          })}
         </div>
       </div>
     );

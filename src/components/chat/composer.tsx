@@ -1,6 +1,6 @@
 "use client";
-import { useState, useRef, useEffect, useMemo } from "react";
-import { ArrowUp, Square, Paperclip, X, File } from "lucide-react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { ArrowUp, Square, Paperclip, X, File, Terminal } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,9 @@ import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { SlashMenu, type SlashItem } from "@/components/chat/slash-menu";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
+import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
 import { api } from "@/lib/tauri";
+import { readDraft, writeDraft } from "@/lib/draft-store";
 import type { ModelChoice } from "@/lib/types";
 
 /** Walk back from the caret to find an open `/<token>` the user is typing: a `/`
@@ -78,6 +80,10 @@ interface Props {
    *  ends, unless the user promotes it to a steer. Omit to fall back to onSend
    *  (immediate steer) while streaming. */
   onQueue?: (text: string, attachments: ComposerAttachment[]) => void;
+  /** Run a local shell command (the `!` bash mode). Receives the command with
+   *  the leading `!` already stripped. Omit to disable bash mode (the `!` is
+   *  then just a normal character). */
+  onBash?: (command: string) => void;
   onAbort: () => void;
   /** Ultra Code state + toggle. When provided, the model picker exposes an
    *  "UltraCode" preset so the user enables/disables autonomous orchestration at
@@ -91,6 +97,10 @@ interface Props {
    *  clicks "New chat" while already on the hero — the component doesn't
    *  remount so a stable `autoFocus` prop alone wouldn't re-trigger focus). */
   focusToken?: number;
+  /** Persist the unsent text under this key so it survives a view switch (the
+   *  composer unmounts) or a conversation switch (the key changes in place).
+   *  Omit for ephemeral composers (dialogs) that shouldn't retain a draft. */
+  draftKey?: string;
 }
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB — Gemini limit is generous but base64 inflates 33%
@@ -106,20 +116,56 @@ export function Composer({
   onWorkspaceChange,
   onSend,
   onQueue,
+  onBash,
   onAbort,
   ultra,
   onUltraToggle,
   variant = "docked",
   placeholder,
   focusToken,
+  draftKey,
 }: Props) {
-  const { t } = useTranslation("chat");
-  const [text, setText] = useState("");
+  const { t, locale } = useTranslation("chat");
+  // A random hero placeholder, re-rolled per new chat (focusToken bumps) so the
+  // empty composer reads a little differently each time. Only used by the hero
+  // variant; docked/bash/streaming keep their functional hints.
+  const heroPlaceholder = useMemo(
+    () => flavorHeroPlaceholder(locale),
+    [locale, focusToken],
+  );
+  const [text, setText] = useState(() => (draftKey ? readDraft(draftKey) : ""));
+
+  // Write-through setter: every edit persists the draft under the current key so
+  // it's already saved when the composer unmounts (view switch) or its key
+  // changes (conversation switch). No-op persistence when no draftKey is wired.
+  const updateText = useCallback(
+    (v: string) => {
+      setText(v);
+      if (draftKey) writeDraft(draftKey, v);
+    },
+    [draftKey],
+  );
+
+  // The conversation/view switched while this composer stayed mounted (e.g. the
+  // docked composer in ChatPane as the active chat changes). The outgoing draft
+  // was already persisted on each keystroke, so just load the incoming one.
+  const draftKeyRef = useRef(draftKey);
+  useEffect(() => {
+    if (draftKeyRef.current === draftKey) return;
+    draftKeyRef.current = draftKey;
+    setText(draftKey ? readDraft(draftKey) : "");
+  }, [draftKey]);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // A leading `!` flips the composer into local bash mode (Claude Code style):
+  // the input runs as a shell command instead of a message. Gated on a wired
+  // onBash handler — otherwise `!` is just an ordinary character.
+  const bashMode = !!onBash && text.startsWith("!");
+  const bashCommand = bashMode ? text.slice(1).trim() : "";
 
   // ---- Slash menu (commands + skills) -------------------------------------
   const [slashCommands, setSlashCommands] = useState<SlashItem[]>([]);
@@ -192,6 +238,11 @@ export function Composer({
    *  token is unchanged so arrow-nav doesn't reset the highlighted row. */
   function syncSlash() {
     if (slashSuppress.current) return;
+    // In bash mode a `/` is a path separator, not a slash-command trigger.
+    if (bashMode) {
+      if (slashOpen) setSlashOpen(false);
+      return;
+    }
     const el = taRef.current;
     if (!el) return;
     const detected = detectSlashToken(el.value, el.selectionStart ?? 0);
@@ -214,7 +265,7 @@ export function Composer({
     const insert = item.kind === "command" ? item.prompt : `/${item.name} `;
     const next = text.slice(0, slashStart) + insert + text.slice(caret);
     const pos = slashStart + insert.length;
-    setText(next);
+    updateText(next);
     closeSlash();
     requestAnimationFrame(() => {
       const node = taRef.current;
@@ -293,8 +344,19 @@ export function Composer({
   }
 
   function submit() {
+    if (disabled) return;
+    // Bash mode: run the command locally and bypass the agent entirely (no
+    // queueing, no attachments). An empty command (`!` alone) is a no-op.
+    if (bashMode) {
+      if (!bashCommand || !onBash) return;
+      onBash(bashCommand);
+      closeSlash();
+      updateText("");
+      setAttachError(null);
+      return;
+    }
     const t = text.trim();
-    if ((!t && attachments.length === 0) || disabled) return;
+    if ((!t && attachments.length === 0)) return;
     // Mid-run: park the message in the follow-up queue instead of sending. The
     // user can still promote it to a steer from the queue UI. Falls back to a
     // direct send (immediate steer) when no queue handler is wired.
@@ -306,7 +368,7 @@ export function Composer({
       prev.forEach((a) => a.type === "image" && URL.revokeObjectURL(a.previewUrl));
       return [];
     });
-    setText("");
+    updateText("");
     setAttachError(null);
   }
 
@@ -336,6 +398,9 @@ export function Composer({
       className={cn(
         "relative rounded-2xl border border-border shadow-sm transition-shadow focus-within:shadow-md",
         isDragging && "ring-2 ring-primary ring-offset-2",
+        // Bash mode: tint the frame so it's unmistakably "running a command",
+        // not "messaging the agent".
+        bashMode && "border-primary/60 ring-1 ring-primary/40",
         variant === "hero"
           ? "bg-card/60 p-2 backdrop-blur-xl backdrop-saturate-150"
           : "bg-card p-1.5",
@@ -392,12 +457,19 @@ export function Composer({
         </div>
       )}
 
+      {bashMode && (
+        <div className="flex items-center gap-1.5 px-2.5 pt-1.5 text-[11px] font-medium text-primary">
+          <Terminal className="size-3" />
+          <span>{t("composer.bashHint")}</span>
+        </div>
+      )}
+
       <Textarea
         ref={taRef}
         value={text}
         onChange={(e) => {
           slashSuppress.current = false; // a fresh edit re-arms the menu
-          setText(e.target.value);
+          updateText(e.target.value);
           syncSlash();
         }}
         onClick={syncSlash}
@@ -460,13 +532,15 @@ export function Composer({
           }
         }}
         placeholder={
-          placeholder ??
+          bashMode
+            ? t("composer.bashPlaceholder")
+            : placeholder ??
           (streaming
             ? (onQueue
                 ? t("composer.placeholderQueue")
                 : t("composer.placeholderRunning"))
             : variant === "hero"
-              ? t("composer.placeholderHero")
+              ? heroPlaceholder
               : t("composer.placeholderDocked"))
         }
         rows={1}
@@ -518,7 +592,19 @@ export function Composer({
             disabled={disabled}
           />
         </div>
-        {streaming ? (
+        {bashMode ? (
+          // Bash runs locally and is independent of the agent stream, so always
+          // offer a Run button here (never the abort affordance).
+          <Button
+            type="button"
+            size="icon-sm"
+            onClick={submit}
+            disabled={disabled || !bashCommand}
+            title={t("composer.runBash")}
+          >
+            <Terminal className="h-4 w-4" />
+          </Button>
+        ) : streaming ? (
           <Button
             type="button"
             size="icon-sm"

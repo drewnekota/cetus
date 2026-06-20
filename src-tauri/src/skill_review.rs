@@ -58,7 +58,6 @@ const MAX_PROPOSALS_PER_PASS: usize = 2;
 /// up with un-triaged suggestions. We retry (cheaply) once the user clears some.
 const MAX_PENDING_PROPOSALS: usize = 8;
 
-const DEEPSEEK_URL: &str = "https://api.deepseek.com/chat/completions";
 const REVIEW_MODEL: &str = "deepseek-v4-pro";
 
 const REVIEW_SYSTEM_PROMPT: &str = "\
@@ -282,7 +281,7 @@ async fn run_review(state: &AppState, handle: &AppHandle, quiet_minutes: u32) ->
     );
 
     let budget = MAX_PROPOSALS_PER_PASS.min(MAX_PENDING_PROPOSALS.saturating_sub(pending));
-    let raw = distill(&api_key, &user_msg).await?;
+    let raw = distill(&api_key, &crate::provider::deepseek_chat_url(&state.store), &user_msg).await?;
     let proposals: Vec<Proposal> = parse_proposals(&raw).into_iter().take(budget).collect();
 
     let mut created = 0usize;
@@ -366,7 +365,7 @@ fn parse_proposals(raw: &str) -> Vec<Proposal> {
 }
 
 /// One-shot, out-of-band proposal call (mirrors `dream::distill`).
-async fn distill(api_key: &str, user_msg: &str) -> Result<String> {
+async fn distill(api_key: &str, url: &str, user_msg: &str) -> Result<String> {
     let body = json!({
         "model": REVIEW_MODEL,
         "messages": [
@@ -381,7 +380,7 @@ async fn distill(api_key: &str, user_msg: &str) -> Result<String> {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(DEEPSEEK_URL)
+        .post(url)
         .bearer_auth(api_key)
         .json(&body)
         .timeout(Duration::from_secs(60))
