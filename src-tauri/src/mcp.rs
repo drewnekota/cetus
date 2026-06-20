@@ -200,7 +200,11 @@ fn build_mcp_doc(store: &Store) -> Value {
     let mut servers = serde_json::Map::new();
     for c in state.entries.iter().filter(|c| c.enabled) {
         // De-dupe keys so two connectors named the same don't clobber each other.
-        let mut key = if c.name.trim().is_empty() { c.id.clone() } else { c.name.trim().to_string() };
+        let mut key = if c.name.trim().is_empty() {
+            c.id.clone()
+        } else {
+            c.name.trim().to_string()
+        };
         let mut n = 2;
         while servers.contains_key(&key) {
             key = format!("{}-{}", c.name.trim(), n);
@@ -217,24 +221,11 @@ fn build_mcp_doc(store: &Store) -> Value {
         };
         servers.insert(key, spec);
     }
-    // Built-in browser capability. When the Browser toggle is on, expose
-    // `chrome-devtools-mcp` driving the cetus-managed Chrome (CDP on :9222, brought
-    // up by `crate::agent::ensure_chrome_running`). This is what gives the agent
-    // its `mcp__chrome-devtools__*` tools — it replaces the old native browser_*
-    // tooling. Skipped if a user connector already claims the `chrome-devtools`
-    // key, so an explicit user override always wins.
-    if crate::agent::load_settings(store).browser && !servers.contains_key("chrome-devtools") {
-        servers.insert(
-            "chrome-devtools".to_string(),
-            json!({
-                "command": "npx",
-                "args": [
-                    "-y",
-                    "chrome-devtools-mcp@latest",
-                    "--browser-url=http://127.0.0.1:9222"
-                ]
-            }),
-        );
+    // Built-in and user plugins may contribute MCP servers. Skipped if a user
+    // connector already claims the same key, so an explicit connector override
+    // wins over plugin defaults.
+    for (name, spec) in crate::plugins::enabled_mcp_servers(store) {
+        servers.entry(name).or_insert(spec);
     }
     // `imports` controls mcporter's editor-config auto-import. Default empty so
     // cetus never silently inherits another tool's MCP servers; the user opts in
@@ -536,13 +527,23 @@ async fn mcporter_list(
     write_mcp_doc(&tmp, &one_server_oauth_doc(input));
     let out = run_mcporter(
         pi_bin,
-        &["list", &input.name, "--config", &tmp.to_string_lossy(), "--json"],
+        &[
+            "list",
+            &input.name,
+            "--config",
+            &tmp.to_string_lossy(),
+            "--json",
+        ],
         TEST_TIMEOUT,
     )
     .await;
     let _ = std::fs::remove_file(&tmp);
     match out {
-        Err(e) => fail(if e.is_empty() { "authorization required — click Authorize".into() } else { e }),
+        Err(e) => fail(if e.is_empty() {
+            "authorization required — click Authorize".into()
+        } else {
+            e
+        }),
         Ok(stdout) => parse_mcporter_list(&stdout),
     }
 }
@@ -568,7 +569,10 @@ fn one_server_oauth_doc(input: &McpConnectorInput) -> Value {
 /// Pull `{ servers: [{ name, tools: [{name, description}] }] }` out of mcporter's
 /// `list --json` output into our result shape.
 fn parse_mcporter_list(stdout: &str) -> McpTestResult {
-    let Some(doc) = stdout.lines().rev().find_map(|l| serde_json::from_str::<Value>(l.trim()).ok())
+    let Some(doc) = stdout
+        .lines()
+        .rev()
+        .find_map(|l| serde_json::from_str::<Value>(l.trim()).ok())
         .or_else(|| serde_json::from_str::<Value>(stdout.trim()).ok())
     else {
         return fail("couldn't parse mcporter output");
@@ -637,9 +641,15 @@ async fn run_mcporter(
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     if out.status.success() {
-        Ok(if stdout.trim().is_empty() { stderr.trim().to_string() } else { stdout })
+        Ok(if stdout.trim().is_empty() {
+            stderr.trim().to_string()
+        } else {
+            stdout
+        })
     } else {
-        Err(format!("{}\n{}", stderr.trim(), stdout.trim()).trim().to_string())
+        Err(format!("{}\n{}", stderr.trim(), stdout.trim())
+            .trim()
+            .to_string())
     }
 }
 
@@ -648,7 +658,10 @@ async fn run_mcporter(
 /// for `npx`-based stdio connectors (e.g. chrome-devtools).
 fn resolve_node() -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
-    if let Some(p) = std::env::var_os("CETUS_NODE").map(PathBuf::from).filter(|p| p.exists()) {
+    if let Some(p) = std::env::var_os("CETUS_NODE")
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+    {
         return Some(p);
     }
     if let Ok(path) = std::env::var("PATH") {
@@ -659,10 +672,14 @@ fn resolve_node() -> Option<std::path::PathBuf> {
             }
         }
     }
-    ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]
-        .into_iter()
-        .map(PathBuf::from)
-        .find(|p| p.exists())
+    [
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|p| p.exists())
 }
 
 // ---- Handshake: stdio ------------------------------------------------------
@@ -740,8 +757,16 @@ async fn test_stdio(
     };
 
     // ack + list tools (best-effort; a server with no tools is still a pass)
-    let _ = write_msg(&mut stdin, &json!({"jsonrpc":"2.0","method":"notifications/initialized"})).await;
-    let _ = write_msg(&mut stdin, &json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}})).await;
+    let _ = write_msg(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+    )
+    .await;
+    let _ = write_msg(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+    )
+    .await;
     if let Ok(v) = read_response(&mut lines, 2).await {
         out.tools = collect_tools(&v);
     }
@@ -864,9 +889,14 @@ async fn test_http(url: &str, headers: &BTreeMap<String, String>) -> McpTestResu
 
     // ack + list tools (best-effort; a server with no tools is still a pass)
     let ack = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
-    let _ = http_rpc(&client, url, headers, session.as_deref(), &ack).send().await;
+    let _ = http_rpc(&client, url, headers, session.as_deref(), &ack)
+        .send()
+        .await;
     let list = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} });
-    if let Ok(r) = http_rpc(&client, url, headers, session.as_deref(), &list).send().await {
+    if let Ok(r) = http_rpc(&client, url, headers, session.as_deref(), &list)
+        .send()
+        .await
+    {
         let b = r.text().await.unwrap_or_default();
         if let Some(v) = parse_json_or_sse(&b) {
             out.tools = collect_tools(&v);

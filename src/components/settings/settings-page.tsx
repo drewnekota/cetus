@@ -24,7 +24,6 @@ import {
   KeyRound,
   Mic,
   Monitor,
-  MonitorCog,
   Moon,
   Pencil,
   Plug,
@@ -77,7 +76,6 @@ import {
 } from "@/lib/tauri";
 import { toast } from "sonner";
 import type {
-  AgentSettings,
   AutoArchiveSettings,
   Conversation,
   DiscoverySettings,
@@ -99,7 +97,6 @@ import type {
   UpdateMeta,
 } from "@/lib/types";
 import {
-  DEFAULT_AGENT_SETTINGS,
   DEFAULT_AUTO_ARCHIVE_SETTINGS,
   DEFAULT_DREAM_SETTINGS,
   DEFAULT_SKILL_REVIEW_SETTINGS,
@@ -162,7 +159,6 @@ type SectionId =
   | "voice"
   | "screen"
   | "meetings"
-  | "agent-control"
   | "archived";
 
 type Section = {
@@ -204,7 +200,6 @@ const SECTION_GROUPS: { labelKey: string; sections: Section[] }[] = [
       { id: "voice", labelKey: "nav.voice", icon: Mic },
       { id: "screen", labelKey: "nav.screen", icon: Monitor },
       { id: "meetings", labelKey: "nav.meetings", icon: AudioLines },
-      { id: "agent-control", labelKey: "nav.agent-control", icon: MonitorCog },
     ],
   },
   {
@@ -280,7 +275,7 @@ export function SettingsPage({
         </span>
       </header>
       <div className="flex min-h-0 flex-1">
-        <nav className="w-52 shrink-0 overflow-y-auto border-r border-border p-2">
+        <nav className="scrollbar-slim w-52 shrink-0 overflow-y-auto border-r border-border bg-muted/20 p-2">
           {SECTION_GROUPS.map((group) => (
             <div key={group.labelKey} className="mb-3 last:mb-0">
               <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -310,8 +305,8 @@ export function SettingsPage({
             </div>
           ))}
         </nav>
-        <main className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-2xl px-6 py-8">
+        <main className="scrollbar-slim min-w-0 flex-1 overflow-y-auto bg-muted/10">
+          <div className="mx-auto w-full max-w-5xl px-6 py-8">
             {section === "general" ? (
               <GeneralSection />
             ) : section === "api-keys" ? (
@@ -341,8 +336,6 @@ export function SettingsPage({
               <VoiceSection />
             ) : section === "meetings" ? (
               <MeetingsSection open={open} />
-            ) : section === "agent-control" ? (
-              <AgentControlSection />
             ) : section === "archived" ? (
               <ArchivedChatsSection
                 open={open}
@@ -363,10 +356,24 @@ export function SettingsPage({
  *  (the heading already shows its own "Loading…" label). */
 function SettingsRowsSkeleton({ rows = 3 }: { rows?: number }) {
   return (
-    <div className="mt-3 space-y-2">
+    <SettingsCardGrid className="mt-3">
       {Array.from({ length: rows }).map((_, i) => (
         <Skeleton key={i} className="h-14 w-full rounded-lg" />
       ))}
+    </SettingsCardGrid>
+  );
+}
+
+function SettingsCardGrid({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("grid min-w-0 gap-3 lg:grid-cols-2", className)}>
+      {children}
     </div>
   );
 }
@@ -2117,135 +2124,6 @@ function MeetingsSection({ open }: { open: boolean }) {
 }
 
 // =============================================================================
-// Computer & Browser control
-// =============================================================================
-
-function AgentControlSection() {
-  const { t } = useTranslation("settings");
-  const [settings, setSettings] = useState<AgentSettings>(
-    DEFAULT_AGENT_SETTINGS,
-  );
-  const [axTrusted, setAxTrusted] = useState<boolean | null>(null);
-  const [screenTrusted, setScreenTrusted] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    api.getAgentSettings().then(setSettings).catch(() => {});
-    api.accessibilityTrusted().then(setAxTrusted).catch(() => {});
-    api.screenRecordingTrusted().then(setScreenTrusted).catch(() => {});
-  }, []);
-
-  function update(patch: Partial<AgentSettings>) {
-    const next = { ...settings, ...patch };
-    setSettings(next);
-    api.setAgentSettings(next).catch(() => {});
-  }
-
-  async function onGrantAx() {
-    const ok = await api.requestAccessibility().catch(() => false);
-    setAxTrusted(ok);
-  }
-
-  async function onGrantScreen() {
-    const ok = await api.requestScreenRecording().catch(() => false);
-    setScreenTrusted(ok);
-  }
-
-  return (
-    <section data-testid="agent-control-card">
-      <SectionHeading
-        title={t("agentControl.title")}
-        description={t("agentControl.description")}
-      />
-
-      <div className="mt-6 space-y-1" data-testid="agent-control-enable-toggle">
-        <ToggleRow
-          id="agent-control-browser"
-          label={t("agentControl.browser.label")}
-          description={t("agentControl.browser.description")}
-          checked={settings.browser}
-          onCheckedChange={(v) => update({ browser: v })}
-        />
-        <ToggleRow
-          id="agent-control-computer"
-          label={t("agentControl.computer.label")}
-          description={t("agentControl.computer.description")}
-          checked={settings.computer}
-          onCheckedChange={(v) => update({ computer: v })}
-        />
-      </div>
-
-      <div className="mt-4 space-y-3">
-        <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">{t("agentControl.ax.label")}</p>
-            <p className="text-xs text-muted-foreground">
-              {axTrusted === false
-                ? t("agentControl.ax.notGranted")
-                : axTrusted
-                  ? t("agentControl.ax.granted")
-                  : t("agentControl.checking")}
-            </p>
-          </div>
-          {axTrusted ? (
-            <span className="text-xs font-medium text-success">
-              {t("agentControl.enabled")}
-            </span>
-          ) : (
-            <div className="flex shrink-0 gap-1.5">
-              <Button size="sm" variant="outline" onClick={onGrantAx}>
-                {t("agentControl.grant")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => api.openAccessibilitySettings().catch(() => {})}
-              >
-                {t("agentControl.openSettings")}
-              </Button>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">{t("agentControl.screen.label")}</p>
-            <p className="text-xs text-muted-foreground">
-              {screenTrusted === false
-                ? t("agentControl.screen.notGranted")
-                : screenTrusted
-                  ? t("agentControl.screen.granted")
-                  : t("agentControl.checking")}
-            </p>
-          </div>
-          {screenTrusted ? (
-            <span className="text-xs font-medium text-success">
-              {t("agentControl.enabled")}
-            </span>
-          ) : (
-            <div className="flex shrink-0 gap-1.5">
-              <Button size="sm" variant="outline" onClick={onGrantScreen}>
-                {t("agentControl.grant")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => api.openScreenRecordingSettings().catch(() => {})}
-              >
-                {t("agentControl.openSettings")}
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <p className="mt-4 text-xs text-muted-foreground">
-        {t("agentControl.footnote")}
-      </p>
-    </section>
-  );
-}
-
-// =============================================================================
 // Archived chats
 // =============================================================================
 
@@ -2846,7 +2724,7 @@ function MemorySection({ open }: { open: boolean }) {
 
       {store === null && <SettingsRowsSkeleton />}
       {sorted.length > 0 && (
-        <div className="mt-3 space-y-2">
+        <SettingsCardGrid className="mt-3">
           {sorted.map((m) => (
             <MemoryRow
               key={m.id}
@@ -2856,7 +2734,7 @@ function MemorySection({ open }: { open: boolean }) {
               onDelete={removeRow}
             />
           ))}
-        </div>
+        </SettingsCardGrid>
       )}
 
       {error && <div className="mt-4 text-xs text-destructive">{error}</div>}
@@ -2948,57 +2826,63 @@ function MemoryRow({
   return (
     <div
       className={cn(
-        "group flex items-start gap-3 rounded-lg border border-border px-3 py-2.5",
+        "group min-w-0 overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5",
         !entry.enabled && "opacity-50",
       )}
     >
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-sm leading-snug">{entry.content}</p>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-          <span
-            className={cn(
-              "rounded px-1.5 py-0.5 font-medium",
-              agentAuthored
-                ? "bg-skill/10 text-skill dark:text-skill"
-                : "bg-muted text-muted-foreground",
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="break-words text-sm leading-snug">{entry.content}</p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+            <span
+              className={cn(
+                "rounded px-1.5 py-0.5 font-medium",
+                agentAuthored
+                  ? "bg-skill/10 text-skill dark:text-skill"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              {agentAuthored ? t("memory.tag.agent") : t("memory.tag.you")}
+            </span>
+            {entry.category && (
+              <span className="rounded bg-muted px-1.5 py-0.5">
+                {entry.category}
+              </span>
             )}
-          >
-            {agentAuthored ? t("memory.tag.agent") : t("memory.tag.you")}
-          </span>
-          {entry.category && (
-            <span className="rounded bg-muted px-1.5 py-0.5">{entry.category}</span>
-          )}
-          <span>
-            {t("memory.editedOn", {
-              date: new Date(entry.updatedAt).toLocaleDateString(),
-            })}
-          </span>
+            <span>
+              {t("memory.editedOn", {
+                date: new Date(entry.updatedAt).toLocaleDateString(),
+              })}
+            </span>
+          </div>
         </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-0.5">
-        <Switch
-          checked={entry.enabled}
-          onCheckedChange={(v) => onToggle(entry.id, v)}
-          aria-label={entry.enabled ? t("memory.muteAria") : t("memory.enableAria")}
-        />
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-8 text-muted-foreground"
-          onClick={() => setEditing(true)}
-          aria-label={t("memory.editAria")}
-        >
-          <Pencil className="size-3.5" />
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-8 text-muted-foreground hover:text-destructive"
-          onClick={() => onDelete(entry.id)}
-          aria-label={t("memory.deleteAria")}
-        >
-          <Trash2 className="size-3.5" />
-        </Button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Switch
+            checked={entry.enabled}
+            onCheckedChange={(v) => onToggle(entry.id, v)}
+            aria-label={
+              entry.enabled ? t("memory.muteAria") : t("memory.enableAria")
+            }
+          />
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8 text-muted-foreground"
+            onClick={() => setEditing(true)}
+            aria-label={t("memory.editAria")}
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8 text-muted-foreground hover:text-destructive"
+            onClick={() => onDelete(entry.id)}
+            aria-label={t("memory.deleteAria")}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -3203,7 +3087,7 @@ function SkillsSection({ open }: { open: boolean }) {
 
         {store === null && <SettingsRowsSkeleton />}
         {sorted.length > 0 && (
-          <div className="mt-3 space-y-2">
+          <SettingsCardGrid className="mt-3">
             {sorted.map((s) => (
               <SkillRow
                 key={s.id}
@@ -3213,7 +3097,7 @@ function SkillsSection({ open }: { open: boolean }) {
                 onDelete={removeRow}
               />
             ))}
-          </div>
+          </SettingsCardGrid>
         )}
       </div>
 
@@ -3319,7 +3203,7 @@ function DiscoveredSkillsSection({ open }: { open: boolean }) {
         </h4>
 
         {skills && skills.length > 0 && (
-          <div className="mt-3 space-y-2">
+          <SettingsCardGrid className="mt-3">
             {skills.map((s) => (
               <DiscoveredSkillRow
                 key={s.id}
@@ -3329,7 +3213,7 @@ function DiscoveredSkillsSection({ open }: { open: boolean }) {
                 }
               />
             ))}
-          </div>
+          </SettingsCardGrid>
         )}
       </div>
 
@@ -3365,7 +3249,7 @@ function DiscoveredSkillRow({
   }
 
   return (
-    <div className="rounded-lg border border-border">
+    <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-card">
       <div className="flex items-start gap-3 px-3 py-2.5">
         <Sparkles className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <button
@@ -3466,87 +3350,91 @@ function SkillRow({
   return (
     <div
       className={cn(
-        "group flex items-start gap-3 rounded-lg border border-border px-3 py-2.5",
+        "group min-w-0 overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5",
         !entry.enabled && "opacity-50",
       )}
     >
-      <Sparkles className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="truncate text-sm font-medium">{entry.name}</p>
-        {entry.description && (
-          <p className="text-xs leading-snug text-muted-foreground">
-            {entry.description}
-          </p>
-        )}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-          <span
-            className={cn(
-              "rounded px-1.5 py-0.5 font-medium",
-              entry.source === "agent"
-                ? "bg-skill/10 text-skill dark:text-skill"
-                : "bg-muted",
-            )}
-          >
-            {entry.source === "agent"
-              ? entry.enabled
-                ? t("skills.source.byAgent")
-                : t("skills.source.proposed")
-              : entry.source === "created"
-                ? t("skills.source.written")
-                : t("skills.source.imported")}
-          </span>
-          <span>
-            {t("skills.updatedOn", {
-              date: new Date(entry.updatedAt).toLocaleDateString(),
-            })}
-          </span>
+      <div className="flex min-w-0 items-start gap-3">
+        <Sparkles className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="truncate text-sm font-medium">{entry.name}</p>
+          {entry.description && (
+            <p className="text-xs leading-snug text-muted-foreground">
+              {entry.description}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+            <span
+              className={cn(
+                "rounded px-1.5 py-0.5 font-medium",
+                entry.source === "agent"
+                  ? "bg-skill/10 text-skill dark:text-skill"
+                  : "bg-muted",
+              )}
+            >
+              {entry.source === "agent"
+                ? entry.enabled
+                  ? t("skills.source.byAgent")
+                  : t("skills.source.proposed")
+                : entry.source === "created"
+                  ? t("skills.source.written")
+                  : t("skills.source.imported")}
+            </span>
+            <span>
+              {t("skills.updatedOn", {
+                date: new Date(entry.updatedAt).toLocaleDateString(),
+              })}
+            </span>
+          </div>
         </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-0.5">
-        <Switch
-          checked={entry.enabled}
-          onCheckedChange={(v) => onToggle(entry.id, v)}
-          aria-label={entry.enabled ? t("skills.disableAria") : t("skills.enableAria")}
-        />
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-8 text-muted-foreground"
-          onClick={() => onReveal(entry.id)}
-          aria-label={t("skills.openFolderAria")}
-        >
-          <FolderOpen className="size-3.5" />
-        </Button>
-        {confirming ? (
-          <>
-            <Button
-              size="sm"
-              variant="destructive"
-              className="h-8"
-              onClick={() => onDelete(entry.id)}
-            >
-              {t("skills.delete")}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 text-muted-foreground"
-              onClick={() => setConfirming(false)}
-            >
-              {tc("action.cancel")}
-            </Button>
-          </>
-        ) : (
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Switch
+            checked={entry.enabled}
+            onCheckedChange={(v) => onToggle(entry.id, v)}
+            aria-label={
+              entry.enabled ? t("skills.disableAria") : t("skills.enableAria")
+            }
+          />
           <Button
             size="icon"
             variant="ghost"
-            className="size-8 text-muted-foreground hover:text-destructive"
-            onClick={() => setConfirming(true)}
-            aria-label={t("skills.uninstallAria")}
+            className="size-8 text-muted-foreground"
+            onClick={() => onReveal(entry.id)}
+            aria-label={t("skills.openFolderAria")}
           >
-            <Trash2 className="size-3.5" />
+            <FolderOpen className="size-3.5" />
           </Button>
-        )}
+          {confirming ? (
+            <>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-8"
+                onClick={() => onDelete(entry.id)}
+              >
+                {t("skills.delete")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-muted-foreground"
+                onClick={() => setConfirming(false)}
+              >
+                {tc("action.cancel")}
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-8 text-muted-foreground hover:text-destructive"
+              onClick={() => setConfirming(true)}
+              aria-label={t("skills.uninstallAria")}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -3700,7 +3588,7 @@ function SlashCommandsSection({ open }: { open: boolean }) {
 
         {commands === null && <SettingsRowsSkeleton />}
         {sorted.length > 0 && (
-          <div className="mt-3 space-y-2">
+          <SettingsCardGrid className="mt-3">
             {sorted.map((c) => (
               <SlashCommandRow
                 key={c.id}
@@ -3709,7 +3597,7 @@ function SlashCommandsSection({ open }: { open: boolean }) {
                 onDelete={removeRow}
               />
             ))}
-          </div>
+          </SettingsCardGrid>
         )}
       </div>
 
@@ -3731,57 +3619,61 @@ function SlashCommandRow({
   const { t: tc } = useTranslation("common");
   const [confirming, setConfirming] = useState(false);
   return (
-    <div className="group flex items-start gap-3 rounded-lg border border-border px-3 py-2.5">
-      <SquareSlash className="mt-0.5 size-4 shrink-0 text-primary" />
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="truncate text-sm font-medium">/{command.name}</p>
-        {command.description && (
-          <p className="text-xs leading-snug text-muted-foreground">{command.description}</p>
-        )}
-        <p className="line-clamp-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-muted-foreground/80">
-          {command.prompt}
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-0.5">
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-8 text-muted-foreground"
-          onClick={onEdit}
-          aria-label={t("slashCmd.editAria")}
-        >
-          <Pencil className="size-3.5" />
-        </Button>
-        {confirming ? (
-          <>
-            <Button
-              size="sm"
-              variant="destructive"
-              className="h-8"
-              onClick={() => onDelete(command.id)}
-            >
-              {t("slashCmd.delete")}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 text-muted-foreground"
-              onClick={() => setConfirming(false)}
-            >
-              {tc("action.cancel")}
-            </Button>
-          </>
-        ) : (
+    <div className="group min-w-0 overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5">
+      <div className="flex min-w-0 items-start gap-3">
+        <SquareSlash className="mt-0.5 size-4 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="truncate text-sm font-medium">/{command.name}</p>
+          {command.description && (
+            <p className="text-xs leading-snug text-muted-foreground">
+              {command.description}
+            </p>
+          )}
+          <p className="line-clamp-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-muted-foreground/80">
+            {command.prompt}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
           <Button
             size="icon"
             variant="ghost"
-            className="size-8 text-muted-foreground hover:text-destructive"
-            onClick={() => setConfirming(true)}
-            aria-label={t("slashCmd.deleteAria")}
+            className="size-8 text-muted-foreground"
+            onClick={onEdit}
+            aria-label={t("slashCmd.editAria")}
           >
-            <Trash2 className="size-3.5" />
+            <Pencil className="size-3.5" />
           </Button>
-        )}
+          {confirming ? (
+            <>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-8"
+                onClick={() => onDelete(command.id)}
+              >
+                {t("slashCmd.delete")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-muted-foreground"
+                onClick={() => setConfirming(false)}
+              >
+                {tc("action.cancel")}
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-8 text-muted-foreground hover:text-destructive"
+              onClick={() => setConfirming(true)}
+              aria-label={t("slashCmd.deleteAria")}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -3955,7 +3847,7 @@ function ConnectorsSection({ open }: { open: boolean }) {
 
       {list === null && <SettingsRowsSkeleton />}
       {connectors.length > 0 && (
-        <div className="mt-3 space-y-2">
+        <SettingsCardGrid className="mt-3">
           {connectors.map((c) =>
             editing === c.id ? (
               <ConnectorEditor
@@ -3978,7 +3870,7 @@ function ConnectorsSection({ open }: { open: boolean }) {
               />
             ),
           )}
-        </div>
+        </SettingsCardGrid>
       )}
 
       <DiscoveredMcpCard open={open} onError={setError} />
@@ -4061,7 +3953,7 @@ function DiscoveredMcpCard({
   const enabled = settings?.mcpImports ?? [];
 
   return (
-    <div className="mt-6 rounded-lg border border-border p-4">
+    <div className="mt-6 overflow-hidden rounded-lg border border-border bg-card p-4">
       <h3 className="text-sm font-medium">{t("discovery.mcp.title")}</h3>
       <p className="mt-1 text-xs text-muted-foreground">
         {t("discovery.mcp.description")}
@@ -4153,7 +4045,7 @@ function ConnectorRow({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border",
+        "min-w-0 overflow-hidden rounded-lg border border-border bg-card",
         !connector.enabled && "opacity-50",
       )}
     >

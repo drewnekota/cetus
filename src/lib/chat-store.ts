@@ -49,6 +49,12 @@ interface ChatsStore {
   endStream: (id: string) => void;
   /** Hydrate from IDB cache without going through the reducer (already-rendered). */
   hydrate: (id: string, messages: RenderedMessage[]) => void;
+  /** Copy the settled rendered view from one conversation id to another. */
+  cloneRendered: (
+    fromId: string,
+    toId: string,
+    throughKey?: string | null,
+  ) => RenderedMessage[] | null;
 }
 
 /** Build the by-key index. Entries reuse the message refs from `messages`, so
@@ -133,6 +139,35 @@ export const useChatStore = create<ChatsStore>()((set) => ({
       streamingIds: withoutStreaming(s.streamingIds, id),
       hydrated: { ...s.hydrated, [id]: true },
     })),
+  cloneRendered: (fromId, toId, throughKey) => {
+    let cloned: RenderedMessage[] | null = null;
+    set((s) => {
+      const from = s.chats[fromId];
+      if (!from || from.messages.length === 0) return s;
+      const end =
+        throughKey == null
+          ? from.messages.length
+          : from.messages.findIndex((m) => m.key === throughKey) + 1;
+      const messages = stripForPersist(
+        from.messages.slice(0, end > 0 ? end : from.messages.length),
+      );
+      cloned = messages;
+      return {
+        chats: {
+          ...s.chats,
+          [toId]: {
+            ...emptyChatState,
+            messages,
+            byKey: indexByKey(messages),
+            hasArtifacts: computeHasArtifacts(messages),
+          },
+        },
+        streamingIds: withoutStreaming(s.streamingIds, toId),
+        hydrated: { ...s.hydrated, [toId]: true },
+      };
+    });
+    return cloned;
+  },
 }));
 
 // ---------- Selectors ----------------------------------------------------
@@ -297,6 +332,16 @@ export async function loadCachedMessages(
   } catch {
     return null;
   }
+}
+
+export async function copyCachedMessages(
+  fromConvId: string,
+  toConvId: string,
+): Promise<RenderedMessage[] | null> {
+  const messages = await loadCachedMessages(fromConvId);
+  if (!messages || messages.length === 0) return null;
+  await saveCachedMessages(toConvId, messages);
+  return messages;
 }
 
 async function saveCachedMessages(

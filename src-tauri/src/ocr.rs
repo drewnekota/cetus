@@ -89,11 +89,14 @@ mod imp {
         let output = Command::new("swiftc")
             .args([
                 "-O",
-                "-framework", "Vision",
-                "-framework", "AppKit",
+                "-framework",
+                "Vision",
+                "-framework",
+                "AppKit",
                 // AppleScript (NSAppleScript) + Accessibility (AXUIElement) APIs
                 // used by the `context` subcommand live in ApplicationServices.
-                "-framework", "ApplicationServices",
+                "-framework",
+                "ApplicationServices",
                 "-o",
             ])
             .arg(&bin)
@@ -127,7 +130,11 @@ mod imp {
         let text = String::from_utf8_lossy(&out.stdout);
         let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;
         Some(AppInfo {
-            app: v.get("app").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            app: v
+                .get("app")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
             bundle_id: v
                 .get("bundleId")
                 .and_then(|x| x.as_str())
@@ -138,11 +145,7 @@ mod imp {
 
     pub fn recognize(app_data: &Path, image_path: &Path) -> Option<String> {
         let bin = helper(app_data)?;
-        let out = Command::new(bin)
-            .arg("ocr")
-            .arg(image_path)
-            .output()
-            .ok()?;
+        let out = Command::new(bin).arg("ocr").arg(image_path).output().ok()?;
         if !out.status.success() {
             tracing::debug!("ocr failed: {}", String::from_utf8_lossy(&out.stderr));
             return None;

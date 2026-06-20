@@ -304,14 +304,95 @@ fn is_cjk(c: char) -> bool {
 /// Common English words we never want to learn as hotwords. Small on purpose —
 /// just the high-frequency function words that survive the length filter.
 const STOPWORDS: &[&str] = &[
-    "the", "and", "for", "are", "but", "not", "you", "all", "any", "can", "her", "was", "one",
-    "our", "out", "day", "get", "has", "him", "his", "how", "man", "new", "now", "old", "see",
-    "two", "way", "who", "boy", "did", "its", "let", "put", "say", "she", "too", "use", "that",
-    "this", "with", "have", "from", "they", "will", "would", "there", "their", "what", "about",
-    "which", "when", "make", "like", "time", "just", "know", "take", "into", "your", "some",
-    "could", "them", "than", "then", "look", "only", "come", "over", "also", "back", "after",
-    "want", "because", "good", "much", "where", "very", "well", "should", "okay", "yeah", "gonna",
-    "really", "thing", "things", "something", "anything", "everything",
+    "the",
+    "and",
+    "for",
+    "are",
+    "but",
+    "not",
+    "you",
+    "all",
+    "any",
+    "can",
+    "her",
+    "was",
+    "one",
+    "our",
+    "out",
+    "day",
+    "get",
+    "has",
+    "him",
+    "his",
+    "how",
+    "man",
+    "new",
+    "now",
+    "old",
+    "see",
+    "two",
+    "way",
+    "who",
+    "boy",
+    "did",
+    "its",
+    "let",
+    "put",
+    "say",
+    "she",
+    "too",
+    "use",
+    "that",
+    "this",
+    "with",
+    "have",
+    "from",
+    "they",
+    "will",
+    "would",
+    "there",
+    "their",
+    "what",
+    "about",
+    "which",
+    "when",
+    "make",
+    "like",
+    "time",
+    "just",
+    "know",
+    "take",
+    "into",
+    "your",
+    "some",
+    "could",
+    "them",
+    "than",
+    "then",
+    "look",
+    "only",
+    "come",
+    "over",
+    "also",
+    "back",
+    "after",
+    "want",
+    "because",
+    "good",
+    "much",
+    "where",
+    "very",
+    "well",
+    "should",
+    "okay",
+    "yeah",
+    "gonna",
+    "really",
+    "thing",
+    "things",
+    "something",
+    "anything",
+    "everything",
 ];
 
 // ---------------------------------------------------------------------------
@@ -363,8 +444,11 @@ fn prune(store: &mut LearnedStore) {
     if store.terms.len() <= MAX_LEARNED_TERMS {
         return;
     }
-    let mut by_count: Vec<(String, u32)> =
-        store.terms.iter().map(|(k, v)| (k.clone(), v.count)).collect();
+    let mut by_count: Vec<(String, u32)> = store
+        .terms
+        .iter()
+        .map(|(k, v)| (k.clone(), v.count))
+        .collect();
     by_count.sort_by(|a, b| b.1.cmp(&a.1));
     let keep: HashSet<String> = by_count
         .into_iter()
@@ -424,9 +508,7 @@ fn focused_snippet(max_chars: usize) -> Option<String> {
     unsafe fn own_text(el: AXUIElementRef) -> Option<String> {
         copy_string(el, kAXValueAttribute)
             .filter(|s| !s.trim().is_empty())
-            .or_else(|| {
-                copy_string(el, kAXSelectedTextAttribute).filter(|s| !s.trim().is_empty())
-            })
+            .or_else(|| copy_string(el, kAXSelectedTextAttribute).filter(|s| !s.trim().is_empty()))
     }
 
     // Append leaf text from `el`'s subtree into `out`, in reading order. A node
@@ -543,7 +625,9 @@ fn focused_snippet(max_chars: usize) -> Option<String> {
         }
 
         let Some(text) = text else {
-            tracing::debug!("focused_snippet: no readable text (role {role:?}, subrole {subrole:?})");
+            tracing::debug!(
+                "focused_snippet: no readable text (role {role:?}, subrole {subrole:?})"
+            );
             return None;
         };
         let trimmed = text.trim();

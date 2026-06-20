@@ -244,7 +244,8 @@ pub fn load_env() -> Vec<(String, String)> {
     KNOWN_PROVIDERS
         .iter()
         .filter_map(|(prov, env_name)| {
-            map.get(*prov).map(|val| (env_name.to_string(), val.clone()))
+            map.get(*prov)
+                .map(|val| (env_name.to_string(), val.clone()))
         })
         .collect()
 }

@@ -155,9 +155,11 @@ pub async fn upsert_slash_command(
     };
 
     // Editing/creating must not collide with a *different* command's name.
-    let clash = s.commands.iter().enumerate().any(|(i, c)| {
-        Some(i) != existing_idx && c.name.eq_ignore_ascii_case(&name)
-    });
+    let clash = s
+        .commands
+        .iter()
+        .enumerate()
+        .any(|(i, c)| Some(i) != existing_idx && c.name.eq_ignore_ascii_case(&name));
     if clash {
         return Err(format!("a command named /{name} already exists"));
     }
@@ -171,7 +173,9 @@ pub async fn upsert_slash_command(
         entry.clone()
     } else {
         if s.commands.len() >= MAX_COMMANDS {
-            return Err(format!("command limit reached ({MAX_COMMANDS}); remove one first"));
+            return Err(format!(
+                "command limit reached ({MAX_COMMANDS}); remove one first"
+            ));
         }
         let entry = SlashCommand {
             id: Uuid::new_v4().to_string(),

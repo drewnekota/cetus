@@ -41,7 +41,9 @@ fn pending() -> &'static Mutex<HashMap<String, oneshot::Sender<Value>>> {
 /// Capture a screenshot through cetus's own pipeline (gated on Screen-Recording
 /// TCC). Returns the base64 `Screenshot` or an error if permission is missing.
 #[tauri::command]
-pub async fn test_screenshot(_state: State<'_, AppState>) -> Result<crate::quick::Screenshot, String> {
+pub async fn test_screenshot(
+    _state: State<'_, AppState>,
+) -> Result<crate::quick::Screenshot, String> {
     crate::quick::capture_screenshot()
         .ok_or_else(|| "no screenshot — grant Screen Recording permission".to_string())
 }
@@ -88,7 +90,9 @@ pub async fn test_dom(
     let (tx, rx) = oneshot::channel::<Value>();
 
     {
-        let mut map = pending().lock().map_err(|_| "registry poisoned".to_string())?;
+        let mut map = pending()
+            .lock()
+            .map_err(|_| "registry poisoned".to_string())?;
         map.insert(id.clone(), tx);
     }
 
@@ -126,7 +130,9 @@ pub async fn test_dom(
 #[tauri::command]
 pub async fn test_dom_result(id: String, value: Value) -> Result<(), String> {
     let tx = {
-        let mut map = pending().lock().map_err(|_| "registry poisoned".to_string())?;
+        let mut map = pending()
+            .lock()
+            .map_err(|_| "registry poisoned".to_string())?;
         map.remove(&id)
     };
     match tx {
@@ -176,6 +182,117 @@ async fn op_ax(state: &AppState, request: Value) -> Result<Value, String> {
         .map_err(|e| format!("ax task failed: {e}"))
 }
 
+async fn op_computer_observe(state: &AppState, mut request: Value) -> Result<Value, String> {
+    if request.get("op").is_none() {
+        request["op"] = json!("dump");
+    }
+    let include_screenshot = request
+        .get("includeScreenshot")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let mut reply = op_ax(state, request).await?;
+    if include_screenshot && reply.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+        match op_screenshot() {
+            Ok(shot) => reply["screenshotJpeg"] = json!(shot.data),
+            Err(e) => reply["screenshotError"] = json!(e),
+        }
+    }
+    Ok(reply)
+}
+
+fn op_chrome_host_self_test(state: &AppState) -> Result<Value, String> {
+    crate::chrome_use::native_host_self_test(&state.app_data_dir)
+        .and_then(|result| serde_json::to_value(result).map_err(|e| e.to_string()))
+}
+
+fn op_chrome_status(state: &AppState) -> Result<Value, String> {
+    let manifest_path = chrome_native_host_manifest_path()?;
+    Ok(json!({
+        "installed": manifest_path.is_file(),
+        "manifestPath": manifest_path,
+        "messagesPath": crate::chrome_use::messages_path(&state.app_data_dir),
+        "commandsPath": crate::chrome_use::commands_path(&state.app_data_dir)
+    }))
+}
+
+fn chrome_native_host_manifest_path() -> Result<std::path::PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| "HOME is not set".to_string())?;
+        return Ok(home
+            .join("Library/Application Support/Google/Chrome/NativeMessagingHosts")
+            .join("com.cetus.chrome_use.json"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var_os("APPDATA")
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| "APPDATA is not set".to_string())?;
+        return Ok(appdata.join("Google/Chrome/NativeMessagingHosts/com.cetus.chrome_use.json"));
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| "HOME is not set".to_string())?;
+        Ok(home.join(".config/google-chrome/NativeMessagingHosts/com.cetus.chrome_use.json"))
+    }
+}
+
+/// Open the Browser surface's top-level webview window through the same path the
+/// frontend command uses. Dev-only, for validating the browser surface without
+/// needing a manual click in the app shell.
+async fn op_browser_open(app: &AppHandle, state: &AppState, url: String) -> Result<Value, String> {
+    crate::commands::open_browser_window_with_app_data_dir(app, &state.app_data_dir, &url)
+        .await
+        .map(|_| json!({}))
+}
+
+/// Emit a Browser annotation event into the main window. The injected browser
+/// script is separately unit-tested; this op verifies the runtime event bridge
+/// and React-side intake in a dev app.
+fn op_browser_annotate(app: &AppHandle, payload: Value) -> Result<Value, String> {
+    app.emit_to("main", "browser-annotation", payload)
+        .map_err(|e| e.to_string())?;
+    Ok(json!({}))
+}
+
+fn op_browser_visible_open(app: &AppHandle, url: String) -> Result<Value, String> {
+    app.emit_to(
+        "main",
+        "browser-control-request",
+        json!({
+            "op": "open",
+            "url": url
+        }),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(json!({}))
+}
+
+fn op_webviews(app: &AppHandle) -> Value {
+    let webviews = app
+        .webviews()
+        .into_iter()
+        .map(|(label, webview)| {
+            let bounds = webview.bounds().ok();
+            json!({
+                "label": label,
+                "windowLabel": webview.window().label(),
+                "bounds": bounds.map(|b| json!({
+                    "x": b.position.to_logical::<f64>(1.0).x,
+                    "y": b.position.to_logical::<f64>(1.0).y,
+                    "width": b.size.to_logical::<f64>(1.0).width,
+                    "height": b.size.to_logical::<f64>(1.0).height,
+                })),
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({ "webviews": webviews })
+}
+
 /// DOM round-trip — emits `devtest-command`, awaits the frontend `TestHook`
 /// reply via the oneshot registry (shared by `test_dom`). ~5s timeout.
 async fn op_dom(
@@ -189,7 +306,9 @@ async fn op_dom(
     let (tx, rx) = oneshot::channel::<Value>();
 
     {
-        let mut map = pending().lock().map_err(|_| "registry poisoned".to_string())?;
+        let mut map = pending()
+            .lock()
+            .map_err(|_| "registry poisoned".to_string())?;
         map.insert(id.clone(), tx);
     }
 
@@ -220,7 +339,9 @@ fn uds_opted_in() -> bool {
     std::env::var("CETUS_DEVTEST_SOCK")
         .map(|v| !v.is_empty())
         .unwrap_or(false)
-        || std::env::var("CETUS_DEVTEST").map(|v| v == "1").unwrap_or(false)
+        || std::env::var("CETUS_DEVTEST")
+            .map(|v| v == "1")
+            .unwrap_or(false)
 }
 
 /// Resolve the socket path: `$CETUS_DEVTEST_SOCK`, else
@@ -306,7 +427,9 @@ async fn handle_conn(app: AppHandle, stream: tokio::net::UnixStream) {
 
         let resp = match serde_json::from_str::<Value>(trimmed) {
             Ok(req) => dispatch(&app, &req).await,
-            Err(e) => json!({ "id": Value::Null, "ok": false, "error": format!("invalid JSON: {e}") }),
+            Err(e) => {
+                json!({ "id": Value::Null, "ok": false, "error": format!("invalid JSON: {e}") })
+            }
         };
         if write_resp(&mut write_half, &resp).await.is_err() {
             break;
@@ -314,10 +437,7 @@ async fn handle_conn(app: AppHandle, stream: tokio::net::UnixStream) {
     }
 }
 
-async fn write_resp(
-    w: &mut (impl AsyncWriteExt + Unpin),
-    resp: &Value,
-) -> std::io::Result<()> {
+async fn write_resp(w: &mut (impl AsyncWriteExt + Unpin), resp: &Value) -> std::io::Result<()> {
     let mut bytes = serde_json::to_vec(resp).unwrap_or_else(|_| b"{}".to_vec());
     bytes.push(b'\n');
     w.write_all(&bytes).await?;
@@ -344,6 +464,65 @@ async fn dispatch(app: &AppHandle, req: &Value) -> Value {
             }
             None => Err("ax requires `request`".to_string()),
         },
+
+        "computerObserve" => match req.get("request").cloned() {
+            Some(request) => {
+                let state = app.state::<AppState>();
+                op_computer_observe(&state, request).await
+            }
+            None => Err("computerObserve requires `request`".to_string()),
+        },
+
+        "chromeHostSelfTest" => {
+            let state = app.state::<AppState>();
+            op_chrome_host_self_test(&state)
+        }
+
+        "chromeStatus" => {
+            let state = app.state::<AppState>();
+            op_chrome_status(&state)
+        }
+
+        "browserOpen" => match s("url") {
+            Some(url) => {
+                let state = app.state::<AppState>();
+                op_browser_open(app, &state, url).await
+            }
+            None => Err("browserOpen requires `url`".to_string()),
+        },
+
+        "browserPanelOpen" => match s("url") {
+            Some(url) => crate::commands::open_browser_panel(
+                app.clone(),
+                url,
+                crate::commands::BrowserPanelBounds {
+                    x: req.get("x").and_then(|v| v.as_f64()).unwrap_or(900.0),
+                    y: req.get("y").and_then(|v| v.as_f64()).unwrap_or(80.0),
+                    width: req.get("width").and_then(|v| v.as_f64()).unwrap_or(420.0),
+                    height: req.get("height").and_then(|v| v.as_f64()).unwrap_or(720.0),
+                },
+                None,
+            )
+            .await
+            .map(|_| json!({})),
+            None => Err("browserPanelOpen requires `url`".to_string()),
+        },
+
+        "browserPanelClose" => crate::commands::close_browser_panel(app.clone())
+            .await
+            .map(|_| json!({})),
+
+        "browserAnnotate" => match req.get("payload").cloned() {
+            Some(payload) => op_browser_annotate(app, payload),
+            None => Err("browserAnnotate requires `payload`".to_string()),
+        },
+
+        "browserVisibleOpen" => match s("url") {
+            Some(url) => op_browser_visible_open(app, url),
+            None => Err("browserVisibleOpen requires `url`".to_string()),
+        },
+
+        "webviews" => Ok(op_webviews(app)),
 
         // `dom` passthrough uses an inner `op` field; the aliases below map
         // straight onto the corresponding DOM op the frontend TestHook handles.

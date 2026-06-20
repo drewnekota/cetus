@@ -1,11 +1,19 @@
 "use client";
-import { useState } from "react";
-import { ArrowRight, Folder, X, Inbox } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, Folder, X, Inbox, PanelBottom, PanelRight } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChatPane } from "@/components/chat/chat-pane";
 import type { ComposerAttachment } from "@/components/chat/composer";
+import {
+  WorkspacePanel,
+  type TerminalRunRequest,
+  type WorkspaceLayout,
+  type WorkspaceTab,
+  type WorkspaceTabKind,
+} from "@/components/workspace/workspace-panel";
+import { createBrowserViewState, type BrowserViewState } from "@/components/browser/browser-view";
 import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
 import { useChatStore, useIsStreaming } from "@/lib/chat-store";
 import { isArtifactDetails } from "@/lib/artifact";
@@ -30,9 +38,8 @@ interface Props {
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
   onSend: (text: string, attachments: ComposerAttachment[]) => void;
-  /** Run a local `!` bash-mode command in this conversation's workspace. */
-  onBash?: (command: string) => void;
   onAbort: () => void;
+  onForkMessage?: (messageKey: string, messageIndex: number) => void;
   focusToken: number;
 }
 
@@ -48,11 +55,12 @@ export function SessionDetailDialog({
   defaultWorkspace,
   onWorkspaceChange,
   onSend,
-  onBash,
   onAbort,
+  onForkMessage,
   focusToken,
 }: Props) {
   const { t } = useTranslation("board");
+  const { t: tc } = useTranslation("chat");
   const convId = conversation?.id ?? null;
   const isStreaming = useIsStreaming(convId);
   const hasChatEntry = useChatStore((s) =>
@@ -81,6 +89,145 @@ export function SessionDetailDialog({
     }),
   );
   const [artifactsOpen, setArtifactsOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceLayout, setWorkspaceLayout] = useState<WorkspaceLayout>("side");
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([
+    { id: "detail-files-1", kind: "files", title: tc("workspacePanel.files") },
+  ]);
+  const [workspaceActiveId, setWorkspaceActiveId] = useState<string | null>("detail-files-1");
+  const workspaceTabsRef = useRef<WorkspaceTab[]>(workspaceTabs);
+  const workspaceActiveIdRef = useRef<string | null>(workspaceActiveId);
+  workspaceTabsRef.current = workspaceTabs;
+  workspaceActiveIdRef.current = workspaceActiveId;
+
+  useEffect(() => {
+    if (!open || !workspaceOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.metaKey &&
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        (e.key === "ArrowLeft" || e.key === "ArrowRight")
+      ) {
+        e.preventDefault();
+        switchWorkspaceTab(e.key === "ArrowRight" ? 1 : -1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, workspaceOpen]);
+
+  function workspaceTitle(kind: WorkspaceTabKind, index: number): string {
+    if (kind === "files") {
+      return index > 1
+        ? tc("workspacePanel.filesN", { index })
+        : tc("workspacePanel.files");
+    }
+    if (kind === "terminal") {
+      return index > 1
+        ? tc("workspacePanel.terminalN", { index })
+        : tc("workspacePanel.terminal");
+    }
+    return index > 1
+      ? tc("workspacePanel.browserN", { index })
+      : tc("workspacePanel.browser");
+  }
+
+  function openWorkspacePanel(layout: WorkspaceLayout) {
+    setWorkspaceLayout(layout);
+    setWorkspaceOpen(true);
+  }
+
+  function openWorkspaceTab(kind: WorkspaceTabKind, alwaysNew = false) {
+    const existing = !alwaysNew ? workspaceTabs.find((tab) => tab.kind === kind) : undefined;
+    if (existing) {
+      setWorkspaceActiveId(existing.id);
+      setWorkspaceOpen(true);
+      return;
+    }
+    const count = workspaceTabs.filter((tab) => tab.kind === kind).length + 1;
+    const tab: WorkspaceTab = {
+      id: `detail-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      kind,
+      title: workspaceTitle(kind, count),
+      browserState: kind === "browser" ? createBrowserViewState() : undefined,
+    };
+    setWorkspaceTabs((tabs) => [...tabs, tab]);
+    setWorkspaceActiveId(tab.id);
+    setWorkspaceOpen(true);
+  }
+
+  function closeWorkspaceTab(id: string) {
+    setWorkspaceTabs((tabs) => {
+      const index = tabs.findIndex((tab) => tab.id === id);
+      if (index === -1) return tabs;
+      const next = tabs.filter((tab) => tab.id !== id);
+      if (workspaceActiveId === id) {
+        const fallback = next[Math.min(index, next.length - 1)] ?? null;
+        setWorkspaceActiveId(fallback?.id ?? null);
+        if (!fallback) setWorkspaceOpen(false);
+      }
+      return next;
+    });
+  }
+
+  function switchWorkspaceTab(direction: 1 | -1) {
+    const tabs = workspaceTabsRef.current;
+    if (tabs.length < 2) return;
+    const activeIndex = Math.max(
+      0,
+      tabs.findIndex((tab) => tab.id === workspaceActiveIdRef.current),
+    );
+    const nextIndex = (activeIndex + direction + tabs.length) % tabs.length;
+    setWorkspaceActiveId(tabs[nextIndex].id);
+    setWorkspaceOpen(true);
+  }
+
+  function updateBrowserWorkspaceTab(id: string, state: BrowserViewState) {
+    setWorkspaceTabs((tabs) =>
+      tabs.map((tab) =>
+        tab.id === id && tab.kind === "browser"
+          ? { ...tab, title: browserTitle(state.url, tab.title), browserState: state }
+          : tab,
+      ),
+    );
+  }
+
+  function openTerminalWithCommand(commandRaw: string) {
+    const command = commandRaw.trim();
+    if (!command) return;
+    const request: TerminalRunRequest = {
+      id: `detail-term-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      command,
+      autoRun: true,
+    };
+    const target =
+      workspaceTabs.find(
+        (tab) => tab.id === workspaceActiveId && tab.kind === "terminal",
+      ) ?? workspaceTabs.find((tab) => tab.kind === "terminal");
+    if (target) {
+      setWorkspaceTabs((tabs) =>
+        tabs.map((tab) =>
+          tab.id === target.id ? { ...tab, terminalRunRequest: request } : tab,
+        ),
+      );
+      setWorkspaceActiveId(target.id);
+      setWorkspaceOpen(true);
+      return;
+    }
+    const count = workspaceTabs.filter((tab) => tab.kind === "terminal").length + 1;
+    const tab: WorkspaceTab = {
+      id: `detail-terminal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      kind: "terminal",
+      title: workspaceTitle("terminal", count),
+      terminalRunRequest: request,
+    };
+    setWorkspaceTabs((tabs) => [...tabs, tab]);
+    setWorkspaceActiveId(tab.id);
+    setWorkspaceOpen(true);
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -139,6 +286,26 @@ export function SessionDetailDialog({
             )}
             <Button
               type="button"
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => openWorkspacePanel("side")}
+              title={tc("workspacePanel.openSide")}
+              aria-label={tc("workspacePanel.openSide")}
+            >
+              <PanelRight className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => openWorkspacePanel("bottom")}
+              title={tc("workspacePanel.openBottom")}
+              aria-label={tc("workspacePanel.openBottom")}
+            >
+              <PanelBottom className="size-4" />
+            </Button>
+            <Button
+              type="button"
               size="sm"
               onClick={() => conversation && onOpenInChat(conversation.id)}
               disabled={!conversation}
@@ -166,20 +333,50 @@ export function SessionDetailDialog({
         {loading && !hasChatEntry ? (
           <ChatSkeleton />
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <ChatPane
-              convId={convId}
-              modelChoice={modelChoice}
-              onModelChange={onModelChange}
-              workspaceDir={workspaceDir}
-              defaultWorkspace={defaultWorkspace}
-              onWorkspaceChange={onWorkspaceChange}
-              onSend={onSend}
-              onBash={onBash}
-              onAbort={onAbort}
-              focusToken={focusToken}
-              disabled={!conversation}
-            />
+          <div
+            className={
+              workspaceOpen && workspaceLayout === "bottom"
+                ? "flex min-h-0 flex-1 flex-col"
+                : "flex min-h-0 flex-1 flex-row"
+            }
+          >
+            <div className="flex min-w-0 flex-1 flex-col">
+              <ChatPane
+                convId={convId}
+                modelChoice={modelChoice}
+                onModelChange={onModelChange}
+                workspaceDir={workspaceDir}
+                defaultWorkspace={defaultWorkspace}
+                onWorkspaceChange={onWorkspaceChange}
+                onSend={onSend}
+                onBash={openTerminalWithCommand}
+                onAbort={onAbort}
+                onForkMessage={onForkMessage}
+                focusToken={focusToken}
+                disabled={!conversation}
+              />
+            </div>
+            {workspaceOpen && (
+              <WorkspacePanel
+                tabs={workspaceTabs}
+                activeId={workspaceActiveId}
+                workspaceDir={workspaceDir}
+                defaultWorkspace={defaultWorkspace}
+                onSelect={(id) => {
+                  setWorkspaceActiveId(id);
+                  setWorkspaceOpen(true);
+                }}
+                onClose={closeWorkspaceTab}
+                onClosePanel={() => setWorkspaceOpen(false)}
+                onNewTab={(kind) => openWorkspaceTab(kind, true)}
+                layout={workspaceLayout}
+                onLayoutChange={setWorkspaceLayout}
+                onUpdateBrowserTab={updateBrowserWorkspaceTab}
+                onAnnotate={async (message) => {
+                  await onSend(message, []);
+                }}
+              />
+            )}
           </div>
         )}
         <ArtifactsDialog
@@ -193,6 +390,16 @@ export function SessionDetailDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function browserTitle(url: string, fallback: string): string {
+  if (!url || url === "about:blank") return fallback;
+  try {
+    const parsed = new URL(url);
+    return parsed.host || parsed.pathname || fallback;
+  } catch {
+    return url.length > 24 ? `${url.slice(0, 21)}...` : url;
+  }
 }
 
 /** Skeleton transcript shown while a cold (never-opened-this-session) card's

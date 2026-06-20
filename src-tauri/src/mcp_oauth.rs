@@ -100,7 +100,9 @@ pub async fn refresh_due_tokens(skew: Duration) {
             return;
         }
     };
-    let Some(entries) = doc.get("entries").and_then(|e| e.as_object()) else { return };
+    let Some(entries) = doc.get("entries").and_then(|e| e.as_object()) else {
+        return;
+    };
 
     // Sample the entries that are due, with everything refresh_one needs. We read
     // here and write later (write_back re-reads), so the vault lock is held only
@@ -110,15 +112,21 @@ pub async fn refresh_due_tokens(skew: Duration) {
     for (key, entry) in entries {
         let tokens = entry.get("tokens");
         let (Some(refresh_token), Some(expires_at)) = (
-            tokens.and_then(|t| t.get("refresh_token")).and_then(|v| v.as_str()),
-            tokens.and_then(|t| t.get("expires_at")).and_then(|v| v.as_u64()),
+            tokens
+                .and_then(|t| t.get("refresh_token"))
+                .and_then(|v| v.as_str()),
+            tokens
+                .and_then(|t| t.get("expires_at"))
+                .and_then(|v| v.as_u64()),
         ) else {
             continue; // static-header or not-yet-authorized entry → skip
         };
         if expires_at > cutoff {
             continue; // still fresh enough
         }
-        let Some(server_url) = entry.get("serverUrl").and_then(|v| v.as_str()) else { continue };
+        let Some(server_url) = entry.get("serverUrl").and_then(|v| v.as_str()) else {
+            continue;
+        };
         let client_id = entry
             .get("clientInfo")
             .and_then(|c| c.get("client_id"))
@@ -143,7 +151,10 @@ pub async fn refresh_due_tokens(skew: Duration) {
                 Err(err) => tracing::warn!("oauth-refresh: write-back failed for {}: {err}", e.key),
             },
             Err(err) => {
-                tracing::warn!("oauth-refresh: refresh failed for {} (left untouched): {err}", e.key)
+                tracing::warn!(
+                    "oauth-refresh: refresh failed for {} (left untouched): {err}",
+                    e.key
+                )
             }
         }
     }
@@ -158,7 +169,11 @@ struct DueEntry {
 
 /// Run the OAuth2 `refresh_token` grant against the server's token endpoint and
 /// return the parsed token response. Does not touch the vault.
-async fn refresh_one(server_url: &str, client_id: &str, refresh_token: &str) -> anyhow::Result<Value> {
+async fn refresh_one(
+    server_url: &str,
+    client_id: &str,
+    refresh_token: &str,
+) -> anyhow::Result<Value> {
     let token_endpoint = discover_token_endpoint(server_url).await?;
     let client = http_client()?;
 
@@ -188,7 +203,11 @@ async fn refresh_one(server_url: &str, client_id: &str, refresh_token: &str) -> 
     }
     let parsed: Value = serde_json::from_str(&body)
         .map_err(|e| anyhow::anyhow!("token endpoint gave non-JSON ({e}): {}", body.trim()))?;
-    if parsed.get("access_token").and_then(|v| v.as_str()).is_none() {
+    if parsed
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .is_none()
+    {
         anyhow::bail!("token response missing access_token: {}", body.trim());
     }
     Ok(parsed)
@@ -220,14 +239,19 @@ async fn discover_token_endpoint(server_url: &str) -> anyhow::Result<String> {
         .and_then(|v| v.as_str())
         .map(String::from)
         .ok_or_else(|| anyhow::anyhow!("no token_endpoint in {meta_url}"))?;
-    endpoint_cache().lock().unwrap().insert(origin, endpoint.clone());
+    endpoint_cache()
+        .lock()
+        .unwrap()
+        .insert(origin, endpoint.clone());
     Ok(endpoint)
 }
 
 /// `scheme://host[:port]` for an absolute URL.
 fn origin_of(url: &str) -> anyhow::Result<String> {
     let u = reqwest::Url::parse(url)?;
-    let host = u.host_str().ok_or_else(|| anyhow::anyhow!("no host in {url}"))?;
+    let host = u
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("no host in {url}"))?;
     Ok(match u.port() {
         Some(p) => format!("{}://{}:{}", u.scheme(), host, p),
         None => format!("{}://{}", u.scheme(), host),
@@ -271,7 +295,10 @@ async fn write_back(path: &Path, key: &str, token_resp: &Value) -> anyhow::Resul
     if let Some(rt) = token_resp.get("refresh_token").and_then(|v| v.as_str()) {
         tokens.insert("refresh_token".into(), json!(rt));
     }
-    let expires_in = token_resp.get("expires_in").and_then(|v| v.as_u64()).unwrap_or(3600);
+    let expires_in = token_resp
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(3600);
     tokens.insert("expires_in".into(), json!(expires_in));
     tokens.insert("expires_at".into(), json!(now_secs() + expires_in));
 
@@ -293,5 +320,7 @@ fn owner_only(path: &Path) {
 }
 
 fn iso_now() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+    chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string()
 }

@@ -150,7 +150,9 @@ fn read_state(path: &Path) -> MemoryState {
             s
         }
         Err(e) => {
-            tracing::warn!("memory.json unparseable ({e}); backing up to .corrupt and starting fresh");
+            tracing::warn!(
+                "memory.json unparseable ({e}); backing up to .corrupt and starting fresh"
+            );
             let _ = std::fs::copy(path, path.with_extension("json.corrupt"));
             MemoryState::default()
         }
@@ -194,13 +196,17 @@ pub async fn create_memory(
         return Err("memory content is empty".into());
     }
     if content.chars().count() > MAX_CONTENT_CHARS {
-        return Err(format!("memory content exceeds {MAX_CONTENT_CHARS} characters"));
+        return Err(format!(
+            "memory content exceeds {MAX_CONTENT_CHARS} characters"
+        ));
     }
     let path = memory_path(&state.app_data_dir);
     let _guard = file_lock().lock().unwrap();
     let mut s = read_state(&path);
     if s.entries.len() >= MAX_ENTRIES {
-        return Err(format!("memory is full ({MAX_ENTRIES} entries); delete some first"));
+        return Err(format!(
+            "memory is full ({MAX_ENTRIES} entries); delete some first"
+        ));
     }
     let now = now_ms();
     let entry = MemoryEntry {
@@ -239,7 +245,9 @@ pub async fn update_memory(
             return Err("memory content is empty".into());
         }
         if c.chars().count() > MAX_CONTENT_CHARS {
-            return Err(format!("memory content exceeds {MAX_CONTENT_CHARS} characters"));
+            return Err(format!(
+                "memory content exceeds {MAX_CONTENT_CHARS} characters"
+            ));
         }
         entry.content = c;
     }

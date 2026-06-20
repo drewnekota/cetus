@@ -81,12 +81,7 @@ pub async fn post_notification(
         // Other platforms: basic fire-and-forget via the plugin (no click route).
         use tauri_plugin_notification::NotificationExt;
         let _ = (&state, &conversation_id);
-        let _ = app
-            .notification()
-            .builder()
-            .title(title)
-            .body(body)
-            .show();
+        let _ = app.notification().builder().title(title).body(body).show();
     }
     Ok(())
 }

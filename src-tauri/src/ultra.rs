@@ -83,8 +83,12 @@ pub fn maybe_handle_agent_request(ctx: &RunCtx, payload: &str) {
         return;
     }
     let (Some(conv), Some(request_id)) = (
-        v.get("conversationId").and_then(|c| c.as_str()).map(String::from),
-        v.get("requestId").and_then(|r| r.as_str()).map(String::from),
+        v.get("conversationId")
+            .and_then(|c| c.as_str())
+            .map(String::from),
+        v.get("requestId")
+            .and_then(|r| r.as_str())
+            .map(String::from),
     ) else {
         return;
     };

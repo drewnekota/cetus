@@ -257,21 +257,50 @@ pub fn ocr_screen_now(app_data: &Path) -> Option<String> {
     text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
 }
 
-/// One-shot primary-monitor capture, downscaled to `max_edge` and JPEG-encoded —
-/// for the quick launcher's context screenshot. Fully in-process (xcap + the
-/// `image` crate): no `screencapture`/`sips` subprocesses and no temp file, where
-/// the old launcher path paid two process spawns and a disk round-trip per open.
-/// Caller gates on Screen Recording permission. Blocking; run in `spawn_blocking`.
-pub fn capture_primary_jpeg(max_edge: u32) -> Option<Vec<u8>> {
-    let img = capture_primary()?;
+/// Capture the primary display via the native `screencapture` tool, then
+/// downscale + JPEG-encode in-process. Same output contract as
+/// [`capture_primary_jpeg`], but a different grab path: on recent macOS xcap's
+/// ScreenCaptureKit path (see [`capture_primary`]) stalls for *seconds* per frame
+/// (~3.5s measured on Darwin 25), whereas `screencapture` uses Apple's optimal
+/// path and returns in ~100ms. The launcher — where the grab is the panel's
+/// first-paint cost — uses this; the one subprocess spawn + temp file are well
+/// worth the ~30x speedup. macOS only.
+#[cfg(target_os = "macos")]
+pub fn capture_primary_jpeg_native(max_edge: u32) -> Option<Vec<u8>> {
+    let path = std::env::temp_dir().join(format!(
+        "cetus-launch-shot-{}-{}.jpg",
+        std::process::id(),
+        now_ms()
+    ));
+    let ok = std::process::Command::new("/usr/sbin/screencapture")
+        .args(["-x", "-t", "jpg"])
+        .arg(&path)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        let _ = std::fs::remove_file(&path);
+        return None;
+    }
+    let bytes = std::fs::read(&path).ok();
+    let _ = std::fs::remove_file(&path);
+    let bytes = bytes?;
+    if bytes.is_empty() {
+        return None;
+    }
+    // Decode → downscale → re-encode so the IPC payload and vision input stay
+    // bounded, honoring the same `max_edge` contract as the xcap path.
+    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
     let resized = downscale(&img, max_edge);
-    drop(img);
     let rgb = image::DynamicImage::ImageRgba8(resized).to_rgb8();
-    let mut bytes: Vec<u8> = Vec::new();
+    let mut out: Vec<u8> = Vec::new();
     image::DynamicImage::ImageRgb8(rgb)
-        .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
+        .write_to(
+            &mut std::io::Cursor::new(&mut out),
+            image::ImageFormat::Jpeg,
+        )
         .ok()?;
-    (!bytes.is_empty()).then_some(bytes)
+    (!out.is_empty()).then_some(out)
 }
 
 /// Capture the primary monitor as an RGBA image. We lift the raw bytes out of

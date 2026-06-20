@@ -232,7 +232,9 @@ pub async fn cleanup_transcript(
         // the known-good fallback degrades cleanup to \"older model\" instead
         // of \"off\". Skipped when the primary IS the fallback.
         Err(e) if primary != CLEANUP_MODEL_FALLBACK => {
-            tracing::warn!("cleanup on {primary} failed ({e}); retrying on {CLEANUP_MODEL_FALLBACK}");
+            tracing::warn!(
+                "cleanup on {primary} failed ({e}); retrying on {CLEANUP_MODEL_FALLBACK}"
+            );
             cleanup_call(ark_key, &system, transcript, CLEANUP_MODEL_FALLBACK).await
         }
         Err(e) => Err(e),
@@ -330,9 +332,16 @@ async fn cleanup_call(
     // start + \"算了，就说好的\"), so the under-length bail is skipped there —
     // exactly the case the collapse feature exists for.
     let out_chars = cleaned.chars().count();
-    let has_retraction = ["不对", "我说错了", "算了", "scratch that", "no wait", "wait, i mean"]
-        .iter()
-        .any(|m| transcript.to_lowercase().contains(m));
+    let has_retraction = [
+        "不对",
+        "我说错了",
+        "算了",
+        "scratch that",
+        "no wait",
+        "wait, i mean",
+    ]
+    .iter()
+    .any(|m| transcript.to_lowercase().contains(m));
     if input_chars >= 10
         && ((out_chars * 5 < input_chars && !has_retraction) || out_chars > input_chars * 2)
     {
@@ -348,7 +357,11 @@ async fn cleanup_call(
 /// Strip the quotes / stray punctuation a model tends to wrap a title in, keep
 /// the first line, and cap the length.
 fn sanitize(raw: &str) -> String {
-    let first_line = raw.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+    let first_line = raw
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
     let trimmed = first_line
         .trim_matches(|c| c == '"' || c == '\'' || c == '“' || c == '”' || c == '`')
         .trim()

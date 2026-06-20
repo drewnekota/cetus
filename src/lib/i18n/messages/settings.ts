@@ -19,6 +19,7 @@ export const settings = {
     "nav.api-keys": "API Keys",
     "nav.memory": "Memory",
     "nav.dreaming": "Dreaming",
+    "nav.plugins": "Plugins",
     "nav.skills": "Skills",
     "nav.slash-commands": "Slash commands",
     "nav.connectors": "Connectors",
@@ -282,7 +283,7 @@ export const settings = {
       "Lets the agent drive your browser and Mac apps. Requires Accessibility (and Screen Recording for the live view).",
     "agentControl.browser.label": "Enable browser control",
     "agentControl.browser.description":
-      "Adds the browser_* tools and the index-based control prompt for driving a web browser. The agent confirms consequential actions and you can stop it any time.",
+      "Enables the Browser Use plugin, which contributes the chrome-devtools MCP tools for driving a managed Chrome. The agent confirms consequential actions and you can stop it any time.",
     "agentControl.computer.label": "Enable computer control",
     "agentControl.computer.description":
       "Adds the computer_* tools for controlling this Mac's apps via accessibility. The agent confirms consequential actions and you can stop it any time.",
@@ -299,6 +300,31 @@ export const settings = {
     "agentControl.screen.granted": "Granted.",
     "agentControl.footnote":
       "The agent acts through numbered element lists, never raw pixels, and asks before anything consequential (sending, deleting, purchasing, submitting, authenticating). A Stop button appears in the chat while it's active.",
+
+    // --- Plugins ----------------------------------------------------------
+    "plugins.title": "Plugins",
+    "plugins.description":
+      "Capability packages that can contribute prompt guidance, tools, MCP servers, skills, and trusted native integrations.",
+    "plugins.import": "Import folder",
+    "plugins.importing": "Importing…",
+    "plugins.empty": "No plugins found",
+    "plugins.source.builtIn": "Built-in",
+    "plugins.source.user": "User",
+    "plugins.openFolder": "Open folder",
+    "plugins.openExtension": "Open extension",
+    "plugins.openChromeExtensions": "Open Chrome extensions",
+    "plugins.installHost": "Install host",
+    "plugins.testHost": "Test host",
+    "plugins.hostInstalled": "Chrome native host installed",
+    "plugins.hostMissing": "Chrome native host not installed",
+    "plugins.hostTestOk": "Native host self-test passed",
+    "plugins.hostTestFailed": "Native host self-test failed",
+    "plugins.delete": "Delete plugin",
+    "plugins.deleteConfirm": "Delete this plugin?",
+    "plugins.surface.title": "Choose the right surface",
+    "plugins.surface.computer": "Native desktop apps, cross-app GUI work, or anything no structured tool can reach.",
+    "plugins.surface.chrome": "Your real Chrome profile: existing logins, cookies, extensions, and open authenticated tabs. Requires the Chrome extension.",
+    "plugins.surface.browser": "Cetus-managed browser for local dev servers, public pages, and isolated temporary sessions.",
 
     // --- Archived chats ---------------------------------------------------
     "archived.title": "Archived chats",
@@ -528,6 +554,7 @@ export const settings = {
     "nav.api-keys": "API 密钥",
     "nav.memory": "记忆",
     "nav.dreaming": "梦境整理",
+    "nav.plugins": "插件",
     "nav.skills": "技能",
     "nav.slash-commands": "斜杠命令",
     "nav.connectors": "连接器",
@@ -751,7 +778,7 @@ export const settings = {
       "让智能体操作你的浏览器和 Mac 应用。需要辅助功能权限（实时预览还需屏幕录制权限）。",
     "agentControl.browser.label": "启用浏览器控制",
     "agentControl.browser.description":
-      "添加 browser_* 工具和基于索引的控制提示，用于操作网页浏览器。智能体会在执行重要操作前确认，你也可随时让它停止。",
+      "启用 Browser Use 插件，由它提供 chrome-devtools MCP 工具来操作托管 Chrome。智能体会在执行重要操作前确认，你也可随时让它停止。",
     "agentControl.computer.label": "启用电脑控制",
     "agentControl.computer.description":
       "添加 computer_* 工具，通过辅助功能控制本机应用。智能体会在执行重要操作前确认，你也可随时让它停止。",
@@ -767,6 +794,30 @@ export const settings = {
     "agentControl.screen.granted": "已授予。",
     "agentControl.footnote":
       "智能体通过编号元素列表操作，绝不直接操作像素，并会在执行任何重要操作（发送、删除、购买、提交、认证）前征求同意。它运行期间，对话中会出现停止按钮。",
+
+    "plugins.title": "插件",
+    "plugins.description":
+      "能力包，可提供提示词指导、工具、MCP 服务器、技能和受信任的原生集成。",
+    "plugins.import": "导入文件夹",
+    "plugins.importing": "导入中…",
+    "plugins.empty": "未找到插件",
+    "plugins.source.builtIn": "内置",
+    "plugins.source.user": "用户",
+    "plugins.openFolder": "打开文件夹",
+    "plugins.openExtension": "打开扩展目录",
+    "plugins.openChromeExtensions": "打开 Chrome 扩展页",
+    "plugins.installHost": "安装 Host",
+    "plugins.testHost": "测试 Host",
+    "plugins.hostInstalled": "Chrome native host 已安装",
+    "plugins.hostMissing": "Chrome native host 未安装",
+    "plugins.hostTestOk": "Native host 自检通过",
+    "plugins.hostTestFailed": "Native host 自检失败",
+    "plugins.delete": "删除插件",
+    "plugins.deleteConfirm": "确定删除这个插件？",
+    "plugins.surface.title": "选择合适的操作入口",
+    "plugins.surface.computer": "原生桌面应用、跨应用 GUI 流程，或结构化工具够不到的任务。",
+    "plugins.surface.chrome": "你的真实 Chrome：已有登录态、cookie、扩展和已打开的认证标签页。需要 Chrome 扩展。",
+    "plugins.surface.browser": "Cetus 托管浏览器：本地开发服务器、公开页面和隔离的临时会话。",
 
     "archived.title": "已归档对话",
     "archived.description":

@@ -1,0 +1,17 @@
+{
+  "id": "cetus.browser-use",
+  "displayName": "Browser Use",
+  "version": "0.1.0",
+  "description": "Drive a managed Chrome browser through Chrome DevTools MCP.",
+  "activation": {
+    "agentControlSurface": "browser"
+  },
+  "interface": {
+    "capabilities": ["Interactive", "Read", "Write"],
+    "riskLevel": "medium"
+  },
+  "systemPrompt": "prompts/system.md",
+  "extensions": ["extensions/browser-visible.ts"],
+  "coreExtensionOverrides": ["browser-use.ts"],
+  "mcpServers": ".mcp.json"
+}

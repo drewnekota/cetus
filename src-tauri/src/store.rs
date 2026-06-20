@@ -245,7 +245,12 @@ impl Store {
         // existed (an older shape) won't get them from CREATE TABLE IF NOT
         // EXISTS. Add them additively so reconciliation never leaves a row the
         // reader can't map — the alternative used to be dropping the table.
-        ensure_column(&conn, "conversations", "ds_model", "TEXT NOT NULL DEFAULT 'pro'")?;
+        ensure_column(
+            &conn,
+            "conversations",
+            "ds_model",
+            "TEXT NOT NULL DEFAULT 'pro'",
+        )?;
         ensure_column(
             &conn,
             "conversations",
@@ -388,12 +393,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE conversations SET ds_model = ?1, reasoning = ?2, updated_at = ?3 WHERE id = ?4",
-            params![
-                choice.model.as_str(),
-                choice.reasoning.as_str(),
-                ts,
-                id
-            ],
+            params![choice.model.as_str(), choice.reasoning.as_str(), ts, id],
         )?;
         Ok(())
     }
@@ -522,11 +522,10 @@ impl Store {
 
     pub fn get_automation(&self, id: &str) -> Result<Option<Automation>> {
         let conn = self.read_conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare(&format!("SELECT {AUTOMATION_COLS} FROM automations WHERE id=?1"))?;
-        let row = stmt
-            .query_row(params![id], row_to_automation)
-            .optional()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {AUTOMATION_COLS} FROM automations WHERE id=?1"
+        ))?;
+        let row = stmt.query_row(params![id], row_to_automation).optional()?;
         Ok(row)
     }
 
@@ -735,8 +734,8 @@ impl Store {
     pub fn prune_screenshots(&self, before_ts: i64) -> Result<Vec<String>> {
         let mut conn = self.conn.lock().unwrap();
         let paths: Vec<String> = {
-            let mut stmt = conn
-                .prepare("SELECT file_path, thumb_path FROM screenshots WHERE ts < ?1")?;
+            let mut stmt =
+                conn.prepare("SELECT file_path, thumb_path FROM screenshots WHERE ts < ?1")?;
             let rows = stmt.query_map(params![before_ts], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
             })?;
@@ -814,7 +813,13 @@ impl Store {
         conn.execute(
             "INSERT INTO meeting_segments (id, meeting_id, ts, source, text)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![uuid::Uuid::new_v4().to_string(), meeting_id, ts, source, text],
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                meeting_id,
+                ts,
+                source,
+                text
+            ],
         )?;
         Ok(())
     }
@@ -867,7 +872,10 @@ impl Store {
     pub fn delete_meeting(&self, id: &str) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM meeting_segments WHERE meeting_id = ?1", params![id])?;
+        tx.execute(
+            "DELETE FROM meeting_segments WHERE meeting_id = ?1",
+            params![id],
+        )?;
         tx.execute("DELETE FROM meetings WHERE id = ?1", params![id])?;
         tx.commit()?;
         Ok(())
@@ -884,7 +892,10 @@ impl Store {
                     (SELECT id FROM meetings WHERE started_ts < ?1)",
                 params![before_ts],
             )?;
-            let n = tx.execute("DELETE FROM meetings WHERE started_ts < ?1", params![before_ts])?;
+            let n = tx.execute(
+                "DELETE FROM meetings WHERE started_ts < ?1",
+                params![before_ts],
+            )?;
             tx.commit()?;
             n
         };

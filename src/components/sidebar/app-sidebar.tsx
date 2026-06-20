@@ -12,6 +12,7 @@ import {
   ArchiveRestore,
   Clock,
   Folder,
+  Plug,
   PlusCircle,
   Settings as SettingsIcon,
 } from "lucide-react";
@@ -88,12 +89,8 @@ export const AppSidebar = memo(function AppSidebar({
       className={cn(
         // `relative` anchors the drag-to-resize handle pinned to the right edge.
         "relative",
-        // Fully transparent: the sidebar IS the window's vibrancy (Arc-style
-        // glass shell). No tint and no gradient, so the sidebar reads as exactly
-        // the same frosted pane as the margins around the content card — one
-        // continuous frost wrapping the opaque card, no seam. The card's own
-        // border is what separates the two.
-        "bg-transparent",
+        // Keep the sidebar on the explicit theme token instead of macOS
+        // vibrancy, so light mode stays at the Codex-like #f8f8f9.
         // Trim the row scale a notch below shadcn's defaults: 13px text (vs
         // 14px) and 14px icons (vs 16px). Scoped to this sidebar via descendant
         // selectors + `!` so they win over the menu-button base styles without
@@ -118,6 +115,12 @@ export const AppSidebar = memo(function AppSidebar({
               className="data-[slot=sidebar-menu-button]:!p-1.5 cursor-default hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
             >
               <div>
+                <img
+                  src="/icon.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="size-5 shrink-0 rounded-[5px]"
+                />
                 <span className="font-serif text-sm font-semibold italic">
                   cetus
                 </span>
@@ -133,17 +136,14 @@ export const AppSidebar = memo(function AppSidebar({
             <SidebarMenuButton
               tooltip={newLabel}
               onClick={onNew}
-              // Subtle elevated surface (lighter than the sidebar/background in
-              // dark mode) rather than a bold primary fill — matches the calmer
-              // selected-row treatment. Brightness hover keeps it reading as the
-              // primary action in both themes.
-              className="min-w-8 bg-sidebar-accent text-sidebar-accent-foreground transition-[filter] duration-200 ease-linear hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:brightness-110 active:brightness-95 dark:hover:brightness-125"
+              // Plain nav row (no standalone fill) so it sits flush with the
+              // other sidebar actions; the hover/active states come from the
+              // default SidebarMenuButton treatment.
+              className="min-w-8"
             >
               <PlusCircle />
               <span>{newLabel}</span>
-              <Kbd className="ml-auto border-transparent bg-foreground/10 text-muted-foreground">
-                ⌘N
-              </Kbd>
+              <Kbd className="ml-auto border-transparent">⌘N</Kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
           {/* Automations is its own destination (a scheduled-prompt feature),
@@ -158,6 +158,17 @@ export const AppSidebar = memo(function AppSidebar({
               <Clock />
               <span>{t("nav.automations")}</span>
               <Kbd className="ml-auto border-transparent">⌘3</Kbd>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip={t("nav.plugins")}
+              isActive={view === "plugins"}
+              onClick={() => onViewChange("plugins")}
+            >
+              <Plug />
+              <span>{t("nav.plugins")}</span>
+              <Kbd className="ml-auto border-transparent">⌘4</Kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -369,6 +380,7 @@ const ConversationRow = memo(function ConversationRow({
         // the menu-item group hover instead so it persists while the cursor is
         // anywhere in the row, including over the archive action.
         className={cn(
+          "pr-6",
           !active &&
             "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
         )}

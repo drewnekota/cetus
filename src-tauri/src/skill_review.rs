@@ -270,7 +270,9 @@ async fn run_review(state: &AppState, handle: &AppHandle, quiet_minutes: u32) ->
 
     if transcript.trim().is_empty() {
         // Nothing usable — advance the watermark so we don't keep retrying these.
-        let _ = state.store.set_setting(WATERMARK_KEY, &high_water.to_string());
+        let _ = state
+            .store
+            .set_setting(WATERMARK_KEY, &high_water.to_string());
         return Ok(());
     }
 
@@ -281,13 +283,23 @@ async fn run_review(state: &AppState, handle: &AppHandle, quiet_minutes: u32) ->
     );
 
     let budget = MAX_PROPOSALS_PER_PASS.min(MAX_PENDING_PROPOSALS.saturating_sub(pending));
-    let raw = distill(&api_key, &crate::provider::deepseek_chat_url(&state.store), &user_msg).await?;
+    let raw = distill(
+        &api_key,
+        &crate::provider::deepseek_chat_url(&state.store),
+        &user_msg,
+    )
+    .await?;
     let proposals: Vec<Proposal> = parse_proposals(&raw).into_iter().take(budget).collect();
 
     let mut created = 0usize;
     for p in proposals {
-        match skills::propose_skill(&state.app_data_dir, &state.store, &p.name, &p.description, &p.body)
-        {
+        match skills::propose_skill(
+            &state.app_data_dir,
+            &state.store,
+            &p.name,
+            &p.description,
+            &p.body,
+        ) {
             Ok(_) => created += 1,
             Err(e) => tracing::warn!("skill-review: propose failed: {e}"),
         }
@@ -298,7 +310,9 @@ async fn run_review(state: &AppState, handle: &AppHandle, quiet_minutes: u32) ->
     }
 
     // Success: advance the watermark so this batch is never reconsidered.
-    let _ = state.store.set_setting(WATERMARK_KEY, &high_water.to_string());
+    let _ = state
+        .store
+        .set_setting(WATERMARK_KEY, &high_water.to_string());
     Ok(())
 }
 

@@ -244,9 +244,7 @@ mod helper {
             match cmd.output() {
                 Ok(o) if o.status.success() && bin.exists() => {
                     if !flags.is_empty() {
-                        tracing::warn!(
-                            "meeting helper compiled with reduced features: {flags:?}"
-                        );
+                        tracing::warn!("meeting helper compiled with reduced features: {flags:?}");
                     } else {
                         tracing::info!("compiled meeting helper at {}", bin.display());
                     }
@@ -259,7 +257,9 @@ mod helper {
                 }
             }
         }
-        tracing::warn!("swiftc failed to build meeting helper; meeting capture disabled: {last_err}");
+        tracing::warn!(
+            "swiftc failed to build meeting helper; meeting capture disabled: {last_err}"
+        );
         None
     }
 }
@@ -268,9 +268,7 @@ mod helper {
 /// available (so the helper is its own TCC-responsible process and uses its
 /// embedded usage strings), otherwise direct — same dance as voice.rs.
 #[cfg(target_os = "macos")]
-fn helper_command(
-    app_data: &Path,
-) -> Result<(PathBuf, Vec<std::ffi::OsString>), String> {
+fn helper_command(app_data: &Path) -> Result<(PathBuf, Vec<std::ffi::OsString>), String> {
     let bin = helper::path(app_data)
         .ok_or("meeting helper unavailable (swiftc missing?)")?
         .to_path_buf();
@@ -544,8 +542,15 @@ async fn run_reader(
         };
         if let Some(seg) = v.get("segment") {
             let source = seg.get("source").and_then(|s| s.as_str()).unwrap_or("mic");
-            let ts = seg.get("ts").and_then(|t| t.as_i64()).unwrap_or_else(now_ms);
-            let text = seg.get("text").and_then(|t| t.as_str()).unwrap_or("").trim();
+            let ts = seg
+                .get("ts")
+                .and_then(|t| t.as_i64())
+                .unwrap_or_else(now_ms);
+            let text = seg
+                .get("text")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .trim();
             if text.is_empty() {
                 continue;
             }
@@ -835,8 +840,7 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
 
         if child.is_none() {
             let app_data2 = app_data.clone();
-            let resolved =
-                tokio::task::spawn_blocking(move || helper_command(&app_data2)).await;
+            let resolved = tokio::task::spawn_blocking(move || helper_command(&app_data2)).await;
             let (program, mut args) = match resolved {
                 Ok(Ok(v)) => v,
                 _ => {
@@ -955,9 +959,7 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
             {
                 let hint = mic_apps.first().cloned();
                 tracing::info!("meeting auto-start: mic in use by {mic_apps:?}");
-                if let Err(e) =
-                    start_internal(&app, &store, &app_data, true, hint).await
-                {
+                if let Err(e) = start_internal(&app, &store, &app_data, true, hint).await {
                     tracing::warn!("meeting auto-start failed: {e}");
                     // Don't retry every tick on a hard failure.
                     active_since = Some(Instant::now());
@@ -1008,9 +1010,7 @@ mod hotkey_state {
 /// Parse + stash the meeting toggle accelerator so the global-shortcut handler
 /// can route presses. Returns the parsed shortcut for registration.
 #[cfg(desktop)]
-pub(crate) fn sync_toggle_hotkey(
-    hotkey: &str,
-) -> Option<tauri_plugin_global_shortcut::Shortcut> {
+pub(crate) fn sync_toggle_hotkey(hotkey: &str) -> Option<tauri_plugin_global_shortcut::Shortcut> {
     let parsed = hotkey
         .trim()
         .parse::<tauri_plugin_global_shortcut::Shortcut>()
@@ -1055,9 +1055,7 @@ pub(crate) fn toggle_from_hotkey(app: &AppHandle) {
 // =============================================================================
 
 #[tauri::command]
-pub async fn get_meeting_settings(
-    state: State<'_, AppState>,
-) -> Result<MeetingSettings, String> {
+pub async fn get_meeting_settings(state: State<'_, AppState>) -> Result<MeetingSettings, String> {
     Ok(load_settings(&state.store))
 }
 
@@ -1075,9 +1073,7 @@ pub async fn set_meeting_settings(
 }
 
 #[tauri::command]
-pub async fn meeting_status(
-    runtime: State<'_, MeetingRuntime>,
-) -> Result<MeetingStatus, String> {
+pub async fn meeting_status(runtime: State<'_, MeetingRuntime>) -> Result<MeetingStatus, String> {
     let slot = runtime.active.lock().await;
     Ok(match slot.as_ref() {
         Some(s) => MeetingStatus {
@@ -1098,10 +1094,7 @@ pub async fn meeting_status(
 }
 
 #[tauri::command]
-pub async fn meeting_start(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn meeting_start(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let store = state.store.clone();
     let app_data = state.app_data_dir.clone();
     start_internal(&app, &store, &app_data, false, None).await

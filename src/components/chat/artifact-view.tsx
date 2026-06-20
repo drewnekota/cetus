@@ -230,6 +230,27 @@ function ArtifactPreviewDialog({
 }) {
   const { t } = useTranslation("chat");
   const { t: tc } = useTranslation("common");
+
+  // HTML artifacts render in a sandboxed iframe whose origin differs from the
+  // app webview, so the embedded page can't reach us directly. The injected
+  // bridge (see buildHtmlSrcDoc) postMessages Escape presses and link clicks
+  // back here: Escape closes the dialog even when focus is inside the iframe,
+  // and links open in the system browser rather than navigating the iframe.
+  useEffect(() => {
+    if (!open) return;
+    function onMessage(e: MessageEvent) {
+      const d = e.data as { __cetus?: string; url?: string } | null;
+      if (!d || typeof d !== "object") return;
+      if (d.__cetus === "esc") {
+        onOpenChange(false);
+      } else if (d.__cetus === "open" && typeof d.url === "string") {
+        invoke("open_external", { url: d.url }).catch(console.error);
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [open, onOpenChange]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -342,14 +363,7 @@ function FullPreview({
         />
       );
     case "html":
-      return (
-        <iframe
-          src={url}
-          title={artifact.name}
-          sandbox="allow-same-origin allow-scripts"
-          className="h-full w-full bg-white"
-        />
-      );
+      return <HtmlPreview path={artifact.path} url={url} name={artifact.name} />;
     case "markdown":
       return (
         <FullTextLoader
@@ -382,6 +396,80 @@ function FullPreview({
         </div>
       );
   }
+}
+
+// ---- HTML preview (sandboxed iframe + parent bridge) -------------------
+
+/** Bridge script injected into the artifact's <head>. Runs inside the iframe
+ *  and forwards Escape presses and link clicks to the parent window so the
+ *  dialog can close and links can open externally. Stringified as-is into the
+ *  srcdoc; keep it dependency-free. */
+const HTML_BRIDGE = `
+(function () {
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') parent.postMessage({ __cetus: 'esc' }, '*');
+  });
+  document.addEventListener('click', function (e) {
+    var n = e.target;
+    while (n && n.nodeType === 3) n = n.parentNode;
+    var a = n && n.closest ? n.closest('a[href]') : null;
+    if (!a) return;
+    var raw = a.getAttribute('href') || '';
+    if (!raw || raw.charAt(0) === '#') return;
+    e.preventDefault();
+    parent.postMessage({ __cetus: 'open', url: a.href }, '*');
+  }, true);
+})();
+`;
+
+/** Inject a <base> (so relative resources resolve against the artifact's own
+ *  location, matching the previous src= behaviour) and the bridge script into
+ *  the document's head. */
+function buildHtmlSrcDoc(html: string, baseHref: string): string {
+  const base = /<base[\s>]/i.test(html)
+    ? ""
+    : `<base href="${baseHref}">`;
+  const inject = `${base}<script>${HTML_BRIDGE}</script>`;
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/(<head[^>]*>)/i, `$1${inject}`);
+  }
+  if (/<html[^>]*>/i.test(html)) {
+    return html.replace(/(<html[^>]*>)/i, `$1<head>${inject}</head>`);
+  }
+  return `${inject}${html}`;
+}
+
+function HtmlPreview({
+  path,
+  url,
+  name,
+}: {
+  path: string;
+  url: string;
+  name: string;
+}) {
+  const { text, error } = useFileText(path);
+  const { t } = useTranslation("chat");
+  if (error)
+    return (
+      <div className="px-6 py-6 text-destructive">
+        {t("artifact.readFailed", { error })}
+      </div>
+    );
+  if (text == null)
+    return (
+      <div className="px-6 py-6 text-muted-foreground">
+        {t("artifact.loading")}
+      </div>
+    );
+  return (
+    <iframe
+      srcDoc={buildHtmlSrcDoc(text, url)}
+      title={name}
+      sandbox="allow-same-origin allow-scripts"
+      className="h-full w-full bg-white"
+    />
+  );
 }
 
 function FullTextLoader({

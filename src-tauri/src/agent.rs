@@ -12,6 +12,8 @@
 //! * `kind: "cua"` — a native macOS accessibility call. Run through
 //!   [`crate::cua`] and the result (element list / action outcome) is replied to
 //!   the waiting extension.
+//! * `kind: "browser"` — a visible Browser surface request. Forwarded to the
+//!   React main window, which opens/focuses the right-side Browser tab.
 //!
 //! Replies go back through the parent pi's `extension_ui_response`, the exact
 //! mechanism Ultra uses (see [`crate::ultra`]).
@@ -67,17 +69,9 @@ pub fn load_settings(store: &Store) -> AgentSettings {
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
-fn save_settings(store: &Store, s: &AgentSettings) -> anyhow::Result<()> {
+pub(crate) fn save_settings(store: &Store, s: &AgentSettings) -> anyhow::Result<()> {
     store.set_setting(SETTINGS_KEY, &serde_json::to_string(s)?)?;
     Ok(())
-}
-
-/// The capability addendum appended to the system prompt, tailored to whichever
-/// surfaces are enabled. `None` when both are off (so a disabled agent never even
-/// hears about the tools).
-pub fn extra_system_prompt(store: &Store) -> Option<String> {
-    let s = load_settings(store);
-    crate::pi_rpc::agent_control_system_prompt(s.browser, s.computer)
 }
 
 /// Publish the enable flags to the process env the pi children inherit, so each
@@ -173,8 +167,8 @@ pub async fn set_agent_settings(
     settings: AgentSettings,
 ) -> Result<(), String> {
     save_settings(&state.store, &settings).map_err(|e| e.to_string())?;
-    // Publish the env flag + refresh the GLOBAL mcp.json template so the built-in
-    // chrome-devtools connector is added/removed for the next conversation's freeze.
+    // Publish the env flag + refresh the GLOBAL mcp.json template so plugin MCP
+    // servers are added/removed for the next conversation's freeze.
     // No pi recycle: like skills/connectors, the browser/computer capability is
     // snapshotted per conversation (see `AppState::conv_agent_env`), so a toggle
     // only reaches conversations created afterward and never disturbs an open chat.
@@ -235,8 +229,12 @@ pub fn maybe_handle_control_request(ctx: &AgentCtx, payload: &str) {
         return;
     }
     let (Some(conv), Some(req), Some(kind)) = (
-        v.get("conversationId").and_then(|x| x.as_str()).map(String::from),
-        v.get("requestId").and_then(|x| x.as_str()).map(String::from),
+        v.get("conversationId")
+            .and_then(|x| x.as_str())
+            .map(String::from),
+        v.get("requestId")
+            .and_then(|x| x.as_str())
+            .map(String::from),
         v.get("kind").and_then(|x| x.as_str()).map(String::from),
     ) else {
         return;
@@ -255,6 +253,7 @@ async fn handle(ctx: AgentCtx, conv: String, req: String, kind: String, params: 
             json!({"ok": true})
         }
         "cua" => run_cua(&ctx, &conv, params).await,
+        "browser" => run_browser_request(&ctx, &conv, params),
         _ => json!({"ok": false, "error": "unknown agent-control kind"}),
     };
     // `ctx.ui.input` resolves to the `value` STRING of the response; the shared
@@ -273,7 +272,11 @@ fn emit_step(ctx: &AgentCtx, conv: &str, p: &Value) {
                 .and_then(|x| x.as_str())
                 .unwrap_or("browser")
                 .to_string(),
-            action: p.get("action").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            action: p
+                .get("action")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
             highlighted_index: p
                 .get("highlightedIndex")
                 .and_then(|x| x.as_u64())
@@ -286,9 +289,41 @@ fn emit_step(ctx: &AgentCtx, conv: &str, p: &Value) {
     );
 }
 
+fn run_browser_request(ctx: &AgentCtx, conv: &str, params: Value) -> Value {
+    let op = params
+        .get("op")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    match op.as_str() {
+        "open" => {
+            let Some(url) = params.get("url").and_then(|x| x.as_str()) else {
+                return json!({"ok": false, "error": "missing url"});
+            };
+            let payload = json!({
+                "conversationId": conv,
+                "op": "open",
+                "url": url
+            });
+            match ctx
+                .handle
+                .emit_to("main", "browser-control-request", payload)
+            {
+                Ok(()) => json!({"ok": true, "result": "requested visible Browser open"}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            }
+        }
+        _ => json!({"ok": false, "error": "unknown browser request op"}),
+    }
+}
+
 /// Run a native accessibility call (`dump` / `act` / `verify` / `ping`).
 async fn run_cua(ctx: &AgentCtx, conv: &str, params: Value) -> Value {
-    let op = params.get("op").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let op = params
+        .get("op")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
 
     // Emergency stop is consumed here: refuse an act if the user hit Stop.
     if op == "act" && ctx.cua.take_stop(conv) {
@@ -308,15 +343,31 @@ async fn run_cua(ctx: &AgentCtx, conv: &str, params: Value) -> Value {
     // tools or ask the user; clicking would need a coordinate `move_click`.
     if reply.get("fallback").and_then(|x| x.as_str()) == Some("ocr") {
         let app_data = ctx.app_data_dir.clone();
-        if let Ok(Some(text)) =
-            tokio::task::spawn_blocking(move || ocr_screen(&app_data)).await
-        {
+        if let Ok(Some(text)) = tokio::task::spawn_blocking(move || ocr_screen(&app_data)).await {
             reply["ocrText"] = json!(text);
         }
     }
 
-    // For a successful act, attach a fresh screenshot to the live view (the model
-    // never sees it — it would otherwise hit the vision-bridge and become prose).
+    // For a dump with includeScreenshot, attach a screenshot to the tool result
+    // so the model can inspect pixels when AX/OCR is not enough. This is opt-in:
+    // screenshots can contain sensitive information, and the AX list is usually
+    // more precise for routine GUI work.
+    if op == "dump"
+        && params.get("includeScreenshot").and_then(|x| x.as_bool()) == Some(true)
+        && reply.get("ok").and_then(|x| x.as_bool()) == Some(true)
+    {
+        let shot = tokio::task::spawn_blocking(crate::quick::capture_screenshot)
+            .await
+            .ok()
+            .flatten();
+        if let Some(shot) = shot {
+            reply["screenshotJpeg"] = json!(shot.data);
+        } else {
+            reply["screenshotError"] = json!("no screenshot — grant Screen Recording permission");
+        }
+    }
+
+    // For a successful act, attach a fresh screenshot to the live view.
     if op == "act" && reply.get("ok").and_then(|x| x.as_bool()) == Some(true) {
         let action = reply
             .get("result")

@@ -56,8 +56,12 @@ pub fn maybe_handle_skill_request(ctx: &SkillToolCtx, payload: &str) {
         return;
     }
     let (Some(conv), Some(req)) = (
-        v.get("conversationId").and_then(|x| x.as_str()).map(String::from),
-        v.get("requestId").and_then(|x| x.as_str()).map(String::from),
+        v.get("conversationId")
+            .and_then(|x| x.as_str())
+            .map(String::from),
+        v.get("requestId")
+            .and_then(|x| x.as_str())
+            .map(String::from),
     ) else {
         return;
     };
@@ -84,7 +88,10 @@ fn handle(ctx: &SkillToolCtx, params: Value) -> (Value, bool) {
         "create" => op_create(ctx, &params),
         "update" => op_update(ctx, &params),
         "delete" => op_delete(ctx, &params),
-        other => (json!({ "ok": false, "error": format!("unknown op '{other}'") }), false),
+        other => (
+            json!({ "ok": false, "error": format!("unknown op '{other}'") }),
+            false,
+        ),
     }
 }
 
@@ -111,7 +118,7 @@ fn op_create(ctx: &SkillToolCtx, p: &Value) -> (Value, bool) {
                 "ok": true,
                 "skill": summarize(&e),
                 "note": "Created and ENABLED. It's in Settings → Skills (tagged 'By agent'), and \
-loads automatically in your next conversation. Tell the user it's saved.",
+            loads automatically in your next conversation. Tell the user it's saved.",
             }),
             true,
         ),
@@ -121,7 +128,10 @@ loads automatically in your next conversation. Tell the user it's saved.",
 
 fn op_update(ctx: &SkillToolCtx, p: &Value) -> (Value, bool) {
     let Some(id) = str_field(p, "id") else {
-        return (json!({ "ok": false, "error": "update needs 'id' (from op 'list')" }), false);
+        return (
+            json!({ "ok": false, "error": "update needs 'id' (from op 'list')" }),
+            false,
+        );
     };
     let name = str_field(p, "name");
     let description = str_field(p, "description");
@@ -141,7 +151,10 @@ fn op_update(ctx: &SkillToolCtx, p: &Value) -> (Value, bool) {
 
 fn op_delete(ctx: &SkillToolCtx, p: &Value) -> (Value, bool) {
     let Some(id) = str_field(p, "id") else {
-        return (json!({ "ok": false, "error": "delete needs 'id' (from op 'list')" }), false);
+        return (
+            json!({ "ok": false, "error": "delete needs 'id' (from op 'list')" }),
+            false,
+        );
     };
     match skills::agent_delete_skill(&ctx.app_data_dir, &ctx.store, &id) {
         Ok(true) => (json!({ "ok": true, "deleted": id }), true),
@@ -160,4 +173,3 @@ fn summarize(e: &SkillEntry) -> Value {
         "source": e.source,
     })
 }
-

@@ -91,6 +91,13 @@ if [ -d "$CETUS_EXT_SRC" ]; then
   echo "→ $EXT_DIR_NAME overlaid ($(ls "$CETUS_EXT_SRC" | wc -l | tr -d ' ') file(s))"
 fi
 
+PLUGIN_DIR_NAME="cetus-plugins"
+CETUS_PLUGIN_SRC="$REPO_ROOT/src-tauri/$PLUGIN_DIR_NAME"
+if [ -d "$CETUS_PLUGIN_SRC" ]; then
+  cp -R "$CETUS_PLUGIN_SRC" "$DEST_DIR/$PLUGIN_DIR_NAME"
+  echo "→ $PLUGIN_DIR_NAME overlaid ($(find "$CETUS_PLUGIN_SRC" -name plugin.json | wc -l | tr -d ' ') plugin(s))"
+fi
+
 # Harden pi-ai's request-side message conversion. Every provider routes its
 # history through transformMessages() (transform-messages.js) before converting
 # to wire format, and each converter assumes message `content` is an array

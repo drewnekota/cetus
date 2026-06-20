@@ -1,6 +1,7 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { PanelBottom, PanelRight, Terminal } from "lucide-react";
 import {
   Composer,
   type ComposerAttachment,
@@ -17,6 +18,18 @@ import { BoardView } from "@/components/board/board-view";
 import { CreateTaskDialog } from "@/components/board/create-task-dialog";
 import { AutomationsView } from "@/components/automation/automations-view";
 import { AutomationDialog } from "@/components/automation/automation-dialog";
+import { PluginsView } from "@/components/plugins/plugins-view";
+import {
+  WorkspacePanel,
+  type WorkspaceTab,
+  type WorkspaceTabKind,
+  type WorkspaceLayout,
+  type TerminalRunRequest,
+} from "@/components/workspace/workspace-panel";
+import {
+  createBrowserViewState,
+  type BrowserViewState,
+} from "@/components/browser/browser-view";
 import { SessionDetailDialog } from "@/components/board/session-detail-dialog";
 import { REVIEW_TOOL_NAME } from "@/lib/review";
 import { DialogHost } from "@/components/extension-ui/dialog-host";
@@ -24,6 +37,7 @@ import { ZoomHud } from "@/components/zoom-hud";
 import { TestHook } from "@/components/devtest/test-hook";
 import { ScreenHistoryPage } from "@/components/screen-history/screen-history-page";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { api, onAppEvent, onUpdateAvailable, type Screenshot } from "@/lib/tauri";
@@ -34,6 +48,7 @@ import {
   useHasArtifacts,
   useHasMessages,
   useStreamingIds,
+  copyCachedMessages,
   installChatPersistence,
   loadCachedMessages,
   loadLastActive,
@@ -41,7 +56,8 @@ import {
 } from "@/lib/chat-store";
 import { useZoom } from "@/hooks/use-zoom";
 import { dispatchNotification, refreshPermission } from "@/lib/notifications";
-import { tt } from "@/lib/i18n";
+import { tt, useLocale, useTranslation } from "@/lib/i18n";
+import { flavorHeadline } from "@/lib/chat-flavor";
 import { buildAttachmentRefs } from "@/lib/attachments";
 import {
   DEFAULT_MODEL_CHOICE,
@@ -114,6 +130,44 @@ function lastUserText(convId: string): string | null {
   return null;
 }
 
+interface BrowserAnnotationEvent {
+  url: string;
+  title?: string;
+  xPct?: number;
+  yPct?: number;
+  note: string;
+  selector?: string | null;
+  element?: string | null;
+  text?: string | null;
+  rect?: { x: number; y: number; width: number; height: number } | null;
+}
+
+interface BrowserControlEvent {
+  conversationId?: string;
+  op: "open";
+  url: string;
+}
+
+function browserAnnotationMessage(p: BrowserAnnotationEvent): string {
+  const lines = [
+    "@Browser 页面批注",
+    "",
+    `URL: ${p.url}`,
+  ];
+  if (p.title) lines.push(`页面标题: ${p.title}`);
+  if (p.selector || p.element) lines.push(`页面元素: ${p.selector || p.element}`);
+  if (p.text) lines.push(`元素文本: ${p.text}`);
+  if (p.rect) {
+    lines.push(
+      `元素区域: ${Math.round(p.rect.width)}×${Math.round(p.rect.height)} at (${Math.round(p.rect.x)}, ${Math.round(p.rect.y)})`,
+    );
+  } else if (typeof p.xPct === "number" && typeof p.yPct === "number") {
+    lines.push(`位置: x=${p.xPct.toFixed(1)}%, y=${p.yPct.toFixed(1)}%`);
+  }
+  lines.push("", p.note);
+  return lines.join("\n");
+}
+
 interface Outgoing {
   /** Image previews for the user bubble (data URLs). */
   localImages: { dataUrl: string; name?: string }[];
@@ -157,6 +211,7 @@ async function prepareOutgoing(
 
 export default function Home() {
   useZoom();
+  const { t } = useTranslation("chat");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [piReady, setPiReady] = useState(false);
@@ -206,6 +261,13 @@ export default function Home() {
   /** Bumped on every "New chat" click; threaded into Composer so it can pull
    *  focus back even when the hero is already on screen and nothing remounts. */
   const [focusToken, setFocusToken] = useState(0);
+  // Random greeting for the landing hero, re-rolled per new chat (focusToken
+  // bumps on "New chat") + on language switch. Stays put across keystrokes.
+  const { locale } = useLocale();
+  const heroHeadline = useMemo(
+    () => flavorHeadline(locale),
+    [locale, focusToken],
+  );
   // Restore the last sidebar view across reloads (⌘R). Lazy initializer (guarded
   // for the static-export prerender, where window is absent) so a reload paints
   // the right page straight away instead of flashing the chat hero first.
@@ -213,7 +275,7 @@ export default function Home() {
     if (typeof window === "undefined") return "chat";
     try {
       const v = localStorage.getItem("cetus:lastView");
-      if (v === "chat" || v === "board" || v === "automations") return v;
+      if (v === "chat" || v === "board" || v === "automations" || v === "plugins") return v;
     } catch {}
     return "chat";
   });
@@ -222,6 +284,14 @@ export default function Home() {
       localStorage.setItem("cetus:lastView", view);
     } catch {}
   }, [view]);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([
+    { id: "files-1", kind: "files", title: "Files" },
+  ]);
+  const [workspaceActiveId, setWorkspaceActiveId] = useState<string | null>("files-1");
+  const [workspaceLayout, setWorkspaceLayout] = useState<WorkspaceLayout>("side");
+  const workspaceTabsRef = useRef<WorkspaceTab[]>(workspaceTabs);
+  const workspaceActiveIdRef = useRef<string | null>(workspaceActiveId);
   const [boardWorkspaceFilter, setBoardWorkspaceFilter] = useState<string | null>(null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -269,6 +339,8 @@ export default function Home() {
   conversationsRef.current = conversations;
   activeIdRef.current = activeId;
   viewRef.current = view;
+  workspaceTabsRef.current = workspaceTabs;
+  workspaceActiveIdRef.current = workspaceActiveId;
 
   // Mirror the live queue + send fn so the flush effect (deps: streaming/active
   // only) never reads stale closures. onSend is a hoisted function declaration.
@@ -563,6 +635,18 @@ export default function Home() {
     return list;
   }, []);
 
+  const archiveConversation = useCallback(
+    async (c: Conversation) => {
+      await api.archiveConversation(c.id, !c.archivedAt);
+      await refreshList();
+      chatStore.getState().drop(c.id);
+      if (c.id === activeIdRef.current) {
+        setActiveId(null);
+      }
+    },
+    [refreshList, chatStore],
+  );
+
   useEffect(() => {
     refreshList().catch(console.error);
   }, [refreshList]);
@@ -627,8 +711,15 @@ export default function Home() {
   //   ⌘R    — reload the webview (works even behind a modal)
   //   ⌘K    — command palette
   //   ⌘N    — new chat / new board task
+  //   ⌘D    — archive current conversation
   //   ⌘,    — open settings
-  //   ⌘1/⌘2 — switch sidebar view (chats / board), browser-tab style
+  //   ⌘1…⌘4 — switch sidebar view
+  //   ⌘B    — toggle workspace
+  //   ⌘J    — toggle Terminal in the workspace
+  //   ⌘T    — open a Browser tab in the right workspace
+  //   ⌘W    — close the active right-workspace tab when that panel is open
+  //   ⌥⌘←/→ — switch right-workspace tabs when that panel is open
+  //   ⌥⌘↑/↓ — switch to the previous / next chat
   //   ⌘⇧A   — toggle artifacts panel (chat view, when artifacts exist)
   //   Esc   — close artifacts panel, else abort current stream (palette closed)
   useEffect(() => {
@@ -647,6 +738,15 @@ export default function Home() {
       ) {
         e.preventDefault();
         window.location.reload();
+        return;
+      }
+      // ⌘K / Ctrl+K — the command palette is a global launcher: openable from
+      // anywhere. Handled before the modal guard (like ⌘R) so an open dialog
+      // doesn't swallow it; it stacks over whatever's showing and owns its own
+      // Esc to close. Toggles, so a second ⌘K dismisses it.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
         return;
       }
       // A modal owns the keyboard while open — don't fire app shortcuts (or
@@ -668,34 +768,331 @@ export default function Home() {
           return;
         }
       }
-      if (!mod || e.altKey) return;
-      const k = e.key.toLowerCase();
-      if (k === "k") {
+      if (
+        e.metaKey &&
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        workspaceOpen &&
+        (e.key === "ArrowLeft" || e.key === "ArrowRight")
+      ) {
         e.preventDefault();
-        setPaletteOpen((v) => !v);
+        switchWorkspaceTab(e.key === "ArrowRight" ? 1 : -1);
         return;
       }
-      if (!e.shiftKey && k === "n") {
+      if (
+        e.metaKey &&
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        (e.key === "ArrowUp" || e.key === "ArrowDown")
+      ) {
+        e.preventDefault();
+        switchChat(e.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (!mod || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (!e.shiftKey && k === "b") {
+        e.preventDefault();
+        setWorkspaceOpen((v) => !v);
+      } else if (!e.shiftKey && k === "j") {
+        e.preventDefault();
+        toggleTerminalPanel();
+      } else if (!e.shiftKey && k === "t") {
+        e.preventDefault();
+        openWorkspaceTab("browser", true);
+      } else if (!e.shiftKey && k === "w" && workspaceOpen && workspaceActiveId) {
+        e.preventDefault();
+        closeWorkspaceTab(workspaceActiveId);
+      } else if (!e.shiftKey && k === "n") {
         e.preventDefault();
         if (view === "board") {
           setNewTaskOpen(true);
         } else {
-          // chat or automations → start a new chat (automations are created
-          // from the Automations page's own button).
+          // Non-board destinations start a new chat; Automations creates
+          // schedules from its own button.
           onNew();
+        }
+      } else if (!e.shiftKey && k === "d") {
+        const c = conversationsRef.current.find((x) => x.id === activeIdRef.current);
+        if (c) {
+          e.preventDefault();
+          archiveConversation(c).catch((err) => {
+            console.error("archiveConversation failed", err);
+            toast.error("Couldn't archive that conversation.");
+          });
         }
       } else if (k === "," || e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
-      } else if (!e.shiftKey && (e.key === "1" || e.key === "2" || e.key === "3")) {
+      } else if (
+        !e.shiftKey &&
+        (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4")
+      ) {
         e.preventDefault();
-        setView(e.key === "1" ? "chat" : e.key === "2" ? "board" : "automations");
+        setView(
+          e.key === "1"
+            ? "chat"
+            : e.key === "2"
+              ? "board"
+              : e.key === "3"
+                ? "automations"
+                : "plugins",
+        );
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, paletteOpen, isStreaming, activeId, settingsOpen, automationDialogOpen, newTaskOpen, detailId]);
+  }, [
+    view,
+    paletteOpen,
+    isStreaming,
+    activeId,
+    settingsOpen,
+    automationDialogOpen,
+    newTaskOpen,
+    detailId,
+    workspaceOpen,
+    workspaceActiveId,
+    workspaceTabs,
+    archiveConversation,
+  ]);
+
+  function workspaceTitle(kind: WorkspaceTabKind, index: number): string {
+    if (kind === "files") {
+      return index > 1
+        ? t("workspacePanel.filesN", { index })
+        : t("workspacePanel.files");
+    }
+    if (kind === "terminal") {
+      return index > 1
+        ? t("workspacePanel.terminalN", { index })
+        : t("workspacePanel.terminal");
+    }
+    return index > 1
+      ? t("workspacePanel.browserN", { index })
+      : t("workspacePanel.browser");
+  }
+
+  function browserTitle(url: string, fallback: string): string {
+    if (!url || url === "about:blank") return fallback;
+    try {
+      const parsed = new URL(url);
+      return parsed.host || parsed.pathname || fallback;
+    } catch {
+      return url.length > 24 ? `${url.slice(0, 21)}...` : url;
+    }
+  }
+
+  function normalizeVisibleBrowserUrl(raw: string): string {
+    const trimmed = raw.trim();
+    if (!trimmed) return "about:blank";
+    if (/^(https?:|file:|about:)/i.test(trimmed)) return trimmed;
+    if (/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(\/|$)/i.test(trimmed)) {
+      return `http://${trimmed}`;
+    }
+    return `https://${trimmed}`;
+  }
+
+  function browserStateForUrl(url: string): BrowserViewState {
+    return {
+      ...createBrowserViewState(),
+      address: url,
+      url,
+      history: [url],
+      historyIndex: 0,
+    };
+  }
+
+  function openWorkspaceTab(kind: WorkspaceTabKind, alwaysNew = false) {
+    const existing = !alwaysNew ? workspaceTabs.find((t) => t.kind === kind) : undefined;
+    if (existing) {
+      setWorkspaceActiveId(existing.id);
+      setWorkspaceOpen(true);
+      return;
+    }
+    const count = workspaceTabs.filter((t) => t.kind === kind).length + 1;
+    const tab: WorkspaceTab = {
+      id: `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      kind,
+      title: workspaceTitle(kind, count),
+      browserState: kind === "browser" ? createBrowserViewState() : undefined,
+    };
+    setWorkspaceTabs((tabs) => [...tabs, tab]);
+    setWorkspaceActiveId(tab.id);
+    setWorkspaceOpen(true);
+  }
+
+  function openTerminalTab() {
+    const tabs = workspaceTabsRef.current;
+    const activeTerminal = tabs.find(
+      (tab) => tab.id === workspaceActiveIdRef.current && tab.kind === "terminal",
+    );
+    const target = activeTerminal ?? tabs.find((tab) => tab.kind === "terminal");
+    if (target) {
+      setWorkspaceActiveId(target.id);
+      setWorkspaceOpen(true);
+      return;
+    }
+
+    const count = tabs.filter((tab) => tab.kind === "terminal").length + 1;
+    const tab: WorkspaceTab = {
+      id: `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      kind: "terminal",
+      title: workspaceTitle("terminal", count),
+    };
+    setWorkspaceTabs((current) => [...current, tab]);
+    setWorkspaceActiveId(tab.id);
+    setWorkspaceOpen(true);
+  }
+
+  function toggleTerminalPanel() {
+    const active = workspaceTabsRef.current.find(
+      (tab) => tab.id === workspaceActiveIdRef.current,
+    );
+    if (workspaceOpen && workspaceLayout === "bottom" && active?.kind === "terminal") {
+      setWorkspaceOpen(false);
+      return;
+    }
+    setWorkspaceLayout("bottom");
+    openTerminalTab();
+  }
+
+  function openWorkspacePanelLayout(layout: WorkspaceLayout) {
+    setWorkspaceLayout(layout);
+    setWorkspaceOpen(true);
+    if (workspaceTabsRef.current.length === 0) openWorkspaceTab("files");
+  }
+
+  function openTerminalWithCommand(commandRaw: string) {
+    const command = commandRaw.trim();
+    if (!command) return;
+    const request: TerminalRunRequest = {
+      id: `term-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      command,
+      autoRun: true,
+    };
+    const tabs = workspaceTabsRef.current;
+    const activeTerminal = tabs.find(
+      (tab) => tab.id === workspaceActiveIdRef.current && tab.kind === "terminal",
+    );
+    const target = activeTerminal ?? tabs.find((tab) => tab.kind === "terminal");
+    if (target) {
+      setWorkspaceTabs((current) =>
+        current.map((tab) =>
+          tab.id === target.id ? { ...tab, terminalRunRequest: request } : tab,
+        ),
+      );
+      setWorkspaceActiveId(target.id);
+      setWorkspaceOpen(true);
+      return;
+    }
+
+    const count = tabs.filter((tab) => tab.kind === "terminal").length + 1;
+    const tab: WorkspaceTab = {
+      id: `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      kind: "terminal",
+      title: workspaceTitle("terminal", count),
+      terminalRunRequest: request,
+    };
+    setWorkspaceTabs((current) => [...current, tab]);
+    setWorkspaceActiveId(tab.id);
+    setWorkspaceOpen(true);
+  }
+
+  function updateBrowserWorkspaceTab(id: string, state: BrowserViewState) {
+    setWorkspaceTabs((tabs) =>
+      tabs.map((tab) =>
+        tab.id === id && tab.kind === "browser"
+          ? {
+              ...tab,
+              title: browserTitle(state.url, tab.title),
+              browserState: state,
+            }
+          : tab,
+      ),
+    );
+  }
+
+  function openVisibleBrowser(urlRaw: string) {
+    const url = normalizeVisibleBrowserUrl(urlRaw);
+    const tabs = workspaceTabsRef.current;
+    const activeBrowser = tabs.find(
+      (tab) => tab.id === workspaceActiveIdRef.current && tab.kind === "browser",
+    );
+    const target = activeBrowser ?? tabs.find((tab) => tab.kind === "browser");
+    if (target) {
+      const state = browserStateForUrl(url);
+      setWorkspaceTabs((current) =>
+        current.map((tab) =>
+          tab.id === target.id
+            ? { ...tab, title: browserTitle(url, tab.title), browserState: state }
+            : tab,
+        ),
+      );
+      setWorkspaceActiveId(target.id);
+      setWorkspaceOpen(true);
+      return;
+    }
+
+    const count = tabs.filter((tab) => tab.kind === "browser").length + 1;
+    const tab: WorkspaceTab = {
+      id: `browser-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      kind: "browser",
+      title: browserTitle(url, workspaceTitle("browser", count)),
+      browserState: browserStateForUrl(url),
+    };
+    setWorkspaceTabs((current) => [...current, tab]);
+    setWorkspaceActiveId(tab.id);
+    setWorkspaceOpen(true);
+  }
+
+  function closeWorkspaceTab(id: string) {
+    setWorkspaceTabs((tabs) => {
+      const index = tabs.findIndex((t) => t.id === id);
+      if (index === -1) return tabs;
+      const next = tabs.filter((t) => t.id !== id);
+      if (workspaceActiveId === id) {
+        const fallback = next[Math.min(index, next.length - 1)] ?? null;
+        setWorkspaceActiveId(fallback?.id ?? null);
+        if (!fallback) setWorkspaceOpen(false);
+      }
+      return next;
+    });
+  }
+
+  function switchWorkspaceTab(direction: 1 | -1) {
+    const tabs = workspaceTabsRef.current;
+    if (tabs.length < 2) return;
+    const activeIndex = Math.max(
+      0,
+      tabs.findIndex((tab) => tab.id === workspaceActiveIdRef.current),
+    );
+    const nextIndex = (activeIndex + direction + tabs.length) % tabs.length;
+    setWorkspaceActiveId(tabs[nextIndex].id);
+    setWorkspaceOpen(true);
+  }
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen<BrowserControlEvent>("browser-control-request", (e) => {
+      const payload = e.payload;
+      if (payload?.op !== "open" || !payload.url) return;
+      openVisibleBrowser(payload.url);
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+    // openVisibleBrowser reads live tab state through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** "New chat" only resets the local view to the hero — the backend
    *  conversation row is created lazily on the first send. This way clicking
@@ -824,6 +1221,17 @@ export default function Home() {
     },
     [onSelect],
   );
+  const switchChat = useCallback(
+    (direction: 1 | -1) => {
+      const chats = conversationsRef.current;
+      if (chats.length === 0) return;
+      const activeIndex = chats.findIndex((chat) => chat.id === activeIdRef.current);
+      const currentIndex = activeIndex >= 0 ? activeIndex : direction > 0 ? -1 : 0;
+      const nextIndex = (currentIndex + direction + chats.length) % chats.length;
+      onSelectChat(chats[nextIndex].id);
+    },
+    [onSelectChat],
+  );
   const onNewSidebar = useCallback(() => {
     if (viewRef.current === "board") {
       setNewTaskOpen(true);
@@ -867,6 +1275,27 @@ export default function Home() {
       unlisten?.();
     };
   }, [onSelectChat, refreshList]);
+
+  // Browser WebView annotations are emitted by a separate top-level window.
+  // Route them through the same send path as normal user feedback so the active
+  // conversation receives URL + selected element context.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen<BrowserAnnotationEvent>("browser-annotation", async (e) => {
+      const payload = e.payload;
+      if (!payload?.url || !payload.note) return;
+      setView("chat");
+      await onSendRef.current(browserAnnotationMessage(payload));
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Passive "update available" toast: fired only when auto-update is off and a
   // background check finds a (not-yet-dismissed) newer version. Install applies
@@ -964,57 +1393,11 @@ export default function Home() {
     refreshList().catch(() => {});
   }
 
-  /** Execute a local `!` bash-mode command against an existing conversation:
-   *  append a "running" breadcrumb, run it in `cwd`, then settle the card with
-   *  its output. Bypasses the agent entirely (the model never sees it). Shared
-   *  by the main chat and the detail dialog. */
-  async function execBash(convId: string, cwd: string | undefined, command: string) {
-    const store = chatStore.getState();
-    store.ensure(convId);
-    const key =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `bash-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
-    store.bashStart(convId, key, command, cwd);
-    try {
-      const res = await api.runBash(command, cwd);
-      store.bashDone(convId, key, res);
-    } catch (e) {
-      // A spawn failure (bad shell, missing cwd) — surface it as stderr in the
-      // same card rather than a separate error row.
-      store.bashDone(convId, key, {
-        stdout: "",
-        stderr: String(e),
-        exitCode: -1,
-        timedOut: false,
-        cwd: cwd ?? "",
-      });
-    }
-    refreshList().catch(() => {});
-  }
-
-  /** Main-chat bash entry: mints a conversation on the hero (mirroring onSend's
-   *  lazy create), then runs the command in the active workspace. */
-  async function onBash(command: string) {
-    let id = activeId;
-    if (!id) {
-      const c = await api.newConversation(workspaceDir ?? undefined);
-      id = c.id;
-      setConversations((cs) => mergeConversation(cs, c));
-      setActiveId(id);
-      setWorkspaceDir(c.workspaceDir);
-      api.setModelChoice(id, modelChoice).catch(console.error);
-    }
+  /** Main-chat bash entry: `!cmd` is a Terminal surface shortcut, not a chat
+   *  message. Open/focus the right Terminal tab and run the command there. */
+  function onBash(command: string) {
     setFocusToken((t) => t + 1);
-    await execBash(id, workspaceDir ?? undefined, command);
-  }
-
-  /** Detail-dialog bash entry: the conversation always exists, so run straight
-   *  against detailId in its own workspace. */
-  async function onDetailBash(command: string) {
-    if (!detailId) return;
-    setDetailFocusToken((t) => t + 1);
-    await execBash(detailId, detailWorkspaceDir ?? undefined, command);
+    openTerminalWithCommand(command);
   }
 
   async function onAbort() {
@@ -1303,14 +1686,48 @@ export default function Home() {
 
   const onArchive = useCallback(
     async (c: Conversation) => {
-      await api.archiveConversation(c.id, !c.archivedAt);
-      await refreshList();
-      chatStore.getState().drop(c.id);
-      if (c.id === activeIdRef.current) {
-        setActiveId(null);
+      await archiveConversation(c);
+    },
+    [archiveConversation],
+  );
+
+  const onFork = useCallback(
+    async (c: Conversation, messageKey?: string | null, messageIndex?: number | null) => {
+      const store = chatStore.getState();
+      if (store.chats[c.id]?.isStreaming) {
+        toast.error("Wait for the current run to finish before forking.");
+        return;
+      }
+      try {
+        const { conversation, messages } = await api.forkConversation(
+          c.id,
+          messageKey,
+          messageIndex,
+        );
+        setConversations((cs) => mergeConversation(cs, conversation));
+
+        const liveCopy = store.cloneRendered(c.id, conversation.id, messageKey);
+        if (!liveCopy) {
+          const cached = await copyCachedMessages(c.id, conversation.id);
+          if (cached && cached.length > 0) {
+            chatStore.getState().hydrate(conversation.id, cached);
+          } else {
+            chatStore.getState().reset(conversation.id, messages);
+          }
+        }
+
+        pendingSelectRef.current = conversation.id;
+        setView("chat");
+        setActiveId(conversation.id);
+        setModelChoice(conversation.model);
+        setWorkspaceDir(conversation.workspaceDir);
+        setFocusToken((t) => t + 1);
+      } catch (e) {
+        console.error("forkConversation failed", e);
+        toast.error("Couldn't fork that conversation.");
       }
     },
-    [refreshList, chatStore],
+    [chatStore],
   );
 
   // --- Human-in-the-loop review (request_review tool → "Needs review") ------
@@ -1419,10 +1836,10 @@ export default function Home() {
       // zoomed root on modern WebKit, so a `100svh/var(--zoom)` height would
       // double-compensate and drift as you ⌘+/⌘− — fixed insets fill the window
       // at any zoom. `!min-h-0` clears shadcn's `min-h-svh` so the sidebar's
-      // `h-full` resolves against the window, not content. No background: the
-      // window is a translucent vibrancy shell, so the frost shows in the
-      // sidebar + the margins around the content card.
-      className="fixed inset-0 !min-h-0"
+      // `h-full` resolves against the window, not content. The shell background
+      // also paints the gutter around the content card, so keep it tied to the
+      // same sidebar token.
+      className="fixed inset-0 !min-h-0 bg-sidebar"
     >
       <DialogHost />
       <ZoomHud />
@@ -1488,8 +1905,11 @@ export default function Home() {
         defaultWorkspace={defaultWorkspace}
         onWorkspaceChange={onDetailWorkspaceChange}
         onSend={onDetailSend}
-        onBash={onDetailBash}
         onAbort={onDetailAbort}
+        onForkMessage={(messageKey, messageIndex) => {
+          const c = conversationsRef.current.find((x) => x.id === detailId);
+          if (c) onFork(c, messageKey, messageIndex);
+        }}
         focusToken={detailFocusToken}
       />
       <CreateTaskDialog
@@ -1544,16 +1964,20 @@ export default function Home() {
         workspaceFilter={boardWorkspaceFilter}
         onWorkspaceFilterChange={setBoardWorkspaceFilter}
         onSelect={onSelectChat}
-        onNew={onNewSidebar}
+      onNew={onNewSidebar}
         onArchive={onArchive}
         onOpenSettings={openSettings}
       />
-      <SidebarInset className="m-2 flex min-h-0 flex-row overflow-hidden rounded-xl border border-border bg-background shadow-sm">
+      <SidebarInset
+        className={`m-2 flex min-h-0 overflow-hidden rounded-xl border border-border bg-background shadow-sm ${
+          workspaceOpen && workspaceLayout === "bottom" ? "flex-col" : "flex-row"
+        }`}
+      >
         <div className="flex min-w-0 flex-1 flex-col">
           <header
-            data-tauri-drag-region
             className="flex h-10 items-center justify-end gap-3 px-4 text-xs text-muted-foreground"
           >
+            <div data-tauri-drag-region className="h-full flex-1" />
             {!piReady && <span className="text-muted-foreground/70">○ connecting…</span>}
             {/* With messages present, the failure surfaces inline at the end of
                 the message list (see MessageError). Keep the header copy only as
@@ -1562,7 +1986,44 @@ export default function Home() {
             {error && !hasMessages && (
               <span className="text-destructive">{error}</span>
             )}
-
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              title={t("workspacePanel.openSide")}
+              aria-label={t("workspacePanel.openSide")}
+              data-testid="workspace-open-side"
+              onClick={() => openWorkspacePanelLayout("side")}
+            >
+              <PanelRight className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              title={t("workspacePanel.openBottom")}
+              aria-label={t("workspacePanel.openBottom")}
+              data-testid="workspace-open-bottom"
+              onClick={() => openWorkspacePanelLayout("bottom")}
+            >
+              <PanelBottom className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant={
+                workspaceOpen &&
+                workspaceTabs.find((tab) => tab.id === workspaceActiveId)?.kind === "terminal"
+                  ? "secondary"
+                  : "ghost"
+              }
+              title="Toggle Terminal (⌘J)"
+              aria-label="Toggle Terminal"
+              data-testid="workspace-toggle-terminal"
+              onClick={toggleTerminalPanel}
+            >
+              <Terminal className="size-3.5" />
+            </Button>
           </header>
           {view === "automations" ? (
             <AutomationsView
@@ -1578,6 +2039,8 @@ export default function Home() {
                 onSelect(id);
               }}
             />
+          ) : view === "plugins" ? (
+            <PluginsView />
           ) : view === "board" ? (
             <BoardView
               conversations={conversations}
@@ -1603,6 +2066,10 @@ export default function Home() {
               onAbort={onAbort}
               onRegenerate={retrying ? undefined : onRetry}
               onRetry={onRetry}
+              onForkMessage={(messageKey, messageIndex) => {
+                const c = conversationsRef.current.find((x) => x.id === activeIdRef.current);
+                if (c) onFork(c, messageKey, messageIndex);
+              }}
               retrying={retrying}
               queued={activeId ? queued[activeId] : undefined}
               onQueue={(text, atts) => {
@@ -1624,7 +2091,7 @@ export default function Home() {
               <GlyphBackdrop />
               <div className="relative z-10 w-full max-w-2xl space-y-6">
                 <h1 className="text-center font-serif text-4xl italic tracking-tight text-foreground">
-                  What should we work on?
+                  {heroHeadline}
                 </h1>
                 <Composer
                   variant="hero"
@@ -1647,7 +2114,28 @@ export default function Home() {
             </div>
           )}
         </div>
-
+        {workspaceOpen && (
+          <WorkspacePanel
+            tabs={workspaceTabs}
+            activeId={workspaceActiveId}
+            workspaceDir={workspaceDir}
+            defaultWorkspace={defaultWorkspace}
+            onSelect={(id) => {
+              setWorkspaceActiveId(id);
+              setWorkspaceOpen(true);
+            }}
+            onClose={closeWorkspaceTab}
+            onClosePanel={() => setWorkspaceOpen(false)}
+            onNewTab={(kind) => openWorkspaceTab(kind, true)}
+            layout={workspaceLayout}
+            onLayoutChange={setWorkspaceLayout}
+            onUpdateBrowserTab={updateBrowserWorkspaceTab}
+            onAnnotate={async (message) => {
+              await onSend(message);
+              setView("chat");
+            }}
+          />
+        )}
       </SidebarInset>
     </SidebarProvider>
   );

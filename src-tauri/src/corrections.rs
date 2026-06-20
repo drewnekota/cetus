@@ -105,7 +105,11 @@ fn write_store(path: &Path, store: &Store) -> std::io::Result<()> {
 /// never inside URL/email/path-like runs); CJK pairs replace verbatim.
 pub fn apply(app_data_dir: &Path, text: &str) -> String {
     let store = read_store(&store_path(app_data_dir));
-    let mut active: Vec<&Pair> = store.pairs.iter().filter(|p| p.count >= MIN_COUNT).collect();
+    let mut active: Vec<&Pair> = store
+        .pairs
+        .iter()
+        .filter(|p| p.count >= MIN_COUNT)
+        .collect();
     if active.is_empty() {
         return text.to_string();
     }
@@ -118,7 +122,12 @@ pub fn apply(app_data_dir: &Path, text: &str) -> String {
             out.replace(&p.wrong, &p.right)
         };
         if next != out {
-            tracing::debug!("corrections: applied {:?} → {:?} (count {})", p.wrong, p.right, p.count);
+            tracing::debug!(
+                "corrections: applied {:?} → {:?} (count {})",
+                p.wrong,
+                p.right,
+                p.count
+            );
         }
         out = next;
     }
@@ -130,7 +139,11 @@ pub fn apply(app_data_dir: &Path, text: &str) -> String {
 /// at the highest learned priority.
 pub fn terms(app_data_dir: &Path) -> Vec<String> {
     let store = read_store(&store_path(app_data_dir));
-    let mut active: Vec<&Pair> = store.pairs.iter().filter(|p| p.count >= MIN_COUNT).collect();
+    let mut active: Vec<&Pair> = store
+        .pairs
+        .iter()
+        .filter(|p| p.count >= MIN_COUNT)
+        .collect();
     active.sort_by_key(|p| std::cmp::Reverse(p.last_ms));
     let mut seen = HashSet::new();
     active
@@ -610,7 +623,10 @@ mod tests {
             "please ping Deep Seek about the launch",
             "please ping DeepSeek about the launch",
         );
-        assert_eq!(pairs, vec![("Deep Seek".to_string(), "DeepSeek".to_string())]);
+        assert_eq!(
+            pairs,
+            vec![("Deep Seek".to_string(), "DeepSeek".to_string())]
+        );
     }
 
     #[test]
@@ -669,13 +685,20 @@ mod tests {
 
     #[test]
     fn word_boundary_replace() {
-        assert_eq!(replace_ascii_word("eric and generic", "eric", "Erik"), "Erik and generic");
+        assert_eq!(
+            replace_ascii_word("eric and generic", "eric", "Erik"),
+            "Erik and generic"
+        );
     }
 
     #[test]
     fn replace_skips_urls_and_emails() {
         assert_eq!(
-            replace_ascii_word("see deepseek.com or mail a@deepseek.io", "deepseek", "DeepSeek"),
+            replace_ascii_word(
+                "see deepseek.com or mail a@deepseek.io",
+                "deepseek",
+                "DeepSeek"
+            ),
             "see deepseek.com or mail a@deepseek.io"
         );
         // Sentence-final dot is not a URL.

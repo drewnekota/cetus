@@ -57,8 +57,12 @@ pub fn maybe_handle_automation_request(ctx: &AutomationToolCtx, payload: &str) {
         return;
     }
     let (Some(conv), Some(req)) = (
-        v.get("conversationId").and_then(|x| x.as_str()).map(String::from),
-        v.get("requestId").and_then(|x| x.as_str()).map(String::from),
+        v.get("conversationId")
+            .and_then(|x| x.as_str())
+            .map(String::from),
+        v.get("requestId")
+            .and_then(|x| x.as_str())
+            .map(String::from),
     ) else {
         return;
     };
@@ -114,7 +118,11 @@ fn op_create(ctx: &AutomationToolCtx, p: &Value) -> Value {
     // The agent arms automations directly now. Default to enabled; honor an
     // explicit `enabled: false` for a draft the user reviews first.
     let enabled = p.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-    let next_run_at = if enabled { schedule.initial_next_run(now) } else { None };
+    let next_run_at = if enabled {
+        schedule.initial_next_run(now)
+    } else {
+        None
+    };
     let automation = Automation {
         id: Uuid::new_v4().to_string(),
         name,
@@ -136,9 +144,12 @@ fn op_create(ctx: &AutomationToolCtx, p: &Value) -> Value {
         return json!({ "ok": false, "error": e.to_string() });
     }
     // Refresh any open Automations view (same event the scheduler uses).
-    let _ = ctx
-        .handle
-        .emit("app-event", AppEvent::AutomationUpdated { automation: automation.clone() });
+    let _ = ctx.handle.emit(
+        "app-event",
+        AppEvent::AutomationUpdated {
+            automation: automation.clone(),
+        },
+    );
     let note = if enabled {
         "Saved and ENABLED — it will run on its schedule. Tell the user it's active; \
 they can review or pause it in Automations (⌘3)."
@@ -188,7 +199,10 @@ fn op_update(ctx: &AutomationToolCtx, p: &Value) -> Value {
     let now = now_ms();
     // The agent may flip `enabled` now; carry the existing flag forward when it
     // doesn't. Recompute next_run when the (possibly new) state is enabled.
-    let enabled = p.get("enabled").and_then(|v| v.as_bool()).unwrap_or(existing.enabled);
+    let enabled = p
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(existing.enabled);
     let next_run = if enabled {
         schedule.initial_next_run(now)
     } else {
@@ -214,9 +228,12 @@ fn op_update(ctx: &AutomationToolCtx, p: &Value) -> Value {
     if let Err(e) = ctx.store.update_automation(&updated) {
         return json!({ "ok": false, "error": e.to_string() });
     }
-    let _ = ctx
-        .handle
-        .emit("app-event", AppEvent::AutomationUpdated { automation: updated.clone() });
+    let _ = ctx.handle.emit(
+        "app-event",
+        AppEvent::AutomationUpdated {
+            automation: updated.clone(),
+        },
+    );
     json!({ "ok": true, "automation": summarize(&updated) })
 }
 
@@ -250,7 +267,6 @@ fn describe_schedule(s: &AutomationSchedule) -> String {
 
 // ---- request → domain mapping ---------------------------------------------
 
-
 /// Build a [`ModelChoice`] from an optional `reasoning`
 /// ("non_think"|"think_high"|"think_max") field, defaulting to the Pro default.
 /// A legacy `model` field is accepted but ignored — cetus ships only DeepSeek V4
@@ -275,12 +291,15 @@ fn build_schedule(p: &Value) -> Result<AutomationSchedule, String> {
         .ok_or("missing 'scheduleKind' (one of: daily, interval, cron, once)")?;
     match kind {
         "daily" => {
-            let time = str_field(p, "time")
-                .ok_or("'daily' needs 'time' as HH:MM (24h, local)")?;
+            let time = str_field(p, "time").ok_or("'daily' needs 'time' as HH:MM (24h, local)")?;
             let weekdays = p
                 .get("weekdays")
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_u64().map(|n| n as u32)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_u64().map(|n| n as u32))
+                        .collect()
+                })
                 .unwrap_or_default();
             Ok(AutomationSchedule::Daily { time, weekdays })
         }
@@ -289,7 +308,9 @@ fn build_schedule(p: &Value) -> Result<AutomationSchedule, String> {
                 .get("everyMinutes")
                 .and_then(|v| v.as_i64())
                 .ok_or("'interval' needs 'everyMinutes' (integer ≥ 1)")?;
-            Ok(AutomationSchedule::Interval { every_minutes: every })
+            Ok(AutomationSchedule::Interval {
+                every_minutes: every,
+            })
         }
         "cron" => {
             let expr = str_field(p, "cron")
@@ -325,4 +346,3 @@ fn parse_once_at(p: &Value) -> Result<i64, String> {
         chrono::LocalResult::None => Err(format!("'{at}' falls in a DST gap; pick another time")),
     }
 }
-

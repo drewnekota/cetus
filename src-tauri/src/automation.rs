@@ -86,15 +86,13 @@ impl AutomationSchedule {
                 }
             }
             AutomationSchedule::Daily { time, weekdays } => {
-                parse_hhmm(time)
-                    .ok_or_else(|| format!("invalid time '{time}', expected HH:MM"))?;
+                parse_hhmm(time).ok_or_else(|| format!("invalid time '{time}', expected HH:MM"))?;
                 if weekdays.iter().any(|&d| d > 6) {
                     return Err("weekday out of range (expected 0-6)".into());
                 }
             }
             AutomationSchedule::Cron { expr } => {
-                parse_cron(expr)
-                    .ok_or_else(|| format!("invalid cron expression '{expr}'"))?;
+                parse_cron(expr).ok_or_else(|| format!("invalid cron expression '{expr}'"))?;
             }
         }
         // Schedulability probe: a syntactically-valid expression can still have
@@ -399,7 +397,10 @@ mod tests {
     #[test]
     fn cron_top_of_every_hour() {
         let after = ms(2026, 6, 1, 9, 15);
-        let next = AutomationSchedule::Cron { expr: "0 * * * *".into() }.next_after(after);
+        let next = AutomationSchedule::Cron {
+            expr: "0 * * * *".into(),
+        }
+        .next_after(after);
         assert_eq!(next, Some(ms(2026, 6, 1, 10, 0)));
     }
 
@@ -416,8 +417,20 @@ mod tests {
 
     #[test]
     fn cron_validation() {
-        assert!(AutomationSchedule::Cron { expr: "0 9 * * *".into() }.validate().is_ok());
-        assert!(AutomationSchedule::Cron { expr: "bogus".into() }.validate().is_err());
-        assert!(AutomationSchedule::Cron { expr: "99 9 * * *".into() }.validate().is_err());
+        assert!(AutomationSchedule::Cron {
+            expr: "0 9 * * *".into()
+        }
+        .validate()
+        .is_ok());
+        assert!(AutomationSchedule::Cron {
+            expr: "bogus".into()
+        }
+        .validate()
+        .is_err());
+        assert!(AutomationSchedule::Cron {
+            expr: "99 9 * * *".into()
+        }
+        .validate()
+        .is_err());
     }
 }

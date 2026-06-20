@@ -76,8 +76,14 @@ pub fn wake_frontmost_app() {
 
     {
         static WOKEN: OnceLock<Mutex<HashMap<i32, Instant>>> = OnceLock::new();
-        let mut woken = WOKEN.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
-        if woken.get(&pid).is_some_and(|t| t.elapsed() < Duration::from_secs(600)) {
+        let mut woken = WOKEN
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap();
+        if woken
+            .get(&pid)
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(600))
+        {
             return;
         }
         woken.retain(|_, t| t.elapsed() < Duration::from_secs(3600));
@@ -101,7 +107,8 @@ pub fn wake_frontmost_app() {
         let el = el_owner.as_CFTypeRef() as accessibility_sys::AXUIElementRef;
         let yes = CFBoolean::true_value();
         let manual = CFString::new("AXManualAccessibility");
-        let err = AXUIElementSetAttributeValue(el, manual.as_concrete_TypeRef(), yes.as_CFTypeRef());
+        let err =
+            AXUIElementSetAttributeValue(el, manual.as_concrete_TypeRef(), yes.as_CFTypeRef());
         if err == kAXErrorSuccess {
             tracing::debug!("ax: AXManualAccessibility enabled on Electron app pid {pid}");
             return;
@@ -129,9 +136,16 @@ pub fn wake_frontmost_app() {
 /// calling binary — only the main app holds them; an ad-hoc helper binary is
 /// untrusted and silently reads nothing. Every field is best-effort.
 #[cfg(target_os = "macos")]
-pub fn gather_context() -> Option<crate::ocr::AmbientContext> {
+/// The pre-focus half of ambient context: frontmost app + selected text. This is
+/// everything that becomes *wrong* the instant the panel takes key focus (the
+/// frontmost app turns into cetus, the selection is gone), so it must run before
+/// `panel::present`. The browser URL is *not* gathered here — it's keyed to the
+/// browser by bundle id and survives cetus stealing focus, so `open_panel`
+/// fetches it asynchronously after presenting (see `fetch_browser_url`) to keep
+/// its AppleScript latency off the critical path. Returns the bundle id in the
+/// context so the caller can do that follow-up fetch.
+pub fn gather_pre_focus_context() -> Option<crate::ocr::AmbientContext> {
     let (app, bundle, pid) = frontmost_identity().unwrap_or_default();
-    let (url, title) = browser_url(&bundle).unwrap_or_default();
     // Nudge the frontmost app's accessibility tree awake. Electron/Chromium apps
     // keep their AX tree asleep until something pokes it, so the fast AX selection
     // read below would otherwise always miss and fall through to the ~300ms
@@ -143,21 +157,26 @@ pub fn gather_context() -> Option<crate::ocr::AmbientContext> {
     // via AX, so fall back to the universal "synthesize ⌘C, read the pasteboard,
     // restore it" path (what PopClip / Raycast do). The fallback runs only when
     // AX came up empty, and only touches the clipboard if something was selected.
+    // It MUST stay here (pre-focus): ⌘C goes to whatever app is frontmost, which
+    // is the user's app only until the panel presents. The cost is ~300ms when it
+    // fires — the price of capturing web/Electron selections.
     let selection = focused_selected_text(pid)
         .or_else(crate::text_input::copy_selection_via_clipboard)
-        .map(|s| s.chars().take(crate::ocr::MAX_SELECTION_CHARS).collect::<String>())
+        .map(|s| {
+            s.chars()
+                .take(crate::ocr::MAX_SELECTION_CHARS)
+                .collect::<String>()
+        })
         .unwrap_or_default();
     tracing::info!(
-        "gather_context: app={app:?} bundle={bundle:?} pid={pid} url_len={} title_len={} sel_len={}",
-        url.len(),
-        title.len(),
+        "gather_pre_focus_context: app={app:?} bundle={bundle:?} pid={pid} sel_len={}",
         selection.len()
     );
     let ctx = crate::ocr::AmbientContext {
         app,
         bundle_id: bundle,
-        url,
-        title,
+        url: String::new(),
+        title: String::new(),
         selection,
     };
     if ctx.is_empty() {
@@ -165,6 +184,14 @@ pub fn gather_context() -> Option<crate::ocr::AmbientContext> {
     } else {
         Some(ctx)
     }
+}
+
+/// Active browser tab (url, title) for `bundle`, or None for non-browsers. Safe
+/// to call *after* the panel has focus — it scripts the browser by bundle id, not
+/// by frontmost-ness — so `open_panel` runs it off the critical path.
+#[cfg(target_os = "macos")]
+pub fn fetch_browser_url(bundle: &str) -> Option<(String, String)> {
+    browser_url(bundle)
 }
 
 /// Frontmost application's (localized name, bundle id, pid) via NSWorkspace
@@ -239,8 +266,11 @@ fn focused_selected_text(pid: i32) -> Option<String> {
 
         let sel_attr = CFString::new("AXSelectedText");
         let mut sel_val: CFTypeRef = std::ptr::null_mut();
-        let serr =
-            AXUIElementCopyAttributeValue(focused_ref, sel_attr.as_concrete_TypeRef(), &mut sel_val);
+        let serr = AXUIElementCopyAttributeValue(
+            focused_ref,
+            sel_attr.as_concrete_TypeRef(),
+            &mut sel_val,
+        );
         if serr != kAXErrorSuccess || sel_val.is_null() {
             tracing::info!("focused_selected_text: AXSelectedText err={serr}");
             return None;
@@ -379,6 +409,11 @@ unsafe fn ns_string_to_rust(s: *mut objc2::runtime::AnyObject) -> Option<String>
 pub fn wake_frontmost_app() {}
 
 #[cfg(not(target_os = "macos"))]
-pub fn gather_context() -> Option<crate::ocr::AmbientContext> {
+pub fn gather_pre_focus_context() -> Option<crate::ocr::AmbientContext> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn fetch_browser_url(_bundle: &str) -> Option<(String, String)> {
     None
 }

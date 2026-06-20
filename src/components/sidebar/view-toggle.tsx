@@ -3,10 +3,10 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 
 // "chat" and "board" are two layouts of the same data (conversations); the
-// toggle switches between them. "automations" is a separate destination reached
-// from a sidebar nav row, not this toggle — so it renders with neither side
-// active here.
-export type SidebarView = "chat" | "board" | "automations";
+// toggle switches between them. Automations and Plugins are separate
+// destinations reached from sidebar nav rows, not this toggle — so they render
+// with neither side active here.
+export type SidebarView = "chat" | "board" | "automations" | "plugins";
 
 interface Props {
   view: SidebarView;

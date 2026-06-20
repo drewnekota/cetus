@@ -241,7 +241,10 @@ unsafe fn ns_string(s: &str) -> *mut objc2::runtime::AnyObject {
 #[cfg(target_os = "macos")]
 unsafe fn snapshot_pasteboard(
     pb: *mut objc2::runtime::AnyObject,
-) -> Vec<(*mut objc2::runtime::AnyObject, *mut objc2::runtime::AnyObject)> {
+) -> Vec<(
+    *mut objc2::runtime::AnyObject,
+    *mut objc2::runtime::AnyObject,
+)> {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
     let mut out: Vec<(*mut AnyObject, *mut AnyObject)> = Vec::new();
@@ -282,7 +285,10 @@ unsafe fn snapshot_pasteboard(
 #[cfg(target_os = "macos")]
 unsafe fn restore_pasteboard(
     pb: *mut objc2::runtime::AnyObject,
-    saved: &[(*mut objc2::runtime::AnyObject, *mut objc2::runtime::AnyObject)],
+    saved: &[(
+        *mut objc2::runtime::AnyObject,
+        *mut objc2::runtime::AnyObject,
+    )],
 ) {
     use objc2::msg_send;
     use objc2::runtime::{AnyClass, AnyObject};
@@ -312,7 +318,10 @@ unsafe fn restore_pasteboard(
 
 #[cfg(target_os = "macos")]
 unsafe fn release_snapshot(
-    saved: Vec<(*mut objc2::runtime::AnyObject, *mut objc2::runtime::AnyObject)>,
+    saved: Vec<(
+        *mut objc2::runtime::AnyObject,
+        *mut objc2::runtime::AnyObject,
+    )>,
 ) {
     use objc2::msg_send;
     for (ty, data) in saved {
@@ -322,7 +331,9 @@ unsafe fn release_snapshot(
 }
 
 fn pbpaste() -> Option<String> {
-    let out = std::process::Command::new("/usr/bin/pbpaste").output().ok()?;
+    let out = std::process::Command::new("/usr/bin/pbpaste")
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -335,7 +346,9 @@ fn pbcopy(text: &str) -> Result<(), String> {
         .spawn()
         .map_err(|e| e.to_string())?;
     if let Some(stdin) = child.stdin.as_mut() {
-        stdin.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| e.to_string())?;
     }
     child.wait().map_err(|e| e.to_string())?;
     Ok(())

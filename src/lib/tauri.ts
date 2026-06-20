@@ -23,6 +23,9 @@ import type {
   ModelChoice,
   PiEvent,
   PiMessage,
+  PluginEntry,
+  ChromeUseSelfTest,
+  ChromeUseStatus,
   SkillEntry,
   SkillReviewSettings,
   SkillState,
@@ -37,6 +40,7 @@ import type {
   UpdateMeta,
   VoiceInsertMode,
   VoicePermissions,
+  WorkspaceFileEntry,
   DevtestDomOp,
   DevtestDomArgs,
 } from "./types";
@@ -116,6 +120,12 @@ export const api = {
       workspaceDir: workspaceDir ?? null,
       model: model ?? null,
     }),
+  forkConversation: (id: string, messageId?: string | null, messageIndex?: number | null) =>
+    invoke<{ conversation: Conversation; messages: PiMessage[] }>("fork_conversation", {
+      id,
+      messageId: messageId ?? null,
+      messageIndex: messageIndex ?? null,
+    }),
   switchConversation: (id: string) =>
     invoke<{ conversation: Conversation; messages: PiMessage[] }>("switch_conversation", { id }),
   archiveConversation: (id: string, archive: boolean) =>
@@ -154,8 +164,24 @@ export const api = {
   piPing: () => invoke<boolean>("pi_ping"),
   defaultWorkspace: () => invoke<string>("default_workspace"),
   pickWorkspaceDir: () => invoke<string | null>("pick_workspace_dir"),
+  listWorkspaceFiles: (workspaceDir?: string | null) =>
+    invoke<WorkspaceFileEntry[]>("list_workspace_files", { workspaceDir: workspaceDir ?? null }),
   /** Open an http(s)/mailto link in the user's default browser. */
   openExternal: (url: string) => invoke<void>("open_external", { url }),
+  /** Open an http(s) URL in Cetus's own top-level browser webview window. */
+  openBrowserWindow: (url: string) =>
+    invoke<void>("open_browser_window", { url }),
+  openBrowserPanel: (
+    url: string,
+    bounds: { x: number; y: number; width: number; height: number },
+    labels?: { annotate: string; placeholder: string; cancel: string; send: string },
+  ) => invoke<void>("open_browser_panel", { url, bounds, labels: labels ?? null }),
+  setBrowserPanelBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
+    invoke<void>("set_browser_panel_bounds", { bounds }),
+  setBrowserPanelAnnotationMode: (enabled: boolean) =>
+    invoke<void>("set_browser_panel_annotation_mode", { enabled }),
+  closeBrowserPanel: () => invoke<void>("close_browser_panel"),
+  openPath: (path: string) => invoke<void>("open_path", { path }),
   // Sync the native window vibrancy to the app theme ("system" | "light" |
   // "dark"); app-wide on macOS. Best-effort — callers fire-and-forget.
   setThemeAppearance: (preference: string) =>
@@ -243,6 +269,18 @@ export const api = {
   setAgentSettings: (settings: AgentSettings) =>
     invoke<void>("set_agent_settings", { settings }),
   agentStop: (convId: string) => invoke<void>("agent_stop", { convId }),
+  listPlugins: () => invoke<PluginEntry[]>("list_plugins"),
+  setPluginEnabled: (id: string, enabled: boolean) =>
+    invoke<void>("set_plugin_enabled", { id, enabled }),
+  importPlugin: (path: string) => invoke<PluginEntry>("import_plugin", { path }),
+  revealPlugin: (id: string) => invoke<void>("reveal_plugin", { id }),
+  deletePlugin: (id: string) => invoke<void>("delete_plugin", { id }),
+  chromeUseStatus: () => invoke<ChromeUseStatus>("chrome_use_status"),
+  installChromeNativeHost: () =>
+    invoke<ChromeUseStatus>("install_chrome_native_host"),
+  openChromeExtensionsPage: () => invoke<void>("open_chrome_extensions_page"),
+  testChromeNativeHost: () =>
+    invoke<ChromeUseSelfTest>("test_chrome_native_host"),
 
   // Dreaming (idle-time memory consolidation) -----------------------------
   getDreamSettings: () => invoke<DreamSettings>("get_dream_settings"),

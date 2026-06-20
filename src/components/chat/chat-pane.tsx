@@ -31,7 +31,7 @@ interface Props {
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
   onSend: (text: string, attachments: ComposerAttachment[]) => void;
-  /** Run a local `!` bash-mode command (forwarded to the Composer). */
+  /** Route a leading-`!` command from the Composer to the Terminal surface. */
   onBash?: (command: string) => void;
   onAbort: () => void;
   /** Roll back + rerun the last turn. Wired only on the last assistant message.
@@ -40,6 +40,8 @@ interface Props {
   /** Roll back + rerun the last (failed) turn — drives the inline error row's
    *  Retry button. Same handler as onRegenerate but shown on send failure. */
   onRetry?: () => void;
+  /** Copy the current conversation through a specific message into a new chat. */
+  onForkMessage?: (messageKey: string, messageIndex: number) => void;
   /** Whether a retry is currently in flight (disables/animates the button). */
   retrying?: boolean;
   /** Follow-up queue (messages typed while the agent is mid-run). When omitted,
@@ -78,6 +80,7 @@ export function ChatPane({
   onAbort,
   onRegenerate,
   onRetry,
+  onForkMessage,
   retrying,
   queued,
   onQueue,
@@ -139,6 +142,7 @@ export function ChatPane({
         isStreaming={isStreaming}
         onRegenerate={onRegenerate}
         onRetry={onRetry}
+        onForkMessage={onForkMessage}
         retrying={retrying}
       />
       <div className="px-4 py-3">
@@ -211,12 +215,14 @@ function MessageList({
   isStreaming,
   onRegenerate,
   onRetry,
+  onForkMessage,
   retrying,
 }: {
   convId: string | null;
   isStreaming: boolean;
   onRegenerate?: () => void;
   onRetry?: () => void;
+  onForkMessage?: (messageKey: string, messageIndex: number) => void;
   retrying?: boolean;
 }) {
   const keys = useMessageKeys(convId);
@@ -267,16 +273,31 @@ function MessageList({
   }, []);
 
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+    <div
+      ref={scrollRef}
+      className="min-h-0 flex-1 overflow-y-auto"
+      data-testid="message-list"
+    >
       <div ref={contentRef} className="mx-auto max-w-3xl px-6 py-4">
         {groups.map((g, gi) => {
           const isLast = gi === groups.length - 1;
+          const messageIndex =
+            g.kind === "assistant"
+              ? keys.indexOf(g.keys[g.keys.length - 1])
+              : keys.indexOf(g.key);
+          const forkMessageKey =
+            g.kind === "assistant" ? g.keys[g.keys.length - 1] : g.key;
           const node =
             g.kind === "assistant" ? (
               <AssistantGroup
                 convId={convId}
                 keys={g.keys}
                 onRegenerate={onRegenerate && !isStreaming && isLast ? onRegenerate : undefined}
+                onFork={
+                  onForkMessage && messageIndex >= 0
+                    ? () => onForkMessage(forkMessageKey, messageIndex)
+                    : undefined
+                }
               />
             ) : (
               <MessageBubble
@@ -288,6 +309,11 @@ function MessageList({
                 onRegenerate={
                   onRegenerate && isLast && !isStreaming && !awaiting && !hasError
                     ? onRegenerate
+                    : undefined
+                }
+                onFork={
+                  onForkMessage && messageIndex >= 0
+                    ? () => onForkMessage(forkMessageKey, messageIndex)
                     : undefined
                 }
               />

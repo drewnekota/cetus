@@ -73,8 +73,18 @@ pub struct Corpus {
 impl Corpus {
     fn is_empty(&self) -> bool {
         self.hotwords.is_empty()
-            && self.context.as_deref().map(str::trim).unwrap_or("").is_empty()
-            && self.recent.as_deref().map(str::trim).unwrap_or("").is_empty()
+            && self
+                .context
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+            && self
+                .recent
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
             && self
                 .boosting_table_id
                 .as_deref()
@@ -144,8 +154,8 @@ fn full_client_request(hands_free: bool, corpus: &Corpus, two_pass: bool) -> Vec
         req["result_type"] = serde_json::Value::from("single");
         req["show_utterances"] = serde_json::Value::from(true);
         req["end_window_size"] = serde_json::Value::from(800); // sentence-level VAD 判停 → `definite`
-        // Server-side disfluency removal (语义顺滑): hands-free inserts raw ASR
-        // text with no LLM cleanup pass, so fillers/repeats must be handled here.
+                                                               // Server-side disfluency removal (语义顺滑): hands-free inserts raw ASR
+                                                               // text with no LLM cleanup pass, so fillers/repeats must be handled here.
         req["enable_ddc"] = serde_json::Value::from(true);
     } else {
         // Push-to-talk reads the whole `full` text once, on release — it never
@@ -225,7 +235,12 @@ fn full_client_request(hands_free: bool, corpus: &Corpus, two_pass: bool) -> Vec
     // corpus (hotwords / dialog_ctx / table). Indispensable when judging why a
     // term was or wasn't recognized.
     tracing::debug!("doubao: request config: {cfg}");
-    frame(FULL_CLIENT, FLAG_NONE, SER_JSON, cfg.to_string().into_bytes())
+    frame(
+        FULL_CLIENT,
+        FLAG_NONE,
+        SER_JSON,
+        cfg.to_string().into_bytes(),
+    )
 }
 
 fn audio_request(pcm: &[u8], last: bool) -> Vec<u8> {
@@ -506,7 +521,9 @@ async fn run(
         "doubao: session ended in {}ms (two_pass={two_pass}, {} chars, err={})",
         started.elapsed().as_millis(),
         text.chars().count(),
-        err.as_ref().map(|e| e.to_string()).unwrap_or_else(|| "none".into())
+        err.as_ref()
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "none".into())
     );
     (text, err)
 }
@@ -555,11 +572,15 @@ async fn run_session(
         while let Some(chunk) = pcm_rx.recv().await {
             total_bytes += chunk.len();
             if let Some(p) = prev.replace(chunk) {
-                write.send(Message::Binary(audio_request(&p, false))).await?;
+                write
+                    .send(Message::Binary(audio_request(&p, false)))
+                    .await?;
             }
         }
         let last = prev.unwrap_or_default();
-        write.send(Message::Binary(audio_request(&last, true))).await?;
+        write
+            .send(Message::Binary(audio_request(&last, true)))
+            .await?;
         // 16 kHz mono s16le → 32000 bytes/s; handy for spotting a dead mic.
         tracing::debug!(
             "doubao: end-of-audio sent ({total_bytes} bytes ≈ {:.1}s)",

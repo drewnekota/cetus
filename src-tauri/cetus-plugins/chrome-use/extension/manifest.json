@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Cetus Chrome Use",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq6GvQjy7DlOmqVO33OX1QPmiaYkehAMC3n+yXnajeHullsHJTYSrqCU6jmQLw9cXbEa86zBF7fOPuLWtie/5E9E533w3ewJDBVT8yhe3vAUbSEl26zIzBDmD+TJQMdE+G7SHWg2K4CXgyx8ETsySBDzZfWzhXT19LH7ZdI37TmEoRmx08jE1IXbTGJgJR3Me06rNzi6Hbr4igdto9n07bIDkxZDCtrwO8Y7K8wPljjrTGRTDn//nXU3pwa1TZQGOvS5UvaoHnlQ+LvQ+sPKgyaXIc9E58r6EpwFp1ZAFlYzWMgzx3dRbnY0VR4yyPY7PW+CVCdzi11OSrPnHxkJarwIDAQAB",
+  "description": "Connect Cetus to the user's real Chrome tabs after explicit approval.",
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Cetus Chrome Use",
+    "default_popup": "popup.html"
+  }
+}

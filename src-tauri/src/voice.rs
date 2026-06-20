@@ -428,7 +428,11 @@ async fn run_perm_subcommand(
     let v: serde_json::Value =
         serde_json::from_str(text.trim()).map_err(|e| format!("bad helper output: {e}"))?;
     Ok(VoicePermissions {
-        mic: v.get("mic").and_then(|x| x.as_str()).unwrap_or("unknown").to_string(),
+        mic: v
+            .get("mic")
+            .and_then(|x| x.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
         speech: v
             .get("speech")
             .and_then(|x| x.as_str())
@@ -467,7 +471,10 @@ pub async fn start_internal(
     // returns here.
     if engine == crate::quick::ASR_DOUBAO && crate::secrets::has("doubao") {
         use base64::Engine as _;
-        let key = crate::secrets::get("doubao").ok().flatten().unwrap_or_default();
+        let key = crate::secrets::get("doubao")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let resource = crate::doubao::DEFAULT_RESOURCE_ID.to_string();
         // Corpus assembly does file IO, jieba segmentation, and an Accessibility
         // round-trip — run it concurrently with helper startup so it can never
@@ -528,15 +535,18 @@ pub async fn start_internal(
                     let _ = app.emit("voice-partial", json_payload(&target, "text", txt));
                 }
             };
-            let mut final_text = match crate::doubao::stream(&key, &resource, corpus, pcm_rx, on_partial).await {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::warn!("doubao stream failed: {e}");
-                    let _ = app_s
-                        .emit("voice-error", json_payload(&target_s, "message", "Doubao recognition failed"));
-                    String::new()
-                }
-            };
+            let mut final_text =
+                match crate::doubao::stream(&key, &resource, corpus, pcm_rx, on_partial).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::warn!("doubao stream failed: {e}");
+                        let _ = app_s.emit(
+                            "voice-error",
+                            json_payload(&target_s, "message", "Doubao recognition failed"),
+                        );
+                        String::new()
+                    }
+                };
             // Gate discard on BOTH signals agreeing: the RMS gate says silence
             // AND the transcript is short (noise hallucinations are brief). A
             // long coherent transcript is stronger evidence of speech than the
@@ -588,8 +598,7 @@ pub async fn start_internal(
                         serde_json::json!({ "target": target_r, "level": l }),
                     );
                 } else if v.get("ready").is_some() {
-                    let _ = app_r
-                        .emit("voice-ready", serde_json::json!({ "target": target_r }));
+                    let _ = app_r.emit("voice-ready", serde_json::json!({ "target": target_r }));
                 } else if let Some(s) = v.get("speech").and_then(|x| x.as_bool()) {
                     speech_r.store(s, std::sync::atomic::Ordering::Relaxed);
                 } else if v.get("pcm_end").is_some() {
@@ -699,8 +708,10 @@ pub async fn start_internal(
                 if let Some(tx) = final_tx.take() {
                     let _ = tx.send(final_text.clone());
                 }
-                let _ = app_for_reader
-                    .emit("voice-final", json_payload(&target_for_reader, "text", &final_text));
+                let _ = app_for_reader.emit(
+                    "voice-final",
+                    json_payload(&target_for_reader, "text", &final_text),
+                );
                 // History recording happens in finish_ptt, after cleanup, so all
                 // downstream consumers see the same text the user received.
             } else if v.get("ready").is_some() {
@@ -711,8 +722,10 @@ pub async fn start_internal(
                 );
             } else if let Some(e) = v.get("error").and_then(|x| x.as_str()) {
                 saw_terminal = true;
-                let _ = app_for_reader
-                    .emit("voice-error", json_payload(&target_for_reader, "message", e));
+                let _ = app_for_reader.emit(
+                    "voice-error",
+                    json_payload(&target_for_reader, "message", e),
+                );
             }
         }
         // Helper exited. If it never sent a final, unblock any waiter.
@@ -731,8 +744,10 @@ pub async fn start_internal(
                  access for cetus in System Settings › Privacy & Security"
                     .to_string()
             };
-            let _ = app_for_reader
-                .emit("voice-error", json_payload(&target_for_reader, "message", &msg));
+            let _ = app_for_reader.emit(
+                "voice-error",
+                json_payload(&target_for_reader, "message", &msg),
+            );
         }
         *inner.lock().await = None;
     });
@@ -847,7 +862,10 @@ pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Resu
         return Err("a dictation is already running".into());
     }
 
-    let key = crate::secrets::get("doubao").ok().flatten().unwrap_or_default();
+    let key = crate::secrets::get("doubao")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     let resource = crate::doubao::DEFAULT_RESOURCE_ID.to_string();
     let corpus = build_corpus(state);
     tracing::info!(
@@ -914,8 +932,7 @@ pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Resu
                 let mut payload = String::new();
                 {
                     let prev = prev_end.lock().map(|p| *p).unwrap_or(None);
-                    let starts_ascii =
-                        s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric());
+                    let starts_ascii = s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric());
                     if starts_ascii && prev.is_some_and(|c| !c.is_ascii()) {
                         payload.push(' ');
                     }
@@ -941,7 +958,10 @@ pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Resu
             crate::doubao::stream_hands_free(&key, &resource, corpus, pcm_rx, on_sentence).await
         {
             tracing::warn!("doubao hands-free stream failed: {e}");
-            let _ = app_s.emit("voice-error", json_payload("global", "message", "Doubao recognition failed"));
+            let _ = app_s.emit(
+                "voice-error",
+                json_payload("global", "message", "Doubao recognition failed"),
+            );
         }
         // Session ended (toggled off / helper exited): clear the HUD transcript.
         let _ = app_s.emit("voice-final", json_payload("global", "text", ""));
@@ -965,7 +985,10 @@ pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Resu
                     }
                 }
             } else if let Some(l) = v.get("level").and_then(|x| x.as_f64()) {
-                let _ = app_r.emit("voice-level", serde_json::json!({ "target": "global", "level": l }));
+                let _ = app_r.emit(
+                    "voice-level",
+                    serde_json::json!({ "target": "global", "level": l }),
+                );
             } else if v.get("ready").is_some() {
                 let _ = app_r.emit("voice-ready", serde_json::json!({ "target": "global" }));
             } else if v.get("pcm_end").is_some() {
@@ -1055,7 +1078,11 @@ pub(crate) fn build_corpus_with(
         }
     }
     if let Some(r) = &corpus.recent {
-        tracing::debug!("biasing: dialog continuity (previous dictation, {} chars): {:?}", r.chars().count(), preview(r));
+        tracing::debug!(
+            "biasing: dialog continuity (previous dictation, {} chars): {:?}",
+            r.chars().count(),
+            preview(r)
+        );
     }
     if let Some(t) = &corpus.boosting_table_id {
         tracing::debug!("biasing: server hotword table: {t}");
@@ -1171,7 +1198,10 @@ pub fn hide_hud(app: &AppHandle) {
 /// already on screen from session start; this only changes its state.
 #[cfg(target_os = "macos")]
 pub fn show_transcribing(app: &AppHandle) {
-    let _ = app.emit("voice-transcribing", serde_json::json!({ "target": "global" }));
+    let _ = app.emit(
+        "voice-transcribing",
+        serde_json::json!({ "target": "global" }),
+    );
 }
 
 // ---- Text injection (global dictation) ------------------------------------

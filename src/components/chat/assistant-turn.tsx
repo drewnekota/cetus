@@ -13,6 +13,8 @@ interface Props {
   keys: string[];
   /** Wired only on the final group, once settled — shows Regenerate. */
   onRegenerate?: () => void;
+  /** Copy this conversation through this assistant turn into a new conversation. */
+  onFork?: () => void;
 }
 
 type Segment =
@@ -74,7 +76,7 @@ function answerText(messages: RenderedMessage[]): string {
 /** A whole assistant turn — one or more consecutive assistant messages rendered
  *  under a single ASSISTANT header. Tool calls + thinking collapse into compact
  *  activity widgets; the natural-language answer stays expanded below. */
-export function AssistantGroup({ convId, keys, onRegenerate }: Props) {
+export function AssistantGroup({ convId, keys, onRegenerate, onFork }: Props) {
   const { t } = useTranslation("chat");
   const messages = useMessagesByKeys(convId, keys);
   // Recompute segments only when the merged messages actually change (the array
@@ -116,6 +118,7 @@ export function AssistantGroup({ convId, keys, onRegenerate }: Props) {
           createdAt={lastCreatedAt}
           isUser={false}
           onRegenerate={onRegenerate}
+          onFork={onFork}
         />
       </div>
     </div>

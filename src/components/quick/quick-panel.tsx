@@ -14,6 +14,7 @@ import {
   type ModelChoice,
   type QuickContext,
   type QuickOpenPayload,
+  type QuickOpenUrlPayload,
   type QuickScreenshot,
   type QuickSessionMode,
 } from "@/lib/types";
@@ -68,6 +69,10 @@ export function QuickPanel() {
   // True for a beat right after the panel opens, so a not-yet-key window losing
   // a transient focus event can't instantly dismiss itself.
   const openingRef = useRef(false);
+  // This open's token (from `quick-open`). The deferred `quick-open-url` event
+  // only applies if its token still matches — guards against a slow URL from a
+  // prior open landing on a newer one.
+  const openIdRef = useRef(0);
   submittingRef.current = submitting;
 
   const focusSoon = useCallback(() => {
@@ -143,6 +148,7 @@ export function QuickPanel() {
     let cancelled = false;
     listen<QuickOpenPayload>("quick-open", (e) => {
       const p = e.payload;
+      openIdRef.current = p.openId;
       setText("");
       setSubmitting(false);
       setScreenshot(p.screenshot);
@@ -181,6 +187,27 @@ export function QuickPanel() {
       unlisten?.();
     };
   }, [focusSoon]);
+
+  // The browser URL is fetched after the panel presents (off the first-paint
+  // path) and streamed in here. Merge it into the existing context only — if the
+  // panel was dismissed (context cleared) or a newer open superseded this token,
+  // drop it so a stale URL never appears as a chip.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen<QuickOpenUrlPayload>("quick-open-url", (e) => {
+      const p = e.payload;
+      if (p.openId !== openIdRef.current) return;
+      setContext((c) => (c ? { ...c, url: p.url, title: p.title } : c));
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Dismiss when focus leaves the panel (Raycast-style), unless we're mid
   // submit.

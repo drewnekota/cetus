@@ -1,0 +1,9 @@
+{
+  "kind": "chrome-extension",
+  "status": "read-tools",
+  "extensionPath": "extension",
+  "extensionId": "bellidpjmeaomkdjbhkcaokmeflanpmc",
+  "nativeHostName": "com.cetus.chrome_use",
+  "requiredHostBridge": "cetus.chrome-use",
+  "description": "Connects Cetus to the user's installed Chrome so the agent can work with existing logged-in tabs after explicit user approval."
+}

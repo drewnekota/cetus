@@ -278,7 +278,9 @@ async fn run_dream(state: &AppState, handle: &AppHandle, quiet_minutes: u32) -> 
     if transcript.trim().is_empty() {
         // Nothing usable (e.g. tool-only sessions) — advance the watermark so we
         // don't keep retrying these, and stop.
-        let _ = state.store.set_setting(WATERMARK_KEY, &high_water.to_string());
+        let _ = state
+            .store
+            .set_setting(WATERMARK_KEY, &high_water.to_string());
         return Ok(());
     }
 
@@ -290,7 +292,12 @@ async fn run_dream(state: &AppState, handle: &AppHandle, quiet_minutes: u32) -> 
          RECENT CONVERSATIONS TO CONSOLIDATE:\n{transcript}"
     );
 
-    let ops = distill(&api_key, &crate::provider::deepseek_chat_url(&state.store), &user_msg).await?;
+    let ops = distill(
+        &api_key,
+        &crate::provider::deepseek_chat_url(&state.store),
+        &user_msg,
+    )
+    .await?;
     let ops = parse_ops(&ops);
     if !ops.is_empty() {
         match memory::consolidate(&state.app_data_dir, ops) {
@@ -304,7 +311,9 @@ async fn run_dream(state: &AppState, handle: &AppHandle, quiet_minutes: u32) -> 
     }
 
     // Success: advance the watermark so this batch is never reconsidered.
-    let _ = state.store.set_setting(WATERMARK_KEY, &high_water.to_string());
+    let _ = state
+        .store
+        .set_setting(WATERMARK_KEY, &high_water.to_string());
     Ok(())
 }
 
@@ -375,7 +384,11 @@ fn read_transcript_file(session_file: &str) -> String {
         if text.is_empty() {
             continue;
         }
-        out.push_str(if role == "user" { "User: " } else { "Assistant: " });
+        out.push_str(if role == "user" {
+            "User: "
+        } else {
+            "Assistant: "
+        });
         out.push_str(text);
         out.push_str("\n\n");
     }
@@ -396,7 +409,11 @@ fn flatten_messages(msgs: &[Value]) -> String {
         if text.is_empty() {
             continue;
         }
-        out.push_str(if role == "user" { "User: " } else { "Assistant: " });
+        out.push_str(if role == "user" {
+            "User: "
+        } else {
+            "Assistant: "
+        });
         out.push_str(text);
         out.push_str("\n\n");
     }
@@ -455,7 +472,11 @@ pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
 }
 
 pub(crate) fn read_i64(store: &Store, key: &str) -> Option<i64> {
-    store.get_setting(key).ok().flatten().and_then(|s| s.parse().ok())
+    store
+        .get_setting(key)
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
 }
 
 /// One-shot, out-of-band consolidation call (mirrors `titling::generate_title`,
@@ -526,7 +547,10 @@ fn parse_ops(raw: &str) -> Vec<memory::Consolidation> {
             .filter(|s| !s.is_empty())
             .map(String::from);
         let is_update = op.get("action").and_then(|a| a.as_str()) == Some("update");
-        let id = op.get("id").and_then(|i| i.as_str()).filter(|s| !s.is_empty());
+        let id = op
+            .get("id")
+            .and_then(|i| i.as_str())
+            .filter(|s| !s.is_empty());
         match (is_update, id) {
             (true, Some(id)) => out.push(memory::Consolidation::Update {
                 id: id.to_string(),

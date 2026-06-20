@@ -159,11 +159,7 @@ async fn tick(handle: &AppHandle) -> Result<()> {
 /// One pass: archive every active conversation idle past the threshold. Shared
 /// by the background tick and the settings-save path (so a config change applies
 /// immediately). Assumes the caller already checked `settings.enabled`.
-async fn sweep(
-    state: &AppState,
-    handle: &AppHandle,
-    settings: &AutoArchiveSettings,
-) -> Result<()> {
+async fn sweep(state: &AppState, handle: &AppHandle, settings: &AutoArchiveSettings) -> Result<()> {
     let now = now_ms();
     let cutoff = now - settings.idle_ms();
     let active = state

@@ -1,0 +1,16 @@
+{
+  "id": "cetus.chrome-use",
+  "displayName": "Chrome Use",
+  "version": "0.1.0",
+  "description": "Use the user's real Chrome profile, signed-in tabs, cookies, and extension context.",
+  "activation": {
+    "enabledByDefault": false
+  },
+  "interface": {
+    "capabilities": ["Interactive", "Read", "Write", "BrowserProfile"],
+    "riskLevel": "high"
+  },
+  "systemPrompt": "prompts/system.md",
+  "extensions": ["extensions/chrome-use.ts"],
+  "apps": ".app.json"
+}

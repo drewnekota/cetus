@@ -217,8 +217,22 @@ pub fn gesture_actions(s: &QuickSettings) -> (u8, u8, u8, u8) {
         }
     }
     let (mut bcmd, mut bopt, mut dcmd, mut dopt) = (ACT_NONE, ACT_NONE, ACT_NONE, ACT_NONE);
-    assign(&s.gesture_plain, ACT_PLAIN, &mut bcmd, &mut bopt, &mut dcmd, &mut dopt);
-    assign(&s.gesture_shot, ACT_SHOT, &mut bcmd, &mut bopt, &mut dcmd, &mut dopt);
+    assign(
+        &s.gesture_plain,
+        ACT_PLAIN,
+        &mut bcmd,
+        &mut bopt,
+        &mut dcmd,
+        &mut dopt,
+    );
+    assign(
+        &s.gesture_shot,
+        ACT_SHOT,
+        &mut bcmd,
+        &mut bopt,
+        &mut dcmd,
+        &mut dopt,
+    );
     (bcmd, bopt, dcmd, dopt)
 }
 
@@ -420,12 +434,13 @@ pub fn capture_screenshot() -> Option<Screenshot> {
         if !screen_recording_granted() {
             return None;
         }
-        // Capture in-process via xcap + the `image` crate (see
-        // `capture::capture_primary_jpeg`) instead of shelling out to
-        // `screencapture` + `sips` through a temp file — that cost two process
-        // spawns and a disk round-trip on every panel open. The 2560px cap keeps
-        // retina / multi-monitor shots sane for the IPC hop and the vision model.
-        let bytes = crate::capture::capture_primary_jpeg(2560)?;
+        // Grab via the native `screencapture` tool, NOT xcap: on recent macOS
+        // xcap's ScreenCaptureKit path stalls ~3.5s per frame (measured), which
+        // was the entire perceived "launcher is laggy" delay — it's the first
+        // thing the panel waits on before presenting. `screencapture` returns in
+        // ~100ms; the one subprocess + temp file is well worth it. The 1600px cap
+        // keeps the IPC payload and vision input bounded.
+        let bytes = crate::capture::capture_primary_jpeg_native(1600)?;
         if bytes.is_empty() {
             return None;
         }
@@ -509,27 +524,48 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
         return;
     }
     // Stamp the open so the reopen handler can ignore the activation this show
-    // may cause (see the macOS Reopen branch in lib.rs).
+    // may cause (see the macOS Reopen branch in lib.rs). The same stamp doubles
+    // as this open's token, threaded through both the `quick-open` event and the
+    // deferred `quick-open-url` follow-up so a late URL from a prior open can't
+    // bleed into a newer one.
+    let open_id = crate::store::now_ms();
     app.state::<AppState>()
         .quick
         .last_open_ms
-        .store(crate::store::now_ms(), Ordering::Relaxed);
+        .store(open_id, Ordering::Relaxed);
     app.state::<AppState>()
         .quick
         .shown
         .store(true, Ordering::Relaxed);
-    // Capture the screenshot AND the ambient context (frontmost app, browser
-    // URL/title, selected text) before the panel presents and steals focus —
-    // afterwards the frontmost app is cetus itself. Both run concurrently so the
-    // context probe hides behind the screenshot's latency. Context rides only
-    // with the screenshot gesture (the "contextful" mode).
+    // Capture the screenshot AND the *pre-focus* ambient context (frontmost app +
+    // selected text) before the panel presents and steals focus — afterwards the
+    // frontmost app is cetus itself. Both run concurrently so the context probe
+    // hides behind the screenshot's latency. The browser URL is deliberately NOT
+    // gathered here: it scripts the browser by bundle id and survives cetus taking
+    // focus, so we fetch it asynchronously *after* presenting (below) to keep its
+    // AppleScript latency off the panel's first-paint critical path. Context rides
+    // only with the screenshot gesture (the "contextful" mode).
+    // TEMP timing instrumentation (remove after diagnosis): each probe measures
+    // its own wall time so we can see whether the screenshot, the context probe,
+    // or neither is what stalls the panel's first paint.
+    let cap_started = std::time::Instant::now();
     let (shot, context) = if capture {
-        // Context probe (AX selection + AppleScript URL + frontmost app) runs
-        // in-process — the TCC grants live with the main app, not a helper.
-        let ctx_task = tauri::async_runtime::spawn_blocking(crate::ax::gather_context);
-        let shot_task = tauri::async_runtime::spawn_blocking(capture_screenshot);
-        let shot = shot_task.await.ok().flatten();
-        let context = ctx_task.await.ok().flatten();
+        let ctx_task = tauri::async_runtime::spawn_blocking(|| {
+            let s = std::time::Instant::now();
+            let r = crate::ax::gather_pre_focus_context();
+            (r, s.elapsed().as_millis())
+        });
+        let shot_task = tauri::async_runtime::spawn_blocking(|| {
+            let s = std::time::Instant::now();
+            let r = capture_screenshot();
+            (r, s.elapsed().as_millis())
+        });
+        let (shot, shot_ms) = shot_task.await.ok().unwrap_or((None, 0));
+        let (context, ctx_ms) = ctx_task.await.ok().unwrap_or((None, 0));
+        tracing::info!(
+            "quick open_panel capture: screenshot={shot_ms}ms context={ctx_ms}ms wall={}ms",
+            cap_started.elapsed().as_millis()
+        );
         (shot, context)
     } else {
         (None, None)
@@ -543,6 +579,7 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
     // must be touched on the main thread, in order: center → present.
     #[cfg(target_os = "macos")]
     {
+        let present_started = std::time::Instant::now(); // TEMP timing
         let app_for_main = app.clone();
         let _ = app.run_on_main_thread(move || {
             // Snapshot the main window's on-screen state first. Presenting the
@@ -573,6 +610,11 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
                 park_quick(&app_for_monitor);
             });
         });
+        tracing::info!(
+            "quick open_panel present: {}ms (total since gesture-capture {}ms)",
+            present_started.elapsed().as_millis(),
+            cap_started.elapsed().as_millis()
+        );
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -593,11 +635,45 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
             // never as a flash on the first open before the capture lands.
             "screenshotPermission": screen_recording_granted(),
             // Ambient context captured pre-focus (may be null). The panel shows
-            // it as removable chips and forwards whatever survives on submit.
+            // it as removable chips and forwards whatever survives on submit. The
+            // browser URL arrives later via `quick-open-url`.
             "context": context,
             "sessionMode": settings.session_mode,
+            // This open's token; the panel pins it so a stale `quick-open-url`
+            // from an earlier open is ignored.
+            "openId": open_id,
         }),
     );
+    // Now that the panel is up, fetch the browser URL off the critical path and
+    // stream it in as a follow-up. The AppleScript probe (bounded to 2s) would
+    // otherwise have delayed the panel's first paint by that much. Only the
+    // contextful gesture carries context, and only browsers yield a URL.
+    if capture {
+        if let Some(bundle) = context.as_ref().map(|c| c.bundle_id.clone()) {
+            if !bundle.is_empty() {
+                let app_for_url = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let fetched = tauri::async_runtime::spawn_blocking(move || {
+                        crate::ax::fetch_browser_url(&bundle)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                    if let Some((url, title)) = fetched {
+                        if url.is_empty() {
+                            return;
+                        }
+                        if let Some(w) = app_for_url.get_webview_window("quick") {
+                            let _ = w.emit(
+                                "quick-open-url",
+                                serde_json::json!({ "url": url, "title": title, "openId": open_id }),
+                            );
+                        }
+                    }
+                });
+            }
+        }
+    }
 }
 
 // ---- Commands -------------------------------------------------------------
@@ -618,8 +694,7 @@ pub async fn set_quick_settings(
     // Caps Lock as the voice trigger needs an HID remap to suppress its system
     // toggle; apply or restore it to match the current selection.
     crate::caps_remap::set_active(
-        settings.voice_enabled
-            && voice_gesture_code(&settings.voice_gesture) == VOICE_CAPS_LOCK,
+        settings.voice_enabled && voice_gesture_code(&settings.voice_gesture) == VOICE_CAPS_LOCK,
     );
     // The summon hotkey is a real OS shortcut (not part of the ⌘-gesture tap),
     // so re-register it whenever settings change — no restart needed.

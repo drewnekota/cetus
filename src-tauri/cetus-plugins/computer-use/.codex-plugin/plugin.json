@@ -1,0 +1,22 @@
+{
+  "id": "cetus.computer-use",
+  "displayName": "Computer Use",
+  "version": "0.1.0",
+  "description": "Control native macOS apps through Cetus-hosted Accessibility tools.",
+  "activation": {
+    "agentControlSurface": "computer"
+  },
+  "interface": {
+    "capabilities": ["Interactive", "Read", "Write", "Native"],
+    "riskLevel": "high"
+  },
+  "systemPrompt": "prompts/system.md",
+  "extensions": ["extensions/computer-use.ts"],
+  "coreExtensionOverrides": ["computer-use.ts"],
+  "nativeCapabilities": [
+    "macos.accessibility",
+    "screen.capture",
+    "hostTunnel.cua",
+    "hostTunnel.agentStep"
+  ]
+}

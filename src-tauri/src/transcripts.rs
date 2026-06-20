@@ -13,8 +13,8 @@
 //! Writes are atomic (temp + rename); a process mutex serialises cetus's own
 //! read-modify-write. Off by default — recording everything you say is sensitive.
 
-use crate::AppState;
 use crate::store::now_ms;
+use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -96,7 +96,9 @@ fn read_state(path: &Path) -> TranscriptState {
             s
         }
         Err(e) => {
-            tracing::warn!("dictations.json unparseable ({e}); backing up to .corrupt, starting fresh");
+            tracing::warn!(
+                "dictations.json unparseable ({e}); backing up to .corrupt, starting fresh"
+            );
             let _ = std::fs::copy(path, path.with_extension("json.corrupt"));
             TranscriptState::default()
         }

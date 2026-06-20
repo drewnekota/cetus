@@ -522,11 +522,15 @@ fn parked_sliver_origin(vf: NSRect, wf: NSRect, frames: &[NSRect]) -> NSPoint {
         |f: &NSRect| f.origin.y < vmax_y - EPS && f.origin.y + f.size.height > vmin_y + EPS;
     // A side is "occupied" when another display sits just past that edge of the
     // main screen, sharing extent along the perpendicular axis.
-    let occ_right = frames.iter().any(|f| f.origin.x >= vmax_x - EPS && overlaps_v(f));
+    let occ_right = frames
+        .iter()
+        .any(|f| f.origin.x >= vmax_x - EPS && overlaps_v(f));
     let occ_left = frames
         .iter()
         .any(|f| f.origin.x + f.size.width <= vmin_x + EPS && overlaps_v(f));
-    let occ_top = frames.iter().any(|f| f.origin.y >= vmax_y - EPS && overlaps_h(f));
+    let occ_top = frames
+        .iter()
+        .any(|f| f.origin.y >= vmax_y - EPS && overlaps_h(f));
     let occ_bottom = frames
         .iter()
         .any(|f| f.origin.y + f.size.height <= vmin_y + EPS && overlaps_h(f));
@@ -535,8 +539,16 @@ fn parked_sliver_origin(vf: NSRect, wf: NSRect, frames: &[NSRect]) -> NSPoint {
     // displays in a line) the spill is unavoidable — keep the original side.
     let go_right = !occ_right || occ_left;
     let go_top = !occ_top || occ_bottom;
-    let x = if go_right { vmax_x - EPS } else { vmin_x + EPS - wf.size.width };
-    let y = if go_top { vmax_y - EPS } else { vmin_y + EPS - wf.size.height };
+    let x = if go_right {
+        vmax_x - EPS
+    } else {
+        vmin_x + EPS - wf.size.width
+    };
+    let y = if go_top {
+        vmax_y - EPS
+    } else {
+        vmin_y + EPS - wf.size.height
+    };
     NSPoint { x, y }
 }
 
@@ -773,7 +785,8 @@ pub fn reveal_after_paint(ns_window: *mut c_void) {
             find_wkwebview(content)
         };
         let responds = if let Some(webview) = webview {
-            let r: Bool = msg_send![webview, respondsToSelector: sel!(_doAfterNextPresentationUpdate:)];
+            let r: Bool =
+                msg_send![webview, respondsToSelector: sel!(_doAfterNextPresentationUpdate:)];
             if r.as_bool() {
                 let w_ptr = obj as usize;
                 let reveal = RcBlock::new(move || {

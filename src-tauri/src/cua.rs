@@ -224,9 +224,9 @@ mod imp {
                     return json!({"ok": false, "error": "ax-helper-eof"});
                 }
                 Ok(_) => {
-                    return serde_json::from_str(resp.trim()).unwrap_or_else(|e| {
-                        json!({"ok": false, "error": format!("ax-helper-bad-json: {e}")})
-                    });
+                    return serde_json::from_str(resp.trim()).unwrap_or_else(
+                        |e| json!({"ok": false, "error": format!("ax-helper-bad-json: {e}")}),
+                    );
                 }
                 Err(_) => {
                     inner.proc = None;

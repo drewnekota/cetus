@@ -88,10 +88,8 @@ pub fn handle_app_event(registry: &NodeResultRegistry, payload: &str) {
             let details = inner
                 .and_then(|e| e.get("result"))
                 .and_then(|r| r.get("details"));
-            let is_node_result = details
-                .and_then(|d| d.get("kind"))
-                .and_then(|k| k.as_str())
-                == Some("node_result");
+            let is_node_result =
+                details.and_then(|d| d.get("kind")).and_then(|k| k.as_str()) == Some("node_result");
             if !is_node_result {
                 return;
             }
@@ -240,9 +238,7 @@ pub async fn run_agent_node(
     ctx.sched.store.set_archived(&id, true, now_ms()).ok();
 
     let mut details = match result {
-        Ok(Ok(details))
-            if details.get("kind").and_then(|k| k.as_str()) == Some("node_result") =>
-        {
+        Ok(Ok(details)) if details.get("kind").and_then(|k| k.as_str()) == Some("node_result") => {
             details
         }
         Ok(_) => return Err("sub-agent exited before reporting a result".to_string()),

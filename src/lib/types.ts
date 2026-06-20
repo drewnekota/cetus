@@ -118,9 +118,21 @@ export interface QuickOpenPayload {
    *  the grant-permission hint only when truly denied — not as a flash before
    *  the first capture lands. */
   screenshotPermission: boolean;
-  /** Ambient context captured pre-focus; null when no screenshot rode along. */
+  /** Ambient context captured pre-focus; null when no screenshot rode along.
+   *  The browser URL is filled in later via a `quick-open-url` event. */
   context: QuickContext | null;
   sessionMode: QuickSessionMode;
+  /** Token for this open; echoed by `quick-open-url` so a late URL from an
+   *  earlier open is ignored. */
+  openId: number;
+}
+
+/** Deferred browser URL for the current open, fetched after the panel presents
+ *  so its AppleScript latency stays off the first-paint path. */
+export interface QuickOpenUrlPayload {
+  url: string;
+  title: string;
+  openId: number;
 }
 
 /** Payload the quick panel forwards to the main window on submit. */
@@ -246,6 +258,50 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   browser: false,
   computer: false,
 };
+
+// ---- Plugins ---------------------------------------------------------------
+
+/** One discovered Cetus plugin. A plugin may contribute prompt guidance, skills,
+ *  MCP servers, pi extensions, or trusted native capabilities. Mirrors the Rust
+ *  `PluginEntry` (src-tauri/src/plugins.rs). */
+export interface PluginEntry {
+  id: string;
+  displayName: string;
+  version: string;
+  description: string;
+  builtIn: boolean;
+  enabled: boolean;
+  configurable: boolean;
+  available: boolean;
+  unavailableReason?: string | null;
+  path: string;
+  extensions: string[];
+  mcpServers: string[];
+  apps: string[];
+  nativeCapabilities: string[];
+  interfaceCapabilities: string[];
+  agentControlSurface?: string | null;
+  riskLevel?: string | null;
+  error?: string | null;
+}
+
+export interface ChromeUseStatus {
+  installed: boolean;
+  hostName: string;
+  extensionId: string;
+  manifestPath: string;
+  messagesPath: string;
+  commandsPath: string;
+  extensionOrigin: string;
+  lastMessage?: unknown | null;
+}
+
+export interface ChromeUseSelfTest {
+  ok: boolean;
+  message: string;
+  ack?: unknown | null;
+  logged?: unknown | null;
+}
 
 // ---- Dreaming (quiet-time memory consolidation) ---------------------------
 
@@ -746,6 +802,14 @@ export interface BashResult {
   timedOut: boolean;
   /** Directory the command actually ran in. */
   cwd: string;
+}
+
+export interface WorkspaceFileEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  sizeBytes: number | null;
+  modifiedMs: number | null;
 }
 
 export interface RenderedMessage {

@@ -112,7 +112,7 @@
   --chart-4: var(--diff-removed);
   --chart-5: color-mix(in oklab, var(--ink) 40%, var(--surface));
 
-  --sidebar: var(--surface);
+  --sidebar: #f8f8f9;
   --sidebar-foreground: var(--ink);
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--surface);

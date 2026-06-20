@@ -45,8 +45,8 @@ export function AutomationsView({
 }: Props) {
   const { t } = useTranslation("automation");
   return (
-    <div className="flex-1 overflow-y-auto px-4 pb-6 pt-2">
-      <div className="mx-auto w-full max-w-3xl">
+    <div className="scrollbar-slim flex-1 overflow-y-auto px-4 pb-6 pt-2">
+      <div className="mx-auto w-full max-w-5xl">
         <div className="flex items-center justify-between pb-3">
           <div>
             <h2 className="text-sm font-semibold text-foreground">
@@ -77,7 +77,7 @@ export function AutomationsView({
             </span>
           </button>
         ) : (
-          <div className="space-y-2">
+          <div className="grid min-w-0 gap-3 md:grid-cols-2">
             {automations.map((a) => (
               <AutomationCard
                 key={a.id}
@@ -119,11 +119,11 @@ function AutomationCard({
   return (
     <div
       className={cn(
-        "group relative rounded-lg border border-border bg-card px-4 py-3 transition-colors hover:border-border/80",
+        "group relative min-w-0 overflow-hidden rounded-lg border border-border bg-card px-4 py-3 transition-colors hover:border-border/80",
         !a.enabled && "opacity-70",
       )}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex min-w-0 items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <Clock className="size-3.5 shrink-0 text-muted-foreground" />

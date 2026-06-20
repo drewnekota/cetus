@@ -7,6 +7,7 @@ mod bash;
 mod biasing;
 mod caps_remap;
 mod capture;
+pub mod chrome_use;
 mod commands;
 mod corrections;
 mod cua;
@@ -29,6 +30,7 @@ mod ocr;
 #[cfg(target_os = "macos")]
 mod panel;
 mod pi_rpc;
+mod plugins;
 mod provider;
 mod quick;
 mod run_engine;
@@ -186,7 +188,7 @@ impl AppState {
         if ultra::load_settings(&self.store).enabled {
             extra.push_str(pi_rpc::ULTRA_SYSTEM_PROMPT);
         }
-        if let Some(p) = agent::extra_system_prompt(&self.store) {
+        if let Some(p) = plugins::extra_system_prompt(&self.store) {
             extra.push_str(&p);
         }
         // Concrete "reply in <language>" anchor from the resolved UI locale, so
@@ -247,12 +249,24 @@ impl AppState {
         let conv_dir = self.app_data_dir.join("conv-agents").join(conv_id);
         let mcp_path = conv_dir.join("mcp.json");
         if !conv_dir.exists() {
-            skills::materialize_skills_into(&self.app_data_dir, &conv_dir.join("skills"), &self.store);
+            skills::materialize_skills_into(
+                &self.app_data_dir,
+                &conv_dir.join("skills"),
+                &self.store,
+            );
+            plugins::plugin_freeze_skills(
+                &self.app_data_dir,
+                &conv_dir.join("skills"),
+                &self.store,
+            );
             mcp::write_conv_config(&mcp_path, &self.store);
         }
         let mcp = mcp_path.to_string_lossy().into_owned();
         vec![
-            ("PI_CODING_AGENT_DIR".into(), conv_dir.to_string_lossy().into_owned()),
+            (
+                "PI_CODING_AGENT_DIR".into(),
+                conv_dir.to_string_lossy().into_owned(),
+            ),
             ("CETUS_MCP_CONFIG".into(), mcp.clone()),
             ("MCPORTER_CONFIG".into(), mcp),
         ]
@@ -480,9 +494,13 @@ pub fn run() {
             // production (.app/Contents/Resources), so on first launch we copy
             // the whole tree to <app_data>/pi-install and run pi from there.
             // PI_INSTALL env var overrides for local dev iteration.
-            let pi_dir = resolve_pi_install(app.handle(), &app_data_dir)
-                .expect("locate/install pi tree");
+            let pi_dir =
+                resolve_pi_install(app.handle(), &app_data_dir).expect("locate/install pi tree");
             let pi_bin = pi_dir.join("pi");
+            std::env::set_var(
+                plugins::CETUS_USER_PLUGINS_ENV,
+                plugins::user_plugins_dir(&app_data_dir),
+            );
 
             let store = Arc::new(store::Store::open(&db_path).expect("open sqlite store"));
             // Size/position the main window before it's presented: restore the
@@ -728,12 +746,10 @@ pub fn run() {
             {
                 use tauri::menu::{Menu, MenuItem};
                 use tauri::tray::TrayIconBuilder;
-                let open_i =
-                    MenuItem::with_id(app, "tray_open", "Open cetus", true, None::<&str>)?;
+                let open_i = MenuItem::with_id(app, "tray_open", "Open cetus", true, None::<&str>)?;
                 let settings_i =
                     MenuItem::with_id(app, "tray_settings", "Settings", true, None::<&str>)?;
-                let quit_i =
-                    MenuItem::with_id(app, "tray_quit", "Quit cetus", true, None::<&str>)?;
+                let quit_i = MenuItem::with_id(app, "tray_quit", "Quit cetus", true, None::<&str>)?;
                 let menu = Menu::with_items(app, &[&open_i, &settings_i, &quit_i])?;
                 let mut tray = TrayIconBuilder::with_id("cetus-tray")
                     .tooltip("cetus")
@@ -790,6 +806,18 @@ pub fn run() {
                 transcripts::transcripts_path(&app_data_dir),
             );
 
+            // Chrome Use native-host bridge: plugin tools read the extension's
+            // local JSONL inbox from this path. The extension/native host writes
+            // here after the user loads the Chrome extension and connects it.
+            std::env::set_var(
+                "CETUS_CHROME_USE_MESSAGES",
+                chrome_use::messages_path(&app_data_dir),
+            );
+            std::env::set_var(
+                "CETUS_CHROME_USE_COMMANDS",
+                chrome_use::commands_path(&app_data_dir),
+            );
+
             // User-installed Skills: point pi's agent dir at a cetus-managed
             // location (isolated from the user's personal ~/.pi) so pi discovers
             // and auto-enables every SKILL.md under `<agentDir>/skills`. Then
@@ -819,7 +847,9 @@ pub fn run() {
             // window is just a plain transparent popup.
             #[cfg(target_os = "macos")]
             {
-                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+                use window_vibrancy::{
+                    apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState,
+                };
                 // Keep cetus out of App Nap so a long-idle window doesn't flash
                 // the bare vibrancy (no DOM) for a beat when you switch back to it.
                 panel::prevent_app_nap();
@@ -915,6 +945,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         commands::list_conversations,
         commands::new_conversation,
+        commands::fork_conversation,
         commands::switch_conversation,
         commands::archive_conversation,
         commands::set_review_state,
@@ -926,6 +957,7 @@ pub fn run() {
         commands::pi_ping,
         commands::default_workspace,
         commands::pick_workspace_dir,
+        commands::list_workspace_files,
         commands::set_workspace,
         commands::set_model_choice,
         commands::get_model_choice,
@@ -939,7 +971,16 @@ pub fn run() {
         commands::read_text_file,
         commands::reveal_in_finder,
         commands::open_external,
+        commands::open_browser_window,
+        commands::open_browser_panel,
+        commands::set_browser_panel_bounds,
+        commands::set_browser_panel_annotation_mode,
+        commands::close_browser_panel,
         commands::open_path,
+        chrome_use::install_chrome_native_host,
+        chrome_use::open_chrome_extensions_page,
+        chrome_use::test_chrome_native_host,
+        chrome_use::chrome_use_status,
         commands::save_attachment,
         commands::list_automations,
         commands::create_automation,
@@ -1026,6 +1067,11 @@ pub fn run() {
         agent::get_agent_settings,
         agent::set_agent_settings,
         agent::agent_stop,
+        plugins::list_plugins,
+        plugins::set_plugin_enabled,
+        plugins::import_plugin,
+        plugins::reveal_plugin,
+        plugins::delete_plugin,
         notify::post_notification,
         bash::run_bash,
     ]);
@@ -1034,6 +1080,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         commands::list_conversations,
         commands::new_conversation,
+        commands::fork_conversation,
         commands::switch_conversation,
         commands::archive_conversation,
         commands::set_review_state,
@@ -1045,6 +1092,7 @@ pub fn run() {
         commands::pi_ping,
         commands::default_workspace,
         commands::pick_workspace_dir,
+        commands::list_workspace_files,
         commands::set_workspace,
         commands::set_model_choice,
         commands::get_model_choice,
@@ -1058,7 +1106,16 @@ pub fn run() {
         commands::read_text_file,
         commands::reveal_in_finder,
         commands::open_external,
+        commands::open_browser_window,
+        commands::open_browser_panel,
+        commands::set_browser_panel_bounds,
+        commands::set_browser_panel_annotation_mode,
+        commands::close_browser_panel,
         commands::open_path,
+        chrome_use::install_chrome_native_host,
+        chrome_use::open_chrome_extensions_page,
+        chrome_use::test_chrome_native_host,
+        chrome_use::chrome_use_status,
         commands::save_attachment,
         commands::list_automations,
         commands::create_automation,
@@ -1145,6 +1202,11 @@ pub fn run() {
         agent::get_agent_settings,
         agent::set_agent_settings,
         agent::agent_stop,
+        plugins::list_plugins,
+        plugins::set_plugin_enabled,
+        plugins::import_plugin,
+        plugins::reveal_plugin,
+        plugins::delete_plugin,
         notify::post_notification,
         bash::run_bash,
         devtest::test_eval,
@@ -1299,9 +1361,7 @@ pub(crate) fn focus_main(app: &AppHandle) {
             if let Some(w) = app2.get_webview_window("main") {
                 if let Ok(ptr) = w.ns_window() {
                     match parked {
-                        Some((x, y, mask)) => {
-                            crate::panel::unpark_main_window(ptr, x, y, mask)
-                        }
+                        Some((x, y, mask)) => crate::panel::unpark_main_window(ptr, x, y, mask),
                         // Not parked — but a close→reopen race may still have
                         // leaked the park's mouse-ignore flag onto a window
                         // we're about to show. Healing is idempotent, so a
@@ -1418,9 +1478,7 @@ pub(crate) fn apply_summon_hotkey(app: &AppHandle, hotkey: &str) {
         };
         if let Some(sc) = meeting::sync_toggle_hotkey(&meeting_hk) {
             if let Err(e) = gs.register(sc) {
-                tracing::warn!(
-                    "cetus: failed to register meeting hotkey {meeting_hk:?}: {e}"
-                );
+                tracing::warn!("cetus: failed to register meeting hotkey {meeting_hk:?}: {e}");
             }
         }
     }
@@ -1435,11 +1493,7 @@ pub(crate) fn apply_launch_on_startup(app: &AppHandle, enabled: bool) {
     {
         use tauri_plugin_autostart::ManagerExt;
         let mgr = app.autolaunch();
-        let res = if enabled {
-            mgr.enable()
-        } else {
-            mgr.disable()
-        };
+        let res = if enabled { mgr.enable() } else { mgr.disable() };
         if let Err(e) = res {
             tracing::warn!("cetus: failed to set launch-on-startup={enabled}: {e}");
         }
@@ -1472,6 +1526,17 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
                     tracing::info!("synced cetus-extensions from {}", src.display());
                 }
             }
+            if let Some(src) = plugins::dev_plugins_src() {
+                if let Err(e) = sync_cetus_plugins_from(&src, &p) {
+                    tracing::warn!("dev cetus-plugins sync skipped: {e}");
+                } else {
+                    tracing::info!("synced cetus-plugins from {}", src.display());
+                }
+            }
+            std::env::set_var(
+                plugins::CETUS_BUILTIN_PLUGINS_ENV,
+                plugins::runtime_plugins_dir(&p),
+            );
             return Ok(p);
         }
         anyhow::bail!("PI_INSTALL={} does not contain a pi binary", p.display());
@@ -1491,6 +1556,7 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
         // existed would silently strand new tools.
         if resource.join("pi").exists() {
             sync_cetus_extensions(&resource, &target)?;
+            sync_cetus_plugins(&resource, &target)?;
             // The tree's node_modules is copied only on first install, so a
             // bundled pi-ai hotfix (the transform-messages content guard, see
             // scripts/build-pi-sidecar.sh) would otherwise never reach an
@@ -1500,6 +1566,10 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
                 tracing::warn!("pi-ai guard sync skipped: {e}");
             }
         }
+        std::env::set_var(
+            plugins::CETUS_BUILTIN_PLUGINS_ENV,
+            plugins::runtime_plugins_dir(&target),
+        );
         return Ok(target);
     }
 
@@ -1515,6 +1585,10 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
         target.display()
     );
     copy_dir(&resource, &target)?;
+    std::env::set_var(
+        plugins::CETUS_BUILTIN_PLUGINS_ENV,
+        plugins::runtime_plugins_dir(&target),
+    );
     Ok(target)
 }
 
@@ -1522,10 +1596,23 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
 /// Cheap (tiny number of small .ts files) and keeps tool updates flowing
 /// without bumping the install version or wiping the cache.
 fn sync_cetus_extensions(resource: &Path, target: &Path) -> std::io::Result<()> {
-    sync_cetus_extensions_from(
-        &resource.join(crate::pi_rpc::CETUS_EXTENSIONS_DIR),
-        target,
-    )
+    sync_cetus_extensions_from(&resource.join(crate::pi_rpc::CETUS_EXTENSIONS_DIR), target)
+}
+
+/// Re-deploy `<resource>/cetus-plugins` over `<target>/cetus-plugins`.
+fn sync_cetus_plugins(resource: &Path, target: &Path) -> std::io::Result<()> {
+    sync_cetus_plugins_from(&resource.join(plugins::CETUS_PLUGINS_DIR), target)
+}
+
+fn sync_cetus_plugins_from(src: &Path, target: &Path) -> std::io::Result<()> {
+    let dst = target.join(plugins::CETUS_PLUGINS_DIR);
+    if !src.exists() {
+        return Ok(());
+    }
+    if dst.exists() {
+        std::fs::remove_dir_all(&dst)?;
+    }
+    copy_dir(src, &dst)
 }
 
 /// Recursively copy `src` into `dst`, creating `dst`. Best-effort helper used
@@ -1568,7 +1655,10 @@ fn sync_cetus_extensions_from(src: &Path, target: &Path) -> std::io::Result<()> 
             match std::fs::remove_dir_all(&stale) {
                 Ok(()) => tracing::info!("pruned stale extensions dir {}", stale.display()),
                 Err(e) => {
-                    tracing::warn!("pruning stale extensions dir {} failed: {e}", stale.display())
+                    tracing::warn!(
+                        "pruning stale extensions dir {} failed: {e}",
+                        stale.display()
+                    )
                 }
             }
         }
@@ -1598,8 +1688,7 @@ fn dev_ext_src() -> Option<PathBuf> {
 /// installed copy is missing or differs from it. Path-stable (no version in the
 /// path), cheap, and idempotent. Only acts when the bundle itself is patched.
 fn sync_pi_ai_guard(resource: &Path, target: &Path) -> std::io::Result<()> {
-    const REL: &str =
-        "node_modules/@earendil-works/pi-ai/dist/providers/transform-messages.js";
+    const REL: &str = "node_modules/@earendil-works/pi-ai/dist/providers/transform-messages.js";
     let src = resource.join(REL);
     let dst = target.join(REL);
     if !src.exists() || !dst.exists() {

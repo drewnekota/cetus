@@ -29,6 +29,15 @@
 //   node scripts/cetus-devtest.mjs dump
 //   node scripts/cetus-devtest.mjs dom --op eval --js "document.querySelector('h1')?.textContent"
 //   node scripts/cetus-devtest.mjs ax --request '{"action":"tree","params":{}}'
+//   node scripts/cetus-devtest.mjs computerObserve --request '{"op":"dump","includeScreenshot":true}'
+//   node scripts/cetus-devtest.mjs chromeHostSelfTest
+//   node scripts/cetus-devtest.mjs chromeStatus
+//   node scripts/cetus-devtest.mjs browserOpen --url about:blank
+//   node scripts/cetus-devtest.mjs browserPanelOpen --url about:blank
+//   node scripts/cetus-devtest.mjs browserPanelClose
+//   node scripts/cetus-devtest.mjs browserAnnotate --payload '{"url":"about:blank","title":"","xPct":50,"yPct":50,"note":"test"}'
+//   node scripts/cetus-devtest.mjs browserVisibleOpen --url about:blank
+//   node scripts/cetus-devtest.mjs webviews
 //
 // Options (any op):
 //   --sock <path>     override socket path (else $CETUS_DEVTEST_SOCK / default)
@@ -39,6 +48,8 @@
 //   --label <string>  webview label (eval/screenshot; default "main")
 //   --op <name>       dom op name (only for the literal `dom` op)
 //   --request <json>  raw JSON for the `ax` op (a CuaRequest)
+//   --url <url>       URL payload (browserOpen)
+//   --payload <json>  raw JSON payload (browserAnnotate)
 //   --timeout <ms>    client read timeout (default 15000)
 // -----------------------------------------------------------------------------
 
@@ -51,12 +62,21 @@ const OPS = new Set([
   "eval",
   "screenshot",
   "ax",
+  "computerObserve",
+  "chromeHostSelfTest",
+  "chromeStatus",
   "dom",
   "find",
   "click",
   "type",
   "getText",
   "dump",
+  "browserOpen",
+  "browserPanelOpen",
+  "browserPanelClose",
+  "browserAnnotate",
+  "browserVisibleOpen",
+  "webviews",
 ]);
 
 function parseArgs(argv) {
@@ -101,6 +121,7 @@ function buildRequest(op, args) {
   if (args.text !== undefined) req.text = args.text;
   if (args.js !== undefined) req.js = args.js;
   if (args.label !== undefined) req.label = args.label;
+  if (args.url !== undefined) req.url = args.url;
 
   // `dom` is a passthrough: the actual DOM op name comes from --op.
   if (op === "dom") {
@@ -110,15 +131,26 @@ function buildRequest(op, args) {
     req.op = args.op;
   }
 
-  // `ax` takes a raw JSON CuaRequest via --request.
-  if (op === "ax") {
+  // AX/computer ops take a raw JSON request via --request.
+  if (op === "ax" || op === "computerObserve") {
     if (args.request === undefined) {
-      fail('ax requires --request \'{"action":"...","params":{}}\'');
+      fail(`${op} requires --request '{"op":"dump"}'`);
     }
     try {
       req.request = JSON.parse(args.request);
     } catch (e) {
       fail(`--request is not valid JSON: ${e.message}`);
+    }
+  }
+
+  if (op === "browserAnnotate") {
+    if (args.payload === undefined) {
+      fail('browserAnnotate requires --payload \'{"url":"...","title":"...","xPct":50,"yPct":50,"note":"..."}\'');
+    }
+    try {
+      req.payload = JSON.parse(args.payload);
+    } catch (e) {
+      fail(`--payload is not valid JSON: ${e.message}`);
     }
   }
 

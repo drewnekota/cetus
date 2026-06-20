@@ -347,8 +347,7 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
                     }
                 } else {
                     let held = ptt_clean_held(bits, gesture);
-                    let was =
-                        voice_trigger_edge(held, &vtap, &ptt_held, &ptt_dirty, &voice_hf_gen);
+                    let was = voice_trigger_edge(held, &vtap, &ptt_held, &ptt_dirty, &voice_hf_gen);
                     if !held && !was && (bits & M_ALL) != 0 && vtap.borrow().last_tap.is_some() {
                         // A *different* modifier became active between two taps —
                         // the gap is contaminated, so drop the pending first tap.
@@ -838,7 +837,11 @@ async fn finish_ptt(app: &AppHandle, runtime: &QuickRuntime) {
     }
     tracing::info!(
         "voice insert ({:?} mode, asr {asr_ms}ms + cleanup {cleanup_ms}ms): {} chars: {:?}",
-        if mode_code == quick::INSERT_PASTE { "paste" } else { "type" },
+        if mode_code == quick::INSERT_PASTE {
+            "paste"
+        } else {
+            "type"
+        },
         text.chars().count(),
         crate::voice::preview(&text)
     );
@@ -857,4 +860,3 @@ async fn finish_ptt(app: &AppHandle, runtime: &QuickRuntime) {
         crate::corrections::watch_insertion(state.app_data_dir.clone(), text.clone());
     }
 }
-

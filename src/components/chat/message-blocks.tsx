@@ -11,7 +11,7 @@ import remarkCjkFriendly from "remark-cjk-friendly";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { markdownComponents, LinkifiedText, normalizeMath } from "@/lib/markdown";
-import { Check, Copy, FileText, RotateCcw } from "lucide-react";
+import { Check, Copy, FileText, GitFork, RotateCcw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { RenderedBlock } from "@/lib/types";
 import { ArtifactView } from "./artifact-view";
@@ -191,6 +191,7 @@ export function MessageActions({
   createdAt,
   isUser,
   onRegenerate,
+  onFork,
 }: {
   /** Lazily build the clipboard string — only invoked on actual copy, so the
    *  active turn doesn't re-join its whole answer on every streaming token. */
@@ -200,6 +201,7 @@ export function MessageActions({
   createdAt: number;
   isUser: boolean;
   onRegenerate?: () => void;
+  onFork?: () => void;
 }) {
   const { t } = useTranslation("chat");
   const [copied, setCopied] = useState(false);
@@ -244,6 +246,17 @@ export function MessageActions({
         >
           <RotateCcw className="size-3" />
           {t("bubble.regenerate")}
+        </button>
+      )}
+      {onFork && (
+        <button
+          type="button"
+          onClick={onFork}
+          title={t("bubble.fork")}
+          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <GitFork className="size-3" />
+          {t("bubble.fork")}
         </button>
       )}
     </div>

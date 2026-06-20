@@ -80,9 +80,9 @@ interface Props {
    *  ends, unless the user promotes it to a steer. Omit to fall back to onSend
    *  (immediate steer) while streaming. */
   onQueue?: (text: string, attachments: ComposerAttachment[]) => void;
-  /** Run a local shell command (the `!` bash mode). Receives the command with
-   *  the leading `!` already stripped. Omit to disable bash mode (the `!` is
-   *  then just a normal character). */
+  /** Send a shell command to the Terminal surface (the `!` mode). Receives the
+   *  command with the leading `!` already stripped. Omit to disable this mode
+   *  (the `!` is then just a normal character). */
   onBash?: (command: string) => void;
   onAbort: () => void;
   /** Ultra Code state + toggle. When provided, the model picker exposes an
@@ -161,9 +161,9 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // A leading `!` flips the composer into local bash mode (Claude Code style):
-  // the input runs as a shell command instead of a message. Gated on a wired
-  // onBash handler — otherwise `!` is just an ordinary character.
+  // A leading `!` flips the composer into Terminal mode: submit opens/focuses
+  // the Terminal surface and runs the command there instead of sending a chat
+  // message. Gated on a wired onBash handler — otherwise `!` is just text.
   const bashMode = !!onBash && text.startsWith("!");
   const bashCommand = bashMode ? text.slice(1).trim() : "";
 
@@ -345,8 +345,8 @@ export function Composer({
 
   function submit() {
     if (disabled) return;
-    // Bash mode: run the command locally and bypass the agent entirely (no
-    // queueing, no attachments). An empty command (`!` alone) is a no-op.
+    // Terminal mode: hand the command to the right-side Terminal surface and
+    // bypass the agent entirely. An empty command (`!` alone) is a no-op.
     if (bashMode) {
       if (!bashCommand || !onBash) return;
       onBash(bashCommand);
@@ -396,7 +396,11 @@ export function Composer({
         }
       }}
       className={cn(
-        "relative rounded-2xl border border-border shadow-sm transition-shadow focus-within:shadow-md",
+        "relative rounded-2xl border border-border",
+        // Soft, wide, low-opacity shadow (large blur, ~6% alpha) for a premium
+        // subtle lift rather than a hard drop shadow. Constant across focus.
+        // Matches the layered-shadow convention used by artifact cards.
+        "shadow-[0_4px_24px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)]",
         isDragging && "ring-2 ring-primary ring-offset-2",
         // Bash mode: tint the frame so it's unmistakably "running a command",
         // not "messaging the agent".
@@ -593,7 +597,7 @@ export function Composer({
           />
         </div>
         {bashMode ? (
-          // Bash runs locally and is independent of the agent stream, so always
+          // Terminal commands are independent of the agent stream, so always
           // offer a Run button here (never the abort affordance).
           <Button
             type="button"

@@ -77,12 +77,17 @@ pub fn load_settings(store: &Store) -> DiscoverySettings {
 
 fn save_settings(store: &Store, s: &DiscoverySettings) -> Result<(), String> {
     store
-        .set_setting(SETTINGS_KEY, &serde_json::to_string(s).map_err(|e| e.to_string())?)
+        .set_setting(
+            SETTINGS_KEY,
+            &serde_json::to_string(s).map_err(|e| e.to_string())?,
+        )
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn get_discovery_settings(state: State<'_, AppState>) -> Result<DiscoverySettings, String> {
+pub async fn get_discovery_settings(
+    state: State<'_, AppState>,
+) -> Result<DiscoverySettings, String> {
     Ok(load_settings(&state.store))
 }
 

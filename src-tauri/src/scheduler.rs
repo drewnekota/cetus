@@ -109,7 +109,12 @@ fn ensure_next_runs(ctx: &SchedulerCtx) {
             continue;
         }
         if let Ok(Some(updated)) = ctx.store.get_automation(&a.id) {
-            emit(ctx, AppEvent::AutomationUpdated { automation: updated });
+            emit(
+                ctx,
+                AppEvent::AutomationUpdated {
+                    automation: updated,
+                },
+            );
         }
     }
 }
@@ -181,9 +186,9 @@ async fn run_and_record(
     let ran_at = now_ms();
     match created {
         Ok((conv, pi)) => {
-            let _ = ctx
-                .store
-                .record_automation_outcome(&auto.id, ran_at, Some(&conv.id), "ok", None);
+            let _ =
+                ctx.store
+                    .record_automation_outcome(&auto.id, ran_at, Some(&conv.id), "ok", None);
             if let Ok(Some(updated)) = ctx.store.get_automation(&auto.id) {
                 emit(
                     ctx,
@@ -229,7 +234,12 @@ async fn run_and_record(
                             Some(&e),
                         );
                         if let Ok(Some(updated)) = ctx.store.get_automation(&auto_id) {
-                            emit(&ctx, AppEvent::AutomationUpdated { automation: updated });
+                            emit(
+                                &ctx,
+                                AppEvent::AutomationUpdated {
+                                    automation: updated,
+                                },
+                            );
                         }
                     }
                 }
@@ -242,7 +252,12 @@ async fn run_and_record(
                 .store
                 .record_automation_outcome(&auto.id, ran_at, None, "error", Some(&e));
             if let Ok(Some(updated)) = ctx.store.get_automation(&auto.id) {
-                emit(ctx, AppEvent::AutomationUpdated { automation: updated });
+                emit(
+                    ctx,
+                    AppEvent::AutomationUpdated {
+                        automation: updated,
+                    },
+                );
             }
             // `guard` drops here → claim released.
             Err(e)

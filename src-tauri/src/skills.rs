@@ -235,7 +235,10 @@ fn copy_tree(src: &Path, dst: &Path, bytes: &mut u64, files: &mut usize) -> std:
             if *bytes > MAX_IMPORT_BYTES {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    format!("skill is too large (max {} MiB)", MAX_IMPORT_BYTES / 1024 / 1024),
+                    format!(
+                        "skill is too large (max {} MiB)",
+                        MAX_IMPORT_BYTES / 1024 / 1024
+                    ),
                 ));
             }
             // Hard-link rather than byte-copy. The materialised set is a
@@ -305,7 +308,10 @@ fn unquote(s: &str) -> String {
 /// from the editor). Keeps it to one line.
 fn yaml_quote(s: &str) -> String {
     let one_line = s.replace(['\r', '\n'], " ");
-    format!("\"{}\"", one_line.replace('\\', "\\\\").replace('"', "\\\""))
+    format!(
+        "\"{}\"",
+        one_line.replace('\\', "\\\\").replace('"', "\\\"")
+    )
 }
 
 /// Truncate to a char boundary so display strings stay sane.
@@ -352,7 +358,9 @@ pub async fn import_skill(state: State<'_, AppState>, path: String) -> CmdResult
 
     let mut s = load_state(&state.store);
     if s.entries.len() >= MAX_SKILLS {
-        return Err(format!("skill limit reached ({MAX_SKILLS}); remove one first"));
+        return Err(format!(
+            "skill limit reached ({MAX_SKILLS}); remove one first"
+        ));
     }
 
     let md = std::fs::read_to_string(&skill_md).unwrap_or_default();
@@ -362,7 +370,11 @@ pub async fn import_skill(state: State<'_, AppState>, path: String) -> CmdResult
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
     let name = clamp(&fm_name.unwrap_or(folder_name), 120);
-    let name = if name.is_empty() { "Untitled skill".to_string() } else { name };
+    let name = if name.is_empty() {
+        "Untitled skill".to_string()
+    } else {
+        name
+    };
     let description = clamp(&fm_desc.unwrap_or_default(), 400);
 
     let id = Uuid::new_v4().to_string();
@@ -407,7 +419,9 @@ pub async fn create_skill(
 
     let mut s = load_state(&state.store);
     if s.entries.len() >= MAX_SKILLS {
-        return Err(format!("skill limit reached ({MAX_SKILLS}); remove one first"));
+        return Err(format!(
+            "skill limit reached ({MAX_SKILLS}); remove one first"
+        ));
     }
 
     let id = Uuid::new_v4().to_string();
@@ -573,7 +587,9 @@ pub fn agent_create_skill(
 
     let mut s = load_state(store);
     if s.entries.len() >= MAX_SKILLS {
-        return Err(format!("skill limit reached ({MAX_SKILLS}); remove one first"));
+        return Err(format!(
+            "skill limit reached ({MAX_SKILLS}); remove one first"
+        ));
     }
 
     let id = Uuid::new_v4().to_string();
@@ -640,11 +656,17 @@ pub fn agent_update_skill(
             }
             b
         }
-        None => skill_body_from_md(&std::fs::read_to_string(dir.join("SKILL.md")).unwrap_or_default()),
+        None => {
+            skill_body_from_md(&std::fs::read_to_string(dir.join("SKILL.md")).unwrap_or_default())
+        }
     };
 
     std::fs::create_dir_all(&dir).map_err(err)?;
-    std::fs::write(dir.join("SKILL.md"), skill_md(&new_name, &new_desc, &new_body)).map_err(err)?;
+    std::fs::write(
+        dir.join("SKILL.md"),
+        skill_md(&new_name, &new_desc, &new_body),
+    )
+    .map_err(err)?;
 
     let now = now_ms();
     let e = &mut s.entries[idx];
@@ -721,15 +743,24 @@ fn open_in_file_browser(path: &Path) -> CmdResult<()> {
     let p = path.to_string_lossy().to_string();
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open").arg(&p).spawn().map_err(err)?;
+        std::process::Command::new("open")
+            .arg(&p)
+            .spawn()
+            .map_err(err)?;
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer").arg(&p).spawn().map_err(err)?;
+        std::process::Command::new("explorer")
+            .arg(&p)
+            .spawn()
+            .map_err(err)?;
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        std::process::Command::new("xdg-open").arg(&p).spawn().map_err(err)?;
+        std::process::Command::new("xdg-open")
+            .arg(&p)
+            .spawn()
+            .map_err(err)?;
     }
     Ok(())
 }
@@ -770,9 +801,7 @@ fn safe_component(id: &str) -> Option<&str> {
 /// Best-effort and read-only: missing dir → empty list; an unreadable entry is
 /// skipped. Name falls back to the folder name when frontmatter has none.
 #[tauri::command]
-pub async fn list_discovered_skills(
-    state: State<'_, AppState>,
-) -> CmdResult<Vec<DiscoveredSkill>> {
+pub async fn list_discovered_skills(state: State<'_, AppState>) -> CmdResult<Vec<DiscoveredSkill>> {
     let root = PathBuf::from(crate::discovery::load_settings(&state.store).skills_folder);
     let Ok(read) = std::fs::read_dir(&root) else {
         return Ok(Vec::new()); // dir absent → nothing installed globally
@@ -793,7 +822,11 @@ pub async fn list_discovered_skills(
         };
         let (fm_name, fm_desc) = parse_frontmatter(&md);
         let name = clamp(&fm_name.unwrap_or_else(|| folder.clone()), 120);
-        let name = if name.is_empty() { folder.clone() } else { name };
+        let name = if name.is_empty() {
+            folder.clone()
+        } else {
+            name
+        };
         out.push(DiscoveredSkill {
             id: folder,
             name,
