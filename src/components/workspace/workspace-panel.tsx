@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import {
   BrowserView,
@@ -139,7 +140,7 @@ export function WorkspacePanel({
   return (
     <aside
       className={cn(
-        "flex flex-col bg-background/48 shadow-[inset_1px_0_0_rgb(255_255_255_/_0.22)] backdrop-blur-2xl backdrop-saturate-200 dark:bg-background/52 dark:shadow-[inset_1px_0_0_rgb(255_255_255_/_0.08)]",
+        "flex flex-col bg-background",
         hidden && "hidden",
         layout === "side"
           ? "h-full w-1/2 min-w-[min(420px,50%)] max-w-3xl border-l border-border"
@@ -566,19 +567,12 @@ function TerminalPanel({
 }) {
   const { t } = useTranslation("chat");
   const inputRef = useRef<HTMLInputElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const lastRunRequestRef = useRef<string | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
 
   function focusInput() {
-    window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      scrollRef.current?.scrollTo({
-        top: scrollRef.current.scrollHeight,
-        behavior: "smooth",
-      });
-    });
+    window.requestAnimationFrame(() => inputRef.current?.focus());
   }
 
   function updateState(updater: (current: TerminalViewState) => TerminalViewState) {
@@ -643,18 +637,10 @@ function TerminalPanel({
   }, [focusRequest]);
 
   return (
-    <div
-      className="h-full bg-transparent text-foreground dark:text-[#eeeeee]"
-      onMouseDown={(e) => {
-        if (e.target !== inputRef.current) focusInput();
-      }}
-    >
-      <div
-        ref={scrollRef}
-        className="h-full overflow-y-auto px-3 py-2 font-mono text-xs"
-      >
+    <div className="flex h-full flex-col bg-background text-foreground dark:bg-[#0f1011] dark:text-[#eeeeee]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-xs">
         {state.history.length === 0 ? (
-          <p className="mb-2 text-muted-foreground dark:text-white/45">
+          <p className="text-muted-foreground dark:text-white/45">
             {t("workspacePanel.noCommands")}
           </p>
         ) : (
@@ -662,21 +648,24 @@ function TerminalPanel({
             <TerminalHistoryItem key={item.id} item={item} />
           ))
         )}
-        <form onSubmit={run} className="flex items-baseline gap-2">
-          <span className="shrink-0 text-emerald-700 dark:text-emerald-300">$</span>
-          <input
-            ref={inputRef}
-            value={state.command}
-            onChange={(e) =>
-              updateState((current) => ({ ...current, command: e.target.value }))
-            }
-            disabled={state.running}
-            className="min-w-0 flex-1 border-0 bg-transparent p-0 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-60 dark:text-white dark:placeholder:text-white/35"
-            placeholder={t("workspacePanel.commandPlaceholder")}
-            spellCheck={false}
-          />
-        </form>
       </div>
+      <form
+        onSubmit={run}
+        className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/20 p-2 dark:border-white/10 dark:bg-transparent"
+      >
+        <span className="font-mono text-xs text-emerald-700 dark:text-emerald-300">$</span>
+        <Input
+          ref={inputRef}
+          value={state.command}
+          onChange={(e) =>
+            updateState((current) => ({ ...current, command: e.target.value }))
+          }
+          disabled={state.running}
+          className="h-8 border-border bg-background font-mono text-xs text-foreground placeholder:text-muted-foreground dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/35"
+          placeholder={t("workspacePanel.commandPlaceholder")}
+          spellCheck={false}
+        />
+      </form>
     </div>
   );
 }

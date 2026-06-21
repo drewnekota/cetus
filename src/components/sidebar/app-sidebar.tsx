@@ -25,6 +25,7 @@ import {
   SidebarHeader,
   SidebarMenu,
   SidebarMenuAction,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
@@ -43,6 +44,8 @@ import type { Conversation } from "@/lib/types";
 interface Props {
   conversations: Conversation[];
   activeId: string | null;
+  streamingIds: Set<string>;
+  unreadCompletedIds: Set<string>;
   defaultWorkspace: string;
   view: SidebarView;
   onViewChange: (v: SidebarView) => void;
@@ -57,6 +60,8 @@ interface Props {
 export const AppSidebar = memo(function AppSidebar({
   conversations,
   activeId,
+  streamingIds,
+  unreadCompletedIds,
   defaultWorkspace,
   view,
   onViewChange,
@@ -89,6 +94,7 @@ export const AppSidebar = memo(function AppSidebar({
       className={cn(
         // `relative` anchors the drag-to-resize handle pinned to the right edge.
         "relative",
+        "bg-sidebar/62 backdrop-blur-2xl backdrop-saturate-200 dark:bg-sidebar/58",
         // Keep the sidebar on the explicit theme token instead of macOS
         // vibrancy, so light mode stays at the Codex-like #f8f8f9.
         // Trim the row scale a notch below shadcn's defaults: 13px text (vs
@@ -236,6 +242,8 @@ export const AppSidebar = memo(function AppSidebar({
                     key={c.id}
                     conversation={c}
                     active={c.id === activeId}
+                    streaming={streamingIds.has(c.id)}
+                    unreadCompleted={unreadCompletedIds.has(c.id)}
                     onSelect={onSelect}
                     onArchive={onArchive}
                   />
@@ -354,11 +362,15 @@ function SidebarResizeHandle({
 const ConversationRow = memo(function ConversationRow({
   conversation,
   active,
+  streaming,
+  unreadCompleted,
   onSelect,
   onArchive,
 }: {
   conversation: Conversation;
   active: boolean;
+  streaming: boolean;
+  unreadCompleted: boolean;
   onSelect: (id: string) => void;
   onArchive: (c: Conversation) => void;
 }) {
@@ -380,7 +392,7 @@ const ConversationRow = memo(function ConversationRow({
         // the menu-item group hover instead so it persists while the cursor is
         // anywhere in the row, including over the archive action.
         className={cn(
-          "pr-6",
+          "pr-8",
           !active &&
             "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
         )}
@@ -390,6 +402,21 @@ const ConversationRow = memo(function ConversationRow({
         )}
         <span className="truncate">{title}</span>
       </SidebarMenuButton>
+      {(streaming || unreadCompleted) && (
+        <SidebarMenuBadge className="right-2 top-1.5 size-5 px-0 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0">
+          {streaming ? (
+            <span
+              aria-label="In progress"
+              className="size-3.5 animate-spin rounded-full border-2 border-muted-foreground/35 border-t-muted-foreground"
+            />
+          ) : (
+            <span
+              aria-label="Unread"
+              className="size-2.5 rounded-full bg-primary"
+            />
+          )}
+        </SidebarMenuBadge>
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <SidebarMenuAction

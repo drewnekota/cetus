@@ -280,6 +280,9 @@ export default function Home() {
   const isStreaming = useIsStreaming(activeId);
   const hasMessages = useHasMessages(activeId);
   const streamingIds = useStreamingIds();
+  const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [modelChoice, setModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
   useEffect(() => {
     try {
@@ -547,6 +550,12 @@ export default function Home() {
         switch (pe.type) {
           case "agent_start":
             runStatusRef.current[cid] = { running: true, outcome: "ok" };
+            setUnreadCompletedIds((ids) => {
+              if (!ids.has(cid)) return ids;
+              const next = new Set(ids);
+              next.delete(cid);
+              return next;
+            });
             break;
           case "message_update": {
             const r = runStatusRef.current[cid];
@@ -576,6 +585,14 @@ export default function Home() {
                   : "Your task is ready.",
               suppressWhenFocused: watchingNow(cid),
               conversationId: cid,
+            });
+            setUnreadCompletedIds((ids) => {
+              const next = new Set(ids);
+              if (watchingNow(cid)) next.delete(cid);
+              else next.add(cid);
+              return next.size === ids.size && next.has(cid) === ids.has(cid)
+                ? ids
+                : next;
             });
             break;
           }
@@ -723,40 +740,47 @@ export default function Home() {
     refreshAutomations().catch(console.error);
   }, [refreshAutomations]);
 
-  // Happy-path hydration: as soon as we know which conversation was last
-  // active, paint its cached RenderedMessage[] from IndexedDB *before* the
-  // backend round-trip lands. The subsequent switchConversation() refreshes
-  // from disk and the reducer takes over for new tokens.
+  // Restore the last active chat on cold start / ⌘R. Flip activeId
+  // synchronously so a reload on a chat stays on that chat even when the IDB
+  // render cache is empty; the cache and backend history fill in afterward.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const lastId = loadLastActive();
       if (!lastId) return;
+      if (viewRef.current !== "chat") return;
+      pendingSelectRef.current = lastId;
+      const isStale = () => pendingSelectRef.current !== lastId;
+      setActiveId(lastId);
       const cached = await loadCachedMessages(lastId);
       if (cancelled) return;
+      let cachedLacksUser = false;
       if (cached && cached.length > 0) {
         chatStore.getState().hydrate(lastId, cached);
-        setActiveId(lastId);
-        const cachedLacksUser = !cached.some((m) => m.role === "user");
-        // Attach pi and pull the canonical conversation row for model/workspace.
-        // We deliberately DON'T `reset` from pi's history here: that history is
-        // lossy for image turns (the vision-bridge strips the image bytes and
-        // merges the gemini description into the user text), so the IDB cache is
-        // the more faithful render. Keep it and let the reducer append new
-        // turns on top. Exception: a legacy automation cache that dropped the
-        // leading user prompt is repaired from pi history, which still carries it.
-        api
-          .switchConversation(lastId)
-          .then(({ conversation, messages }) => {
-            if (cancelled) return;
-            setModelChoice(conversation.model);
-            setWorkspaceDir(conversation.workspaceDir);
-            if (cachedLacksUser && messages?.some((m) => m.role === "user")) {
-              chatStore.getState().reset(lastId, messages);
-            }
-          })
-          .catch(console.error);
+        cachedLacksUser = !cached.some((m) => m.role === "user");
       }
+      // Attach pi and pull the canonical conversation row for model/workspace.
+      // We deliberately DON'T `reset` from pi's history when the cache is
+      // faithful: that history is lossy for image turns, so IDB is the better
+      // render. If there is no cache, or a legacy cache dropped the user prompt,
+      // fall back to pi history.
+      api
+        .switchConversation(lastId)
+        .then(({ conversation, messages }) => {
+          if (cancelled || isStale()) return;
+          setModelChoice(conversation.model);
+          setWorkspaceDir(conversation.workspaceDir);
+          if (
+            (!cached || cached.length === 0 || cachedLacksUser) &&
+            messages?.some((m) => m.role === "user")
+          ) {
+            chatStore.getState().reset(lastId, messages);
+          }
+        })
+        .catch((e) => {
+          console.error("restore last active failed", lastId, e);
+          if (!cancelled && !isStale()) setActiveId(null);
+        });
     })();
     return () => {
       cancelled = true;
@@ -768,6 +792,16 @@ export default function Home() {
   useEffect(() => {
     saveLastActive(activeId);
   }, [activeId]);
+
+  useEffect(() => {
+    if (view !== "chat" || !activeId) return;
+    setUnreadCompletedIds((ids) => {
+      if (!ids.has(activeId)) return ids;
+      const next = new Set(ids);
+      next.delete(activeId);
+      return next;
+    });
+  }, [activeId, view]);
 
   // Global keyboard shortcuts (parallels macOS app conventions):
   //   ⌘R    — reload the webview (works even behind a modal)
@@ -1440,6 +1474,12 @@ export default function Home() {
   // need a `view` dependency that would break memoization on every view switch.
   const onSelectChat = useCallback(
     (id: string) => {
+      setUnreadCompletedIds((ids) => {
+        if (!ids.has(id)) return ids;
+        const next = new Set(ids);
+        next.delete(id);
+        return next;
+      });
       setView("chat");
       onSelect(id);
     },
@@ -2182,18 +2222,20 @@ export default function Home() {
       <AppSidebar
         conversations={conversations}
         activeId={activeId}
+        streamingIds={streamingIds}
+        unreadCompletedIds={unreadCompletedIds}
         defaultWorkspace={defaultWorkspace}
         view={view}
         onViewChange={setView}
         workspaceFilter={boardWorkspaceFilter}
         onWorkspaceFilterChange={setBoardWorkspaceFilter}
         onSelect={onSelectChat}
-      onNew={onNewSidebar}
+        onNew={onNewSidebar}
         onArchive={onArchive}
         onOpenSettings={openSettings}
       />
       <SidebarInset
-        className="m-2 flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-sm"
+        className="m-2 flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-background/64 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.45),0_3px_16px_rgb(0_0_0_/_0.045)] backdrop-blur-2xl backdrop-saturate-200 dark:bg-background/58 dark:shadow-[inset_0_1px_0_rgb(255_255_255_/_0.10),0_4px_18px_rgb(0_0_0_/_0.14)]"
       >
         <div className="flex min-h-0 flex-1 flex-row">
           <div className="flex min-w-0 flex-1 flex-col">

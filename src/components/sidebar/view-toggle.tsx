@@ -40,7 +40,7 @@ export function ViewToggle({ view, onChange }: Props) {
             className={cn(
               "inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
               active
-                ? "bg-foreground text-background"
+                ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
@@ -48,7 +48,7 @@ export function ViewToggle({ view, onChange }: Props) {
             <kbd
               className={cn(
                 "font-sans text-[10px] leading-none tabular-nums",
-                active ? "text-background/60" : "text-muted-foreground/60",
+                active ? "text-primary-foreground/65" : "text-muted-foreground/60",
               )}
             >
               {it.hint}
