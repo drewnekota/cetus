@@ -242,6 +242,7 @@ pub const LEGACY_EXTENSION_DIRS: &[&str] = &["kott-extensions"];
 pub const CORE_EXTENSIONS: &[&str] = &[
     "automation-tools.ts",
     "memory.ts",
+    "skill-discovery.ts",
     "skill-tools.ts",
     "request-review.ts",
     "mcp-bridge.ts",

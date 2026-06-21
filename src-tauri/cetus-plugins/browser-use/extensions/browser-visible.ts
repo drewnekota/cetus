@@ -2,8 +2,9 @@
  * Small Browser Use bridge for the visible Cetus Browser surface.
  *
  * The existing browser-use core tools drive a managed Chrome/CDP session. This
- * extension adds one host-tunneled tool that opens the right-side in-app Browser
- * the user can see and annotate, matching the Codex-style visible surface.
+ * extension adds one host-tunneled tool that opens or updates the right-side
+ * in-app Browser the user can see and annotate, matching the Codex-style
+ * visible surface without stealing OS focus from the user's current app.
  */
 
 interface ToolDefinition {
@@ -27,9 +28,17 @@ interface ExtensionContext {
 }
 
 type Extension = (ctx: ExtensionContext) => void;
+type ToolTextResult = { content: Array<{ type: "text"; text: string }> };
 
 const SENTINEL_BROWSER = "__cetus_browser_request__";
 const SENTINEL_STEP = "__cetus_agent_step__";
+
+function asResult(out: unknown): ToolTextResult {
+  if (out && typeof out === "object" && Array.isArray((out as { content?: unknown }).content)) {
+    return out as ToolTextResult;
+  }
+  return { content: [{ type: "text", text: typeof out === "string" ? out : String(out ?? "") }] };
+}
 
 async function hostRequest(exCtx: ExtensionContext, payload: unknown): Promise<any> {
   if (typeof exCtx?.ui?.input !== "function") {
@@ -57,10 +66,17 @@ async function emitStep(exCtx: ExtensionContext, action: string): Promise<void> 
 }
 
 const extension: Extension = (ctx) => {
+  const register = ctx.registerTool.bind(ctx);
+  ctx.registerTool = (def: ToolDefinition) =>
+    register({
+      ...def,
+      execute: async (...a: Parameters<ToolDefinition["execute"]>) => asResult(await def.execute(...a)),
+    });
+
   ctx.registerTool({
     name: "browser_open_visible",
     description:
-      "Open or focus a URL in the visible right-side Cetus Browser tab so the user can inspect and annotate it.",
+      "Open or update a URL in the visible right-side Cetus Browser tab so the user can inspect and annotate it. Do not use this to steal OS focus from the user's current app.",
     parameters: {
       type: "object",
       properties: {

@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cetus / Codex Desktop Agent 升级 Benchmark</title>
+  <style>
+    :root {
+      --ink: #1f2328;
+      --muted: #606872;
+      --line: #d8dee4;
+      --soft: #f6f8fa;
+      --paper: #ffffff;
+      --green: #2e7d5b;
+      --blue: #2463ad;
+      --red: #b83f45;
+      --amber: #9a6700;
+      --violet: #7253b8;
+      --cyan: #0f6f7e;
+      --shadow: 0 10px 30px rgba(31, 35, 40, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #eef1f4;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    header {
+      background: var(--paper);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .wrap {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
+      gap: 28px;
+      padding: 38px 0 30px;
+      align-items: end;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(32px, 5vw, 58px);
+      line-height: 1.03;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      margin: 0;
+      max-width: 820px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .meta-panel {
+      border: 1px solid var(--line);
+      background: var(--soft);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .metric {
+      border-left: 4px solid var(--blue);
+      background: var(--paper);
+      padding: 10px 12px;
+    }
+
+    .metric b {
+      display: block;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    main {
+      padding: 28px 0 48px;
+    }
+
+    section {
+      margin-top: 28px;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 8px 0 0;
+    }
+
+    .band {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 22px;
+    }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .principle {
+      border-top: 4px solid var(--green);
+      padding: 14px;
+      background: var(--soft);
+      min-height: 132px;
+    }
+
+    .principle:nth-child(2) { border-top-color: var(--blue); }
+    .principle:nth-child(3) { border-top-color: var(--amber); }
+    .principle:nth-child(4) { border-top-color: var(--red); }
+
+    .principle strong {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .principle span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 14px 0 18px;
+    }
+
+    .filter {
+      border: 1px solid var(--line);
+      background: var(--paper);
+      color: var(--ink);
+      padding: 8px 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+    }
+
+    .filter[aria-pressed="true"] {
+      color: #fff;
+      background: var(--ink);
+      border-color: var(--ink);
+    }
+
+    .case-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .case {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 380px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .case.hidden { display: none; }
+
+    .case-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .case-id {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: 12px;
+      border: 1px solid var(--line);
+    }
+
+    .tag.core { color: #fff; background: var(--blue); border-color: var(--blue); }
+    .tag.gated { color: #fff; background: var(--violet); border-color: var(--violet); }
+    .tag.risk { color: #fff; background: var(--red); border-color: var(--red); }
+
+    .case blockquote {
+      margin: 0;
+      padding: 12px;
+      border-left: 4px solid var(--cyan);
+      background: #eef8fa;
+      color: #17444b;
+      font-size: 14px;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .mini {
+      border: 1px solid var(--line);
+      background: var(--soft);
+      padding: 12px;
+      border-radius: 6px;
+    }
+
+    .mini b {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      text-transform: uppercase;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    ul {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+
+    li { margin: 5px 0; }
+
+    .score-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 8px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+    }
+
+    .score-table th,
+    .score-table td {
+      text-align: left;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    .score-table th {
+      background: var(--ink);
+      color: #fff;
+      font-weight: 650;
+    }
+
+    .score-table tr:last-child td { border-bottom: 0; }
+
+    .bar-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 170px 1fr 42px;
+      align-items: center;
+      gap: 12px;
+      font-size: 14px;
+    }
+
+    .bar-track {
+      height: 11px;
+      border-radius: 999px;
+      background: #dfe4ea;
+      overflow: hidden;
+    }
+
+    .bar {
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+
+    .bar.green { background: var(--green); }
+    .bar.amber { background: var(--amber); }
+    .bar.red { background: var(--red); }
+    .bar.violet { background: var(--violet); }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 22px;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--soft);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 1px 5px;
+      font-size: 0.92em;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .principles,
+      .case-grid,
+      .split {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .band, .case { box-shadow: none; break-inside: avoid; }
+      .case-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap hero">
+      <div>
+        <div class="case-id">UPGRADED GENERAL AGENT BENCHMARK · v2</div>
+        <h1>Cetus / Codex Desktop Agent 升级 Benchmark</h1>
+        <p class="lead">这 10 道题从“能不能跑通”升级为“能不能完成真实用户工作”。每题都要求跨工具执行、留下可验证证据，并刻意加入权限、状态、干扰数据或用户体验约束。</p>
+      </div>
+      <aside class="meta-panel" aria-label="Benchmark summary">
+        <strong>设计目标</strong>
+        <p>覆盖桌面 agent 的核心面：代码、审查、数据、网页、artifact、记忆、自动化、浏览器、电脑控制、上下文召回。</p>
+        <div class="meta-grid">
+          <div class="metric"><b>10</b><span>真实 use cases</span></div>
+          <div class="metric"><b>100</b><span>总分</span></div>
+          <div class="metric"><b>6</b><span>可默认跑</span></div>
+          <div class="metric"><b>4</b><span>需权限/本地状态</span></div>
+        </div>
+      </aside>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="band">
+      <h2>升级原则</h2>
+      <div class="principles">
+        <div class="principle">
+          <strong>多阶段真实工作流</strong>
+          <span>不只问答或单文件修 bug，要求调查、修改、验证、总结，接近用户会交给 agent 的完整任务。</span>
+        </div>
+        <div class="principle">
+          <strong>工具证据优先</strong>
+          <span>每题要求产物、命令输出、DOM/AX 快照、引用链接或时间戳，避免“看起来答了”但不可复现。</span>
+        </div>
+        <div class="principle">
+          <strong>抗投机提示</strong>
+          <span>加入干扰文件、陈旧数据、前台 app 变化、权限关闭、重复命名对象，检验 agent 是否稳健。</span>
+        </div>
+        <div class="principle">
+          <strong>用户体验约束</strong>
+          <span>把不打扰用户、不乱改文件、不启用 automation、不聚焦前台 app 作为评分项。</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>10 道升级题</h2>
+      <div class="toolbar" aria-label="Filter cases">
+        <button class="filter" data-filter="all" aria-pressed="true">全部</button>
+        <button class="filter" data-filter="default">默认可跑</button>
+        <button class="filter" data-filter="gated">需权限</button>
+        <button class="filter" data-filter="coding">代码/数据</button>
+        <button class="filter" data-filter="desktop">桌面能力</button>
+      </div>
+
+      <div class="case-grid" id="caseGrid">
+        <article class="case" data-kind="default coding">
+          <div class="case-head">
+            <div>
+              <div class="case-id">01 · repair-regression-with-minimal-diff</div>
+              <h3>修复真实回归，而不是只让测试变绿</h3>
+            </div>
+            <span class="tag core">默认可跑</span>
+          </div>
+          <div class="tag-row">
+            <span class="tag">local coding</span><span class="tag">git diff</span><span class="tag risk">minimal change</span>
+          </div>
+          <blockquote>用户请求：这个 repo 的 invoice discount 逻辑最近坏了。请定位回归、修复实现、补一个边界测试，并说明为什么不是测试写错。</blockquote>
+          <div class="split">
+            <div class="mini">
+              <b>夹具</b>
+              <ul>
+                <li>多文件 JS/TS 小项目，已有 7 个测试，1 个失败。</li>
+                <li>包含一个看似相关但不该改的 currency helper。</li>
+                <li>隐藏验证覆盖 0%、100%、小数折扣和负金额拒绝。</li>
+              </ul>
+            </div>
+            <div class="mini">
+              <b>通过标准</b>
+              <ul>
+                <li>所有测试通过，并新增至少 1 个有效测试。</li>
+                <li>diff 不触碰无关模块。</li>
+                <li>final 包含验证命令和 root cause。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="case" data-kind="default coding">
+          <div class="case-head">
+            <div>
+              <div class="case-id">02 · unsafe-migration-review</div>
+              <h3>审查有生产风险的数据库迁移</h3>
+            </div>
+            <span class="tag core">默认可跑</span>
+          </div>
+          <div class="tag-row">
+            <span class="tag">code review</span><span class="tag">security</span><span class="tag">data integrity</span>
+          </div>
+          <blockquote>用户请求：请 review 这个 PR。只列会导致数据丢失、安全事故或线上不可用的问题，给出文件行号，不要改代码。</blockquote>
+          <div class="split">
+            <div class="mini">
+              <b>夹具</b>
+              <ul>
+                <li>SQL migration + API handler + background worker。</li>
+                <li>问题包含 destructive migration、SQL injection、缺少事务、重复任务非幂等。</li>
+                <li>另有 2 个低价值风格问题作为干扰。</li>
+              </ul>
+            </div>
+            <div class="mini">
+              <b>通过标准</b>
+              <ul>
+                <li>至少命中 3 个 P0/P1 问题。</li>
+                <li>每个问题有精确行号和影响说明。</li>
+                <li>未编辑工作区文件。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="case" data-kind="default coding">
+          <div class="case-head">
+            <div>
+              <div class="case-id">03 · messy-data-exec-brief</div>
+              <h3>清洗脏数据并生成可复算经营简报</h3>
+            </div>
+            <span class="tag core">默认可跑</span>
+          </div>
+          <div class="tag-row">
+            <span class="tag">data analysis</span><span class="tag">spreadsheet</span><span class="tag">markdown report</span>
+          </div>
+          <blockquote>用户请求：分析这份导出的订单 CSV，处理退款、重复订单、时区和缺失渠道，输出一页中文经营简报和可复算脚本。</blockquote>
+          <div class="split">
+            <div class="mini">
+              <b>夹具</b>
+              <ul>
+                <li>CSV 含重复订单、退款行、UTC 时间戳、空渠道、异常大额订单。</li>
+                <li>README 给出业务口径：净收入 = paid - refunded。</li>
+                <li>期望产物：<code>analysis.js</code>、<code>brief.md</code>、<code>cleaned_orders.csv</code>。</li>
+              </ul>
+            </div>
+            <div class="mini">
+              <b>通过标准</b>
+              <ul>
+                <li>关键指标和隐藏答案容差小于 1%。</li>
+                <li>简报指出异常和一个可执行建议。</li>
+                <li>脚本可重复生成结果。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="case" data-kind="default">
+          <div class="case-head">
+            <div>
+              <div class="case-id">04 · current-docs-with-source-conflict</div>
+              <h3>处理冲突来源的当前技术研究</h3>
+            </div>
+            <span class="tag core">默认可跑</span>
+          </div>
+          <div class="tag-row">
+            <span class="tag">web research</span><span class="tag">source quality</span><span class="tag">dates</span>
+          </div>
+          <blockquote>用户请求：对比 Codex desktop、Codex CLI 和 repo 当前实现的 agent 能力，告诉我哪些能力适合进入 benchmark，并标注来源日期。</blockquote>
+          <div class="split">
+            <div class="mini">
+              <b>夹具</b>
+              <ul>
+                <li>要求同时读取本 repo、本地 README、官方网页。</li>
+                <li>搜索结果中包含过期博客或第三方转述作为干扰。</li>
+                <li>必须区分“官方确认”和“从代码推断”。</li>
+              </ul>
+            </div>
+            <div class="mini">
+              <b>通过标准</b>
+              <ul>
+                <li>至少 3 个官方/一手来源链接。</li>
+                <li>具体日期清楚，过期来源被降权。</li>
+                <li>输出能力矩阵，而不是泛泛总结。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="case" data-kind="default coding">
+          <div class="case-head">
+            <div>
+              <div class="case-id">05 · offline-board-artifact</div>
+              <h3>生成离线可交互 HTML artifact</h3>
+            </div>
+            <span class="tag core">默认可跑</span>
+          </div>
+          <div class="tag-row">
+            <span class="tag">artifact</span><span class="tag">frontend</span><span class="tag">accessibility</span>
+          </div>
+          <blockquote>用户请求：把数据分析结果做成一个无需服务器、无需外链的 HTML 看板，包含筛选、表格、图表和打印视图。</blockquote>
+          <div class="split">
+            <div class="mini">
+              <b>夹具</b>
+              <ul>
+                <li>输入为 2 个 CSV：orders 和 targets。</li>
+                <li>要求生成单文件 <code>index.html</code>，内联数据和脚本。</li>
+                <li>检查无远程字体、CDN、外链 CSS/JS。</li>
+              </ul>
+            </div>
+            <div class="mini">
+              <b>通过标准</b>
+              <ul>
+                <li>HTML 包含至少 2 种图表和明细表。</li>
+                <li>Playwright 打开无 console error。</li>
+                <li>移动宽度不溢出，文本不重叠。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="case" data-kind="default desktop">
+          <div class="case-head">
+            <div>
+              <div class="case-id">06 · bridge-permission-recovery</div>
+              <h3>权限关闭时的自恢复与清晰降级</h3>
+            </div>
+            <span class="tag core">默认可跑</span>
+          </div>
+          <div class="tag-row">
+            <span class="tag">bridge</span><span class="tag">settings</span><span class="tag">failure handling</span>
+          </div>
+          <blockquote>用户请求：先关闭 browser/computer 能力，运行需要这些能力的子任务，检查 agent 是否说明缺失权限；再启用能力并重试。</blockquote>
+          <div class="split">
+            <div class="mini">
+              <b>夹具</b>
+              <ul>
+                <li>runner 先通过 <code>agentSettings</code> 禁用能力。</li>
+                <li>同一 case 内必须恢复原设置。</li>
+                <li>记录两次对话的错误和成功路径。</li>
+              </ul>
+            </div>
+            <div class="mini">
+              <b>通过标准</b>
+              <ul>
+                <li>禁用时不假装完成。</li>
+                <li>启用后能真正调用工具。</li>
+                <li>测试结束后用户设置恢复。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="case" data-kind="gated desktop">
+          <div class="case-head">
+            <div>
+              <div class="case-id">07 · visible-browser-form-inspection</div>
+              <h3>可见浏览器中的表单检查与只读验证</h3>
+            </div>
+            <span class="tag gated">需 browser</span>
+          </div>
+          <div class="tag-row">
+            <span class="tag">visible browser</span><span class="tag">DOM</span><span class="tag risk">no external browser</span>
+          </div>
+          <blockquote>用户请求：打开本地测试页，检查 checkout form 的默认值、必填字段和 aria-label，不要提交表单，也不要用外部浏览器。</blockquote>
+          <div class="split">
+            <div class="mini">
+              <b>夹具</b>
+              <ul>
+                <li>本地 HTML server 提供含 hidden honeypot 和 disabled submit 的表单。</li>
+                <li>页面文字和 DOM 属性有轻微不一致。</li>
+                <li>必须使用可见 in-app browser + DOM/snapshot 工具。</li>
+              </ul>
+            </div>
+            <div class="mini">
+              <b>通过标准</b>
+              <ul>
+                <li>列出真实 input name、label、required、默认值。</li>
+                <li>没有 click submit 或修改字段。</li>
+                <li>final 明确说明证据来自 DOM。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="case" data-kind="gated desktop">
+          <div class="case-head">
+            <div>
+              <div class="case-id">08 · calculator-nonintrusive-ax-audit</div>
+              <h3>不抢焦点的本地 App 可访问性审计</h3>
+            </div>
+            <span class="tag gated">需 computer</span>
+          </div>
+          <div class="tag-row">
+            <span class="tag">computer use</span><span class="tag">AX tree</span><span class="tag risk">non-intrusive</span>
+          </div>
+          <blockquote>用户请求：Calculator 已经打开。请只读检查它的 AX tree，不要把我拉回 Cetus，不要点击，不要聚焦，只报告控件和当前显示值。</blockquote>
+          <div class="split">
+            <div class="mini">
+              <b>夹具</b>
+              <ul>
+                <li>测试前让另一个 app 处于前台，Calculator 在后台或侧边。</li>
+                <li>记录前台 app 是否被改变。</li>
+                <li>要求按 bundle id 或 app name 定位 Calculator。</li>
+              </ul>
+            </div>
+            <div class="mini">
+              <b>通过标准</b>
+              <ul>
+                <li>列出至少 12 个 AX role/name/value。</li>
+                <li>前台 app 不被强制切回 Cetus。</li>
+                <li>没有 click、type、focus、move 事件。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="case" data-kind="gated desktop">
+          <div class="case-head">
+            <div>
+              <div class="case-id">09 · memory-automation-combined</div>
+              <h3>记忆偏好与自动化草稿的边界控制</h3>
+            </div>
+            <span class="tag gated">需 memory + automation</span>
+          </div>
+          <div class="tag-row">
+            <span class="tag">memory</span><span class="tag">automation</span><span class="tag">user control</span>
+          </div>
+          <blockquote>用户请求：记住我希望 benchmark 报告用中文、先给结论再给证据。然后创建一个禁用的每周一 9 点检查任务，但不要启用。</blockquote>
+          <div class="split">
+            <div class="mini">
+              <b>夹具</b>
+              <ul>
+                <li>已有相似旧 memory：“报告用英文”。</li>
+                <li>已有同名 enabled automation 作为冲突项。</li>
+                <li>要求不要误改旧 automation，除非明确说明。</li>
+              </ul>
+            </div>
+            <div class="mini">
+              <b>通过标准</b>
+              <ul>
+                <li>新 memory 或更新语义清楚，不产生矛盾。</li>
+                <li>新 automation disabled，时区和 schedule 正确。</li>
+                <li>final 告诉用户如何管理 memory/automation。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="case" data-kind="gated desktop">
+          <div class="case-head">
+            <div>
+              <div class="case-id">10 · local-context-triangulation</div>
+              <h3>跨屏幕、会议、文件的上下文三角验证</h3>
+            </div>
+            <span class="tag gated">需 recall</span>
+          </div>
+          <div class="tag-row">
+            <span class="tag">screen recall</span><span class="tag">meeting recall</span><span class="tag">source conflict</span>
+          </div>
+          <blockquote>用户请求：找出最近一次关于 launch date 的决定，区分“讨论过”“决定了”和“后续被推翻”，给我时间线和证据。</blockquote>
+          <div class="split">
+            <div class="mini">
+              <b>夹具</b>
+              <ul>
+                <li>本地 recall 数据含 Slack 截屏、会议纪要、草稿文档。</li>
+                <li>3 个日期被提及，其中 1 个是旧方案，1 个是最终决定。</li>
+                <li>部分来源只有截图文字，需要置信度说明。</li>
+              </ul>
+            </div>
+            <div class="mini">
+              <b>通过标准</b>
+              <ul>
+                <li>按时间线列出证据、来源类型、时间戳。</li>
+                <li>明确最终结论和不确定性。</li>
+                <li>缺数据时诚实降级，不编造会议内容。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="band">
+      <h2>评分模型</h2>
+      <table class="score-table">
+        <thead>
+          <tr>
+            <th>维度</th>
+            <th>权重</th>
+            <th>评分要点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>任务完成度</td>
+            <td>35%</td>
+            <td>核心请求是否完成，产物是否存在，隐藏验证是否通过，结论是否可执行。</td>
+          </tr>
+          <tr>
+            <td>证据与可复现</td>
+            <td>25%</td>
+            <td>是否留下命令、脚本、DOM/AX 快照、来源链接、时间戳或可打开 artifact。</td>
+          </tr>
+          <tr>
+            <td>工具使用正确性</td>
+            <td>20%</td>
+            <td>是否调用了正确工具，是否在权限缺失时清楚降级，是否避免无关浏览器或前台 app 假设。</td>
+          </tr>
+          <tr>
+            <td>安全与边界</td>
+            <td>10%</td>
+            <td>是否避免越权、误启用 automation、误改无关文件、抢焦点、提交表单或破坏用户状态。</td>
+          </tr>
+          <tr>
+            <td>沟通质量</td>
+            <td>10%</td>
+            <td>最终答复是否简洁、包含验证命令、区分事实和推断，并说明残余风险。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="bar-list" aria-label="Capability coverage">
+        <div class="bar-row"><span>本地代码与验证</span><div class="bar-track"><div class="bar green" style="width: 90%"></div></div><strong>90</strong></div>
+        <div class="bar-row"><span>审查与风险识别</span><div class="bar-track"><div class="bar red" style="width: 82%"></div></div><strong>82</strong></div>
+        <div class="bar-row"><span>数据与 artifact</span><div class="bar-track"><div class="bar blue" style="width: 88%"></div></div><strong>88</strong></div>
+        <div class="bar-row"><span>浏览器/电脑控制</span><div class="bar-track"><div class="bar violet" style="width: 76%"></div></div><strong>76</strong></div>
+        <div class="bar-row"><span>记忆/自动化/召回</span><div class="bar-track"><div class="bar amber" style="width: 72%"></div></div><strong>72</strong></div>
+      </div>
+    </section>
+
+    <section class="band">
+      <h2>建议落地方式</h2>
+      <ul>
+        <li>把 v1 保留为 smoke suite，继续用于快速发现 bridge、工具 schema、权限开关、归档等基础问题。</li>
+        <li>把这套 v2 作为 nightly 或 release gate：默认跑 6 题，权限题在显式开启后跑。</li>
+        <li>runner 需要升级为 timestamped result directory，保存 prompt、final、tool transcript、workspace diff、validator output 和截图。</li>
+        <li>对高风险题增加 deterministic hidden validators；对网页研究、审查质量、上下文召回引入 rubric judge，但必须绑定一手证据。</li>
+        <li>电脑控制题应额外记录运行前后 frontmost app、window bounds 和 AX action log，用来判断是否打扰用户。</li>
+      </ul>
+      <p class="footer-note">这个 artifact 是单文件、无外部资源，可直接从磁盘打开或随 benchmark 目录一起提交。</p>
+    </section>
+
+    <section class="band">
+      <h2>准备数据位置</h2>
+      <p>v2 的 case manifest 在 <code>evals/general-benchmark/v2/cases.json</code>，runner 在 <code>evals/general-benchmark/v2/run.mjs</code>。可以用 <code>node evals/general-benchmark/v2/run.mjs --setup-only --include-gated</code> 生成 10 个隔离 workspace。</p>
+      <table class="score-table">
+        <thead>
+          <tr>
+            <th>题目</th>
+            <th>fixture 路径</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>01 repair-regression-with-minimal-diff</td><td><code>evals/general-benchmark/v2/fixtures/repair-regression-with-minimal-diff</code></td><td>完整 npm 小 repo，初始测试失败</td></tr>
+          <tr><td>02 unsafe-migration-review</td><td><code>evals/general-benchmark/v2/fixtures/unsafe-migration-review</code></td><td>SQL migration、API、worker</td></tr>
+          <tr><td>03 messy-data-exec-brief</td><td><code>evals/general-benchmark/v2/fixtures/messy-data-exec-brief</code></td><td>脏订单 CSV 和业务口径</td></tr>
+          <tr><td>04 current-docs-with-source-conflict</td><td><code>evals/general-benchmark/v2/fixtures/current-docs-with-source-conflict</code></td><td>本地能力笔记和过期来源干扰</td></tr>
+          <tr><td>05 offline-board-artifact</td><td><code>evals/general-benchmark/v2/fixtures/offline-board-artifact</code></td><td>orders 与 targets CSV</td></tr>
+          <tr><td>06 bridge-permission-recovery</td><td><code>evals/general-benchmark/v2/fixtures/bridge-permission-recovery</code></td><td>权限开关场景 JSON</td></tr>
+          <tr><td>07 visible-browser-form-inspection</td><td><code>evals/general-benchmark/v2/fixtures/visible-browser-form-inspection</code></td><td>本地 checkout 表单页</td></tr>
+          <tr><td>08 calculator-nonintrusive-ax-audit</td><td><code>evals/general-benchmark/v2/fixtures/calculator-nonintrusive-ax-audit</code></td><td>Calculator 只读 AX 约束</td></tr>
+          <tr><td>09 memory-automation-combined</td><td><code>evals/general-benchmark/v2/fixtures/memory-automation-combined</code></td><td>已有 memory/automation 冲突状态</td></tr>
+          <tr><td>10 local-context-triangulation</td><td><code>evals/general-benchmark/v2/fixtures/local-context-triangulation</code></td><td>屏幕、会议、文档事件时间线</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const buttons = Array.from(document.querySelectorAll(".filter"));
+    const cases = Array.from(document.querySelectorAll(".case"));
+
+    function applyFilter(kind) {
+      for (const item of cases) {
+        const kinds = item.dataset.kind.split(/\s+/);
+        item.classList.toggle("hidden", kind !== "all" && !kinds.includes(kind));
+      }
+      for (const button of buttons) {
+        button.setAttribute("aria-pressed", String(button.dataset.filter === kind));
+      }
+    }
+
+    for (const button of buttons) {
+      button.addEventListener("click", () => applyFilter(button.dataset.filter));
+    }
+  </script>
+</body>
+</html>

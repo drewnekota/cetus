@@ -70,6 +70,9 @@ const EAGER_SERVERS = new Set(
 const EAGER_IF_FEW = 8;
 /** Cap on how many matches `mcp_search` returns, so discovery can't itself blow up. */
 const SEARCH_LIMIT = 40;
+/** Keep each discovery result one-line and bounded; full schema/description is
+ * available through mcp_describe when a tool is actually relevant. */
+const SEARCH_DESCRIPTION_LIMIT = 180;
 
 /** One catalogued MCP tool. */
 interface CatalogEntry {
@@ -385,13 +388,15 @@ function searchCatalog(entries: CatalogEntry[], query?: string, server?: string)
       return { e, score };
     })
     .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score || a.e.fqName.localeCompare(b.e.fqName));
+    .sort((a, b) => b.score - a.score || cmp(a.e.fqName, b.e.fqName));
 
   if (scored.length === 0) {
     return q ? `No MCP tools match "${query}". Try mcp_search with no query to list all.` : "No MCP tools available.";
   }
   const shown = scored.slice(0, SEARCH_LIMIT);
-  const lines = shown.map(({ e }) => `- ${e.fqName} — ${e.description || "(no description)"}`);
+  const lines = shown.map(
+    ({ e }) => `- ${e.fqName} — ${compact(e.description, SEARCH_DESCRIPTION_LIMIT) || "(no description)"}`,
+  );
   const more = scored.length > shown.length ? `\n…and ${scored.length - shown.length} more — narrow your query.` : "";
   return (
     `${scored.length} matching MCP tool(s). Use mcp_describe(name) then mcp_call(name, args):\n` +
@@ -448,6 +453,11 @@ function safeJson(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+function compact(s: string, max: number): string {
+  const oneLine = String(s || "").replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
 }
 
 function errMsg(err: unknown): string {

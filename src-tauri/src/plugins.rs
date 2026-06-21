@@ -579,7 +579,12 @@ pub fn extra_system_prompt(store: &Store) -> Option<String> {
     (!parts.is_empty()).then(|| format!("\n\n{}", parts.join("\n\n")))
 }
 
-pub fn plugin_freeze_skills(app_data_dir: &Path, dst_skills_dir: &Path, store: &Store) {
+pub fn plugin_freeze_skills(
+    app_data_dir: &Path,
+    dst_skills_dir: &Path,
+    store: &Store,
+    budget: &mut crate::skills::SkillPromptBudget,
+) {
     for plugin in load_plugins(None, Some(app_data_dir))
         .into_iter()
         .filter(|p| plugin_enabled(p, store))
@@ -594,7 +599,11 @@ pub fn plugin_freeze_skills(app_data_dir: &Path, dst_skills_dir: &Path, store: &
         let prefix = safe_dir_name(&plugin.manifest.id);
         if src.join("SKILL.md").is_file() {
             let dst = dst_skills_dir.join(prefix);
-            if let Err(e) = copy_dir(&src, &dst) {
+            let md = std::fs::read_to_string(src.join("SKILL.md")).unwrap_or_default();
+            let (name, description) = skill_frontmatter(&md, &plugin.manifest.id);
+            if let Err(e) =
+                crate::skills::materialize_one_skill(&src, &dst, &name, &description, budget)
+            {
                 tracing::warn!(
                     "plugin: failed to materialize skill from {}: {e}",
                     src.display()
@@ -612,7 +621,11 @@ pub fn plugin_freeze_skills(app_data_dir: &Path, dst_skills_dir: &Path, store: &
             }
             let child_name = entry.file_name().to_string_lossy().to_string();
             let dst = dst_skills_dir.join(format!("{prefix}-{}", safe_dir_name(&child_name)));
-            if let Err(e) = copy_dir(&child, &dst) {
+            let md = std::fs::read_to_string(child.join("SKILL.md")).unwrap_or_default();
+            let (name, description) = skill_frontmatter(&md, &child_name);
+            if let Err(e) =
+                crate::skills::materialize_one_skill(&child, &dst, &name, &description, budget)
+            {
                 tracing::warn!(
                     "plugin: failed to materialize skill from {}: {e}",
                     child.display()
@@ -620,6 +633,38 @@ pub fn plugin_freeze_skills(app_data_dir: &Path, dst_skills_dir: &Path, store: &
             }
         }
     }
+    budget.log_if_truncated("plugin");
+}
+
+fn skill_frontmatter(md: &str, fallback_name: &str) -> (String, String) {
+    let trimmed = md.trim_start_matches('\u{feff}');
+    let mut lines = trimmed.lines();
+    if lines.next().map(|l| l.trim_end()) != Some("---") {
+        return (fallback_name.to_string(), String::new());
+    }
+    let mut name = None;
+    let mut description = None;
+    for line in lines {
+        if line.trim_end() == "---" {
+            break;
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            let value = value
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
+            match key.trim().to_ascii_lowercase().as_str() {
+                "name" if !value.is_empty() => name = Some(value),
+                "description" if !value.is_empty() => description = Some(value),
+                _ => {}
+            }
+        }
+    }
+    (
+        name.unwrap_or_else(|| fallback_name.to_string()),
+        description.unwrap_or_default(),
+    )
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {

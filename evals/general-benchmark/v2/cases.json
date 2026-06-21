@@ -1,0 +1,141 @@
+[
+  {
+    "id": "repair-regression-with-minimal-diff",
+    "category": "local-coding",
+    "runnable": true,
+    "fixtureDir": "fixtures/repair-regression-with-minimal-diff",
+    "prompt": "这个 repo 的 invoice discount 逻辑最近坏了。请定位回归、修复实现、补一个边界测试，并说明为什么不是测试写错。只做最小必要改动，不要改 src/currency.js。最终回答必须明确包含两项：root cause（说明 discountPct 是百分比但实现把它当固定金额扣减）和 exact verification command `npm test`。",
+    "validators": [
+      "npm test exits 0",
+      "src/currency.js unchanged",
+      "at least one test added or strengthened",
+      "final includes root cause and verification command"
+    ]
+  },
+  {
+    "id": "unsafe-migration-review",
+    "category": "code-review",
+    "runnable": true,
+    "fixtureDir": "fixtures/unsafe-migration-review",
+    "prompt": "请 review 这个 PR。只列会导致数据丢失、安全事故或线上不可用的问题，给出文件行号，不要改代码。最终回答必须覆盖 destructive migration/data loss、SQL injection、missing transaction/atomicity、non-idempotent retry duplicate invoice risk。",
+    "validators": [
+      "mentions destructive migration/data loss",
+      "mentions SQL injection",
+      "mentions missing transaction or non-atomic update",
+      "mentions non-idempotent worker",
+      "workspace files unchanged"
+    ]
+  },
+  {
+    "id": "messy-data-exec-brief",
+    "category": "data-analysis",
+    "runnable": true,
+    "fixtureDir": "fixtures/messy-data-exec-brief",
+    "prompt": "分析 orders_export.csv，按 README.md 的业务口径处理退款、重复订单、时区和缺失渠道。输出 analysis.js、brief.md、cleaned_orders.csv。brief.md 必须是一页中文经营简报，包含净收入、5 月/6 月净收入、重复订单、unknown 渠道、异常大额订单和一个可执行建议。",
+    "validators": [
+      "creates analysis script",
+      "creates brief.md",
+      "creates cleaned_orders.csv",
+      "net revenue within 1 percent of expected answer",
+      "brief includes anomaly and actionable recommendation"
+    ]
+  },
+  {
+    "id": "current-docs-with-source-conflict",
+    "category": "web-search",
+    "runnable": true,
+    "fixtureDir": "fixtures/current-docs-with-source-conflict",
+    "prompt": "对比 Codex desktop、Codex CLI 和这个 repo 当前实现的 agent 能力，告诉我哪些能力适合进入 benchmark，并标注来源日期。必须区分官方确认和从代码推断，识别 stale_third_party_blog.md 是过期/低置信来源。输出 codex-capability-matrix.md，并在文档中包含至少 3 个完整 https:// 开头的一手/官方来源链接，不能只写裸域名。最终回答中总结。",
+    "validators": [
+      "uses at least three primary or official sources",
+      "identifies stale third-party source as lower confidence",
+      "produces capability matrix",
+      "separates fact from inference"
+    ]
+  },
+  {
+    "id": "offline-board-artifact",
+    "category": "artifact",
+    "runnable": true,
+    "fixtureDir": "fixtures/offline-board-artifact",
+    "prompt": "根据 orders.csv 和 targets.csv 做一个无需服务器、无需外链的 HTML 看板。输出单文件 index.html，必须内联 CSS/JS/数据，不能使用远程字体、CDN、外部脚本或外部样式。看板要包含 segment 筛选、至少两种图表、明细表和打印视图。",
+    "validators": [
+      "creates self-contained index.html",
+      "no external link/script/font resources",
+      "contains two visualizations and a detail table",
+      "opens without console errors in Playwright"
+    ]
+  },
+  {
+    "id": "bridge-permission-recovery",
+    "category": "bridge",
+    "runnable": true,
+    "fixtureDir": "fixtures/bridge-permission-recovery",
+    "agentSettings": {"browser": true, "computer": true},
+    "prompt": "阅读 scenario.json，完成权限恢复测试记录。你需要在 permission-recovery-log.json 中记录 originalSettings、disabledAttempt、enabledAttempt、restoredSettings，并在最终回答说明禁用时如何降级、启用后如何验证、设置是否恢复。不要伪造工具成功；如果当前环境不能实际切换权限，就如实记录缺口。",
+    "validators": [
+      "disabled path does not claim success",
+      "enabled path uses tool calls",
+      "original settings restored",
+      "both attempts are recorded"
+    ]
+  },
+  {
+    "id": "visible-browser-form-inspection",
+    "category": "browser-control",
+    "runnable": false,
+    "fixtureDir": "fixtures/visible-browser-form-inspection",
+    "requires": ["browser control enabled"],
+    "agentSettings": {"browser": true},
+    "prompt": "打开工作区里的 checkout.html 本地测试页，检查 checkout form 的默认值、必填字段和 aria-label，不要提交表单，也不要用外部浏览器。输出 browser-form-inspection.md，逐项列出 email、company、seats、billing_cycle、website 字段的 name/value/required/aria 信息。",
+    "validators": [
+      "uses visible in-app browser",
+      "extracts DOM fields and aria labels",
+      "does not submit form",
+      "does not mutate input values"
+    ]
+  },
+  {
+    "id": "calculator-nonintrusive-ax-audit",
+    "category": "computer-use",
+    "runnable": false,
+    "fixtureDir": "fixtures/calculator-nonintrusive-ax-audit",
+    "requires": ["computer control enabled", "Calculator running", "macOS accessibility permission"],
+    "agentSettings": {"computer": true},
+    "prompt": "Calculator 已经打开。请只读检查它的 AX tree，不要把我拉回 Cetus，不要点击，不要聚焦，只报告控件和当前显示值。输出 calculator-ax-audit.md，至少列出 12 个 AX role/name/value，包括 All Clear、Divide、Equals 和 display。",
+    "validators": [
+      "targets Calculator by app name or bundle id",
+      "reports at least 12 AX role/name/value entries",
+      "frontmost app remains unchanged",
+      "no click/type/focus/move action"
+    ]
+  },
+  {
+    "id": "memory-automation-combined",
+    "category": "memory-automation",
+    "runnable": false,
+    "fixtureDir": "fixtures/memory-automation-combined",
+    "requires": ["memory enabled", "automation tools enabled"],
+    "prompt": "阅读 initial_state.json。记住我希望 benchmark 报告用中文、先给结论再给证据。然后创建一个禁用的每周一 9 点检查任务，但不要启用，也不要静默修改已有 enabled automation。输出 memory-automation-result.md，说明创建/更新了什么，以及用户如何管理 memory 和 automation。",
+    "validators": [
+      "preference memory is created or updated without contradiction",
+      "new automation is disabled",
+      "existing enabled automation is not silently modified",
+      "final explains management controls"
+    ]
+  },
+  {
+    "id": "local-context-triangulation",
+    "category": "context-recall",
+    "runnable": false,
+    "fixtureDir": "fixtures/local-context-triangulation",
+    "requires": ["screen context or meeting recall enabled"],
+    "prompt": "阅读 context_events.json，找出最近一次关于 launch date 的决定，区分“讨论过”“决定了”和“后续被推翻”。输出 launch-date-timeline.md，包含时间线、来源类型、时间戳、最终决定、被推翻日期、备用日期和不确定性说明。",
+    "validators": [
+      "uses multiple local context sources",
+      "reports source type and timestamp",
+      "identifies final decision versus old proposal",
+      "states uncertainty instead of inventing missing evidence"
+    ]
+  }
+]

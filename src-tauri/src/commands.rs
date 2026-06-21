@@ -74,6 +74,7 @@ impl Default for BrowserAnnotationLabels {
 pub struct WorkspaceFileEntry {
     name: String,
     path: String,
+    relative_path: String,
     is_dir: bool,
     size_bytes: Option<u64>,
     modified_ms: Option<u64>,
@@ -114,7 +115,7 @@ const BROWSER_ANNOTATION_SCRIPT: &str = r###"
     '#cetus-browser-annotation-send{background:#111;color:#fff}',
     '</style>',
     '<div id="cetus-browser-annotation-highlight"></div>',
-    '<button id="cetus-browser-annotation-toggle" type="button">__CETUS_BROWSER_ANNOTATE_LABEL__</button>',
+    '__CETUS_BROWSER_ANNOTATION_TOGGLE__',
     '<div id="cetus-browser-annotation-pop">',
     '  <textarea id="cetus-browser-annotation-note" maxlength="2000" placeholder="__CETUS_BROWSER_ANNOTATE_PLACEHOLDER__"></textarea>',
     '  <div class="row"><span id="cetus-browser-annotation-target"></span><span><button id="cetus-browser-annotation-cancel" type="button">__CETUS_BROWSER_ANNOTATE_CANCEL__</button><button id="cetus-browser-annotation-send" type="button">__CETUS_BROWSER_ANNOTATE_SEND__</button></span></div>',
@@ -217,6 +218,7 @@ const BROWSER_ANNOTATION_SCRIPT: &str = r###"
   }
   function onPick(e) {
     if (!annotating) return;
+    if (isChrome(e.target)) return;
     var target = targetFromPoint(e.clientX, e.clientY);
     if (!target || isChrome(target)) return;
     e.preventDefault();
@@ -255,22 +257,18 @@ const BROWSER_ANNOTATION_SCRIPT: &str = r###"
     var note = document.getElementById("cetus-browser-annotation-note");
     var cancel = document.getElementById("cetus-browser-annotation-cancel");
     var send = document.getElementById("cetus-browser-annotation-send");
-    if (!toggle || !pop || !note || !cancel || !send) return;
-    window.__cetusSetBrowserAnnotationMode = setAnnotating;
-    window.addEventListener("cetus-browser-annotation-mode", function (e) {
-      setAnnotating(!!(e.detail && e.detail.enabled));
-    });
-    toggle.addEventListener("click", function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      setAnnotating(!annotating);
-    });
+    if (!pop || !note || !cancel || !send) return;
+    if (toggle) {
+      toggle.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        setAnnotating(!annotating);
+      });
+    }
     cancel.addEventListener("click", function (e) {
       e.preventDefault();
       e.stopPropagation();
-      pop.style.display = "none";
-      pending = null;
-      setAnnotating(true);
+      setAnnotating(false);
     });
     send.addEventListener("click", function (e) {
       e.preventDefault();
@@ -289,6 +287,10 @@ const BROWSER_ANNOTATION_SCRIPT: &str = r###"
       }
     }, true);
   }
+  window.__cetusSetBrowserAnnotationMode = setAnnotating;
+  window.addEventListener("cetus-browser-annotation-mode", function (e) {
+    setAnnotating(!!(e.detail && e.detail.enabled));
+  });
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", mount, { once: true });
   } else {
@@ -309,13 +311,22 @@ fn escape_html_attr(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-fn browser_annotation_script(token: &str, labels: &BrowserAnnotationLabels) -> String {
+fn browser_annotation_script(
+    token: &str,
+    labels: &BrowserAnnotationLabels,
+    show_toggle: bool,
+) -> String {
+    let toggle = if show_toggle {
+        format!(
+            r#"<button id="cetus-browser-annotation-toggle" type="button">{}</button>"#,
+            escape_html_attr(&labels.annotate)
+        )
+    } else {
+        String::new()
+    };
     BROWSER_ANNOTATION_SCRIPT
         .replace("__CETUS_BROWSER_ANNOTATION_TOKEN__", token)
-        .replace(
-            "__CETUS_BROWSER_ANNOTATE_LABEL__",
-            &escape_html_attr(&labels.annotate),
-        )
+        .replace("__CETUS_BROWSER_ANNOTATION_TOGGLE__", &toggle)
         .replace(
             "__CETUS_BROWSER_ANNOTATE_PLACEHOLDER__",
             &escape_html_attr(&labels.placeholder),
@@ -786,37 +797,86 @@ pub async fn list_workspace_files(
     state: State<'_, AppState>,
     workspace_dir: Option<String>,
 ) -> CmdResult<Vec<WorkspaceFileEntry>> {
-    const MAX_ENTRIES: usize = 200;
+    const MAX_ENTRIES: usize = 800;
+    const MAX_DEPTH: usize = 8;
     let dir = workspace_dir
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| state.default_workspace.clone());
-    let mut entries = Vec::new();
-    for entry in std::fs::read_dir(&dir).map_err(err)? {
+    let mut entries = Vec::with_capacity(MAX_ENTRIES.min(128));
+    collect_workspace_files(&dir, &dir, 0, MAX_DEPTH, MAX_ENTRIES, &mut entries)?;
+    Ok(entries)
+}
+
+fn collect_workspace_files(
+    root: &Path,
+    dir: &Path,
+    depth: usize,
+    max_depth: usize,
+    max_entries: usize,
+    entries: &mut Vec<WorkspaceFileEntry>,
+) -> CmdResult<()> {
+    if depth > max_depth || entries.len() >= max_entries {
+        return Ok(());
+    }
+
+    let mut children = Vec::new();
+    for entry in std::fs::read_dir(dir).map_err(err)? {
+        if entries.len() + children.len() >= max_entries {
+            break;
+        }
         let entry = entry.map_err(err)?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if should_hide_workspace_entry(&name) {
+            continue;
+        }
         let path = entry.path();
         let meta = entry.metadata().ok();
         let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+        children.push((name, path, is_dir, meta));
+    }
+
+    children.sort_by(|a, b| {
+        b.2.cmp(&a.2)
+            .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+    });
+
+    for (name, path, is_dir, meta) in children {
+        if entries.len() >= max_entries {
+            break;
+        }
+
         let size_bytes = meta.as_ref().filter(|m| m.is_file()).map(|m| m.len());
         let modified_ms = meta
+            .as_ref()
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64);
+        let relative_path = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
         entries.push(WorkspaceFileEntry {
-            name: entry.file_name().to_string_lossy().to_string(),
+            name,
             path: path.to_string_lossy().to_string(),
+            relative_path,
             is_dir,
             size_bytes,
             modified_ms,
         });
+
+        if is_dir {
+            collect_workspace_files(root, &path, depth + 1, max_depth, max_entries, entries)?;
+        }
     }
-    entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-    entries.truncate(MAX_ENTRIES);
-    Ok(entries)
+
+    Ok(())
+}
+
+fn should_hide_workspace_entry(name: &str) -> bool {
+    matches!(name, ".git" | "node_modules")
 }
 
 #[tauri::command]
@@ -1124,7 +1184,6 @@ pub(crate) async fn open_browser_window_with_app_data_dir(
     if let Some(win) = app.get_webview_window("browser") {
         win.navigate(parsed).map_err(err)?;
         win.show().map_err(err)?;
-        win.set_focus().map_err(err)?;
         return Ok(());
     }
     let data_dir = app_data_dir.join("browser-webview");
@@ -1136,7 +1195,7 @@ pub(crate) async fn open_browser_window_with_app_data_dir(
         Uuid::new_v4().simple()
     );
     let annotation_script =
-        browser_annotation_script(&annotation_token, &BrowserAnnotationLabels::default());
+        browser_annotation_script(&annotation_token, &BrowserAnnotationLabels::default(), true);
     match WebviewWindowBuilder::new(app, "browser", WebviewUrl::External(parsed.clone()))
         .title("Cetus Browser")
         .inner_size(1200.0, 820.0)
@@ -1164,7 +1223,6 @@ pub(crate) async fn open_browser_window_with_app_data_dir(
             if let Some(win) = app.get_webview_window("browser") {
                 win.navigate(parsed).map_err(err)?;
                 win.show().map_err(err)?;
-                win.set_focus().map_err(err)?;
             } else {
                 return Err(err(e));
             }
@@ -1216,7 +1274,7 @@ pub async fn open_browser_panel(
         Uuid::new_v4().simple()
     );
     let annotation_script =
-        browser_annotation_script(&annotation_token, &labels.unwrap_or_default());
+        browser_annotation_script(&annotation_token, &labels.unwrap_or_default(), false);
     let builder = WebviewBuilder::new(BROWSER_PANEL_LABEL, WebviewUrl::External(parsed.clone()))
         .initialization_script(annotation_script)
         .on_document_title_changed(move |_webview, title| {
@@ -1559,7 +1617,7 @@ mod tests {
     #[test]
     fn browser_annotation_script_uses_per_window_token() {
         let token = "__CETUS_BROWSER_ANNOTATION__test-token__";
-        let script = browser_annotation_script(token, &BrowserAnnotationLabels::default());
+        let script = browser_annotation_script(token, &BrowserAnnotationLabels::default(), true);
 
         assert!(script.contains(&format!("var PREFIX = \"{token}\";")));
         assert!(!script.contains("__CETUS_BROWSER_ANNOTATION_TOKEN__"));
@@ -1570,6 +1628,7 @@ mod tests {
         let script = browser_annotation_script(
             "__CETUS_BROWSER_ANNOTATION__test-token__",
             &BrowserAnnotationLabels::default(),
+            true,
         );
 
         assert!(script.contains("selector: selector"));
@@ -1585,6 +1644,7 @@ mod tests {
         let script = browser_annotation_script(
             "__CETUS_BROWSER_ANNOTATION__test-token__",
             &BrowserAnnotationLabels::default(),
+            true,
         );
 
         assert!(script.contains("document.addEventListener(\"mousemove\", onMove, true)"));
@@ -1597,6 +1657,33 @@ mod tests {
         assert!(!script.contains("pos.textContent = \"x \""));
         assert!(!script.contains("xPct:"));
         assert!(!script.contains("yPct:"));
+    }
+
+    #[test]
+    fn browser_annotation_script_does_not_capture_own_controls() {
+        let script = browser_annotation_script(
+            "__CETUS_BROWSER_ANNOTATION__test-token__",
+            &BrowserAnnotationLabels::default(),
+            true,
+        );
+
+        assert!(script.contains("if (isChrome(e.target)) return;"));
+        assert!(script.contains("cancel.addEventListener(\"click\""));
+        assert!(script.contains("setAnnotating(false);"));
+        assert!(!script.contains("setAnnotating(true);\n    });"));
+    }
+
+    #[test]
+    fn browser_annotation_script_can_hide_floating_toggle() {
+        let script = browser_annotation_script(
+            "__CETUS_BROWSER_ANNOTATION__test-token__",
+            &BrowserAnnotationLabels::default(),
+            false,
+        );
+
+        assert!(!script.contains("<button id=\"cetus-browser-annotation-toggle\""));
+        assert!(script.contains("window.addEventListener(\"cetus-browser-annotation-mode\""));
+        assert!(script.contains("if (toggle)"));
     }
 
     #[test]

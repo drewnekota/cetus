@@ -196,6 +196,16 @@
   }
   html {
     @apply font-sans;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  html.theme-repaint [data-chat-composer],
+  html.theme-repaint [data-slot="textarea"],
+  html.theme-repaint [data-slot="input"] {
+    opacity: 0.9999;
+    transform: translateZ(0);
   }
 }
 

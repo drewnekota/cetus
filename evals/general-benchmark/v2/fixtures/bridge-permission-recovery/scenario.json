@@ -1,0 +1,21 @@
+{
+  "initialSettings": {
+    "browser": false,
+    "computer": false
+  },
+  "retrySettings": {
+    "browser": true,
+    "computer": true
+  },
+  "subtasks": [
+    {
+      "id": "browser",
+      "instruction": "Open https://example.com in the visible in-app browser and read the title."
+    },
+    {
+      "id": "computer",
+      "instruction": "Read the Calculator app AX tree without clicking."
+    }
+  ],
+  "mustRestoreOriginalSettings": true
+}

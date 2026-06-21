@@ -1,0 +1,28 @@
+{
+  "targetApp": {
+    "name": "Calculator",
+    "bundleId": "com.apple.calculator"
+  },
+  "constraints": [
+    "read-only",
+    "do not click",
+    "do not type",
+    "do not focus",
+    "do not move windows",
+    "do not require Calculator to be frontmost"
+  ],
+  "expectedControls": [
+    "All Clear",
+    "Divide",
+    "Multiply",
+    "Subtract",
+    "Add",
+    "Equals",
+    "Decimal",
+    "0",
+    "1",
+    "2",
+    "3",
+    "Display"
+  ]
+}

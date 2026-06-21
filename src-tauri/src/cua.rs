@@ -137,11 +137,14 @@ mod imp {
         }
         let bin_dir = app_data.join("bin");
         let bin = bin_dir.join("cetus-cua-helper");
-        if bin.exists() {
-            return Some(bin);
-        }
         std::fs::create_dir_all(&bin_dir).ok()?;
         let src = bin_dir.join("cetus-cua-helper.swift");
+        let source_matches = std::fs::read_to_string(&src)
+            .map(|existing| existing == HELPER_SRC)
+            .unwrap_or(false);
+        if bin.exists() && source_matches {
+            return Some(bin);
+        }
         if std::fs::write(&src, HELPER_SRC).is_err() {
             return None;
         }

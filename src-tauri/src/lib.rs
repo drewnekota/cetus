@@ -249,15 +249,18 @@ impl AppState {
         let conv_dir = self.app_data_dir.join("conv-agents").join(conv_id);
         let mcp_path = conv_dir.join("mcp.json");
         if !conv_dir.exists() {
-            skills::materialize_skills_into(
+            let mut skill_budget = skills::SkillPromptBudget::from_env();
+            skills::materialize_skills_into_with_budget(
                 &self.app_data_dir,
                 &conv_dir.join("skills"),
                 &self.store,
+                &mut skill_budget,
             );
             plugins::plugin_freeze_skills(
                 &self.app_data_dir,
                 &conv_dir.join("skills"),
                 &self.store,
+                &mut skill_budget,
             );
             mcp::write_conv_config(&mcp_path, &self.store);
         }
@@ -655,12 +658,12 @@ pub fn run() {
                         api.prevent_close();
                         // Capture the real on-screen geometry before park tucks
                         // the window off-screen, then persist it.
-                        window_geom::record(&win_geom);
+                        window_geom::record(&win_geom, false);
                         park_main(&app_handle);
                     }
                     // Remember wherever the user drags/resizes the window to.
                     tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
-                        window_geom::record(&win_geom);
+                        window_geom::record(&win_geom, true);
                     }
                     // A fully-shown main window that just became key MUST accept
                     // the mouse. The warm-park dance can leave `ignoresMouseEvents`
@@ -1554,9 +1557,19 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
         // edits to existing ones) ship without needing to wipe the install
         // tree. Without this, a stale install from before cetus-extensions/
         // existed would silently strand new tools.
-        if resource.join("pi").exists() {
+        if let Some(src) = dev_ext_src() {
+            sync_cetus_extensions_from(&src, &target)?;
+            tracing::info!("synced cetus-extensions from {}", src.display());
+        } else if resource.join("pi").exists() {
             sync_cetus_extensions(&resource, &target)?;
+        }
+        if let Some(src) = plugins::dev_plugins_src() {
+            sync_cetus_plugins_from(&src, &target)?;
+            tracing::info!("synced cetus-plugins from {}", src.display());
+        } else if resource.join("pi").exists() {
             sync_cetus_plugins(&resource, &target)?;
+        }
+        if resource.join("pi").exists() {
             // The tree's node_modules is copied only on first install, so a
             // bundled pi-ai hotfix (the transform-messages content guard, see
             // scripts/build-pi-sidecar.sh) would otherwise never reach an
@@ -1585,6 +1598,14 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
         target.display()
     );
     copy_dir(&resource, &target)?;
+    if let Some(src) = dev_ext_src() {
+        sync_cetus_extensions_from(&src, &target)?;
+        tracing::info!("synced cetus-extensions from {}", src.display());
+    }
+    if let Some(src) = plugins::dev_plugins_src() {
+        sync_cetus_plugins_from(&src, &target)?;
+        tracing::info!("synced cetus-plugins from {}", src.display());
+    }
     std::env::set_var(
         plugins::CETUS_BUILTIN_PLUGINS_ENV,
         plugins::runtime_plugins_dir(&target),

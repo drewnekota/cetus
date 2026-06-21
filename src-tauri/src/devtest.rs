@@ -18,12 +18,14 @@
 //! MCP server) is still required — that is intentionally NOT built here.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter as _, Manager, State};
+use tauri::{AppHandle, Emitter as _, Listener as _, Manager, State};
 use tokio::sync::oneshot;
+use uuid::Uuid;
 
 use crate::AppState;
 
@@ -293,6 +295,134 @@ fn op_webviews(app: &AppHandle) -> Value {
     json!({ "webviews": webviews })
 }
 
+fn op_agent_settings(state: &AppState, settings: Option<Value>) -> Result<Value, String> {
+    if let Some(settings) = settings {
+        let mut current = crate::agent::load_settings(&state.store);
+        if let Some(browser) = settings.get("browser").and_then(|v| v.as_bool()) {
+            current.browser = browser;
+        }
+        if let Some(computer) = settings.get("computer").and_then(|v| v.as_bool()) {
+            current.computer = computer;
+        }
+        crate::agent::save_settings(&state.store, &current).map_err(|e| e.to_string())?;
+        crate::agent::export_enabled(&state.store);
+        crate::mcp::export_config(&state.app_data_dir, &state.store);
+    }
+    serde_json::to_value(crate::agent::load_settings(&state.store)).map_err(|e| e.to_string())
+}
+
+async fn op_agent_prompt(
+    app: &AppHandle,
+    state: &AppState,
+    prompt: String,
+    workspace: Option<String>,
+    archive: bool,
+) -> Result<Value, String> {
+    let workspace = workspace
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.default_workspace.clone());
+    std::fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+
+    let id = Uuid::new_v4().to_string();
+    let now = crate::store::now_ms();
+    let conversation = crate::store::Conversation {
+        id: id.clone(),
+        title: "Devtest benchmark".to_string(),
+        session_file: String::new(),
+        workspace_dir: workspace.to_string_lossy().to_string(),
+        model: Default::default(),
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+        source_automation_id: None,
+        parallel_group_id: None,
+        solution_index: None,
+        review_state: "none".to_string(),
+    };
+    state
+        .store
+        .insert(&conversation)
+        .map_err(|e| e.to_string())?;
+
+    let started = std::time::Instant::now();
+    let (done_tx, done_rx) = oneshot::channel::<Result<(), String>>();
+    let done_tx = Arc::new(Mutex::new(Some(done_tx)));
+    let listen_conv_id = id.clone();
+    let event_id = app.listen("app-event", move |event| {
+        let Ok(value) = serde_json::from_str::<Value>(event.payload()) else {
+            return;
+        };
+        let same_conversation = value
+            .get("conversationId")
+            .and_then(|v| v.as_str())
+            .map(|v| v == listen_conv_id)
+            .unwrap_or(false);
+        if !same_conversation {
+            return;
+        }
+
+        let outcome = match value.get("type").and_then(|v| v.as_str()) {
+            Some("pi_event")
+                if value.pointer("/event/type").and_then(|v| v.as_str()) == Some("agent_end") =>
+            {
+                Some(Ok(()))
+            }
+            Some("pi_error") => Some(Err(value
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("pi_error")
+                .to_string())),
+            Some("pi_exited") => Some(Err(format!(
+                "pi exited with code {:?}",
+                value.get("code").and_then(|v| v.as_i64())
+            ))),
+            _ => None,
+        };
+
+        if let Some(outcome) = outcome {
+            if let Ok(mut slot) = done_tx.lock() {
+                if let Some(tx) = slot.take() {
+                    let _ = tx.send(outcome);
+                }
+            }
+        }
+    });
+
+    let result = async {
+        let pi = state.pi_for(&id).await.map_err(|e| e.to_string())?;
+        pi.send_prompt(&prompt, Vec::new())
+            .await
+            .map_err(|e| e.to_string())?;
+        match tokio::time::timeout(Duration::from_secs(600), done_rx).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(e))) => return Err(e),
+            Ok(Err(_)) => return Err("agent completion listener closed".to_string()),
+            Err(_) => return Err("agent turn timed out waiting for agent_end".to_string()),
+        }
+        state.store.touch(&id, crate::store::now_ms()).ok();
+        let messages = pi.get_messages().await.map_err(|e| e.to_string())?;
+        let conversation = state
+            .store
+            .get(&id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "conversation disappeared".to_string())?;
+        Ok::<_, String>(json!({
+            "conversation": conversation,
+            "messages": messages,
+            "durationMs": started.elapsed().as_millis() as u64
+        }))
+    }
+    .await;
+    app.unlisten(event_id);
+
+    if archive {
+        let _ = state.store.set_archived(&id, true, crate::store::now_ms());
+        state.kill_pi(&id).await;
+    }
+
+    result
+}
+
 /// DOM round-trip — emits `devtest-command`, awaits the frontend `TestHook`
 /// reply via the oneshot registry (shared by `test_dom`). ~5s timeout.
 async fn op_dom(
@@ -523,6 +653,28 @@ async fn dispatch(app: &AppHandle, req: &Value) -> Value {
         },
 
         "webviews" => Ok(op_webviews(app)),
+
+        "agentSettings" => {
+            let state = app.state::<AppState>();
+            op_agent_settings(&state, req.get("settings").cloned())
+        }
+
+        "agentPrompt" => match s("text") {
+            Some(prompt) => {
+                let state = app.state::<AppState>();
+                op_agent_prompt(
+                    app,
+                    &state,
+                    prompt,
+                    s("workspace"),
+                    req.get("archive")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                )
+                .await
+            }
+            None => Err("agentPrompt requires `text`".to_string()),
+        },
 
         // `dom` passthrough uses an inner `op` field; the aliases below map
         // straight onto the corresponding DOM op the frontend TestHook handles.

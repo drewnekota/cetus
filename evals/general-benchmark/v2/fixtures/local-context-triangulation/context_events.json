@@ -1,0 +1,26 @@
+[
+  {
+    "source": "screen",
+    "timestamp": "2026-06-16T10:12:00+08:00",
+    "title": "Slack screenshot: #launch-room",
+    "text": "Alex: July 8 still feels possible if QA closes by Friday. Mina: treat July 8 as a proposal, not committed."
+  },
+  {
+    "source": "meeting",
+    "timestamp": "2026-06-17T15:30:00+08:00",
+    "title": "Launch readiness meeting",
+    "text": "Decision: move external launch to July 15. Owners agreed to announce internally after security sign-off."
+  },
+  {
+    "source": "document",
+    "timestamp": "2026-06-18T09:05:00+08:00",
+    "title": "Launch plan draft",
+    "text": "The previous July 8 date is superseded. Current launch date: July 15, pending no P0 security findings."
+  },
+  {
+    "source": "screen",
+    "timestamp": "2026-06-19T18:42:00+08:00",
+    "title": "Calendar screenshot",
+    "text": "Hold: July 22 contingency review. This is a backup slot, not the launch date."
+  }
+]

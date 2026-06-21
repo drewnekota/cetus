@@ -99,7 +99,7 @@ export const AppSidebar = memo(function AppSidebar({
         // The row archive action is a shared primitive that ships a 20px box +
         // 16px glyph — oversized next to the trimmed 14px row icons. Shrink both,
         // scoped to this sidebar so the primitive stays untouched elsewhere.
-        "[&_[data-slot=sidebar-menu-action]]:!w-4 [&_[data-slot=sidebar-menu-action]_svg]:!size-3",
+        "[&_[data-slot=sidebar-menu-action]]:!w-3.5 [&_[data-slot=sidebar-menu-action]_svg]:!size-3",
       )}
     >
       <SidebarHeader className="gap-2">
@@ -112,7 +112,7 @@ export const AppSidebar = memo(function AppSidebar({
                 plain row (no hover/active state, no pointer cursor). */}
             <SidebarMenuButton
               asChild
-              className="data-[slot=sidebar-menu-button]:!p-1.5 cursor-default hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
+              className="data-[slot=sidebar-menu-button]:!gap-1 data-[slot=sidebar-menu-button]:!p-1.5 cursor-default hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
             >
               <div>
                 <img
@@ -121,8 +121,8 @@ export const AppSidebar = memo(function AppSidebar({
                   aria-hidden="true"
                   className="size-5 shrink-0 rounded-[5px]"
                 />
-                <span className="font-serif text-sm font-semibold italic">
-                  cetus
+                <span className="translate-y-px font-serif text-sm font-bold italic">
+                  Cetus
                 </span>
               </div>
             </SidebarMenuButton>
@@ -398,7 +398,7 @@ const ConversationRow = memo(function ConversationRow({
               e.stopPropagation();
               onArchive(conversation);
             }}
-            className="rounded-sm text-muted-foreground"
+            className="rounded-sm !text-muted-foreground/60 hover:!bg-transparent hover:!text-muted-foreground"
           >
             {archived ? <ArchiveRestore /> : <Archive />}
             <span className="sr-only">
@@ -407,7 +407,8 @@ const ConversationRow = memo(function ConversationRow({
           </SidebarMenuAction>
         </TooltipTrigger>
         <TooltipContent side="right">
-          {archived ? t("action.unarchive") : t("action.archive")}
+          <span>{archived ? t("action.unarchive") : t("action.archive")}</span>
+          <Kbd>⌘D</Kbd>
         </TooltipContent>
       </Tooltip>
     </SidebarMenuItem>

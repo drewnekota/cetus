@@ -1,0 +1,17 @@
+order_id,created_at_utc,customer_id,channel,status,amount_usd
+1001,2026-05-01T01:20:00Z,c_001,paid_search,paid,1200
+1002,2026-05-01T14:05:00Z,c_002,organic,paid,850
+1003,2026-05-02T23:50:00Z,c_003,email,paid,420
+1003,2026-05-02T23:51:00Z,c_003,email,paid,420
+1004,2026-05-03T03:10:00Z,c_004,,paid,310
+1005,2026-05-03T15:40:00Z,c_002,organic,refunded,-850
+1006,2026-05-04T08:00:00Z,c_005,paid_search,paid,6200
+1007,2026-05-05T12:30:00Z,c_006,partner,paid,950
+1008,2026-05-07T05:05:00Z,c_007,email,paid,500
+1009,2026-06-01T04:10:00Z,c_008,paid_search,paid,1320
+1010,2026-06-02T18:15:00Z,c_009,organic,paid,760
+1011,2026-06-03T21:00:00Z,c_010,,paid,290
+1012,2026-06-04T02:45:00Z,c_011,partner,paid,980
+1013,2026-06-05T09:20:00Z,c_012,email,paid,610
+1014,2026-06-05T09:21:00Z,c_012,email,refunded,-610
+1015,2026-06-07T11:30:00Z,c_013,paid_search,paid,7000

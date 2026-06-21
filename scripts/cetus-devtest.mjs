@@ -38,12 +38,16 @@
 //   node scripts/cetus-devtest.mjs browserAnnotate --payload '{"url":"about:blank","title":"","xPct":50,"yPct":50,"note":"test"}'
 //   node scripts/cetus-devtest.mjs browserVisibleOpen --url about:blank
 //   node scripts/cetus-devtest.mjs webviews
+//   node scripts/cetus-devtest.mjs agentSettings --payload '{"browser":true,"computer":true}'
+//   node scripts/cetus-devtest.mjs agentPrompt --text "Say hi" --workspace /tmp/cetus-eval --timeout 300000
 //
 // Options (any op):
 //   --sock <path>     override socket path (else $CETUS_DEVTEST_SOCK / default)
 //   --id <value>      request id (default: a generated number)
 //   --selector <css>  CSS selector (dom/find/click/type/getText)
 //   --text <string>   text payload (type)
+//   --workspace <dir> workspace for agentPrompt (defaults to Cetus default workspace)
+//   --archive         archive the conversation after agentPrompt completes
 //   --js <string>     JavaScript source (eval / dom op=eval)
 //   --label <string>  webview label (eval/screenshot; default "main")
 //   --op <name>       dom op name (only for the literal `dom` op)
@@ -77,6 +81,8 @@ const OPS = new Set([
   "browserAnnotate",
   "browserVisibleOpen",
   "webviews",
+  "agentSettings",
+  "agentPrompt",
 ]);
 
 function parseArgs(argv) {
@@ -119,6 +125,8 @@ function buildRequest(op, args) {
   const req = { id, op };
   if (args.selector !== undefined) req.selector = args.selector;
   if (args.text !== undefined) req.text = args.text;
+  if (args.workspace !== undefined) req.workspace = args.workspace;
+  if (args.archive !== undefined) req.archive = Boolean(args.archive);
   if (args.js !== undefined) req.js = args.js;
   if (args.label !== undefined) req.label = args.label;
   if (args.url !== undefined) req.url = args.url;
@@ -149,6 +157,14 @@ function buildRequest(op, args) {
     }
     try {
       req.payload = JSON.parse(args.payload);
+    } catch (e) {
+      fail(`--payload is not valid JSON: ${e.message}`);
+    }
+  }
+
+  if (op === "agentSettings" && args.payload !== undefined) {
+    try {
+      req.settings = JSON.parse(args.payload);
     } catch (e) {
       fail(`--payload is not valid JSON: ${e.message}`);
     }

@@ -1,0 +1,103 @@
+[
+  {
+    "id": "fs-code-fix",
+    "category": "local-coding",
+    "title": "Fix a failing local unit test",
+    "runnable": true,
+    "prompt": "You are in an isolated benchmark workspace. Inspect the files, run the test command, fix the bug, and leave a concise final summary. The final summary must explicitly include the exact verification command you ran, e.g. `node test.js` or `npm test`. Do not edit files outside this workspace.",
+    "setupFiles": {
+      "package.json": "{\"scripts\":{\"test\":\"node test.js\"},\"type\":\"module\"}\n",
+      "math.js": "export function median(values) {\n  const sorted = [...values].sort();\n  const mid = Math.floor(sorted.length / 2);\n  return sorted[mid];\n}\n",
+      "test.js": "import { median } from './math.js';\nimport assert from 'node:assert/strict';\nassert.equal(median([3, 1, 2]), 2);\nassert.equal(median([10, 2, 4, 8]), 6);\nconsole.log('ok');\n"
+    },
+    "successHints": ["test passes", "median handles even length", "only workspace files changed"]
+  },
+  {
+    "id": "repo-review",
+    "category": "code-review",
+    "title": "Review a risky patch",
+    "runnable": true,
+    "prompt": "Review the code in this isolated workspace. Find the most important correctness/security issues with file and line references. Do not edit files. Your final answer must explicitly cover: SQL injection, invalid/negative amount validation, and missing transaction/atomicity.",
+    "setupFiles": {
+      "server.js": "export function handleTransfer(req, db) {\n  const amount = Number(req.body.amount);\n  const to = req.body.to;\n  const from = req.user.id;\n  db.query(`update accounts set balance = balance - ${amount} where id = '${from}'`);\n  db.query(`update accounts set balance = balance + ${amount} where id = '${to}'`);\n  return { ok: true };\n}\n"
+    },
+    "successHints": ["SQL injection", "negative or invalid amount", "transaction/atomicity"]
+  },
+  {
+    "id": "csv-analysis",
+    "category": "data-analysis",
+    "title": "Analyze a CSV and produce a report",
+    "runnable": true,
+    "prompt": "Analyze sales_2026.csv in this workspace. Create report.md with the top 3 products by revenue, month-over-month revenue trend, and one actionable recommendation. Verify your calculations with a script or shell command.",
+    "copyFiles": [
+      "../fixtures/sales_2026.csv"
+    ],
+    "successHints": ["report.md exists", "calculations are reproducible", "recommendation is grounded in data"]
+  },
+  {
+    "id": "current-web-research",
+    "category": "web-search",
+    "title": "Answer a current technical question with sources",
+    "runnable": true,
+    "prompt": "Look up the current official Codex app feature documentation and summarize the capabilities most relevant to desktop agents. Include source links and dates where available.",
+    "successHints": ["uses current sources", "mentions worktrees/parallel threads/automations/Git/skills or MCP"]
+  },
+  {
+    "id": "html-artifact",
+    "category": "artifact",
+    "title": "Create a shareable HTML artifact",
+    "runnable": true,
+    "prompt": "Create a self-contained index.html in this workspace that visualizes the attached sales CSV as a compact executive dashboard. Keep it static and openable from disk with no external network resources: no remote fonts, no external scripts, no external stylesheets, and no CDN links. Mention the file path in your final answer.",
+    "copyFiles": [
+      "../fixtures/sales_2026.csv"
+    ],
+    "successHints": ["index.html exists", "contains data visualization", "openable without a server"]
+  },
+  {
+    "id": "memory-preference",
+    "category": "memory",
+    "title": "Use and update durable memory",
+    "runnable": false,
+    "prompt": "Remember that for benchmark reports I prefer concise Chinese summaries with verification commands. Then answer with what you stored and where I can manage it.",
+    "requires": ["memory enabled"],
+    "successHints": ["creates or references durable memory", "explains user control"]
+  },
+  {
+    "id": "automation",
+    "category": "automation",
+    "title": "Create a scheduled background task",
+    "runnable": false,
+    "prompt": "Create a disabled weekday 9 AM automation that summarizes the latest agent platform news into a short markdown digest. Do not enable it yet.",
+    "requires": ["automation tools enabled"],
+    "successHints": ["automation row created", "disabled", "schedule is correct"]
+  },
+  {
+    "id": "browser-control",
+    "category": "browser-control",
+    "title": "Use the in-app browser for page inspection",
+    "runnable": false,
+    "prompt": "Open https://example.com in the visible in-app Browser so the user can see it. Then use the browser/DevTools extraction tools that return page text (for example browser_extract after browser_open, or an equivalent managed-browser DOM/snapshot tool) to inspect the page title and main text. Your final answer must explicitly repeat the exact page title and the sentence beginning \"This domain is for use\". Do not say \"above\" or refer to tool output implicitly. Do not use an external browser.",
+    "requires": ["browser control enabled"],
+    "agentSettings": { "browser": true },
+    "successHints": ["browser surface opened", "page content summarized"]
+  },
+  {
+    "id": "computer-use",
+    "category": "computer-use",
+    "title": "Inspect a local app through accessibility",
+    "runnable": false,
+    "prompt": "Use computer control to inspect the macOS Calculator app UI by targeting the app by name or bundle id, not by assuming it is the frontmost app. This is read-only: do not click, type, focus, move, or otherwise act on any control. Your final answer must explicitly list at least 10 accessible controls by AX role/name, including All Clear, Divide, and Equals, and one display field if present. Do not say the controls were reported above; repeat the evidence in the final answer.",
+    "requires": ["macOS accessibility permission", "computer control enabled", "Calculator running"],
+    "agentSettings": { "computer": true },
+    "successHints": ["uses AX/computer observation with an explicit app target", "does not rely only on screenshots", "does not require Calculator to stay frontmost"]
+  },
+  {
+    "id": "screen-meeting-recall",
+    "category": "context-recall",
+    "title": "Recall local screen or meeting context",
+    "runnable": false,
+    "prompt": "Search my recent screen and meeting history for mentions of launch date decisions and summarize the evidence with timestamps.",
+    "requires": ["screen context or meeting memory enabled", "local history present"],
+    "successHints": ["uses recall tools", "cites timestamps", "handles missing data clearly"]
+  }
+]

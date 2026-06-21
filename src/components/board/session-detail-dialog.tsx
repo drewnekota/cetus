@@ -8,7 +8,9 @@ import { ChatPane } from "@/components/chat/chat-pane";
 import type { ComposerAttachment } from "@/components/chat/composer";
 import {
   WorkspacePanel,
+  createTerminalViewState,
   type TerminalRunRequest,
+  type TerminalViewState,
   type WorkspaceLayout,
   type WorkspaceTab,
   type WorkspaceTabKind,
@@ -151,6 +153,7 @@ export function SessionDetailDialog({
       id: `detail-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       kind,
       title: workspaceTitle(kind, count),
+      terminalState: kind === "terminal" ? createTerminalViewState() : undefined,
       browserState: kind === "browser" ? createBrowserViewState() : undefined,
     };
     setWorkspaceTabs((tabs) => [...tabs, tab]);
@@ -194,6 +197,16 @@ export function SessionDetailDialog({
     );
   }
 
+  function updateTerminalWorkspaceTab(id: string, state: TerminalViewState) {
+    setWorkspaceTabs((tabs) =>
+      tabs.map((tab) =>
+        tab.id === id && tab.kind === "terminal"
+          ? { ...tab, terminalState: state }
+          : tab,
+      ),
+    );
+  }
+
   function openTerminalWithCommand(commandRaw: string) {
     const command = commandRaw.trim();
     if (!command) return;
@@ -221,6 +234,7 @@ export function SessionDetailDialog({
       id: `detail-terminal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       kind: "terminal",
       title: workspaceTitle("terminal", count),
+      terminalState: createTerminalViewState(),
       terminalRunRequest: request,
     };
     setWorkspaceTabs((tabs) => [...tabs, tab]);
@@ -370,7 +384,7 @@ export function SessionDetailDialog({
                 onClosePanel={() => setWorkspaceOpen(false)}
                 onNewTab={(kind) => openWorkspaceTab(kind, true)}
                 layout={workspaceLayout}
-                onLayoutChange={setWorkspaceLayout}
+                onUpdateTerminalTab={updateTerminalWorkspaceTab}
                 onUpdateBrowserTab={updateBrowserWorkspaceTab}
                 onAnnotate={async (message) => {
                   await onSend(message, []);

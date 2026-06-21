@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Checkout Fixture</title>
+</head>
+<body>
+  <main>
+    <h1>Checkout</h1>
+    <form id="checkout" action="/submit" method="post">
+      <label>
+        Email address
+        <input name="email" type="email" value="buyer@example.test" required aria-label="Customer email">
+      </label>
+      <label>
+        Company
+        <input name="company" type="text" value="Northstar Labs" aria-label="Company name">
+      </label>
+      <label>
+        Seats
+        <input name="seats" type="number" value="12" min="1" required aria-label="Seat count">
+      </label>
+      <label>
+        Billing cycle
+        <select name="billing_cycle" aria-label="Billing cycle">
+          <option value="monthly">Monthly</option>
+          <option value="annual" selected>Annual</option>
+        </select>
+      </label>
+      <input name="website" value="" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <button type="submit" disabled aria-label="Submit checkout">Pay now</button>
+    </form>
+  </main>
+</body>
+</html>

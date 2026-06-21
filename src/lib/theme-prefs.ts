@@ -71,12 +71,29 @@ function withTransitionsDisabled(toggle: () => void) {
   window.setTimeout(() => override.remove(), 0);
 }
 
+function forceThemeRepaint() {
+  const root = document.documentElement;
+  root.classList.add("theme-repaint");
+  // Touch layout while the repaint class is present, then leave it on for one
+  // paint. This prods WebKit to invalidate transparent form-control layers that
+  // can otherwise keep their old light/dark backing until an external repaint
+  // event, such as taking a screenshot.
+  void root.offsetHeight;
+  requestAnimationFrame(() => {
+    void root.offsetHeight;
+    requestAnimationFrame(() => root.classList.remove("theme-repaint"));
+  });
+}
+
 /** Toggle the `.dark` class to match a preference (this window). */
 export function applyTheme(pref: ThemePreference) {
   const dark = resolveTheme(pref) === "dark";
-  withTransitionsDisabled(() =>
-    document.documentElement.classList.toggle("dark", dark),
-  );
+  withTransitionsDisabled(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    document.documentElement.style.colorScheme = dark ? "dark" : "light";
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  });
+  forceThemeRepaint();
   // Match the native window vibrancy (app-wide on macOS) to the theme. The raw
   // preference is passed so "system" hands control back to the OS — keeping the
   // frosted glass behind every window correct even when a locked theme differs

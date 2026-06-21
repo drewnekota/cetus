@@ -31,6 +31,11 @@ struct Geom {
     height: u32,
     #[serde(default)]
     maximized: bool,
+    /// True only after the user has explicitly moved or resized the main
+    /// window. Older persisted geometry did not carry this field, so it
+    /// deserializes as false and falls back to the 90%-centered default.
+    #[serde(default)]
+    user_set: bool,
 }
 
 /// Last known on-screen geometry of the main window, updated on move/resize and
@@ -52,13 +57,16 @@ pub fn resume() {
 }
 
 /// Snapshot the main window's current geometry into the in-memory cache. No-op
-/// while parked. Called on every move/resize and once right before a close
-/// parks the window.
-pub fn record(win: &WebviewWindow) {
+/// while parked. Move/resize events mark the geometry as user-set; the close
+/// snapshot preserves the existing flag so merely closing the default window
+/// does not opt users into a restored fixed size forever.
+pub fn record(win: &WebviewWindow, user_set: bool) {
     if SUSPENDED.load(Ordering::Relaxed) {
         return;
     }
-    if let Some(g) = read_live(win) {
+    let existing_user_set = LAST.lock().unwrap().map(|g| g.user_set).unwrap_or(false);
+    if let Some(mut g) = read_live(win) {
+        g.user_set = user_set || existing_user_set;
         *LAST.lock().unwrap() = Some(g);
     }
 }
@@ -76,6 +84,7 @@ fn read_live(win: &WebviewWindow) -> Option<Geom> {
         width: size.width,
         height: size.height,
         maximized: win.is_maximized().unwrap_or(false),
+        user_set: false,
     })
 }
 
@@ -103,13 +112,15 @@ pub fn restore_or_default(app: &AppHandle, store: &Store) {
     };
     if let Some(g) = load(store) {
         if on_some_monitor(&win, &g) {
-            let _ = win.set_size(PhysicalSize::new(g.width, g.height));
-            let _ = win.set_position(PhysicalPosition::new(g.x, g.y));
-            if g.maximized {
-                let _ = win.maximize();
+            if g.user_set {
+                let _ = win.set_size(PhysicalSize::new(g.width, g.height));
+                let _ = win.set_position(PhysicalPosition::new(g.x, g.y));
+                if g.maximized {
+                    let _ = win.maximize();
+                }
+                *LAST.lock().unwrap() = Some(g);
+                return;
             }
-            *LAST.lock().unwrap() = Some(g);
-            return;
         }
     }
     if let Some(g) = default_geom(&win) {
@@ -139,6 +150,7 @@ fn default_geom(win: &WebviewWindow) -> Option<Geom> {
         width,
         height,
         maximized: false,
+        user_set: false,
     })
 }
 

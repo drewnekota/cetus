@@ -1,0 +1,22 @@
+{
+  "existingMemories": [
+    {
+      "id": "mem_old_report_language",
+      "text": "For benchmark reports, the user prefers concise English summaries."
+    }
+  ],
+  "existingAutomations": [
+    {
+      "id": "auto_enabled_weekly_agent_check",
+      "title": "Weekly benchmark check",
+      "schedule": "FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=0",
+      "enabled": true
+    }
+  ],
+  "requestedMemory": "benchmark 报告用中文、先给结论再给证据",
+  "requestedAutomation": {
+    "title": "Weekly benchmark check",
+    "schedule": "Monday 09:00",
+    "enabled": false
+  }
+}

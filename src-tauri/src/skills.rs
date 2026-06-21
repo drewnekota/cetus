@@ -40,6 +40,13 @@ const MAX_IMPORT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_IMPORT_FILES: usize = 400;
 /// Cap a hand-written SKILL.md body so one skill can't dominate the prompt.
 const MAX_BODY_CHARS: usize = 50_000;
+/// Approximate default model context used only for budgeting the *skill index*
+/// injected into the prompt. Bodies remain on disk and are read lazily.
+const DEFAULT_CONTEXT_TOKENS: usize = 1_000_000;
+/// Keep the visible skill manifest to a small fraction of the context. Override
+/// with CETUS_SKILL_PROMPT_BUDGET_PCT (e.g. 0.03) or
+/// CETUS_SKILL_PROMPT_BUDGET_CHARS for a hard character cap.
+const DEFAULT_SKILL_PROMPT_PCT: f64 = 0.05;
 
 fn default_true() -> bool {
     true
@@ -144,7 +151,13 @@ fn err(e: impl std::fmt::Display) -> String {
 /// fall back to; new conversations get their own frozen copy via
 /// [`materialize_skills_into`] in `AppState::pi_for`.
 pub fn resync_active_dir(app_data_dir: &Path, store: &Store) {
-    materialize_skills_into(app_data_dir, &active_skills_dir(app_data_dir), store);
+    let mut budget = SkillPromptBudget::from_env();
+    materialize_skills_into_with_budget(
+        app_data_dir,
+        &active_skills_dir(app_data_dir),
+        store,
+        &mut budget,
+    );
 }
 
 /// Rebuild `target` (a `<agentDir>/skills` directory) from the library + enabled
@@ -156,6 +169,82 @@ pub fn resync_active_dir(app_data_dir: &Path, store: &Store) {
 /// on one skill is logged, not fatal, so a single bad skill can't strand the
 /// others or break chat.
 pub fn materialize_skills_into(app_data_dir: &Path, target: &Path, store: &Store) {
+    let mut budget = SkillPromptBudget::from_env();
+    materialize_skills_into_with_budget(app_data_dir, target, store, &mut budget);
+}
+
+/// Shared budget for skills that pi exposes directly in the system prompt. Once
+/// exhausted, skills are still copied into the conversation snapshot but marked
+/// `disable-model-invocation: true`; the `skill_search` / `skill_read` tools can
+/// discover and load them lazily.
+#[derive(Debug, Clone)]
+pub struct SkillPromptBudget {
+    max_chars: usize,
+    used_chars: usize,
+    visible_count: usize,
+    hidden_count: usize,
+}
+
+impl SkillPromptBudget {
+    pub fn from_env() -> Self {
+        let max_chars = std::env::var("CETUS_SKILL_PROMPT_BUDGET_CHARS")
+            .ok()
+            .and_then(|s| s.trim().parse::<usize>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or_else(|| {
+                let context_tokens = std::env::var("CETUS_CONTEXT_WINDOW_TOKENS")
+                    .ok()
+                    .and_then(|s| s.trim().parse::<usize>().ok())
+                    .filter(|n| *n > 0)
+                    .unwrap_or(DEFAULT_CONTEXT_TOKENS);
+                let pct = std::env::var("CETUS_SKILL_PROMPT_BUDGET_PCT")
+                    .ok()
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+                    .filter(|p| *p > 0.0 && *p <= 0.5)
+                    .unwrap_or(DEFAULT_SKILL_PROMPT_PCT);
+                ((context_tokens as f64) * 4.0 * pct).round() as usize
+            });
+        Self {
+            max_chars,
+            used_chars: 0,
+            visible_count: 0,
+            hidden_count: 0,
+        }
+    }
+
+    fn allow(&mut self, name: &str, description: &str, location: &Path) -> bool {
+        // Mirrors pi's XML prompt entry closely enough to bound prompt growth
+        // without depending on pi internals.
+        let cost = 96 + name.len() + description.len() + location.to_string_lossy().len();
+        if self.visible_count == 0 || self.used_chars + cost <= self.max_chars {
+            self.used_chars += cost;
+            self.visible_count += 1;
+            true
+        } else {
+            self.hidden_count += 1;
+            false
+        }
+    }
+
+    pub fn log_if_truncated(&self, scope: &str) {
+        if self.hidden_count > 0 {
+            tracing::info!(
+                "skills: {scope} visible manifest budget used {}/{} chars; {} visible, {} lazy-only",
+                self.used_chars,
+                self.max_chars,
+                self.visible_count,
+                self.hidden_count
+            );
+        }
+    }
+}
+
+pub fn materialize_skills_into_with_budget(
+    app_data_dir: &Path,
+    target: &Path,
+    store: &Store,
+    budget: &mut SkillPromptBudget,
+) {
     let state = load_state(store);
     // Start clean: only the materialised set should be present.
     let _ = std::fs::remove_dir_all(target);
@@ -172,7 +261,7 @@ pub fn materialize_skills_into(app_data_dir: &Path, target: &Path, store: &Store
             continue; // library dir missing/corrupt — skip
         }
         let dst = target.join(&entry.id);
-        if let Err(e) = copy_tree(&src, &dst, &mut 0, &mut 0) {
+        if let Err(e) = materialize_one_skill(&src, &dst, &entry.name, &entry.description, budget) {
             tracing::warn!("skills: materialise {} failed: {e}", entry.id);
             let _ = std::fs::remove_dir_all(&dst);
         }
@@ -182,12 +271,13 @@ pub fn materialize_skills_into(app_data_dir: &Path, target: &Path, store: &Store
     // same-named skills by name at load time.
     let disc = crate::discovery::load_settings(store);
     if disc.skills_load_discovered {
-        copy_discovered_skills(Path::new(&disc.skills_folder), target);
+        copy_discovered_skills(Path::new(&disc.skills_folder), target, budget);
     }
+    budget.log_if_truncated("managed/discovered");
 }
 
 /// Copy each `SKILL.md` folder under `folder` into `target` as `discovered-<name>`.
-fn copy_discovered_skills(folder: &Path, target: &Path) {
+fn copy_discovered_skills(folder: &Path, target: &Path, budget: &mut SkillPromptBudget) {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return; // folder missing / unreadable — nothing to load
     };
@@ -201,11 +291,62 @@ fn copy_discovered_skills(folder: &Path, target: &Path) {
         if dst.exists() {
             continue;
         }
-        if let Err(e) = copy_tree(&src, &dst, &mut 0, &mut 0) {
+        let md = std::fs::read_to_string(src.join("SKILL.md")).unwrap_or_default();
+        let (fm_name, fm_desc) = parse_frontmatter(&md);
+        let skill_name = fm_name.unwrap_or_else(|| name.clone());
+        let skill_desc = fm_desc.unwrap_or_default();
+        if let Err(e) = materialize_one_skill(&src, &dst, &skill_name, &skill_desc, budget) {
             tracing::warn!("skills: discovered {name} failed: {e}");
             let _ = std::fs::remove_dir_all(&dst);
         }
     }
+}
+
+pub fn materialize_one_skill(
+    src: &Path,
+    dst: &Path,
+    name: &str,
+    description: &str,
+    budget: &mut SkillPromptBudget,
+) -> std::io::Result<()> {
+    copy_tree(src, dst, &mut 0, &mut 0)?;
+    let visible = budget.allow(name, description, &dst.join("SKILL.md"));
+    if !visible {
+        mark_skill_lazy_only(&dst.join("SKILL.md"))?;
+    }
+    Ok(())
+}
+
+fn mark_skill_lazy_only(skill_md: &Path) -> std::io::Result<()> {
+    let md = std::fs::read_to_string(skill_md)?;
+    if md.contains("\ndisable-model-invocation:") || md.starts_with("disable-model-invocation:") {
+        return Ok(());
+    }
+    let s = md.trim_start_matches('\u{feff}');
+    let updated = if s.starts_with("---\n") || s.starts_with("---\r\n") {
+        let mut out = String::new();
+        let mut inserted = false;
+        let mut lines = md.lines();
+        if let Some(first) = lines.next() {
+            out.push_str(first);
+            out.push('\n');
+        }
+        for line in lines {
+            if !inserted && line.trim_end() == "---" {
+                out.push_str("disable-model-invocation: true\n");
+                inserted = true;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    } else {
+        format!(
+            "---\ndescription: \"Lazy-only skill; use skill_read to inspect the original instructions.\"\ndisable-model-invocation: true\n---\n\n{}",
+            md
+        )
+    };
+    std::fs::write(skill_md, updated)
 }
 
 /// Copy a directory tree, skipping symlinks and enforcing total size/file caps so

@@ -9,7 +9,7 @@ import { fontVariables } from "./fonts";
 // system appearance, when following it) doesn't flash the wrong colors. Mirrors
 // `theme-prefs.ts`; defaults to following the system. <html> carries
 // suppressHydrationWarning since this script mutates its class pre-hydration.
-const THEME_INIT = `(function(){try{var p=localStorage.getItem("cetus.theme")||"system";var d=p==="dark"||(p!=="light"&&(!window.matchMedia||window.matchMedia("(prefers-color-scheme: dark)").matches));document.documentElement.classList.toggle("dark",d);}catch(e){}})();`;
+const THEME_INIT = `(function(){try{var p=localStorage.getItem("cetus.theme")||"system";var d=p==="dark"||(p!=="light"&&(!window.matchMedia||window.matchMedia("(prefers-color-scheme: dark)").matches));document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light";document.documentElement.dataset.theme=d?"dark":"light";}catch(e){}})();`;
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { WindowRouter } from "@/components/window-router";
 import { I18nProvider } from "@/lib/i18n";

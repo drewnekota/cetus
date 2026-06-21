@@ -807,6 +807,7 @@ export interface BashResult {
 export interface WorkspaceFileEntry {
   name: string;
   path: string;
+  relativePath: string;
   isDir: boolean;
   sizeBytes: number | null;
   modifiedMs: number | null;

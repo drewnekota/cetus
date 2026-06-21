@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { Gauge, Sparkles, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { DsModel, ModelChoice, ReasoningLevel } from "@/lib/types";
@@ -95,6 +96,7 @@ interface Props {
 
 export function ModelPicker({ value, onChange, ultra, onUltraToggle, lockUltra, disabled }: Props) {
   const { t } = useTranslation("chat");
+  const [hoveredPreset, setHoveredPreset] = useState<PresetId | null>(null);
   const active = activePreset(value, !!ultra);
   // Only offer UltraCode where the parent can actually drive the Ultra switch.
   const presets = onUltraToggle ? PRESETS : PRESETS.filter((p) => !p.ultra);
@@ -113,7 +115,12 @@ export function ModelPicker({ value, onChange, ultra, onUltraToggle, lockUltra, 
   }
 
   return (
-    <Select value={active} onValueChange={select} disabled={disabled}>
+    <Select
+      value={active}
+      onValueChange={select}
+      onOpenChange={() => setHoveredPreset(null)}
+      disabled={disabled}
+    >
       <SelectTrigger
         size="sm"
         className="h-7 gap-1.5 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:ring-0 data-[size=sm]:h-7"
@@ -125,11 +132,13 @@ export function ModelPicker({ value, onChange, ultra, onUltraToggle, lockUltra, 
         {presets.map((p) => {
           const Icon = p.icon;
           return (
-            <Tooltip key={p.id}>
+            <Tooltip key={p.id} open={hoveredPreset === p.id}>
               <TooltipTrigger asChild>
                 <SelectItem
                   value={p.id}
                   disabled={lockUltra && p.ultra && !ultra}
+                  onPointerEnter={() => setHoveredPreset(p.id)}
+                  onPointerLeave={() => setHoveredPreset(null)}
                   className="text-xs"
                 >
                   <Icon className="size-4" />

@@ -105,6 +105,18 @@ interface Props {
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB — Gemini limit is generous but base64 inflates 33%
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB — docx/xlsx/pdf etc., read on disk by the agent
+const FOCUS_TRIGGER_CHARS = new Set(["/", "、", "／"]);
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return (
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    target.isContentEditable
+  );
+}
 
 export function Composer({
   disabled,
@@ -158,6 +170,7 @@ export function Composer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -177,6 +190,14 @@ export function Composer({
   // Set when the user dismisses with Esc; cleared on the next edit so the menu
   // stays closed for the current token but a later `/` reopens it.
   const slashSuppress = useRef(false);
+  const withFocusHint = useCallback(
+    (base: string) => {
+      const trimmed = base.trimEnd();
+      const separator = /[.!?。！？…]$/.test(trimmed) ? " " : ". ";
+      return `${trimmed}${separator}${t("composer.focusShortcutHint")}`;
+    },
+    [t],
+  );
 
   // Pull commands + skills when the menu opens (so settings edits show up
   // without a remount). Skills = enabled library skills + globally discovered
@@ -286,6 +307,42 @@ export function Composer({
     if (focusToken !== undefined && !disabled) taRef.current?.focus();
   }, [focusToken, disabled]);
 
+  useEffect(() => {
+    if (disabled) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.defaultPrevented ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey ||
+        e.isComposing ||
+        !FOCUS_TRIGGER_CHARS.has(e.key) ||
+        isEditableTarget(e.target)
+      ) {
+        return;
+      }
+
+      const root = rootRef.current;
+      const el = taRef.current;
+      if (!root || !el) return;
+      const openDialogs = Array.from(
+        document.querySelectorAll<HTMLElement>("[role='dialog'][data-state='open']"),
+      );
+      const topDialog = openDialogs.at(-1);
+      if (topDialog && !topDialog.contains(root)) return;
+      if (!topDialog && root.closest("[role='dialog']")) return;
+
+      e.preventDefault();
+      slashSuppress.current = false;
+      requestAnimationFrame(() => {
+        el.focus();
+      });
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [disabled]);
+
   // Revoke preview URLs on unmount so we don't leak object URLs.
   useEffect(() => {
     return () => {
@@ -374,6 +431,8 @@ export function Composer({
 
   return (
     <div
+      ref={rootRef}
+      data-chat-composer
       onDragOver={(e) => {
         // Hijack drag enter only when files are involved — text-from-textarea
         // drags would otherwise highlight the drop zone too.
@@ -538,14 +597,16 @@ export function Composer({
         placeholder={
           bashMode
             ? t("composer.bashPlaceholder")
-            : placeholder ??
-          (streaming
-            ? (onQueue
-                ? t("composer.placeholderQueue")
-                : t("composer.placeholderRunning"))
-            : variant === "hero"
-              ? heroPlaceholder
-              : t("composer.placeholderDocked"))
+            : withFocusHint(
+                placeholder ??
+                  (streaming
+                    ? onQueue
+                      ? t("composer.placeholderQueue")
+                      : t("composer.placeholderRunning")
+                    : variant === "hero"
+                      ? heroPlaceholder
+                      : t("composer.placeholderDocked")),
+              )
         }
         rows={1}
         disabled={disabled}
@@ -577,7 +638,7 @@ export function Composer({
             disabled={disabled}
             title={t("composer.attachFile")}
           >
-            <Paperclip className="size-3" />
+            <Paperclip className="size-3 text-muted-foreground" />
           </Button>
           <WorkspacePicker
             workspaceDir={workspaceDir}

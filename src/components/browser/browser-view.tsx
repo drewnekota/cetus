@@ -235,7 +235,9 @@ export function BrowserView({ state, onStateChange, onAnnotate }: Props) {
       setInlinePreview(false);
       return;
     }
-    await openEmbedded(url);
+    if (embeddedUrlRef.current !== url) {
+      await openEmbedded(url);
+    }
     await api.setBrowserPanelAnnotationMode(enabled);
   }
 
@@ -332,7 +334,7 @@ export function BrowserView({ state, onStateChange, onAnnotate }: Props) {
             <Input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className="h-8 pl-8 pr-2 text-[13px]"
+              className="h-7 pl-8 pr-2 text-[13px]"
               spellCheck={false}
               data-testid="browser-address"
             />
@@ -340,7 +342,7 @@ export function BrowserView({ state, onStateChange, onAnnotate }: Props) {
         </form>
         <Button
           type="button"
-          size="sm"
+          size="xs"
           variant={inlinePreview ? "default" : "outline"}
           data-testid="browser-inline-preview-toggle"
           onClick={() => {
@@ -353,7 +355,7 @@ export function BrowserView({ state, onStateChange, onAnnotate }: Props) {
         </Button>
         <Button
           type="button"
-          size="sm"
+          size="xs"
           variant={panelAnnotating ? "default" : "outline"}
           data-testid="browser-annotate"
           onClick={() => {

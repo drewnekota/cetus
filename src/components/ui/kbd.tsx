@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 export function Kbd({ className, ...props }: React.ComponentProps<"kbd">) {
   return (
     <kbd
+      data-slot="kbd"
       className={cn(
         "inline-flex h-4 items-center rounded border border-border/50 bg-muted/40 px-1 text-[10px] leading-none tracking-wide text-muted-foreground/80",
         "font-[system-ui,-apple-system,'SF_Pro_Text','Segoe_UI',sans-serif]",

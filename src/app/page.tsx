@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { PanelBottom, PanelRight, Terminal } from "lucide-react";
+import { PanelBottom, PanelRight } from "lucide-react";
 import {
   Composer,
   type ComposerAttachment,
@@ -21,10 +21,12 @@ import { AutomationDialog } from "@/components/automation/automation-dialog";
 import { PluginsView } from "@/components/plugins/plugins-view";
 import {
   WorkspacePanel,
+  createTerminalViewState,
   type WorkspaceTab,
   type WorkspaceTabKind,
   type WorkspaceLayout,
   type TerminalRunRequest,
+  type TerminalViewState,
 } from "@/components/workspace/workspace-panel";
 import {
   createBrowserViewState,
@@ -209,6 +211,62 @@ async function prepareOutgoing(
   return { localImages, savedFiles, piImages, piMessage: text + buildAttachmentRefs(savedFiles) };
 }
 
+function usePanelPresence(open: boolean, delayMs = 110) {
+  const [mounted, setMounted] = useState(open);
+  const [hidden, setHidden] = useState(!open);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      setHidden(false);
+      return;
+    }
+    if (!mounted) {
+      setHidden(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setHidden(true), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [open, delayMs, mounted]);
+  return { mounted, hidden };
+}
+
+interface WorkspaceDockState {
+  open: boolean;
+  tabs: WorkspaceTab[];
+  activeId: string | null;
+}
+
+type WorkspaceDocksState = Record<WorkspaceLayout, WorkspaceDockState>;
+type WorkspaceDocksByChatState = Record<string, WorkspaceDocksState>;
+
+const NEW_CHAT_WORKSPACE_KEY = "__new_chat__";
+
+function createInitialWorkspaceDocks(): WorkspaceDocksState {
+  return {
+    side: {
+      open: false,
+      tabs: [{ id: "files-1", kind: "files", title: "Files" }],
+      activeId: "files-1",
+    },
+    bottom: {
+      open: false,
+      tabs: [
+        {
+          id: "terminal-1",
+          kind: "terminal",
+          title: "Terminal",
+          terminalState: createTerminalViewState(),
+        },
+      ],
+      activeId: "terminal-1",
+    },
+  };
+}
+
+function createInitialWorkspaceDocksByChat(): WorkspaceDocksByChatState {
+  return { [NEW_CHAT_WORKSPACE_KEY]: createInitialWorkspaceDocks() };
+}
+
 export default function Home() {
   useZoom();
   const { t } = useTranslation("chat");
@@ -284,14 +342,19 @@ export default function Home() {
       localStorage.setItem("cetus:lastView", view);
     } catch {}
   }, [view]);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>([
-    { id: "files-1", kind: "files", title: "Files" },
-  ]);
-  const [workspaceActiveId, setWorkspaceActiveId] = useState<string | null>("files-1");
-  const [workspaceLayout, setWorkspaceLayout] = useState<WorkspaceLayout>("side");
-  const workspaceTabsRef = useRef<WorkspaceTab[]>(workspaceTabs);
-  const workspaceActiveIdRef = useRef<string | null>(workspaceActiveId);
+  const [workspaceDocksByChat, setWorkspaceDocksByChat] =
+    useState<WorkspaceDocksByChatState>(
+      createInitialWorkspaceDocksByChat,
+    );
+  const workspaceDocksByChatRef =
+    useRef<WorkspaceDocksByChatState>(workspaceDocksByChat);
+  const workspaceKey = activeId ?? NEW_CHAT_WORKSPACE_KEY;
+  const workspaceDocks =
+    workspaceDocksByChat[workspaceKey] ?? createInitialWorkspaceDocks();
+  const sideWorkspace = workspaceDocks.side;
+  const bottomWorkspace = workspaceDocks.bottom;
+  const sideWorkspacePresence = usePanelPresence(sideWorkspace.open);
+  const bottomWorkspacePresence = usePanelPresence(bottomWorkspace.open);
   const [boardWorkspaceFilter, setBoardWorkspaceFilter] = useState<string | null>(null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -339,8 +402,7 @@ export default function Home() {
   conversationsRef.current = conversations;
   activeIdRef.current = activeId;
   viewRef.current = view;
-  workspaceTabsRef.current = workspaceTabs;
-  workspaceActiveIdRef.current = workspaceActiveId;
+  workspaceDocksByChatRef.current = workspaceDocksByChat;
 
   // Mirror the live queue + send fn so the flush effect (deps: streaming/active
   // only) never reads stale closures. onSend is a hoisted function declaration.
@@ -717,6 +779,7 @@ export default function Home() {
   //   ⌘B    — toggle workspace
   //   ⌘J    — toggle Terminal in the workspace
   //   ⌘T    — open a Browser tab in the right workspace
+  //   ⌘P    — open a Files tab in the right workspace
   //   ⌘W    — close the active right-workspace tab when that panel is open
   //   ⌥⌘←/→ — switch right-workspace tabs when that panel is open
   //   ⌥⌘↑/↓ — switch to the previous / next chat
@@ -773,11 +836,11 @@ export default function Home() {
         e.altKey &&
         !e.ctrlKey &&
         !e.shiftKey &&
-        workspaceOpen &&
+        sideWorkspace.open &&
         (e.key === "ArrowLeft" || e.key === "ArrowRight")
       ) {
         e.preventDefault();
-        switchWorkspaceTab(e.key === "ArrowRight" ? 1 : -1);
+        switchWorkspaceTab("side", e.key === "ArrowRight" ? 1 : -1);
         return;
       }
       if (
@@ -795,16 +858,19 @@ export default function Home() {
       const k = e.key.toLowerCase();
       if (!e.shiftKey && k === "b") {
         e.preventDefault();
-        setWorkspaceOpen((v) => !v);
+        toggleSideWorkspacePanel();
       } else if (!e.shiftKey && k === "j") {
         e.preventDefault();
         toggleTerminalPanel();
       } else if (!e.shiftKey && k === "t") {
         e.preventDefault();
-        openWorkspaceTab("browser", true);
-      } else if (!e.shiftKey && k === "w" && workspaceOpen && workspaceActiveId) {
+        openWorkspaceTab("side", "browser", true);
+      } else if (!e.shiftKey && k === "p") {
         e.preventDefault();
-        closeWorkspaceTab(workspaceActiveId);
+        openWorkspaceTab("side", "files");
+      } else if (!e.shiftKey && k === "w" && sideWorkspace.open && sideWorkspace.activeId) {
+        e.preventDefault();
+        closeWorkspaceTab("side", sideWorkspace.activeId);
       } else if (!e.shiftKey && k === "n") {
         e.preventDefault();
         if (view === "board") {
@@ -854,9 +920,9 @@ export default function Home() {
     automationDialogOpen,
     newTaskOpen,
     detailId,
-    workspaceOpen,
-    workspaceActiveId,
-    workspaceTabs,
+    sideWorkspace.open,
+    sideWorkspace.activeId,
+    sideWorkspace.tabs,
     archiveConversation,
   ]);
 
@@ -906,34 +972,117 @@ export default function Home() {
     };
   }
 
-  function openWorkspaceTab(kind: WorkspaceTabKind, alwaysNew = false) {
-    const existing = !alwaysNew ? workspaceTabs.find((t) => t.kind === kind) : undefined;
+  function updateWorkspaceDock(
+    layout: WorkspaceLayout,
+    updater: (dock: WorkspaceDockState) => WorkspaceDockState,
+    keyOverride?: string | null,
+  ) {
+    const key = keyOverride ?? activeIdRef.current ?? NEW_CHAT_WORKSPACE_KEY;
+    setWorkspaceDocksByChat((current) => {
+      const currentDocks = current[key] ?? createInitialWorkspaceDocks();
+      return {
+        ...current,
+        [key]: {
+          ...currentDocks,
+          [layout]: updater(currentDocks[layout]),
+        },
+      };
+    });
+  }
+
+  function workspaceRefs(layout: WorkspaceLayout, keyOverride?: string | null) {
+    const key = keyOverride ?? activeIdRef.current ?? NEW_CHAT_WORKSPACE_KEY;
+    const dock =
+      (workspaceDocksByChatRef.current[key] ?? createInitialWorkspaceDocks())[
+        layout
+      ];
+    return {
+      ...dock,
+      setTabs: (updater: (tabs: WorkspaceTab[]) => WorkspaceTab[]) =>
+        updateWorkspaceDock(
+          layout,
+          (current) => ({
+            ...current,
+            tabs: updater(current.tabs),
+          }),
+          key,
+        ),
+      setActiveId: (activeId: string | null) =>
+        updateWorkspaceDock(
+          layout,
+          (current) => ({ ...current, activeId }),
+          key,
+        ),
+      setOpen: (open: boolean) =>
+        updateWorkspaceDock(layout, (current) => ({ ...current, open }), key),
+      update: (updater: (dock: WorkspaceDockState) => WorkspaceDockState) =>
+        updateWorkspaceDock(layout, updater, key),
+    };
+  }
+
+  function openWorkspaceTab(
+    layout: WorkspaceLayout,
+    kind: WorkspaceTabKind,
+    alwaysNew = false,
+  ) {
+    const { tabs, update } = workspaceRefs(layout);
+    const existing = !alwaysNew ? tabs.find((t) => t.kind === kind) : undefined;
     if (existing) {
-      setWorkspaceActiveId(existing.id);
-      setWorkspaceOpen(true);
+      const terminalFocusRequest =
+        kind === "terminal"
+          ? `term-focus-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+          : undefined;
+      update((current) => ({
+        ...current,
+        tabs: terminalFocusRequest
+          ? current.tabs.map((tab) =>
+              tab.id === existing.id
+                ? { ...tab, terminalFocusRequest }
+                : tab,
+            )
+          : current.tabs,
+        activeId: existing.id,
+        open: true,
+      }));
       return;
     }
-    const count = workspaceTabs.filter((t) => t.kind === kind).length + 1;
+    const count = tabs.filter((t) => t.kind === kind).length + 1;
+    const terminalFocusRequest =
+      kind === "terminal"
+        ? `term-focus-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        : undefined;
     const tab: WorkspaceTab = {
       id: `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       kind,
       title: workspaceTitle(kind, count),
+      terminalState: kind === "terminal" ? createTerminalViewState() : undefined,
+      terminalFocusRequest,
       browserState: kind === "browser" ? createBrowserViewState() : undefined,
     };
-    setWorkspaceTabs((tabs) => [...tabs, tab]);
-    setWorkspaceActiveId(tab.id);
-    setWorkspaceOpen(true);
+    update((current) => ({
+      ...current,
+      tabs: [...current.tabs, tab],
+      activeId: tab.id,
+      open: true,
+    }));
   }
 
   function openTerminalTab() {
-    const tabs = workspaceTabsRef.current;
+    const { tabs, activeId, update } = workspaceRefs("bottom");
+    const focusRequest = `term-focus-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const activeTerminal = tabs.find(
-      (tab) => tab.id === workspaceActiveIdRef.current && tab.kind === "terminal",
+      (tab) => tab.id === activeId && tab.kind === "terminal",
     );
     const target = activeTerminal ?? tabs.find((tab) => tab.kind === "terminal");
     if (target) {
-      setWorkspaceActiveId(target.id);
-      setWorkspaceOpen(true);
+      update((current) => ({
+        ...current,
+        tabs: current.tabs.map((tab) =>
+          tab.id === target.id ? { ...tab, terminalFocusRequest: focusRequest } : tab,
+        ),
+        activeId: target.id,
+        open: true,
+      }));
       return;
     }
 
@@ -942,28 +1091,39 @@ export default function Home() {
       id: `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       kind: "terminal",
       title: workspaceTitle("terminal", count),
+      terminalState: createTerminalViewState(),
+      terminalFocusRequest: focusRequest,
     };
-    setWorkspaceTabs((current) => [...current, tab]);
-    setWorkspaceActiveId(tab.id);
-    setWorkspaceOpen(true);
+    update((current) => ({
+      ...current,
+      tabs: [...current.tabs, tab],
+      activeId: tab.id,
+      open: true,
+    }));
   }
 
   function toggleTerminalPanel() {
-    const active = workspaceTabsRef.current.find(
-      (tab) => tab.id === workspaceActiveIdRef.current,
-    );
-    if (workspaceOpen && workspaceLayout === "bottom" && active?.kind === "terminal") {
-      setWorkspaceOpen(false);
+    if (workspaceRefs("bottom").open) {
+      workspaceRefs("bottom").setOpen(false);
       return;
     }
-    setWorkspaceLayout("bottom");
     openTerminalTab();
   }
 
+  function toggleSideWorkspacePanel() {
+    if (workspaceRefs("side").open) {
+      workspaceRefs("side").setOpen(false);
+      return;
+    }
+    openWorkspacePanelLayout("side");
+  }
+
   function openWorkspacePanelLayout(layout: WorkspaceLayout) {
-    setWorkspaceLayout(layout);
-    setWorkspaceOpen(true);
-    if (workspaceTabsRef.current.length === 0) openWorkspaceTab("files");
+    const { tabs, setOpen } = workspaceRefs(layout);
+    setOpen(true);
+    if (tabs.length === 0) {
+      openWorkspaceTab(layout, layout === "bottom" ? "terminal" : "files");
+    }
   }
 
   function openTerminalWithCommand(commandRaw: string) {
@@ -974,19 +1134,20 @@ export default function Home() {
       command,
       autoRun: true,
     };
-    const tabs = workspaceTabsRef.current;
+    const { tabs, activeId, update } = workspaceRefs("bottom");
     const activeTerminal = tabs.find(
-      (tab) => tab.id === workspaceActiveIdRef.current && tab.kind === "terminal",
+      (tab) => tab.id === activeId && tab.kind === "terminal",
     );
     const target = activeTerminal ?? tabs.find((tab) => tab.kind === "terminal");
     if (target) {
-      setWorkspaceTabs((current) =>
-        current.map((tab) =>
+      update((current) => ({
+        ...current,
+        tabs: current.tabs.map((tab) =>
           tab.id === target.id ? { ...tab, terminalRunRequest: request } : tab,
         ),
-      );
-      setWorkspaceActiveId(target.id);
-      setWorkspaceOpen(true);
+        activeId: target.id,
+        open: true,
+      }));
       return;
     }
 
@@ -995,15 +1156,20 @@ export default function Home() {
       id: `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       kind: "terminal",
       title: workspaceTitle("terminal", count),
+      terminalState: createTerminalViewState(),
       terminalRunRequest: request,
     };
-    setWorkspaceTabs((current) => [...current, tab]);
-    setWorkspaceActiveId(tab.id);
-    setWorkspaceOpen(true);
+    update((current) => ({
+      ...current,
+      tabs: [...current.tabs, tab],
+      activeId: tab.id,
+      open: true,
+    }));
   }
 
-  function updateBrowserWorkspaceTab(id: string, state: BrowserViewState) {
-    setWorkspaceTabs((tabs) =>
+  function updateBrowserWorkspaceTab(layout: WorkspaceLayout, id: string, state: BrowserViewState) {
+    const { setTabs } = workspaceRefs(layout);
+    setTabs((tabs) =>
       tabs.map((tab) =>
         tab.id === id && tab.kind === "browser"
           ? {
@@ -1016,24 +1182,40 @@ export default function Home() {
     );
   }
 
-  function openVisibleBrowser(urlRaw: string) {
+  function updateTerminalWorkspaceTab(
+    layout: WorkspaceLayout,
+    id: string,
+    state: TerminalViewState,
+  ) {
+    const { setTabs } = workspaceRefs(layout);
+    setTabs((tabs) =>
+      tabs.map((tab) =>
+        tab.id === id && tab.kind === "terminal"
+          ? { ...tab, terminalState: state }
+          : tab,
+      ),
+    );
+  }
+
+  function openVisibleBrowser(urlRaw: string, conversationId?: string | null) {
     const url = normalizeVisibleBrowserUrl(urlRaw);
-    const tabs = workspaceTabsRef.current;
+    const { tabs, activeId, update } = workspaceRefs("side", conversationId);
     const activeBrowser = tabs.find(
-      (tab) => tab.id === workspaceActiveIdRef.current && tab.kind === "browser",
+      (tab) => tab.id === activeId && tab.kind === "browser",
     );
     const target = activeBrowser ?? tabs.find((tab) => tab.kind === "browser");
     if (target) {
       const state = browserStateForUrl(url);
-      setWorkspaceTabs((current) =>
-        current.map((tab) =>
+      update((current) => ({
+        ...current,
+        tabs: current.tabs.map((tab) =>
           tab.id === target.id
             ? { ...tab, title: browserTitle(url, tab.title), browserState: state }
             : tab,
         ),
-      );
-      setWorkspaceActiveId(target.id);
-      setWorkspaceOpen(true);
+        activeId: target.id,
+        open: true,
+      }));
       return;
     }
 
@@ -1044,35 +1226,77 @@ export default function Home() {
       title: browserTitle(url, workspaceTitle("browser", count)),
       browserState: browserStateForUrl(url),
     };
-    setWorkspaceTabs((current) => [...current, tab]);
-    setWorkspaceActiveId(tab.id);
-    setWorkspaceOpen(true);
+    update((current) => ({
+      ...current,
+      tabs: [...current.tabs, tab],
+      activeId: tab.id,
+      open: true,
+    }));
   }
 
-  function closeWorkspaceTab(id: string) {
-    setWorkspaceTabs((tabs) => {
+  function closeWorkspaceTab(layout: WorkspaceLayout, id: string) {
+    const { activeId, setTabs, setActiveId, setOpen } = workspaceRefs(layout);
+    setTabs((tabs) => {
       const index = tabs.findIndex((t) => t.id === id);
       if (index === -1) return tabs;
       const next = tabs.filter((t) => t.id !== id);
-      if (workspaceActiveId === id) {
+      if (activeId === id) {
         const fallback = next[Math.min(index, next.length - 1)] ?? null;
-        setWorkspaceActiveId(fallback?.id ?? null);
-        if (!fallback) setWorkspaceOpen(false);
+        setActiveId(fallback?.id ?? null);
+        if (!fallback) setOpen(false);
       }
       return next;
     });
   }
 
-  function switchWorkspaceTab(direction: 1 | -1) {
-    const tabs = workspaceTabsRef.current;
+  function switchWorkspaceTab(layout: WorkspaceLayout, direction: 1 | -1) {
+    const { tabs, activeId, setActiveId, setOpen } = workspaceRefs(layout);
     if (tabs.length < 2) return;
     const activeIndex = Math.max(
       0,
-      tabs.findIndex((tab) => tab.id === workspaceActiveIdRef.current),
+      tabs.findIndex((tab) => tab.id === activeId),
     );
     const nextIndex = (activeIndex + direction + tabs.length) % tabs.length;
-    setWorkspaceActiveId(tabs[nextIndex].id);
-    setWorkspaceOpen(true);
+    setActiveId(tabs[nextIndex].id);
+    setOpen(true);
+  }
+
+  function renderWorkspaceDock(layout: WorkspaceLayout) {
+    const dock = workspaceDocks[layout];
+    const presence =
+      layout === "side" ? sideWorkspacePresence : bottomWorkspacePresence;
+    if (!presence.mounted) return null;
+    return (
+      <WorkspacePanel
+        tabs={dock.tabs}
+        activeId={dock.activeId}
+        workspaceDir={workspaceDir}
+        defaultWorkspace={defaultWorkspace}
+        onSelect={(id) => {
+          updateWorkspaceDock(layout, (current) => ({
+            ...current,
+            activeId: id,
+            open: true,
+          }));
+        }}
+        onClose={(id) => closeWorkspaceTab(layout, id)}
+        onClosePanel={() => workspaceRefs(layout).setOpen(false)}
+        onNewTab={(kind) => openWorkspaceTab(layout, kind, true)}
+        layout={layout}
+        onUpdateTerminalTab={(id, state) =>
+          updateTerminalWorkspaceTab(layout, id, state)
+        }
+        onUpdateBrowserTab={(id, state) =>
+          updateBrowserWorkspaceTab(layout, id, state)
+        }
+        motionState={dock.open ? "open" : "closed"}
+        hidden={presence.hidden}
+        onAnnotate={async (message) => {
+          await onSend(message);
+          setView("chat");
+        }}
+      />
+    );
   }
 
   useEffect(() => {
@@ -1081,7 +1305,7 @@ export default function Home() {
     listen<BrowserControlEvent>("browser-control-request", (e) => {
       const payload = e.payload;
       if (payload?.op !== "open" || !payload.url) return;
-      openVisibleBrowser(payload.url);
+      openVisibleBrowser(payload.url, payload.conversationId);
     }).then((u) => {
       if (cancelled) u();
       else unlisten = u;
@@ -1969,173 +2193,139 @@ export default function Home() {
         onOpenSettings={openSettings}
       />
       <SidebarInset
-        className={`m-2 flex min-h-0 overflow-hidden rounded-xl border border-border bg-background shadow-sm ${
-          workspaceOpen && workspaceLayout === "bottom" ? "flex-col" : "flex-row"
-        }`}
+        className="m-2 flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-sm"
       >
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header
-            className="flex h-10 items-center justify-end gap-3 px-4 text-xs text-muted-foreground"
-          >
-            <div data-tauri-drag-region className="h-full flex-1" />
-            {!piReady && <span className="text-muted-foreground/70">○ connecting…</span>}
-            {/* With messages present, the failure surfaces inline at the end of
+        <div className="flex min-h-0 flex-1 flex-row">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header
+              className="flex h-10 items-center justify-end gap-3 px-4 text-xs text-muted-foreground"
+            >
+              <div data-tauri-drag-region className="h-full flex-1" />
+              {!piReady && <span className="text-muted-foreground/70">○ connecting…</span>}
+              {/* With messages present, the failure surfaces inline at the end of
                 the message list (see MessageError). Keep the header copy only as
                 a fallback for errors that fire before any message exists
                 (e.g. an attachment write failing on the very first send). */}
-            {error && !hasMessages && (
-              <span className="text-destructive">{error}</span>
-            )}
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              title={t("workspacePanel.openSide")}
-              aria-label={t("workspacePanel.openSide")}
-              data-testid="workspace-open-side"
-              onClick={() => openWorkspacePanelLayout("side")}
-            >
-              <PanelRight className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              title={t("workspacePanel.openBottom")}
-              aria-label={t("workspacePanel.openBottom")}
-              data-testid="workspace-open-bottom"
-              onClick={() => openWorkspacePanelLayout("bottom")}
-            >
-              <PanelBottom className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              size="icon-xs"
-              variant={
-                workspaceOpen &&
-                workspaceTabs.find((tab) => tab.id === workspaceActiveId)?.kind === "terminal"
-                  ? "secondary"
-                  : "ghost"
-              }
-              title="Toggle Terminal (⌘J)"
-              aria-label="Toggle Terminal"
-              data-testid="workspace-toggle-terminal"
-              onClick={toggleTerminalPanel}
-            >
-              <Terminal className="size-3.5" />
-            </Button>
-          </header>
-          {view === "automations" ? (
-            <AutomationsView
-              automations={automations}
-              defaultWorkspace={defaultWorkspace}
-              onNew={openNewAutomation}
-              onEdit={openEditAutomation}
-              onToggle={onToggleAutomation}
-              onRunNow={onRunAutomation}
-              onDelete={onDeleteAutomation}
-              onOpenConversation={(id) => {
-                setView("chat");
-                onSelect(id);
-              }}
-            />
-          ) : view === "plugins" ? (
-            <PluginsView />
-          ) : view === "board" ? (
-            <BoardView
-              conversations={conversations}
-              workspaceFilter={boardWorkspaceFilter}
-              defaultWorkspace={defaultWorkspace}
-              streamingIds={streamingIds}
-              onOpen={onOpenDetail}
-              onArchive={onArchive}
-              onApproveReview={onApproveReview}
-              onRequestChanges={onRequestChanges}
-            />
-          ) : hasMessages ? (
-            <ChatPane
-              convId={activeId}
-              draftKey={activeId ? `chat:${activeId}` : "chat:new"}
-              modelChoice={modelChoice}
-              onModelChange={onModelChange}
-              workspaceDir={workspaceDir}
-              defaultWorkspace={defaultWorkspace}
-              onWorkspaceChange={onWorkspaceChange}
-              onSend={onSend}
-              onBash={onBash}
-              onAbort={onAbort}
-              onRegenerate={retrying ? undefined : onRetry}
-              onRetry={onRetry}
-              onForkMessage={(messageKey, messageIndex) => {
-                const c = conversationsRef.current.find((x) => x.id === activeIdRef.current);
-                if (c) onFork(c, messageKey, messageIndex);
-              }}
-              retrying={retrying}
-              queued={activeId ? queued[activeId] : undefined}
-              onQueue={(text, atts) => {
-                if (activeId) enqueueMessage(activeId, text, atts);
-              }}
-              onSteerQueued={(id) => {
-                if (activeId) steerQueued(activeId, id);
-              }}
-              onRemoveQueued={(id) => {
-                if (activeId) removeQueued(activeId, id);
-              }}
-              ultra={ultraEnabled}
-              onUltraToggle={onUltraToggle}
-              focusToken={focusToken}
-              disabled={!piReady}
-            />
-          ) : (
-            <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
-              <GlyphBackdrop />
-              <div className="relative z-10 w-full max-w-2xl space-y-6">
-                <h1 className="text-center font-serif text-4xl italic tracking-tight text-foreground">
-                  {heroHeadline}
-                </h1>
-                <Composer
-                  variant="hero"
-                  focusToken={focusToken}
-                  draftKey={activeId ? `chat:${activeId}` : "chat:new"}
-                  disabled={!piReady}
-                  streaming={isStreaming}
-                  modelChoice={modelChoice}
-                  onModelChange={onModelChange}
-                  workspaceDir={workspaceDir}
-                  defaultWorkspace={defaultWorkspace}
-                  onWorkspaceChange={onWorkspaceChange}
-                  onSend={onSend}
-                  onBash={onBash}
-                  onAbort={onAbort}
-                  ultra={ultraEnabled}
-                  onUltraToggle={onUltraToggle}
-                />
+              {error && !hasMessages && (
+                <span className="text-destructive">{error}</span>
+              )}
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                title={t("workspacePanel.openSide")}
+                aria-label={t("workspacePanel.openSide")}
+                data-testid="workspace-open-side"
+                onClick={() => openWorkspacePanelLayout("side")}
+              >
+                <PanelRight className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                title={t("workspacePanel.openBottom")}
+                aria-label={t("workspacePanel.openBottom")}
+                data-testid="workspace-open-bottom"
+                onClick={() => openWorkspacePanelLayout("bottom")}
+              >
+                <PanelBottom className="size-3.5" />
+              </Button>
+            </header>
+            {view === "automations" ? (
+              <AutomationsView
+                automations={automations}
+                defaultWorkspace={defaultWorkspace}
+                onNew={openNewAutomation}
+                onEdit={openEditAutomation}
+                onToggle={onToggleAutomation}
+                onRunNow={onRunAutomation}
+                onDelete={onDeleteAutomation}
+                onOpenConversation={(id) => {
+                  setView("chat");
+                  onSelect(id);
+                }}
+              />
+            ) : view === "plugins" ? (
+              <PluginsView />
+            ) : view === "board" ? (
+              <BoardView
+                conversations={conversations}
+                workspaceFilter={boardWorkspaceFilter}
+                defaultWorkspace={defaultWorkspace}
+                streamingIds={streamingIds}
+                onOpen={onOpenDetail}
+                onArchive={onArchive}
+                onApproveReview={onApproveReview}
+                onRequestChanges={onRequestChanges}
+              />
+            ) : hasMessages ? (
+              <ChatPane
+                convId={activeId}
+                draftKey={activeId ? `chat:${activeId}` : "chat:new"}
+                modelChoice={modelChoice}
+                onModelChange={onModelChange}
+                workspaceDir={workspaceDir}
+                defaultWorkspace={defaultWorkspace}
+                onWorkspaceChange={onWorkspaceChange}
+                onSend={onSend}
+                onBash={onBash}
+                onAbort={onAbort}
+                onRegenerate={retrying ? undefined : onRetry}
+                onRetry={onRetry}
+                onForkMessage={(messageKey, messageIndex) => {
+                  const c = conversationsRef.current.find(
+                    (x) => x.id === activeIdRef.current,
+                  );
+                  if (c) onFork(c, messageKey, messageIndex);
+                }}
+                retrying={retrying}
+                queued={activeId ? queued[activeId] : undefined}
+                onQueue={(text, atts) => {
+                  if (activeId) enqueueMessage(activeId, text, atts);
+                }}
+                onSteerQueued={(id) => {
+                  if (activeId) steerQueued(activeId, id);
+                }}
+                onRemoveQueued={(id) => {
+                  if (activeId) removeQueued(activeId, id);
+                }}
+                ultra={ultraEnabled}
+                onUltraToggle={onUltraToggle}
+                focusToken={focusToken}
+                disabled={!piReady}
+              />
+            ) : (
+              <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
+                <GlyphBackdrop />
+                <div className="relative z-10 w-full max-w-2xl space-y-6">
+                  <h1 className="text-center font-serif text-4xl italic tracking-tight text-foreground">
+                    {heroHeadline}
+                  </h1>
+                  <Composer
+                    variant="hero"
+                    focusToken={focusToken}
+                    draftKey={activeId ? `chat:${activeId}` : "chat:new"}
+                    disabled={!piReady}
+                    streaming={isStreaming}
+                    modelChoice={modelChoice}
+                    onModelChange={onModelChange}
+                    workspaceDir={workspaceDir}
+                    defaultWorkspace={defaultWorkspace}
+                    onWorkspaceChange={onWorkspaceChange}
+                    onSend={onSend}
+                    onBash={onBash}
+                    onAbort={onAbort}
+                    ultra={ultraEnabled}
+                    onUltraToggle={onUltraToggle}
+                  />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+          {renderWorkspaceDock("side")}
         </div>
-        {workspaceOpen && (
-          <WorkspacePanel
-            tabs={workspaceTabs}
-            activeId={workspaceActiveId}
-            workspaceDir={workspaceDir}
-            defaultWorkspace={defaultWorkspace}
-            onSelect={(id) => {
-              setWorkspaceActiveId(id);
-              setWorkspaceOpen(true);
-            }}
-            onClose={closeWorkspaceTab}
-            onClosePanel={() => setWorkspaceOpen(false)}
-            onNewTab={(kind) => openWorkspaceTab(kind, true)}
-            layout={workspaceLayout}
-            onLayoutChange={setWorkspaceLayout}
-            onUpdateBrowserTab={updateBrowserWorkspaceTab}
-            onAnnotate={async (message) => {
-              await onSend(message);
-              setView("chat");
-            }}
-          />
-        )}
+        {renderWorkspaceDock("bottom")}
       </SidebarInset>
     </SidebarProvider>
   );
