@@ -40,7 +40,7 @@ export function ViewToggle({ view, onChange }: Props) {
             className={cn(
               "inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
               active
-                ? "bg-primary text-primary-foreground"
+                ? "bg-[var(--brand)] text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >

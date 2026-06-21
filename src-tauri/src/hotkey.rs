@@ -776,7 +776,6 @@ async fn finish_ptt(app: &AppHandle, runtime: &QuickRuntime) {
                 Some(task) => task.await.unwrap_or_default(),
                 None => crate::doubao::Corpus::default(),
             };
-            let model = settings.voice_cleanup_model.trim().to_string();
             match crate::titling::cleanup_transcript(
                 &key,
                 &text,
@@ -784,7 +783,7 @@ async fn finish_ptt(app: &AppHandle, runtime: &QuickRuntime) {
                 &corpus.hotwords,
                 app_name.as_deref(),
                 corpus.recent.as_deref(),
-                if model.is_empty() { None } else { Some(&model) },
+                None,
             )
             .await
             {

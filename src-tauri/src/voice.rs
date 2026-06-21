@@ -1061,10 +1061,6 @@ pub(crate) fn build_corpus_with(
     // and the correction watcher's +1.2s/+10s re-reads land after it's up.
     crate::ax::wake_frontmost_app();
     let mut corpus = crate::biasing::build(app_data_dir, &settings.voice_hotwords);
-    let table = settings.voice_boosting_table_id.trim();
-    if !table.is_empty() {
-        corpus.boosting_table_id = Some(table.to_string());
-    }
     // Dialog continuity: feed the previous dictation (when history is on) as a
     // `dialog_ctx` entry, so a sentence picked up where the last one left off
     // recognizes consistently. One entry — more dilutes the live focused context.

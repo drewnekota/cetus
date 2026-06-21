@@ -26,9 +26,9 @@ import {
   Monitor,
   Moon,
   Pencil,
-  Plug,
   Plus,
   RotateCw,
+  ServerCog,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -115,7 +115,6 @@ import {
   type TranscriptState,
   type VoiceAsrEngine,
   type VoiceGesture,
-  type VoiceInsertMode,
   type VoicePermissions,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -190,7 +189,7 @@ const SECTION_GROUPS: { labelKey: string; sections: Section[] }[] = [
       { id: "dreaming", labelKey: "nav.dreaming", icon: Moon },
       { id: "skills", labelKey: "nav.skills", icon: Sparkles },
       { id: "slash-commands", labelKey: "nav.slash-commands", icon: SquareSlash },
-      { id: "connectors", labelKey: "nav.connectors", icon: Plug },
+      { id: "connectors", labelKey: "nav.connectors", icon: ServerCog },
     ],
   },
   {
@@ -297,7 +296,7 @@ export function SettingsPage({
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
                     )}
                   >
-                    <Icon className="size-4" />
+                    <Icon className="size-3.5 shrink-0" />
                     {t(s.labelKey)}
                   </button>
                 );
@@ -1276,17 +1275,6 @@ function AppearanceSection() {
         </div>
       </div>
 
-      {/* Preview of the three font roles the app uses. */}
-      <div className="mt-8 space-y-2 rounded-lg border border-border p-4">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {t("appearance.preview")}
-        </p>
-        <p className="font-sans text-base">
-          The quick brown fox jumps over the lazy dog.
-        </p>
-        <p className="font-serif text-xl italic">Key of the Twilight</p>
-        <p className="font-mono text-sm">const cetus = "hello, world"; // 1234567890</p>
-      </div>
     </section>
   );
 }
@@ -1305,13 +1293,31 @@ function VoiceSection() {
     /mac/i.test(navigator.platform || navigator.userAgent || "");
 
   useEffect(() => {
-    api.getQuickSettings().then(setSettings).catch(() => {});
+    api
+      .getQuickSettings()
+      .then((s) =>
+        setSettings({
+          ...s,
+          voiceInsertMode: "type",
+          voiceCleanup: true,
+          voiceCleanupModel: "",
+          voiceBoostingTableId: "",
+        }),
+      )
+      .catch(() => {});
     api.voicePermissions().then(setPerms).catch(() => {});
     api.accessibilityTrusted().then(setTrusted).catch(() => {});
   }, []);
 
   function update(patch: Partial<QuickSettings>) {
-    const next = { ...settings, ...patch };
+    const next = {
+      ...settings,
+      ...patch,
+      voiceInsertMode: "type" as const,
+      voiceCleanup: true,
+      voiceCleanupModel: "",
+      voiceBoostingTableId: "",
+    };
     setSettings(next);
     api.setQuickSettings(next).catch(() => {});
   }
@@ -1469,45 +1475,6 @@ function VoiceSection() {
           )}
         </div>
 
-        <SegmentRow
-          label={t("voice.insert.label")}
-          description={t("voice.insert.description")}
-          value={settings.voiceInsertMode}
-          onChange={(v) => update({ voiceInsertMode: v as VoiceInsertMode })}
-          options={[
-            { value: "type", label: t("voice.insert.opt.type") },
-            { value: "paste", label: t("voice.insert.opt.paste") },
-          ]}
-        />
-
-        <div className="rounded-lg border border-border">
-          <ToggleRow
-            id="voice-cleanup"
-            label={t("voice.cleanup.label")}
-            description={t("voice.cleanup.description")}
-            checked={settings.voiceCleanup}
-            onCheckedChange={(v) => update({ voiceCleanup: v })}
-            boxed
-          />
-          {settings.voiceCleanup && (
-            <div className="space-y-2 border-t border-border px-3 py-2.5">
-              <Label htmlFor="voice-cleanup-model" className="text-xs font-medium">
-                {t("voice.cleanup.modelLabel")}
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                {t("voice.cleanup.modelHint")}
-              </p>
-              <Input
-                id="voice-cleanup-model"
-                value={settings.voiceCleanupModel}
-                onChange={(e) => update({ voiceCleanupModel: e.target.value })}
-                placeholder="doubao-seed-2-0-lite-260215"
-                className="text-xs"
-              />
-            </div>
-          )}
-        </div>
-
         <div className="rounded-lg border border-border">
           <ToggleRow
             id="voice-start-sound"
@@ -1543,19 +1510,6 @@ function VoiceSection() {
                   onChange={(e) => update({ voiceHotwords: e.target.value })}
                   placeholder={t("voice.biasing.hotwordsPlaceholder")}
                   rows={4}
-                  className="text-xs"
-                />
-                <Label htmlFor="voice-boosting-table" className="text-xs font-medium">
-                  {t("voice.biasing.tableLabel")}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  {t("voice.biasing.tableHint")}
-                </p>
-                <Input
-                  id="voice-boosting-table"
-                  value={settings.voiceBoostingTableId}
-                  onChange={(e) => update({ voiceBoostingTableId: e.target.value })}
-                  placeholder={t("voice.biasing.tablePlaceholder")}
                   className="text-xs"
                 />
               </div>
@@ -3116,6 +3070,16 @@ function DiscoveredSkillsSection({ open }: { open: boolean }) {
   const [skills, setSkills] = useState<DiscoveredSkill[] | null>(null);
   const [discovery, setDiscovery] = useState<DiscoverySettings | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const repoSkills = skills?.filter((s) => s.scope === "repo") ?? [];
+  const userSkills = skills?.filter((s) => s.scope !== "repo") ?? [];
+  const repoGroups = Array.from(
+    repoSkills.reduce((groups, skill) => {
+      const group = groups.get(skill.root) ?? [];
+      group.push(skill);
+      groups.set(skill.root, group);
+      return groups;
+    }, new Map<string, DiscoveredSkill[]>()),
+  );
 
   const reload = useCallback(async () => {
     try {
@@ -3203,21 +3167,63 @@ function DiscoveredSkillsSection({ open }: { open: boolean }) {
         </h4>
 
         {skills && skills.length > 0 && (
-          <SettingsCardGrid className="mt-3">
-            {skills.map((s) => (
-              <DiscoveredSkillRow
-                key={s.id}
-                skill={s}
+          <div className="mt-3 space-y-5">
+            {repoGroups.map(([root, group]) => (
+              <DiscoveredSkillGroup
+                key={root}
+                title={t("skills.discovered.repoTitle")}
+                root={root}
+                skills={group}
                 onReveal={(id) =>
                   api.revealDiscoveredSkill(id).catch((e) => setError(String(e)))
                 }
               />
             ))}
-          </SettingsCardGrid>
+            {userSkills.length > 0 && (
+              <DiscoveredSkillGroup
+                title={t("skills.discovered.userTitle")}
+                root={discovery?.skillsFolder}
+                skills={userSkills}
+                onReveal={(id) =>
+                  api.revealDiscoveredSkill(id).catch((e) => setError(String(e)))
+                }
+              />
+            )}
+          </div>
         )}
       </div>
 
       {error && <div className="mt-3 text-xs text-destructive">{error}</div>}
+    </div>
+  );
+}
+
+function DiscoveredSkillGroup({
+  title,
+  root,
+  skills,
+  onReveal,
+}: {
+  title: string;
+  root?: string;
+  skills: DiscoveredSkill[];
+  onReveal: (id: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex min-w-0 items-baseline gap-2">
+        <h5 className="shrink-0 text-xs font-medium text-foreground">{title}</h5>
+        {root && (
+          <span className="truncate font-mono text-[11px] text-muted-foreground">
+            {root}
+          </span>
+        )}
+      </div>
+      <SettingsCardGrid>
+        {skills.map((s) => (
+          <DiscoveredSkillRow key={s.id} skill={s} onReveal={onReveal} />
+        ))}
+      </SettingsCardGrid>
     </div>
   );
 }
@@ -3271,7 +3277,9 @@ function DiscoveredSkillRow({
           )}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
             <span className="rounded bg-muted px-1.5 py-0.5 font-medium">
-              {t("skills.discovered.badge")}
+              {skill.scope === "repo"
+                ? t("skills.discovered.repoBadge")
+                : t("skills.discovered.userBadge")}
             </span>
           </div>
         </button>
@@ -4050,7 +4058,7 @@ function ConnectorRow({
       )}
     >
       <div className="flex items-start gap-3 px-3 py-2.5">
-        <Plug className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <ServerCog className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <p className="truncate text-sm font-medium">{connector.name}</p>

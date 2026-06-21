@@ -10,9 +10,9 @@ import {
 import {
   Archive,
   ArchiveRestore,
+  Blocks,
   Clock,
   Folder,
-  Plug,
   PlusCircle,
   Settings as SettingsIcon,
 } from "lucide-react";
@@ -172,7 +172,7 @@ export const AppSidebar = memo(function AppSidebar({
               isActive={view === "plugins"}
               onClick={() => onViewChange("plugins")}
             >
-              <Plug />
+              <Blocks />
               <span>{t("nav.plugins")}</span>
               <Kbd className="ml-auto border-transparent">⌘4</Kbd>
             </SidebarMenuButton>

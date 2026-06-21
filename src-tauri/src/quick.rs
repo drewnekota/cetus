@@ -157,39 +157,47 @@ impl Default for QuickSettings {
 const SETTINGS_KEY: &str = "quick_launch";
 
 pub fn load_settings(store: &crate::store::Store) -> QuickSettings {
-    store
+    let mut settings: QuickSettings = store
         .get_setting(SETTINGS_KEY)
         .ok()
         .flatten()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    settings.voice_cleanup = true;
+    settings.voice_cleanup_model.clear();
+    settings.voice_insert_mode = default_voice_insert_mode();
+    settings.voice_boosting_table_id.clear();
+    settings
 }
 
 fn save_settings(store: &crate::store::Store, s: &QuickSettings) -> anyhow::Result<()> {
-    let json = serde_json::to_string(s)?;
+    let mut s = s.clone();
+    s.voice_cleanup = true;
+    s.voice_cleanup_model.clear();
+    s.voice_insert_mode = default_voice_insert_mode();
+    s.voice_boosting_table_id.clear();
+    let json = serde_json::to_string(&s)?;
     store.set_setting(SETTINGS_KEY, &json)?;
     Ok(())
 }
 
-/// One-time migration: cleanup + context biasing flipped to default-ON for the
+/// One-time migration: context biasing flipped to default-ON for the
 /// voice-accuracy overhaul, but `save_settings` serializes the full struct, so
 /// every pre-existing settings blob carries an explicit `false` that a serde
-/// default can't reach. Flip both once and stamp a marker; users who turn them
-/// back off afterwards stay off.
+/// default can't reach. Cleanup is always normalized on load/save.
 pub fn migrate_voice_defaults(store: &crate::store::Store) {
     const MARKER: &str = "voice_defaults_v2_migrated";
     if matches!(store.get_setting(MARKER), Ok(Some(_))) {
         return;
     }
     let mut s = load_settings(store);
-    if !s.voice_cleanup || !s.voice_context_biasing {
-        s.voice_cleanup = true;
+    if !s.voice_context_biasing {
         s.voice_context_biasing = true;
         if let Err(e) = save_settings(store, &s) {
             tracing::warn!("voice defaults migration failed: {e}");
             return; // retry next launch; marker not set
         }
-        tracing::info!("voice defaults migration: cleanup + context biasing enabled");
+        tracing::info!("voice defaults migration: context biasing enabled");
     }
     let _ = store.set_setting(MARKER, "1");
 }
@@ -256,13 +264,6 @@ pub fn voice_gesture_code(g: &str) -> u8 {
 // Transcript insertion strategy (see text_input.rs).
 pub const INSERT_TYPE: u8 = 0;
 pub const INSERT_PASTE: u8 = 1;
-
-pub fn insert_mode_code(m: &str) -> u8 {
-    match m {
-        "paste" => INSERT_PASTE,
-        _ => INSERT_TYPE,
-    }
-}
 
 // Live dictation session kind, owned by the voice worker (see hotkey.rs) and
 // read by the polling monitor so it never starts push-to-talk over an existing
@@ -349,8 +350,8 @@ impl QuickRuntime {
             last_open_ms: Arc::new(AtomicI64::new(0)),
             voice_enabled: Arc::new(AtomicBool::new(s.voice_enabled)),
             voice_gesture: Arc::new(AtomicU8::new(voice_gesture_code(&s.voice_gesture))),
-            voice_insert_mode: Arc::new(AtomicU8::new(insert_mode_code(&s.voice_insert_mode))),
-            voice_cleanup: Arc::new(AtomicBool::new(s.voice_cleanup)),
+            voice_insert_mode: Arc::new(AtomicU8::new(INSERT_TYPE)),
+            voice_cleanup: Arc::new(AtomicBool::new(true)),
             voice_asr_engine: Arc::new(AtomicU8::new(asr_engine_code(&s.voice_asr_engine))),
             voice_start_sound: Arc::new(AtomicBool::new(s.voice_start_sound)),
             voice_hf_gen: Arc::new(AtomicU32::new(0)),
@@ -377,9 +378,8 @@ impl QuickRuntime {
             self.ptt_held.store(false, Ordering::Relaxed);
             self.ptt_dirty.store(false, Ordering::Relaxed);
         }
-        self.voice_insert_mode
-            .store(insert_mode_code(&s.voice_insert_mode), Ordering::Relaxed);
-        self.voice_cleanup.store(s.voice_cleanup, Ordering::Relaxed);
+        self.voice_insert_mode.store(INSERT_TYPE, Ordering::Relaxed);
+        self.voice_cleanup.store(true, Ordering::Relaxed);
         self.voice_asr_engine
             .store(asr_engine_code(&s.voice_asr_engine), Ordering::Relaxed);
         self.voice_start_sound

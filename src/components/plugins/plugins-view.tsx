@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Chrome, ExternalLink, FolderOpen, Plug, TestTube2, Trash2 } from "lucide-react";
+import { Blocks, Chrome, ExternalLink, FolderOpen, TestTube2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -144,7 +144,7 @@ export function PluginsView() {
           </div>
         ) : plugins.length === 0 ? (
           <div className="mt-4 flex h-64 flex-col items-center justify-center rounded-md border border-border text-center">
-            <Plug className="mb-3 size-8 text-muted-foreground" />
+            <Blocks className="mb-3 size-8 text-muted-foreground" />
             <p className="text-sm font-medium">{t("plugins.empty")}</p>
           </div>
         ) : (

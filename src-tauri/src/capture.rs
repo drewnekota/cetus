@@ -63,7 +63,7 @@ fn default_interval() -> u64 {
     8
 }
 fn default_retention() -> u32 {
-    14
+    7
 }
 fn default_true() -> bool {
     true
@@ -75,7 +75,7 @@ impl Default for CaptureSettings {
             enabled: false,
             interval_seconds: 8,
             excluded_apps: Vec::new(),
-            retention_days: 14,
+            retention_days: default_retention(),
             ocr_enabled: true,
         }
     }
@@ -257,50 +257,58 @@ pub fn ocr_screen_now(app_data: &Path) -> Option<String> {
     text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
 }
 
-/// Capture the primary display via the native `screencapture` tool, then
-/// downscale + JPEG-encode in-process. Same output contract as
-/// [`capture_primary_jpeg`], but a different grab path: on recent macOS xcap's
-/// ScreenCaptureKit path (see [`capture_primary`]) stalls for *seconds* per frame
-/// (~3.5s measured on Darwin 25), whereas `screencapture` uses Apple's optimal
-/// path and returns in ~100ms. The launcher — where the grab is the panel's
-/// first-paint cost — uses this; the one subprocess spawn + temp file are well
-/// worth the ~30x speedup. macOS only.
+/// Capture the primary display via native macOS tools and return a bounded JPEG
+/// for the quick launcher's first-paint path. `screencapture` grabs the frame in
+/// ~100ms on current macOS; `sips -Z` keeps the resize/JPEG work in Apple's
+/// optimized image stack. Avoid doing this resize through the Rust `image` crate
+/// in debug builds: that pure-Rust path takes multiple seconds on large Retina
+/// frames, which makes the screenshot launcher feel stuck.
 #[cfg(target_os = "macos")]
 pub fn capture_primary_jpeg_native(max_edge: u32) -> Option<Vec<u8>> {
+    let started = Instant::now();
     let path = std::env::temp_dir().join(format!(
         "cetus-launch-shot-{}-{}.jpg",
         std::process::id(),
         now_ms()
     ));
+    let grab_started = Instant::now();
     let ok = std::process::Command::new("/usr/sbin/screencapture")
         .args(["-x", "-t", "jpg"])
         .arg(&path)
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
+    let grab_ms = grab_started.elapsed().as_millis();
     if !ok {
         let _ = std::fs::remove_file(&path);
+        tracing::info!("capture_primary_jpeg_native: screencapture failed after {grab_ms}ms");
         return None;
     }
+    let resize_started = Instant::now();
+    let resized = std::process::Command::new("/usr/bin/sips")
+        .args(["-Z", &max_edge.to_string()])
+        .arg(&path)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let resize_ms = resize_started.elapsed().as_millis();
+    if !resized {
+        tracing::debug!("capture_primary_jpeg_native: sips resize failed; using original frame");
+    }
+    let read_started = Instant::now();
     let bytes = std::fs::read(&path).ok();
+    let read_ms = read_started.elapsed().as_millis();
     let _ = std::fs::remove_file(&path);
     let bytes = bytes?;
     if bytes.is_empty() {
         return None;
     }
-    // Decode → downscale → re-encode so the IPC payload and vision input stay
-    // bounded, honoring the same `max_edge` contract as the xcap path.
-    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
-    let resized = downscale(&img, max_edge);
-    let rgb = image::DynamicImage::ImageRgba8(resized).to_rgb8();
-    let mut out: Vec<u8> = Vec::new();
-    image::DynamicImage::ImageRgb8(rgb)
-        .write_to(
-            &mut std::io::Cursor::new(&mut out),
-            image::ImageFormat::Jpeg,
-        )
-        .ok()?;
-    (!out.is_empty()).then_some(out)
+    tracing::debug!(
+        "capture_primary_jpeg_native: grab={grab_ms}ms resize={resize_ms}ms read={read_ms}ms total={}ms bytes={}",
+        started.elapsed().as_millis(),
+        bytes.len()
+    );
+    Some(bytes)
 }
 
 /// Capture the primary monitor as an RGBA image. We lift the raw bytes out of

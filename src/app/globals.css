@@ -72,7 +72,7 @@
 :root {
   --surface: #fcfcfd;
   --ink: #1b1b1b;
-  --brand: #a58bfa;
+  --brand: #827be6;
   --diff-added: #52a450;
   --diff-removed: #c94446;
   --skill: #8160d8;
@@ -127,7 +127,7 @@
 .dark {
   --surface: #0f0f11;
   --ink: #e3e4e6;
-  --brand: #a58bfa;
+  --brand: #827be6;
   --diff-added: #69c967;
   --diff-removed: #ff7e78;
   --skill: #c2a1ff;

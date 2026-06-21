@@ -154,6 +154,10 @@ fn synth_cmd_v() {
 // Virtual keycode for 'c' (ANSI keyboard).
 #[cfg(target_os = "macos")]
 const KEYCODE_C: u16 = 0x08;
+#[cfg(target_os = "macos")]
+const COPY_SELECTION_POLL_MS: u64 = 10;
+#[cfg(target_os = "macos")]
+const COPY_SELECTION_MAX_POLLS: usize = 8;
 
 /// Synthesize a ⌘C to the focused app.
 #[cfg(target_os = "macos")]
@@ -185,24 +189,31 @@ pub(crate) fn copy_selection_via_clipboard() -> Option<String> {
     use objc2::runtime::{AnyClass, AnyObject};
     use std::ffi::CStr;
     use std::os::raw::c_char;
+    use std::time::Instant;
 
     unsafe {
+        let started = Instant::now();
         let pb_cls = AnyClass::get(c"NSPasteboard")?;
         let pb: *mut AnyObject = msg_send![pb_cls, generalPasteboard];
         if pb.is_null() {
             return None;
         }
         let before: isize = msg_send![pb, changeCount];
+        let snapshot_started = Instant::now();
         let saved = snapshot_pasteboard(pb);
+        let snapshot_ms = snapshot_started.elapsed().as_millis();
 
+        let copy_started = Instant::now();
         synth_cmd_c();
 
         // Wait (bounded) for the app to service the copy; break the instant the
-        // pasteboard changes. Most apps respond in tens of ms.
+        // pasteboard changes. Most apps respond in tens of ms. This runs on the
+        // launcher first-paint path, so keep the miss case below a frame-budget
+        // multiple instead of waiting hundreds of ms when there is no selection.
         let mut text: Option<String> = None;
         let mut copied = false;
-        for _ in 0..30 {
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        for _ in 0..COPY_SELECTION_MAX_POLLS {
+            std::thread::sleep(std::time::Duration::from_millis(COPY_SELECTION_POLL_MS));
             let now: isize = msg_send![pb, changeCount];
             if now == before {
                 continue;
@@ -218,12 +229,21 @@ pub(crate) fn copy_selection_via_clipboard() -> Option<String> {
             }
             break;
         }
+        let copy_wait_ms = copy_started.elapsed().as_millis();
         // Only disturbed the clipboard if a copy actually landed — restore then.
+        let restore_started = Instant::now();
         if copied {
             restore_pasteboard(pb, &saved);
         }
+        let restore_ms = restore_started.elapsed().as_millis();
         release_snapshot(saved);
-        text.filter(|t| !t.trim().is_empty())
+        let selected = text.filter(|t| !t.trim().is_empty());
+        tracing::info!(
+            "copy_selection_via_clipboard: copied={copied} text_len={} snapshot={snapshot_ms}ms wait={copy_wait_ms}ms restore={restore_ms}ms total={}ms",
+            selected.as_ref().map(|t| t.len()).unwrap_or(0),
+            started.elapsed().as_millis()
+        );
+        selected
     }
 }
 

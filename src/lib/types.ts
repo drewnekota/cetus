@@ -393,14 +393,18 @@ export interface SkillState {
   entries: SkillEntry[];
 }
 
-/** A skill auto-discovered from the global `~/.agents/skills` dir (installed via
- *  the `skills` CLI). pi loads these automatically; cetus shows them read-only.
+/** A skill auto-discovered from a user or repo `.agents/skills` dir. pi loads
+ *  these automatically; cetus shows them read-only.
  *  Mirrors the Rust `DiscoveredSkill` (src-tauri/src/skills.rs). */
 export interface DiscoveredSkill {
-  /** The skill's folder name under `~/.agents/skills`. */
+  /** Stable id used by read/reveal commands. */
   id: string;
   name: string;
   description: string;
+  /** `user` for the configured skills folder, `repo` for workspace `.agents/skills`. */
+  scope: "user" | "repo";
+  /** Absolute directory whose child folder contains this skill. */
+  root: string;
   /** Absolute path to the skill's `SKILL.md`. */
   path: string;
 }

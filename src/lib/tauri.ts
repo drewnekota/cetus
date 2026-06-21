@@ -166,6 +166,7 @@ export const api = {
   pickWorkspaceDir: () => invoke<string | null>("pick_workspace_dir"),
   listWorkspaceFiles: (workspaceDir?: string | null) =>
     invoke<WorkspaceFileEntry[]>("list_workspace_files", { workspaceDir: workspaceDir ?? null }),
+  readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
   /** Open an http(s)/mailto link in the user's default browser. */
   openExternal: (url: string) => invoke<void>("open_external", { url }),
   /** Open an http(s) URL in Cetus's own top-level browser webview window. */

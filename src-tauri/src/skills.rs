@@ -25,6 +25,8 @@
 use crate::store::{now_ms, Store};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use tauri::State;
 use uuid::Uuid;
@@ -123,6 +125,42 @@ fn skill_dir(app_data_dir: &Path, id: &str) -> PathBuf {
     library_dir(app_data_dir).join(id)
 }
 
+fn short_path_hash(path: &Path) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.to_string_lossy().hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
+fn repo_skill_roots_for_workspace(workspace: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(workspace) = workspace {
+        add_repo_skill_root_paths_from(workspace, &mut roots, &mut seen);
+    }
+    roots
+}
+
+fn add_repo_skill_root_paths_from(
+    start: &Path,
+    roots: &mut Vec<PathBuf>,
+    seen: &mut HashSet<String>,
+) {
+    for ancestor in start.ancestors() {
+        let root = ancestor.join(".agents").join("skills");
+        if !root.is_dir() {
+            continue;
+        }
+        let key = root
+            .canonicalize()
+            .unwrap_or_else(|_| root.clone())
+            .to_string_lossy()
+            .to_string();
+        if seen.insert(key) {
+            roots.push(root);
+        }
+    }
+}
+
 // ---- State persistence -----------------------------------------------------
 
 pub fn load_state(store: &Store) -> SkillState {
@@ -157,6 +195,7 @@ pub fn resync_active_dir(app_data_dir: &Path, store: &Store) {
         &active_skills_dir(app_data_dir),
         store,
         &mut budget,
+        None,
     );
 }
 
@@ -170,7 +209,7 @@ pub fn resync_active_dir(app_data_dir: &Path, store: &Store) {
 /// others or break chat.
 pub fn materialize_skills_into(app_data_dir: &Path, target: &Path, store: &Store) {
     let mut budget = SkillPromptBudget::from_env();
-    materialize_skills_into_with_budget(app_data_dir, target, store, &mut budget);
+    materialize_skills_into_with_budget(app_data_dir, target, store, &mut budget, None);
 }
 
 /// Shared budget for skills that pi exposes directly in the system prompt. Once
@@ -244,6 +283,7 @@ pub fn materialize_skills_into_with_budget(
     target: &Path,
     store: &Store,
     budget: &mut SkillPromptBudget,
+    workspace: Option<&Path>,
 ) {
     let state = load_state(store);
     // Start clean: only the materialised set should be present.
@@ -271,13 +311,22 @@ pub fn materialize_skills_into_with_budget(
     // same-named skills by name at load time.
     let disc = crate::discovery::load_settings(store);
     if disc.skills_load_discovered {
-        copy_discovered_skills(Path::new(&disc.skills_folder), target, budget);
+        copy_discovered_skills(Path::new(&disc.skills_folder), target, budget, "user");
+        for root in repo_skill_roots_for_workspace(workspace) {
+            let ns = format!("repo-{}", short_path_hash(&root));
+            copy_discovered_skills(&root, target, budget, &ns);
+        }
     }
     budget.log_if_truncated("managed/discovered");
 }
 
-/// Copy each `SKILL.md` folder under `folder` into `target` as `discovered-<name>`.
-fn copy_discovered_skills(folder: &Path, target: &Path, budget: &mut SkillPromptBudget) {
+/// Copy each `SKILL.md` folder under `folder` into `target` with a source namespace.
+fn copy_discovered_skills(
+    folder: &Path,
+    target: &Path,
+    budget: &mut SkillPromptBudget,
+    namespace: &str,
+) {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return; // folder missing / unreadable — nothing to load
     };
@@ -287,7 +336,7 @@ fn copy_discovered_skills(folder: &Path, target: &Path, budget: &mut SkillPrompt
         if name.starts_with('.') || !src.is_dir() || !src.join("SKILL.md").exists() {
             continue;
         }
-        let dst = target.join(format!("discovered-{name}"));
+        let dst = target.join(format!("discovered-{namespace}-{name}"));
         if dst.exists() {
             continue;
         }
@@ -906,24 +955,46 @@ fn open_in_file_browser(path: &Path) -> CmdResult<()> {
     Ok(())
 }
 
-// ---- Discovered skills (~/.agents/skills) ----------------------------------
+// ---- Discovered skills (user + repo .agents/skills) ------------------------
 //
-// pi's package manager auto-loads skills from the *global* agents dir
-// `~/.agents/skills` (and ancestor `.agents/skills`) — the set installed by the
-// `skills` CLI — on top of cetus's own library. Those skills are live in chat but
-// cetus never wrote them, so they don't appear in the managed list above. We
-// surface them here read-only: list them, render their `SKILL.md`, and reveal
-// the folder. Managing them (enable/uninstall) stays with the `skills` CLI.
+// pi/Codex-style skill discovery has two read-only sources outside cetus's
+// managed library: user skills (the configured `~/.agents/skills`-style folder)
+// and repo skills (`.agents/skills` under a workspace ancestor). Both can be live
+// in chat but cetus never wrote them, so we surface them here read-only: list
+// them, render their `SKILL.md`, and reveal the folder.
 
-/// One auto-discovered skill from `~/.agents/skills`. `id` is the folder name (a
-/// single path component); `path` is the absolute `SKILL.md` for display/open.
+/// One auto-discovered skill. `id` encodes source + root hash + folder so same
+/// folder names in user/repo roots can be read/revealed unambiguously.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredSkill {
     pub id: String,
     pub name: String,
     pub description: String,
+    pub scope: String,
+    pub root: String,
     pub path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiscoveredScope {
+    User,
+    Repo,
+}
+
+impl DiscoveredScope {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Repo => "repo",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DiscoveredRoot {
+    scope: DiscoveredScope,
+    path: PathBuf,
 }
 
 /// Reject anything that isn't a single, plain folder name so an `id` from the UI
@@ -938,44 +1009,166 @@ fn safe_component(id: &str) -> Option<&str> {
     Some(id)
 }
 
-/// Scan `~/.agents/skills` for `<name>/SKILL.md`, returning the metadata for each.
+fn discovered_skill_id(scope: DiscoveredScope, root: &Path, folder: &str) -> String {
+    format!("{}:{}:{folder}", scope.as_str(), short_path_hash(root))
+}
+
+fn parse_discovered_skill_id(id: &str) -> Option<(Option<DiscoveredScope>, Option<String>, &str)> {
+    let mut parts = id.splitn(3, ':');
+    let first = parts.next()?;
+    let second = parts.next();
+    let third = parts.next();
+    match (first, second, third) {
+        ("user", Some(hash), Some(folder)) => {
+            Some((Some(DiscoveredScope::User), Some(hash.to_string()), folder))
+        }
+        ("repo", Some(hash), Some(folder)) => {
+            Some((Some(DiscoveredScope::Repo), Some(hash.to_string()), folder))
+        }
+        _ => Some((None, None, id)), // Back-compat for old folder-only ids.
+    }
+}
+
+fn discovered_roots(state: &AppState) -> Vec<DiscoveredRoot> {
+    let disc = crate::discovery::load_settings(&state.store);
+    let user_root = PathBuf::from(disc.skills_folder);
+    let user_key = user_root
+        .canonicalize()
+        .unwrap_or_else(|_| user_root.clone())
+        .to_string_lossy()
+        .to_string();
+
+    let mut roots = vec![DiscoveredRoot {
+        scope: DiscoveredScope::User,
+        path: user_root,
+    }];
+    let mut seen = HashSet::from([user_key]);
+
+    if let Ok(cwd) = std::env::current_dir() {
+        add_repo_skill_roots_from(&cwd, &mut roots, &mut seen);
+    }
+    add_repo_skill_roots_from(&state.default_workspace, &mut roots, &mut seen);
+    if let Ok(convs) = state.store.list(false) {
+        for conv in convs.into_iter().take(50) {
+            add_repo_skill_roots_from(Path::new(&conv.workspace_dir), &mut roots, &mut seen);
+        }
+    }
+
+    roots
+}
+
+fn add_repo_skill_roots_from(
+    start: &Path,
+    roots: &mut Vec<DiscoveredRoot>,
+    seen: &mut HashSet<String>,
+) {
+    let mut path_roots = Vec::new();
+    let mut path_seen = HashSet::new();
+    add_repo_skill_roots_from_path(start, &mut path_roots, &mut path_seen);
+    for path in path_roots {
+        let key = path
+            .canonicalize()
+            .unwrap_or_else(|_| path.clone())
+            .to_string_lossy()
+            .to_string();
+        if seen.insert(key) {
+            roots.push(DiscoveredRoot {
+                scope: DiscoveredScope::Repo,
+                path,
+            });
+        }
+    }
+}
+
+fn add_repo_skill_roots_from_path(
+    start: &Path,
+    roots: &mut Vec<PathBuf>,
+    seen: &mut HashSet<String>,
+) {
+    for ancestor in start.ancestors() {
+        let root = ancestor.join(".agents").join("skills");
+        if !root.is_dir() {
+            continue;
+        }
+        let key = root
+            .canonicalize()
+            .unwrap_or_else(|_| root.clone())
+            .to_string_lossy()
+            .to_string();
+        if seen.insert(key) {
+            roots.push(root);
+        }
+    }
+}
+
+fn resolve_discovered_skill_md(state: &AppState, id: &str) -> CmdResult<PathBuf> {
+    let (scope, hash, folder) = parse_discovered_skill_id(id).ok_or("invalid skill id")?;
+    let comp = safe_component(folder).ok_or("invalid skill id")?;
+    let roots = discovered_roots(state);
+    for root in roots {
+        if let Some(want_scope) = scope {
+            if root.scope != want_scope {
+                continue;
+            }
+        }
+        if let Some(want_hash) = hash.as_deref() {
+            if short_path_hash(&root.path) != want_hash {
+                continue;
+            }
+        }
+        let md = root.path.join(comp).join("SKILL.md");
+        if md.exists() {
+            return Ok(md);
+        }
+    }
+    Err("skill folder is missing".into())
+}
+
+/// Scan discovered roots for `<name>/SKILL.md`, returning metadata for each.
 /// Best-effort and read-only: missing dir → empty list; an unreadable entry is
 /// skipped. Name falls back to the folder name when frontmatter has none.
 #[tauri::command]
 pub async fn list_discovered_skills(state: State<'_, AppState>) -> CmdResult<Vec<DiscoveredSkill>> {
-    let root = PathBuf::from(crate::discovery::load_settings(&state.store).skills_folder);
-    let Ok(read) = std::fs::read_dir(&root) else {
-        return Ok(Vec::new()); // dir absent → nothing installed globally
-    };
     let mut out = Vec::new();
-    for entry in read.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+    for root in discovered_roots(&state) {
+        let Ok(read) = std::fs::read_dir(&root.path) else {
             continue;
-        }
-        let folder = entry.file_name().to_string_lossy().to_string();
-        // Skip dotfiles / lock files masquerading as entries.
-        if folder.starts_with('.') {
-            continue;
-        }
-        let skill_md = entry.path().join("SKILL.md");
-        let Ok(md) = std::fs::read_to_string(&skill_md) else {
-            continue; // not a skill folder
         };
-        let (fm_name, fm_desc) = parse_frontmatter(&md);
-        let name = clamp(&fm_name.unwrap_or_else(|| folder.clone()), 120);
-        let name = if name.is_empty() {
-            folder.clone()
-        } else {
-            name
-        };
-        out.push(DiscoveredSkill {
-            id: folder,
-            name,
-            description: clamp(&fm_desc.unwrap_or_default(), 400),
-            path: skill_md.to_string_lossy().to_string(),
-        });
+        for entry in read.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let folder = entry.file_name().to_string_lossy().to_string();
+            // Skip dotfiles / lock files masquerading as entries.
+            if folder.starts_with('.') {
+                continue;
+            }
+            let skill_md = entry.path().join("SKILL.md");
+            let Ok(md) = std::fs::read_to_string(&skill_md) else {
+                continue; // not a skill folder
+            };
+            let (fm_name, fm_desc) = parse_frontmatter(&md);
+            let name = clamp(&fm_name.unwrap_or_else(|| folder.clone()), 120);
+            let name = if name.is_empty() {
+                folder.clone()
+            } else {
+                name
+            };
+            out.push(DiscoveredSkill {
+                id: discovered_skill_id(root.scope, &root.path, &folder),
+                name,
+                description: clamp(&fm_desc.unwrap_or_default(), 400),
+                scope: root.scope.as_str().to_string(),
+                root: root.path.to_string_lossy().to_string(),
+                path: skill_md.to_string_lossy().to_string(),
+            });
+        }
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by(|a, b| {
+        a.scope
+            .cmp(&b.scope)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
     Ok(out)
 }
 
@@ -983,9 +1176,7 @@ pub async fn list_discovered_skills(state: State<'_, AppState>) -> CmdResult<Vec
 /// skill can't blow up the UI; `id` is validated to stay inside the dir.
 #[tauri::command]
 pub async fn read_discovered_skill(state: State<'_, AppState>, id: String) -> CmdResult<String> {
-    let comp = safe_component(&id).ok_or("invalid skill id")?;
-    let root = PathBuf::from(crate::discovery::load_settings(&state.store).skills_folder);
-    let md = root.join(comp).join("SKILL.md");
+    let md = resolve_discovered_skill_md(&state, &id)?;
     let body = std::fs::read_to_string(&md).map_err(|e| format!("can't read SKILL.md: {e}"))?;
     Ok(clamp(&body, MAX_BODY_CHARS))
 }
@@ -993,9 +1184,11 @@ pub async fn read_discovered_skill(state: State<'_, AppState>, id: String) -> Cm
 /// Reveal a discovered skill's folder in the OS file browser.
 #[tauri::command]
 pub async fn reveal_discovered_skill(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    let comp = safe_component(&id).ok_or("invalid skill id")?;
-    let root = PathBuf::from(crate::discovery::load_settings(&state.store).skills_folder);
-    let dir = root.join(comp);
+    let md = resolve_discovered_skill_md(&state, &id)?;
+    let dir = md
+        .parent()
+        .ok_or_else(|| "skill folder is missing".to_string())?
+        .to_path_buf();
     if !dir.exists() {
         return Err("skill folder is missing".into());
     }

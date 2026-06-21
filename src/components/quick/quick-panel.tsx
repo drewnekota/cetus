@@ -299,7 +299,7 @@ export function QuickPanel() {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden rounded-[18px] bg-[color-mix(in_oklab,var(--surface),transparent_18%)] font-medium text-foreground ring-1 ring-[var(--ink)]/[0.06] dark:bg-[color-mix(in_oklab,var(--card),transparent_28%)] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:text-[11px]">
+    <div className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground ring-1 ring-[var(--ink)]/[0.04] dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-white/[0.06] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:text-[11px]">
       {/* The input owns the whole region above the action strip: the textarea
           fills it so typing wraps and uses the full height, and the screenshot
           chip (when present) tucks in at the bottom of the same region. */}
@@ -386,7 +386,7 @@ export function QuickPanel() {
       </div>
 
       {/* Thin, muted action strip — subordinate to the input. */}
-      <div className="flex items-center gap-2.5 border-t border-black/10 px-4 py-2.5 text-[13px] text-muted-foreground dark:border-white/10">
+      <div className="flex items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-[13px] text-muted-foreground dark:border-white/[0.06]">
         <Segmented
           value={sessionMode}
           onChange={setSessionMode}

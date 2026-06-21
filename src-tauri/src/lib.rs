@@ -179,7 +179,7 @@ impl AppState {
         // PI_CODING_AGENT_DIR / CETUS_MCP_CONFIG) means later skill/connector toggles
         // never disturb an existing chat — and keeps each conversation's tool +
         // skills prefix byte-stable for DeepSeek's prompt cache.
-        for (k, v) in self.conv_agent_env(conv_id) {
+        for (k, v) in self.conv_agent_env(conv_id, &workspace) {
             env.push((k, v));
         }
         // Ultra Code (global toggle) appends the workflow-authoring contract to
@@ -245,7 +245,7 @@ impl AppState {
     /// existence is the snapshot: the first spawn copies the then-current enabled
     /// skills + connectors in; subsequent spawns reuse the frozen copy verbatim.
     /// Legacy conversations (created before this) materialize on their next spawn.
-    fn conv_agent_env(&self, conv_id: &str) -> Vec<(String, String)> {
+    fn conv_agent_env(&self, conv_id: &str, workspace: &Path) -> Vec<(String, String)> {
         let conv_dir = self.app_data_dir.join("conv-agents").join(conv_id);
         let mcp_path = conv_dir.join("mcp.json");
         if !conv_dir.exists() {
@@ -255,6 +255,7 @@ impl AppState {
                 &conv_dir.join("skills"),
                 &self.store,
                 &mut skill_budget,
+                Some(workspace),
             );
             plugins::plugin_freeze_skills(
                 &self.app_data_dir,

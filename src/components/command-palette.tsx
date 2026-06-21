@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Blocks,
   BrainCircuit,
   Check,
   Clock,
@@ -10,7 +11,6 @@ import {
   LayoutGrid,
   MessageSquare,
   Monitor,
-  Plug,
   Plus,
   Settings,
   Sparkles,
@@ -225,7 +225,7 @@ export function CommandPalette({
       { id: "chats", label: t("action.switchChats.label"), keywords: t("action.switchChats.keywords"), shortcut: "⌘1", icon: MessageSquare, run: () => onViewChange("chat") },
       { id: "board", label: t("action.switchBoard.label"), keywords: t("action.switchBoard.keywords"), shortcut: "⌘2", icon: LayoutGrid, run: () => onViewChange("board") },
       { id: "automations", label: t("action.switchAutomations.label"), keywords: t("action.switchAutomations.keywords"), shortcut: "⌘3", icon: Clock, run: () => onViewChange("automations") },
-      { id: "plugins", label: t("action.switchPlugins.label"), keywords: t("action.switchPlugins.keywords"), shortcut: "⌘4", icon: Plug, run: () => onViewChange("plugins") },
+      { id: "plugins", label: t("action.switchPlugins.label"), keywords: t("action.switchPlugins.keywords"), shortcut: "⌘4", icon: Blocks, run: () => onViewChange("plugins") },
       { id: "settings", label: t("action.openSettings.label"), keywords: t("action.openSettings.keywords"), shortcut: "⌘,", icon: Settings, run: onOpenSettings },
       { id: "screen-history", label: t("action.screenHistory.label"), keywords: t("action.screenHistory.keywords"), shortcut: "", icon: Monitor, run: () => onOpenScreenHistory() },
     ],

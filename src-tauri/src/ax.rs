@@ -158,8 +158,8 @@ pub fn gather_pre_focus_context() -> Option<crate::ocr::AmbientContext> {
     // restore it" path (what PopClip / Raycast do). The fallback runs only when
     // AX came up empty, and only touches the clipboard if something was selected.
     // It MUST stay here (pre-focus): ⌘C goes to whatever app is frontmost, which
-    // is the user's app only until the panel presents. The cost is ~300ms when it
-    // fires — the price of capturing web/Electron selections.
+    // is the user's app only until the panel presents. The miss case is tightly
+    // bounded because this sits on the panel's first-paint path.
     let selection = focused_selected_text(pid)
         .or_else(crate::text_input::copy_selection_via_clipboard)
         .map(|s| {
