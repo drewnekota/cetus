@@ -107,9 +107,8 @@ workspace panel, so normal sites are not blocked by iframe embedding rules. The
 Browser tab still offers an optional inline preview canvas for local or
 embeddable pages, but that preview is not the default browsing path. Both the
 inline canvas and the embedded WebView support coordinate-based annotations that
-flow back into the active conversation as `@Browser` feedback. This is
-intentionally separate from Chrome Use: Browser does not inherit the user's
-normal Chrome tabs, cookies, extensions, or login state.
+flow back into the active conversation as `@Browser` feedback. Browser does not
+inherit the user's normal Chrome tabs, cookies, extensions, or login state.
 
 The Browser Use plugin also contributes `browser_open_visible`, a host-tunneled
 tool that opens or focuses a URL in that right-side Browser tab. DOM automation
@@ -121,26 +120,6 @@ left-sidebar destination. `Cmd+B` toggles the workspace panel, `Cmd+T` opens a
 new Browser tab there, and `Cmd+W` closes the active workspace tab instead of
 closing the app window. The same workspace panel can also hold Files and
 Terminal tabs.
-
-Chrome Use is represented as `cetus.chrome-use`. The built-in plugin includes an
-unpacked Chrome extension scaffold under `chrome-use/extension`; it can be
-loaded through Chrome's Developer Mode and collects active-tab and tab-list
-context for a Native Messaging host named `com.cetus.chrome_use`. Cetus can
-install the native host manifest from the Plugins page, open Chrome's extension
-manager, reveal the unpacked extension folder, and run a native host self-test
-without involving Chrome. Received extension messages are stored under the app
-data directory. When the Chrome Use plugin is
-enabled, the agent gets Chrome tools such as `chrome_use_status`,
-`chrome_active_tab_snapshot`, `chrome_list_tabs`, `chrome_select_tab`,
-`chrome_page_snapshot`, `chrome_click`, `chrome_fill`, `chrome_navigate`, and
-`chrome_recent_messages`. The first trusted command
-channel is in place: agent tools can queue requests for the extension to return
-the current active tab snapshot, list tabs, select a tab, or navigate after user
-confirmation. It can also click/fill visible page elements after confirmation,
-with password/file/hidden and other sensitive fields blocked; consequential
-clicks are blocked unless the tool call explicitly opts into the final action
-after user confirmation. A plain MCP server or the existing managed Chrome CDP
-bridge is not enough for this trust boundary.
 
 Computer Use is implemented as `cetus.computer-use`. It contributes the
 `computer-use.ts` pi extension, prompt guidance, and trusted native capability
@@ -155,11 +134,9 @@ model alongside the numbered element list.
 Prefer the most structured surface that can do the job:
 
 1. Use a purpose-built plugin or MCP server when one exists.
-2. Use Chrome Use for browser tasks that depend on the user's existing Chrome
-   login state, cookies, extensions, or already-open authenticated tabs.
-3. Use Browser Use for local dev servers, public pages, and isolated temporary
+2. Use Browser Use for local dev servers, public pages, and isolated temporary
    browser sessions.
-4. Use Computer Use for native desktop apps, cross-app GUI workflows, or work
+3. Use Computer Use for native desktop apps, cross-app GUI workflows, or work
    that no structured plugin/MCP/browser surface can reach.
-5. Stop for user confirmation before sending, submitting, purchasing,
+4. Stop for user confirmation before sending, submitting, purchasing,
    publishing, deleting, authenticating, or changing account/security settings.

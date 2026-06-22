@@ -621,6 +621,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "block2 0.6.2",
+ "cetus-bridge",
  "chrono",
  "core-foundation 0.10.1",
  "core-graphics 0.24.0",
@@ -654,6 +655,16 @@ dependencies = [
  "uuid",
  "window-vibrancy 0.5.3",
  "xcap",
+]
+
+[[package]]
+name = "cetus-bridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

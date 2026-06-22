@@ -46,6 +46,11 @@ export interface QueuedMessage {
   attachments: ComposerAttachment[];
 }
 
+export interface QuoteRequest {
+  id: number;
+  text: string;
+}
+
 export interface ImageAttachment {
   type: "image";
   /** Bare base64 (no `data:` prefix). */
@@ -101,6 +106,8 @@ interface Props {
    *  composer unmounts) or a conversation switch (the key changes in place).
    *  Omit for ephemeral composers (dialogs) that shouldn't retain a draft. */
   draftKey?: string;
+  /** Selected text from the current conversation to append as a Markdown quote. */
+  quoteRequest?: QuoteRequest | null;
 }
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB — Gemini limit is generous but base64 inflates 33%
@@ -136,6 +143,7 @@ export function Composer({
   placeholder,
   focusToken,
   draftKey,
+  quoteRequest,
 }: Props) {
   const { t, locale } = useTranslation("chat");
   // A random hero placeholder, re-rolled per new chat (focusToken bumps) so the
@@ -173,6 +181,7 @@ export function Composer({
   const rootRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastQuoteIdRef = useRef<number | null>(null);
 
   // A leading `!` flips the composer into Terminal mode: submit opens/focuses
   // the Terminal surface and runs the command there instead of sending a chat
@@ -306,6 +315,26 @@ export function Composer({
   useEffect(() => {
     if (focusToken !== undefined && !disabled) taRef.current?.focus();
   }, [focusToken, disabled]);
+
+  useEffect(() => {
+    if (!quoteRequest || quoteRequest.id === lastQuoteIdRef.current) return;
+    lastQuoteIdRef.current = quoteRequest.id;
+    const quote = formatQuoteForComposer(quoteRequest.text);
+    if (!quote) return;
+    setText((prev) => {
+      const trimmed = prev.trimEnd();
+      const next = `${trimmed ? `${trimmed}\n\n` : ""}${quote}\n\n`;
+      if (draftKey) writeDraft(draftKey, next);
+      return next;
+    });
+    requestAnimationFrame(() => {
+      const node = taRef.current;
+      if (!node || disabled) return;
+      node.focus();
+      const pos = node.value.length;
+      node.setSelectionRange(pos, pos);
+    });
+  }, [disabled, draftKey, quoteRequest]);
 
   useEffect(() => {
     if (disabled) return;
@@ -693,6 +722,18 @@ export function Composer({
       </div>
     </div>
   );
+}
+
+function formatQuoteForComposer(text: string): string {
+  const cleaned = text
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!cleaned) return "";
+  return cleaned
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
 }
 
 function fileToBase64(file: File): Promise<string> {

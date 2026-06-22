@@ -275,6 +275,23 @@ function stripSuffix(text: string, desc: string): string {
   return t.slice(0, t.length - d.length).replace(/\n+$/, "").trimEnd();
 }
 
+function removeMessageAndReindexTools(
+  messages: RenderedMessage[],
+  toolIndex: ChatState["toolIndex"],
+  removeIdx: number,
+): Pick<ChatState, "messages" | "toolIndex"> {
+  const nextMessages = messages.filter((_, idx) => idx !== removeIdx);
+  const nextToolIndex: ChatState["toolIndex"] = {};
+  for (const [id, loc] of Object.entries(toolIndex)) {
+    if (loc.messageIdx === removeIdx) continue;
+    nextToolIndex[id] = {
+      ...loc,
+      messageIdx: loc.messageIdx > removeIdx ? loc.messageIdx - 1 : loc.messageIdx,
+    };
+  }
+  return { messages: nextMessages, toolIndex: nextToolIndex };
+}
+
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "reset": {
@@ -323,23 +340,25 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // Locally finalize an interrupted run. pi.abort() stops the model but
       // emits no agent_end, so isStreaming would stay stuck true — the
       // persistence cache (skipped mid-stream) never flushes and the run looks
-      // "active" so get_messages stalls on the next reopen. Mirror agent_end
-      // AND clear any per-block streaming flags (abort never sends the trailing
-      // text_end / toolcall_end), so the last bubble settles instead of
-      // spinning forever.
+      // "active" so get_messages stalls on the next reopen. Drop the in-flight
+      // assistant turn entirely: a partial thought/text/tool_call is not a
+      // replayable protocol message, and keeping it can poison the next request.
       if (!state.isStreaming && state.activeAssistantIdx == null) return state;
       let messages = state.messages;
+      let toolIndex = state.toolIndex;
       if (state.activeAssistantIdx != null && messages[state.activeAssistantIdx]) {
-        messages = [...messages];
-        const m = { ...messages[state.activeAssistantIdx] };
-        m.blocks = m.blocks.map((b) =>
-          "streaming" in b && b.streaming ? { ...b, streaming: false } : b,
+        const stripped = removeMessageAndReindexTools(
+          messages,
+          toolIndex,
+          state.activeAssistantIdx,
         );
-        messages[state.activeAssistantIdx] = m;
+        messages = stripped.messages;
+        toolIndex = stripped.toolIndex;
       }
       return {
         ...state,
         messages,
+        toolIndex,
         isStreaming: false,
         awaitingAssistant: false,
         activeAssistantIdx: null,

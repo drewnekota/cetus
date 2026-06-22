@@ -24,8 +24,6 @@ import type {
   PiEvent,
   PiMessage,
   PluginEntry,
-  ChromeUseSelfTest,
-  ChromeUseStatus,
   SkillEntry,
   SkillReviewSettings,
   SkillState,
@@ -276,12 +274,6 @@ export const api = {
   importPlugin: (path: string) => invoke<PluginEntry>("import_plugin", { path }),
   revealPlugin: (id: string) => invoke<void>("reveal_plugin", { id }),
   deletePlugin: (id: string) => invoke<void>("delete_plugin", { id }),
-  chromeUseStatus: () => invoke<ChromeUseStatus>("chrome_use_status"),
-  installChromeNativeHost: () =>
-    invoke<ChromeUseStatus>("install_chrome_native_host"),
-  openChromeExtensionsPage: () => invoke<void>("open_chrome_extensions_page"),
-  testChromeNativeHost: () =>
-    invoke<ChromeUseSelfTest>("test_chrome_native_host"),
 
   // Dreaming (idle-time memory consolidation) -----------------------------
   getDreamSettings: () => invoke<DreamSettings>("get_dream_settings"),
@@ -335,7 +327,7 @@ export const api = {
   deleteSlashCommand: (id: string) =>
     invoke<void>("delete_slash_command", { id }),
 
-  // Connectors (MCP servers) ----------------------------------------------
+  // MCP servers ------------------------------------------------------------
   listConnectors: () => invoke<McpConnector[]>("list_connectors"),
   addConnector: (input: McpConnectorInput) =>
     invoke<McpConnector>("add_connector", { input }),
@@ -347,7 +339,7 @@ export const api = {
   /** Run a real MCP initialize + tools/list handshake against the config. */
   testConnector: (input: McpConnectorInput) =>
     invoke<McpTestResult>("test_connector", { input }),
-  /** Run the OAuth flow for an http connector via mcporter (opens a browser). */
+  /** Run the OAuth flow for an HTTP MCP server via mcporter (opens a browser). */
   authorizeConnector: (input: McpConnectorInput) =>
     invoke<string>("authorize_connector", { input }),
   getDiscoverySettings: () =>

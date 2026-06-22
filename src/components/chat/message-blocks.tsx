@@ -10,7 +10,7 @@ import remarkMath from "remark-math";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { markdownComponents, LinkifiedText, normalizeMath } from "@/lib/markdown";
+import { markdownComponents, LinkifiedText, normalizeMath, KATEX_OPTIONS } from "@/lib/markdown";
 import { Check, Copy, FileText, GitFork, RotateCcw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { RenderedBlock } from "@/lib/types";
@@ -46,7 +46,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
         "[&_td_code]:text-[0.95em] [&_th_code]:text-[0.95em]"
       )}
     >
-      <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath, remarkCjkFriendly]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>
+      <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath, remarkCjkFriendly]} rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]} components={markdownComponents}>
         {normalizeMath(text)}
       </ReactMarkdown>
     </div>

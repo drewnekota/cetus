@@ -202,47 +202,6 @@ async fn op_computer_observe(state: &AppState, mut request: Value) -> Result<Val
     Ok(reply)
 }
 
-fn op_chrome_host_self_test(state: &AppState) -> Result<Value, String> {
-    crate::chrome_use::native_host_self_test(&state.app_data_dir)
-        .and_then(|result| serde_json::to_value(result).map_err(|e| e.to_string()))
-}
-
-fn op_chrome_status(state: &AppState) -> Result<Value, String> {
-    let manifest_path = chrome_native_host_manifest_path()?;
-    Ok(json!({
-        "installed": manifest_path.is_file(),
-        "manifestPath": manifest_path,
-        "messagesPath": crate::chrome_use::messages_path(&state.app_data_dir),
-        "commandsPath": crate::chrome_use::commands_path(&state.app_data_dir)
-    }))
-}
-
-fn chrome_native_host_manifest_path() -> Result<std::path::PathBuf, String> {
-    #[cfg(target_os = "macos")]
-    {
-        let home = std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .ok_or_else(|| "HOME is not set".to_string())?;
-        return Ok(home
-            .join("Library/Application Support/Google/Chrome/NativeMessagingHosts")
-            .join("com.cetus.chrome_use.json"));
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let appdata = std::env::var_os("APPDATA")
-            .map(std::path::PathBuf::from)
-            .ok_or_else(|| "APPDATA is not set".to_string())?;
-        return Ok(appdata.join("Google/Chrome/NativeMessagingHosts/com.cetus.chrome_use.json"));
-    }
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    {
-        let home = std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .ok_or_else(|| "HOME is not set".to_string())?;
-        Ok(home.join(".config/google-chrome/NativeMessagingHosts/com.cetus.chrome_use.json"))
-    }
-}
-
 /// Open the Browser surface's top-level webview window through the same path the
 /// frontend command uses. Dev-only, for validating the browser surface without
 /// needing a manual click in the app shell.
@@ -602,16 +561,6 @@ async fn dispatch(app: &AppHandle, req: &Value) -> Value {
             }
             None => Err("computerObserve requires `request`".to_string()),
         },
-
-        "chromeHostSelfTest" => {
-            let state = app.state::<AppState>();
-            op_chrome_host_self_test(&state)
-        }
-
-        "chromeStatus" => {
-            let state = app.state::<AppState>();
-            op_chrome_status(&state)
-        }
 
         "browserOpen" => match s("url") {
             Some(url) => {

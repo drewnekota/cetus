@@ -17,24 +17,12 @@
  * ENABLING: the agent may arm automations directly — `create` defaults to
  * enabled (pass `enabled: false` for a draft) and `update` can flip the flag.
  * Keep the sentinel and the field names in sync with
- * src-tauri/src/automation_tool.rs and the `AUTOMATION_TOOL_TITLE` constant in
- * src-tauri/src/pi_rpc.rs.
+ * src-tauri/src/automation_tool.rs and `HOST_TUNNELS.automation` in
+ * src-tauri/cetus-extensions/bridge/protocol.ts.
  */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-/** Sentinel title intercepted by the Rust host (never shown to the user). */
-const SENTINEL_AUTOMATION = "__cetus_automation__";
-
-/** The exec context pi passes as the 5th execute() argument carries the UI RPC. */
-interface ExtensionContext {
-  // pi's RPC `ui.input` takes positional args (title, placeholder, opts) — NOT
-  // an options object. Passing an object makes `title` the object, which breaks
-  // sentinel routing on the host and leaks a broken dialog to the frontend.
-  ui?: {
-    input(title: string, placeholder?: string, opts?: { timeout?: number }): Promise<string | null>;
-  };
-}
+import { callHost, HOST_TUNNELS, toolResult, type HostTunnelContext } from "./bridge/protocol";
 
 interface HostReply {
   ok: boolean;
@@ -44,35 +32,8 @@ interface HostReply {
   automations?: unknown[];
 }
 
-/**
- * Tunnel one payload to the Rust host and parse its JSON reply. Guarded so a
- * missing channel / malformed reply becomes a typed error the model can read,
- * never a thrown TypeError the agent loop mis-surfaces.
- */
-async function hostCall(exCtx: ExtensionContext, payload: unknown): Promise<HostReply> {
-  if (typeof exCtx?.ui?.input !== "function") {
-    return { ok: false, error: "host tunnel unavailable (no ui.input)" };
-  }
-  let raw: string | null;
-  try {
-    raw = await exCtx.ui.input(SENTINEL_AUTOMATION, JSON.stringify(payload));
-  } catch (err) {
-    return { ok: false, error: `host tunnel failed: ${(err as Error).message}` };
-  }
-  if (raw === null) return { ok: false, error: "host tunnel returned no reply" };
-  try {
-    return JSON.parse(raw) as HostReply;
-  } catch {
-    return { ok: false, error: `unparseable host reply: ${raw.slice(0, 200)}` };
-  }
-}
-
-/** Render a host reply into a tool result the model reads. */
-function result(reply: HostReply) {
-  const text = reply.ok
-    ? JSON.stringify(reply, null, 2)
-    : `error: ${reply.error ?? "unknown error"}`;
-  return { content: [{ type: "text" as const, text }] };
+function hostCall(exCtx: HostTunnelContext, payload: unknown): Promise<HostReply> {
+  return callHost(exCtx, HOST_TUNNELS.automation, payload);
 }
 
 /** Shared schedule fields, reused by create + update. */
@@ -145,7 +106,7 @@ export default function (pi: ExtensionAPI) {
       ...scheduleFields,
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, exCtx) {
-      return result(await hostCall(exCtx as ExtensionContext, { op: "create", ...params }));
+      return toolResult(await hostCall(exCtx as HostTunnelContext, { op: "create", ...params }));
     },
   });
 
@@ -158,7 +119,7 @@ export default function (pi: ExtensionAPI) {
       "tell the user what's currently scheduled.",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, exCtx) {
-      return result(await hostCall(exCtx as ExtensionContext, { op: "list" }));
+      return toolResult(await hostCall(exCtx as HostTunnelContext, { op: "list" }));
     },
   });
 
@@ -179,7 +140,7 @@ export default function (pi: ExtensionAPI) {
       ...scheduleFields,
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, exCtx) {
-      return result(await hostCall(exCtx as ExtensionContext, { op: "update", ...params }));
+      return toolResult(await hostCall(exCtx as HostTunnelContext, { op: "update", ...params }));
     },
   });
 }

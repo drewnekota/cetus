@@ -3,6 +3,17 @@ import { type Components } from "react-markdown";
 import { invoke } from "@tauri-apps/api/core";
 
 /**
+ * Shared rehype-katex options. Assistant output routinely drops CJK text or
+ * stray symbols inside `$ … $` (e.g. "斯" in a formula), which KaTeX's default
+ * `strict: "warn"` floods the console with (unicodeTextInMathMode and friends).
+ * These are chat messages, not spec-authored LaTeX, so downgrade strict checks
+ * to "ignore" — the math still renders; we just stop the warning spam. Errors
+ * that actually break rendering still surface (throwOnError stays off → KaTeX
+ * shows the offending source in red, as before).
+ */
+export const KATEX_OPTIONS = { strict: "ignore" as const, throwOnError: false };
+
+/**
  * Models emit math in LaTeX delimiters (`\[ … \]` for display, `\( … \)` for
  * inline), but remark-math only understands `$$ … $$` / `$ … $`. Worse, raw
  * markdown treats `\[` as an *escaped* bracket, so untouched output renders as

@@ -22,10 +22,10 @@ import type { BashResult, PiEvent, PiMessage, RenderedMessage } from "./types";
 
 interface ChatsStore {
   chats: Record<string, ChatState>;
-  /** Conversation ids with an active run. Maintained incrementally as each
-   *  conv's isStreaming flips, so the board's per-card dot doesn't have to scan
-   *  every conversation on every streaming token. A new Set is minted only when
-   *  membership actually changes — identity-stable otherwise. */
+  /** Conversation ids with an active or pending run. Maintained incrementally
+   *  as each conv's run-active flag flips, so sidebar/board indicators don't
+   *  have to scan every conversation on every streaming token. A new Set is
+   *  minted only when membership actually changes — identity-stable otherwise. */
   streamingIds: Set<string>;
   /** True once we've finished loading the IDB snapshot for the active conv. */
   hydrated: Record<string, boolean>;
@@ -82,9 +82,11 @@ function step(s: Slice, id: string, action: ChatAction): Slice {
       : next;
   const chats = { ...s.chats, [id]: withIndex };
   let streamingIds = s.streamingIds;
-  if (withIndex.isStreaming !== prev.isStreaming) {
+  const wasActive = prev.isStreaming || prev.awaitingAssistant;
+  const isActive = withIndex.isStreaming || withIndex.awaitingAssistant;
+  if (isActive !== wasActive) {
     streamingIds = new Set(s.streamingIds);
-    if (withIndex.isStreaming) streamingIds.add(id);
+    if (isActive) streamingIds.add(id);
     else streamingIds.delete(id);
   }
   return { chats, streamingIds };
@@ -279,9 +281,10 @@ export function useHasMessages(convId: string | null | undefined): boolean {
   });
 }
 
-/** Set of conv ids currently streaming (for board view dots etc). Maintained
- *  incrementally in the store, so this is an identity-stable read that only
- *  changes when a run starts or ends — not on every streaming token. */
+/** Set of conv ids currently active or awaiting the assistant (for board view
+ *  dots etc). Maintained incrementally in the store, so this is an
+ *  identity-stable read that only changes when a run starts/ends — not on every
+ *  streaming token. */
 export function useStreamingIds(): Set<string> {
   return useChatStore((s) => s.streamingIds);
 }

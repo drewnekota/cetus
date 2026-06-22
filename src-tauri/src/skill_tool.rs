@@ -4,7 +4,7 @@
 //! instead of the user writing one by hand in Settings → Skills.
 //!
 //! The extension tunnels a request through a sentinel `ctx.ui.input`
-//! ([`crate::pi_rpc::SKILL_TOOL_TITLE`]); `dispatch_line` surfaces it as
+//! ([`crate::bridge::SKILL_TOOL_TITLE`]); `dispatch_line` surfaces it as
 //! [`AppEvent::SkillToolRequest`]; we answer here, mutate the skills store via
 //! [`crate::skills`], re-materialise the active set, and reply via the parent
 //! pi's `extension_ui_response` — the same round-trip the automation-tools path
@@ -20,8 +20,9 @@
 //! read at session start, so a new/updated skill loads in the next conversation —
 //! the reply tells the agent to say so.
 
+use crate::app_event::AppEvent;
 use crate::host_tunnel::{self, str_field};
-use crate::pi_rpc::{AppEvent, PiRpc};
+use crate::pi_rpc::PiRpc;
 use crate::skills::{self, SkillEntry};
 use crate::store::Store;
 use serde_json::{json, Value};

@@ -754,7 +754,7 @@ fn spawn_auto_title(
             use tauri::Emitter;
             let _ = handle.emit(
                 "app-event",
-                crate::pi_rpc::AppEvent::ConversationUpdated { conversation },
+                crate::app_event::AppEvent::ConversationUpdated { conversation },
             );
         }
     });
@@ -912,7 +912,9 @@ pub async fn set_model_choice(
     // immediately. If it's cold, the next pi_for() will pick it up from the
     // freshly persisted row.
     if let Some(pi) = state.pi_existing(&id).await {
-        pi.apply_choice(choice).await.map_err(err)?;
+        crate::model_bridge::apply_choice(&pi, choice)
+            .await
+            .map_err(err)?;
     }
     state
         .store

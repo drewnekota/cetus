@@ -16,24 +16,12 @@
  * A skill the user explicitly asks for is created ENABLED and managed (tagged
  * "By agent" in Settings → Skills). Skills are read at session start, so a new
  * skill loads in the NEXT conversation, not retroactively in this one. Keep the
- * sentinel + field names in sync with src-tauri/src/skill_tool.rs and the
- * `SKILL_TOOL_TITLE` constant in src-tauri/src/pi_rpc.rs.
+ * sentinel + field names in sync with src-tauri/src/skill_tool.rs and
+ * `HOST_TUNNELS.skill` in src-tauri/cetus-extensions/bridge/protocol.ts.
  */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-/** Sentinel title intercepted by the Rust host (never shown to the user). */
-const SENTINEL_SKILL = "__cetus_skill__";
-
-/** The exec context pi passes as the 5th execute() argument carries the UI RPC. */
-interface ExtensionContext {
-  // pi's RPC `ui.input` takes positional args (title, placeholder, opts) — NOT an
-  // options object. Passing an object makes `title` the object, which breaks
-  // sentinel routing on the host and leaks a broken dialog to the frontend.
-  ui?: {
-    input(title: string, placeholder?: string, opts?: { timeout?: number }): Promise<string | null>;
-  };
-}
+import { callHost, HOST_TUNNELS, toolResult, type HostTunnelContext } from "./bridge/protocol";
 
 interface HostReply {
   ok: boolean;
@@ -45,35 +33,8 @@ interface HostReply {
   masterEnabled?: boolean;
 }
 
-/**
- * Tunnel one payload to the Rust host and parse its JSON reply. Guarded so a
- * missing channel / malformed reply becomes a typed error the model can read,
- * never a thrown TypeError the agent loop mis-surfaces.
- */
-async function hostCall(exCtx: ExtensionContext, payload: unknown): Promise<HostReply> {
-  if (typeof exCtx?.ui?.input !== "function") {
-    return { ok: false, error: "host tunnel unavailable (no ui.input)" };
-  }
-  let raw: string | null;
-  try {
-    raw = await exCtx.ui.input(SENTINEL_SKILL, JSON.stringify(payload));
-  } catch (err) {
-    return { ok: false, error: `host tunnel failed: ${(err as Error).message}` };
-  }
-  if (raw === null) return { ok: false, error: "host tunnel returned no reply" };
-  try {
-    return JSON.parse(raw) as HostReply;
-  } catch {
-    return { ok: false, error: `unparseable host reply: ${raw.slice(0, 200)}` };
-  }
-}
-
-/** Render a host reply into a tool result the model reads. */
-function result(reply: HostReply) {
-  const text = reply.ok
-    ? JSON.stringify(reply, null, 2)
-    : `error: ${reply.error ?? "unknown error"}`;
-  return { content: [{ type: "text" as const, text }] };
+function hostCall(exCtx: HostTunnelContext, payload: unknown): Promise<HostReply> {
+  return callHost(exCtx, HOST_TUNNELS.skill, payload);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -112,7 +73,7 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, exCtx) {
-      return result(await hostCall(exCtx as ExtensionContext, params));
+      return toolResult(await hostCall(exCtx as HostTunnelContext, params));
     },
   });
 }

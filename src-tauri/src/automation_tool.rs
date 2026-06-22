@@ -4,7 +4,7 @@
 //! user filling the Automations dialog by hand.
 //!
 //! The extension tunnels a request through a sentinel `ctx.ui.input`
-//! ([`crate::pi_rpc::AUTOMATION_TOOL_TITLE`]); `dispatch_line` surfaces it as
+//! ([`crate::bridge::AUTOMATION_TOOL_TITLE`]); `dispatch_line` surfaces it as
 //! [`AppEvent::AutomationToolRequest`]; we answer here and reply via the parent
 //! pi's `extension_ui_response` — the same round-trip the agent-control and Ultra
 //! paths use.
@@ -16,10 +16,11 @@
 //! `next_run_at` is (re)computed from the schedule whenever an automation is
 //! enabled, and cleared when it's disabled. There is still no delete tool.
 
+use crate::app_event::AppEvent;
 use crate::automation::{Automation, AutomationSchedule};
 use crate::host_tunnel::{self, str_field};
 use crate::model::{ModelChoice, ReasoningLevel};
-use crate::pi_rpc::{AppEvent, PiRpc};
+use crate::pi_rpc::PiRpc;
 use crate::store::{now_ms, Store};
 use serde_json::{json, Value};
 use std::collections::HashMap;

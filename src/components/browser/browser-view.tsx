@@ -55,9 +55,10 @@ interface Props {
   state: BrowserViewState;
   onStateChange: (state: BrowserViewState) => void;
   onAnnotate: (message: string) => Promise<void>;
+  visible?: boolean;
 }
 
-export function BrowserView({ state, onStateChange, onAnnotate }: Props) {
+export function BrowserView({ state, onStateChange, onAnnotate, visible = true }: Props) {
   const { t } = useTranslation("chat");
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const panelHostRef = useRef<HTMLDivElement | null>(null);
@@ -176,6 +177,7 @@ export function BrowserView({ state, onStateChange, onAnnotate }: Props) {
   }, []);
 
   const openEmbedded = useCallback(async (next: string) => {
+    if (!visible) return;
     if (inlinePreview) return;
     if (next === "about:blank") {
       embeddedUrlRef.current = null;
@@ -199,7 +201,7 @@ export function BrowserView({ state, onStateChange, onAnnotate }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [annotationLabels, inlinePreview, panelBounds]);
+  }, [annotationLabels, inlinePreview, panelBounds, visible]);
 
   function navigate(nextRaw: string, replace = false) {
     const next = normalizeUrl(nextRaw);
@@ -242,6 +244,11 @@ export function BrowserView({ state, onStateChange, onAnnotate }: Props) {
   }
 
   useEffect(() => {
+    if (!visible) {
+      embeddedUrlRef.current = null;
+      api.closeBrowserPanel().catch(console.error);
+      return;
+    }
     if (inlinePreview) {
       embeddedUrlRef.current = null;
       api.closeBrowserPanel().catch(console.error);
@@ -278,7 +285,7 @@ export function BrowserView({ state, onStateChange, onAnnotate }: Props) {
       embeddedUrlRef.current = null;
       api.closeBrowserPanel().catch(console.error);
     };
-  }, [inlinePreview, openEmbedded, panelBounds, url]);
+  }, [inlinePreview, openEmbedded, panelBounds, url, visible]);
 
   return (
     <div

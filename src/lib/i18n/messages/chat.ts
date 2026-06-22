@@ -71,6 +71,7 @@ export const chat = {
     "pane.removeFromQueue": "Remove from queue",
     "pane.retry": "Retry",
     "pane.retrying": "Retrying…",
+    "quote.addToChat": "Add to chat",
 
     // Message bubble
     "bubble.attachment": "attachment",
@@ -216,6 +217,7 @@ export const chat = {
     "pane.removeFromQueue": "从队列移除",
     "pane.retry": "重试",
     "pane.retrying": "重试中…",
+    "quote.addToChat": "添加到对话",
 
     "bubble.attachment": "附件",
     "bubble.revealInFinder": "{path} — 在访达中显示",
@@ -304,6 +306,7 @@ export const chat = {
     "pane.steerNow": "今すぐ誘導",
     "pane.steerTooltip": "今すぐ送信——現在の実行に注入（誘導）",
     "pane.removeFromQueue": "キューから削除",
+    "quote.addToChat": "チャットに追加",
 
     "bubble.attachment": "添付ファイル",
     "bubble.revealInFinder": "{path} — Finder で表示",
@@ -389,6 +392,7 @@ export const chat = {
     "pane.steerNow": "지금 유도",
     "pane.steerTooltip": "지금 전송 — 현재 실행에 삽입 (유도)",
     "pane.removeFromQueue": "대기열에서 제거",
+    "quote.addToChat": "채팅에 추가",
 
     "bubble.attachment": "첨부 파일",
     "bubble.revealInFinder": "{path} — Finder에서 보기",
@@ -474,6 +478,7 @@ export const chat = {
     "pane.steerNow": "Dirigir ahora",
     "pane.steerTooltip": "Enviar ahora: inyectar en la ejecución actual (dirigir)",
     "pane.removeFromQueue": "Quitar de la cola",
+    "quote.addToChat": "Añadir al chat",
 
     "bubble.attachment": "adjunto",
     "bubble.revealInFinder": "{path} — mostrar en Finder",
@@ -560,6 +565,7 @@ export const chat = {
     "pane.steerNow": "Direcionar agora",
     "pane.steerTooltip": "Enviar agora — injetar na execução atual (direcionar)",
     "pane.removeFromQueue": "Remover da fila",
+    "quote.addToChat": "Adicionar ao chat",
 
     "bubble.attachment": "anexo",
     "bubble.revealInFinder": "{path} — mostrar no Finder",
@@ -646,6 +652,7 @@ export const chat = {
     "pane.steerNow": "Diriger maintenant",
     "pane.steerTooltip": "Envoyer maintenant — injecter dans l'exécution en cours (diriger)",
     "pane.removeFromQueue": "Retirer de la file",
+    "quote.addToChat": "Ajouter au chat",
 
     "bubble.attachment": "pièce jointe",
     "bubble.revealInFinder": "{path} — afficher dans le Finder",
@@ -732,6 +739,7 @@ export const chat = {
     "pane.steerNow": "Jetzt steuern",
     "pane.steerTooltip": "Jetzt senden — in den laufenden Vorgang einspeisen (steuern)",
     "pane.removeFromQueue": "Aus Warteschlange entfernen",
+    "quote.addToChat": "Zum Chat hinzufügen",
 
     "bubble.attachment": "Anhang",
     "bubble.revealInFinder": "{path} — im Finder anzeigen",
@@ -818,6 +826,7 @@ export const chat = {
     "pane.steerNow": "Guida ora",
     "pane.steerTooltip": "Invia ora — inserisci nell'esecuzione corrente (guida)",
     "pane.removeFromQueue": "Rimuovi dalla coda",
+    "quote.addToChat": "Aggiungi alla chat",
 
     "bubble.attachment": "allegato",
     "bubble.revealInFinder": "{path} — mostra nel Finder",
@@ -904,6 +913,7 @@ export const chat = {
     "pane.steerNow": "Направить сейчас",
     "pane.steerTooltip": "Отправить сейчас — внедрить в текущий запуск (направить)",
     "pane.removeFromQueue": "Убрать из очереди",
+    "quote.addToChat": "Добавить в чат",
 
     "bubble.attachment": "вложение",
     "bubble.revealInFinder": "{path} — показать в Finder",

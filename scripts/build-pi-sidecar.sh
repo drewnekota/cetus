@@ -79,11 +79,11 @@ chmod 0755 "$DEST_DIR/pi"
 # version control at src-tauri/cetus-extensions/ and must be re-deployed here on
 # every sidecar build because this whole tree is wiped (rm -rf above) and is
 # itself gitignored. pi loads `<bindir>/<EXT_DIR>/*.ts` at spawn time
-# (see src-tauri/src/pi_rpc.rs), and the host re-syncs this dir into the app's
+# (see src-tauri/cetus-bridge/src/pi_rpc.rs), and the host re-syncs this dir into the app's
 # writable install tree on launch (src-tauri/src/lib.rs::sync_cetus_extensions).
-# EXT_DIR_NAME MUST match pi_rpc::CETUS_EXTENSIONS_DIR — if you rename it, change
-# it in pi_rpc.rs (loader), lib.rs (sync), AND here, or the loader reads an empty
-# path and the agent launches with zero of its own tools.
+# EXT_DIR_NAME MUST match bridge::CETUS_EXTENSIONS_DIR — if you rename it, change
+# it in src-tauri/cetus-bridge/src/bridge.rs, lib.rs (sync), AND here, or the loader reads an
+# empty path and the agent launches with zero of its own tools.
 EXT_DIR_NAME="cetus-extensions"
 CETUS_EXT_SRC="$REPO_ROOT/src-tauri/$EXT_DIR_NAME"
 if [ -d "$CETUS_EXT_SRC" ]; then

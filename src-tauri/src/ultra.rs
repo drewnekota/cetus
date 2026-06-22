@@ -1,13 +1,13 @@
 //! Ultra Code mode — Claude-Code-style autonomous orchestration.
 //!
 //! A single persisted toggle. When on, every conversation's pi is spawned with
-//! [`crate::pi_rpc::ULTRA_SYSTEM_PROMPT`] appended, instructing the model to
+//! [`crate::prompts::ULTRA_SYSTEM_PROMPT`] appended, instructing the model to
 //! orchestrate substantial tasks by AUTHORING a JS workflow script and calling
 //! the `run_workflow` tool (see `pi-install/cetus-extensions/ultra-runtime.ts`).
 //! That script runs in pi's own Bun runtime; its `agent()` primitive tunnels a
 //! sub-agent request back to the host through a sentinel `ctx.ui.input`
 //! (recognized in `pi_rpc::dispatch_line`, surfaced as
-//! [`crate::pi_rpc::AppEvent::UltraAgentRequest`]). This module answers that
+//! [`crate::app_event::AppEvent::UltraAgentRequest`]). This module answers that
 //! request: it runs a real cetus sub-agent via [`crate::run_engine::run_agent_node`]
 //! (reusing the shared pool + registry + semaphore) and replies to the waiting
 //! script via the parent pi's `extension_ui_response`.

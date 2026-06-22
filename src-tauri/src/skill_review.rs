@@ -306,7 +306,7 @@ async fn run_review(state: &AppState, handle: &AppHandle, quiet_minutes: u32) ->
     }
     if created > 0 {
         tracing::info!("skill-review: proposed {created} skill(s) for review");
-        let _ = handle.emit("app-event", crate::pi_rpc::AppEvent::SkillsUpdated);
+        let _ = handle.emit("app-event", crate::app_event::AppEvent::SkillsUpdated);
     }
 
     // Success: advance the watermark so this batch is never reconsidered.

@@ -31,7 +31,7 @@ import {
   type ArtifactDetails,
 } from "@/lib/artifact";
 import { cn } from "@/lib/utils";
-import { markdownComponents, normalizeMath } from "@/lib/markdown";
+import { markdownComponents, normalizeMath, KATEX_OPTIONS } from "@/lib/markdown";
 import { useTranslation } from "@/lib/i18n";
 
 interface Props {
@@ -156,7 +156,7 @@ function Thumbnail({
           fallbackIcon={FileText}
           render={(text) => (
             <div className="prose prose-sm dark:prose-invert h-full w-full max-w-none overflow-hidden bg-card p-4 text-[12px] leading-[1.55] [&>*]:my-1.5 [&>:first-child]:mt-0 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-[13px] [&_h3]:font-semibold [&_pre]:text-[10px]">
-              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkCjkFriendly]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{normalizeMath(text)}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkCjkFriendly]} rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]} components={markdownComponents}>{normalizeMath(text)}</ReactMarkdown>
             </div>
           )}
         />
@@ -370,7 +370,7 @@ function FullPreview({
           path={artifact.path}
           render={(text) => (
             <div className="prose prose-sm dark:prose-invert mx-auto max-w-3xl px-6 py-6">
-              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkCjkFriendly]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{normalizeMath(text)}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath, remarkCjkFriendly]} rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]} components={markdownComponents}>{normalizeMath(text)}</ReactMarkdown>
             </div>
           )}
         />

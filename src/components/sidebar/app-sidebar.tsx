@@ -2,6 +2,7 @@
 import {
   memo,
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -25,7 +26,6 @@ import {
   SidebarHeader,
   SidebarMenu,
   SidebarMenuAction,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
@@ -39,6 +39,8 @@ import { ViewToggle, type SidebarView } from "@/components/sidebar/view-toggle";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { workspaceName } from "@/lib/paths";
+import { formatFullDateTime } from "@/lib/format";
+import { formatRelativeTime } from "@/lib/conversation-search";
 import type { Conversation } from "@/lib/types";
 
 interface Props {
@@ -74,6 +76,7 @@ export const AppSidebar = memo(function AppSidebar({
 }: Props) {
   const { t } = useTranslation("sidebar");
   const { width, startResize, resetWidth } = useSidebarWidth();
+  const nowMs = useMinuteClock();
   const groups = useMemo(() => groupByWorkspace(conversations), [conversations]);
   const chatGroups = groups;
   const workspaceCounts = useMemo(() => {
@@ -244,6 +247,7 @@ export const AppSidebar = memo(function AppSidebar({
                     active={c.id === activeId}
                     streaming={streamingIds.has(c.id)}
                     unreadCompleted={unreadCompletedIds.has(c.id)}
+                    nowMs={nowMs}
                     onSelect={onSelect}
                     onArchive={onArchive}
                   />
@@ -334,6 +338,26 @@ function useSidebarWidth() {
   return { width, startResize, resetWidth };
 }
 
+function useMinuteClock() {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const update = () => setNowMs(Date.now());
+    let interval: number | undefined;
+    const first = window.setTimeout(() => {
+      update();
+      interval = window.setInterval(update, 60_000);
+    }, 60_000 - (Date.now() % 60_000));
+
+    return () => {
+      window.clearTimeout(first);
+      if (interval) window.clearInterval(interval);
+    };
+  }, []);
+
+  return nowMs;
+}
+
 function SidebarResizeHandle({
   onResizeStart,
   onReset,
@@ -364,6 +388,7 @@ const ConversationRow = memo(function ConversationRow({
   active,
   streaming,
   unreadCompleted,
+  nowMs,
   onSelect,
   onArchive,
 }: {
@@ -371,12 +396,14 @@ const ConversationRow = memo(function ConversationRow({
   active: boolean;
   streaming: boolean;
   unreadCompleted: boolean;
+  nowMs: number;
   onSelect: (id: string) => void;
   onArchive: (c: Conversation) => void;
 }) {
   const { t } = useTranslation("sidebar");
   const archived = !!conversation.archivedAt;
   const title = conversation.title || t("conversation.untitled");
+  const relativeTime = formatRelativeTime(conversation.updatedAt, nowMs);
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
@@ -392,7 +419,7 @@ const ConversationRow = memo(function ConversationRow({
         // the menu-item group hover instead so it persists while the cursor is
         // anywhere in the row, including over the archive action.
         className={cn(
-          "pr-8",
+          "relative pr-10",
           !active &&
             "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
         )}
@@ -400,23 +427,35 @@ const ConversationRow = memo(function ConversationRow({
         {conversation.sourceAutomationId && (
           <Clock className="size-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="truncate">{title}</span>
-      </SidebarMenuButton>
-      {(streaming || unreadCompleted) && (
-        <SidebarMenuBadge className="right-2 top-1.5 size-5 px-0 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0">
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span
+          title={streaming ? t("conversation.inProgress") : formatFullDateTime(conversation.updatedAt)}
+          className={cn(
+            "absolute right-2 flex w-7 shrink-0 items-center justify-center text-[11px] tabular-nums text-muted-foreground/70 transition-opacity",
+            "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
+            active && "text-sidebar-accent-foreground/70",
+          )}
+        >
           {streaming ? (
             <span
-              aria-label="In progress"
-              className="size-3.5 animate-spin rounded-full border-2 border-muted-foreground/35 border-t-muted-foreground"
+              aria-label={t("conversation.inProgress")}
+              className="block size-3 animate-spin rounded-full border-2 border-current/35 border-t-current"
             />
           ) : (
-            <span
-              aria-label="Unread"
-              className="size-2.5 rounded-full bg-primary"
-            />
+            relativeTime
           )}
-        </SidebarMenuBadge>
-      )}
+        </span>
+        {(streaming || unreadCompleted) && (
+          <span
+            className={cn(
+              "shrink-0 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
+              streaming ? "sr-only" : "size-2 rounded-full bg-primary",
+            )}
+          >
+            {streaming ? t("conversation.inProgress") : <span className="sr-only">Unread</span>}
+          </span>
+        )}
+      </SidebarMenuButton>
       <Tooltip>
         <TooltipTrigger asChild>
           <SidebarMenuAction
@@ -425,7 +464,7 @@ const ConversationRow = memo(function ConversationRow({
               e.stopPropagation();
               onArchive(conversation);
             }}
-            className="rounded-sm !text-muted-foreground/60 hover:!bg-transparent hover:!text-muted-foreground"
+            className="!right-2 !top-1/2 !w-7 !-translate-y-1/2 rounded-sm !text-muted-foreground/60 hover:!bg-transparent hover:!text-muted-foreground"
           >
             {archived ? <ArchiveRestore /> : <Archive />}
             <span className="sr-only">

@@ -514,6 +514,23 @@ pub fn enabled_extension_paths(pi_dir: &Path, store: &Store) -> Vec<PathBuf> {
     paths
 }
 
+pub fn bridge_plugin_extensions(
+    pi_dir: &Path,
+    store: &Store,
+) -> crate::bridge::PluginExtensionConfig {
+    let summaries = plugin_entries(Some(pi_dir), None, store);
+    crate::bridge::PluginExtensionConfig {
+        owned_extension_names: plugin_owned_extension_names(Some(pi_dir), None),
+        extension_paths: enabled_extension_paths(pi_dir, store),
+        runtime_dir: Some(runtime_plugins_dir(pi_dir)),
+        enabled_summaries: summaries
+            .iter()
+            .filter(|p| p.enabled)
+            .map(|p| format!("{}@{}", p.id, p.version))
+            .collect(),
+    }
+}
+
 pub fn enabled_mcp_servers(store: &Store) -> BTreeMap<String, Value> {
     let mut servers = BTreeMap::new();
     for plugin in load_plugins(None, None)
@@ -876,59 +893,6 @@ mod tests {
             std::fs::read_to_string(plugin.root.join("extensions/browser-visible.ts")).unwrap();
         assert!(extension.contains("browser_open_visible"));
         assert!(extension.contains("__cetus_browser_request__"));
-    }
-
-    #[test]
-    fn bundled_chrome_plugin_carries_extension_scaffold() {
-        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("cetus-plugins/chrome-use/.codex-plugin/plugin.json");
-        let plugin = read_manifest(
-            manifest.parent().unwrap().parent().unwrap().to_path_buf(),
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(plugin.manifest.id, "cetus.chrome-use");
-        assert_eq!(plugin.manifest.apps.as_deref(), Some(".app.json"));
-        assert_eq!(plugin.manifest.extensions, vec!["extensions/chrome-use.ts"]);
-
-        let app_json = std::fs::read_to_string(plugin.root.join(".app.json")).unwrap();
-        assert!(app_json.contains("\"extensionPath\": \"extension\""));
-        assert!(app_json.contains("\"extensionId\": \"bellidpjmeaomkdjbhkcaokmeflanpmc\""));
-        assert!(app_json.contains("\"nativeHostName\": \"com.cetus.chrome_use\""));
-
-        let extension_manifest =
-            std::fs::read_to_string(plugin.root.join("extension/manifest.json")).unwrap();
-        assert!(extension_manifest.contains("\"manifest_version\": 3"));
-        assert!(extension_manifest.contains("\"key\""));
-        assert!(extension_manifest.contains("\"nativeMessaging\""));
-
-        let background =
-            std::fs::read_to_string(plugin.root.join("extension/background.js")).unwrap();
-        assert!(background.contains("page_snapshot"));
-        assert!(background.contains("select_tab"));
-        assert!(background.contains("navigate"));
-        assert!(background.contains("click"));
-        assert!(background.contains("fill"));
-        assert!(background.contains("consequential"));
-        assert!(background.contains("allowConsequential"));
-        assert!(background.contains("Refusing to fill"));
-
-        let pi_extension =
-            std::fs::read_to_string(plugin.root.join("extensions/chrome-use.ts")).unwrap();
-        assert!(pi_extension.contains("chrome_page_snapshot"));
-        assert!(pi_extension.contains("chrome_click"));
-        assert!(pi_extension.contains("chrome_fill"));
-        assert!(pi_extension.contains("chrome_active_tab_snapshot"));
-        assert!(pi_extension.contains("CETUS_CHROME_USE_MESSAGES"));
-        assert!(pi_extension.contains("CETUS_CHROME_USE_COMMANDS"));
-        assert!(pi_extension.contains("command_result"));
-        assert!(pi_extension.contains("chrome_select_tab"));
-        assert!(pi_extension.contains("chrome_navigate"));
-        assert!(pi_extension.contains("Confirm Chrome navigation"));
-        assert!(pi_extension.contains("Confirm Chrome click"));
-        assert!(pi_extension.contains("Confirm Chrome fill"));
-        assert!(pi_extension.contains("allowConsequential"));
     }
 
     #[test]

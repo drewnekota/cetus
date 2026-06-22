@@ -166,15 +166,25 @@ pub async fn run_agent_node(
 
     let id = Uuid::new_v4().to_string();
     let env = secrets::load_env();
+    let mut runtime_config = crate::prompts::cetus_runtime_config(None);
+    if let Some(pi_dir) = ctx.sched.pi_bin.parent() {
+        runtime_config.plugin_extensions =
+            crate::plugins::bridge_plugin_extensions(pi_dir, &ctx.sched.store);
+    }
+    let event_sink = Arc::new(crate::tauri_bridge::TauriEventSink::new(
+        ctx.sched.handle.clone(),
+    ));
+    let task_spawner = Arc::new(crate::tauri_bridge::TauriTaskSpawner);
     let pi = Arc::new(
         PiRpc::spawn(
-            ctx.sched.handle.clone(),
+            event_sink,
+            task_spawner,
             &ctx.sched.pi_bin,
             &ctx.sched.sessions_dir,
             workspace,
             env,
             Some(id.clone()),
-            None, // sub-agents never inherit Ultra mode (recursion guard)
+            runtime_config, // sub-agents never inherit Ultra mode
         )
         .map_err(|e| e.to_string())?,
     );
@@ -210,7 +220,7 @@ pub async fn run_agent_node(
         ctx.sched.pool.lock().await.remove(&id);
         return Err(format!("insert conv: {e}"));
     }
-    let _ = pi.apply_choice(model).await;
+    let _ = crate::model_bridge::apply_choice(&pi, model).await;
 
     let (tx, rx) = oneshot::channel::<Value>();
     ctx.registry.lock().unwrap().insert(id.clone(), tx);

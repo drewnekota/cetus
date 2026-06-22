@@ -1,20 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Blocks, Chrome, ExternalLink, FolderOpen, TestTube2, Trash2 } from "lucide-react";
+import { Blocks, ExternalLink, FolderOpen, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/tauri";
 import { useTranslation } from "@/lib/i18n";
-import type { ChromeUseSelfTest, ChromeUseStatus, PluginEntry } from "@/lib/types";
+import type { PluginEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function PluginsView() {
   const { t } = useTranslation("settings");
   const [plugins, setPlugins] = useState<PluginEntry[] | null>(null);
-  const [chromeStatus, setChromeStatus] = useState<ChromeUseStatus | null>(null);
-  const [chromeSelfTest, setChromeSelfTest] = useState<ChromeUseSelfTest | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,7 +20,6 @@ export function PluginsView() {
     setError(null);
     try {
       setPlugins(await api.listPlugins());
-      api.chromeUseStatus().then(setChromeStatus).catch(() => {});
     } catch (e) {
       setError(String(e));
     }
@@ -81,32 +78,6 @@ export function PluginsView() {
     }
   }
 
-  async function installChromeHost() {
-    setBusy(true);
-    setError(null);
-    try {
-      setChromeStatus(await api.installChromeNativeHost());
-      await load();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function testChromeHost() {
-    setBusy(true);
-    setError(null);
-    try {
-      setChromeSelfTest(await api.testChromeNativeHost());
-      setChromeStatus(await api.chromeUseStatus());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
@@ -158,22 +129,10 @@ export function PluginsView() {
                   builtIn: t("plugins.source.builtIn"),
                   user: t("plugins.source.user"),
                   openFolder: t("plugins.openFolder"),
-                  openExtension: t("plugins.openExtension"),
-                  openChromeExtensions: t("plugins.openChromeExtensions"),
-                  installHost: t("plugins.installHost"),
-                  testHost: t("plugins.testHost"),
-                  hostInstalled: t("plugins.hostInstalled"),
-                  hostMissing: t("plugins.hostMissing"),
-                  hostTestOk: t("plugins.hostTestOk"),
-                  hostTestFailed: t("plugins.hostTestFailed"),
                   delete: t("plugins.delete"),
                 }}
                 onToggle={toggle}
                 onDelete={deletePlugin}
-                onInstallChromeHost={installChromeHost}
-                onTestChromeHost={testChromeHost}
-                chromeStatus={chromeStatus}
-                chromeSelfTest={chromeSelfTest}
                 onError={setError}
               />
             ))}
@@ -188,7 +147,6 @@ function SurfaceGuide() {
   const { t } = useTranslation("settings");
   const rows = [
     ["@Computer", t("plugins.surface.computer")],
-    ["@Chrome", t("plugins.surface.chrome")],
     ["@Browser", t("plugins.surface.browser")],
   ];
   return (
@@ -214,10 +172,6 @@ function PluginCard({
   labels,
   onToggle,
   onDelete,
-  onInstallChromeHost,
-  onTestChromeHost,
-  chromeStatus,
-  chromeSelfTest,
   onError,
 }: {
   plugin: PluginEntry;
@@ -226,22 +180,10 @@ function PluginCard({
     builtIn: string;
     user: string;
     openFolder: string;
-    openExtension: string;
-    openChromeExtensions: string;
-    installHost: string;
-    testHost: string;
-    hostInstalled: string;
-    hostMissing: string;
-    hostTestOk: string;
-    hostTestFailed: string;
     delete: string;
   };
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (plugin: PluginEntry) => void;
-  onInstallChromeHost: () => void;
-  onTestChromeHost: () => void;
-  chromeStatus: ChromeUseStatus | null;
-  chromeSelfTest: ChromeUseSelfTest | null;
   onError: (error: string) => void;
 }) {
   const contributions = [
@@ -293,52 +235,6 @@ function PluginCard({
         </div>
       )}
 
-      {plugin.id === "cetus.chrome-use" && chromeStatus && (
-        <div className="mt-3 rounded-md border border-border bg-muted/25 px-2.5 py-2 text-xs">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">
-              {chromeStatus.installed ? labels.hostInstalled : labels.hostMissing}
-            </span>
-            {!chromeStatus.installed && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 gap-1.5 px-2"
-                onClick={onInstallChromeHost}
-                disabled={busy}
-              >
-                <Chrome className="size-3.5" />
-                {labels.installHost}
-              </Button>
-            )}
-          </div>
-          <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-            {chromeStatus.extensionId}
-          </p>
-          <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-            {chromeStatus.manifestPath}
-          </p>
-          <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-            {chromeStatus.messagesPath}
-          </p>
-          <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-            {chromeStatus.commandsPath}
-          </p>
-          {chromeSelfTest && (
-            <p
-              className={cn(
-                "mt-2 rounded border px-2 py-1 text-[11px]",
-                chromeSelfTest.ok
-                  ? "border-success/30 bg-success/10 text-success"
-                  : "border-destructive/30 bg-destructive/10 text-destructive",
-              )}
-            >
-              {chromeSelfTest.ok ? labels.hostTestOk : labels.hostTestFailed}
-            </p>
-          )}
-        </div>
-      )}
-
       <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-2">
         <p className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
           {plugin.id}
@@ -353,44 +249,6 @@ function PluginCard({
             <ExternalLink className="size-3.5" />
             {labels.openFolder}
           </Button>
-          {plugin.id === "cetus.chrome-use" && (
-            <>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1.5 px-2"
-                onClick={() =>
-                  api.openChromeExtensionsPage().catch((e) => onError(String(e)))
-                }
-              >
-                <ExternalLink className="size-3.5" />
-                {labels.openChromeExtensions}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1.5 px-2"
-                onClick={onTestChromeHost}
-                disabled={busy}
-              >
-                <TestTube2 className="size-3.5" />
-                {labels.testHost}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1.5 px-2"
-                onClick={() =>
-                  api
-                    .openPath(`${plugin.path}/extension`)
-                    .catch((e) => onError(String(e)))
-                }
-              >
-                <Chrome className="size-3.5" />
-                {labels.openExtension}
-              </Button>
-            </>
-          )}
           {!plugin.builtIn && (
             <Button
               size="icon"

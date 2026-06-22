@@ -11,8 +11,9 @@
 //! `.await` points (the pi pool is the same `Arc<Mutex<…>>` AppState holds, so
 //! a conversation fired here is reused when the user later opens its card).
 
+use crate::app_event::AppEvent;
 use crate::automation::Automation;
-use crate::pi_rpc::{AppEvent, PiRpc};
+use crate::pi_rpc::PiRpc;
 use crate::secrets;
 use crate::store::{now_ms, Conversation, Store};
 use std::collections::{HashMap, HashSet};
@@ -213,7 +214,9 @@ async fn run_and_record(
             tauri::async_runtime::spawn(async move {
                 let _guard = guard;
                 let sent = async {
-                    pi.apply_choice(model).await.map_err(|e| e.to_string())?;
+                    crate::model_bridge::apply_choice(&pi, model)
+                        .await
+                        .map_err(|e| e.to_string())?;
                     pi.send_prompt(&prompt, Vec::new())
                         .await
                         .map_err(|e| e.to_string())?;
@@ -298,15 +301,23 @@ async fn create_conversation(
 
     let id = Uuid::new_v4().to_string();
     let env = secrets::load_env();
+    let mut runtime_config = crate::prompts::cetus_runtime_config(None);
+    if let Some(pi_dir) = ctx.pi_bin.parent() {
+        runtime_config.plugin_extensions =
+            crate::plugins::bridge_plugin_extensions(pi_dir, &ctx.store);
+    }
+    let event_sink = Arc::new(crate::tauri_bridge::TauriEventSink::new(ctx.handle.clone()));
+    let task_spawner = Arc::new(crate::tauri_bridge::TauriTaskSpawner);
     let pi = Arc::new(
         PiRpc::spawn(
-            ctx.handle.clone(),
+            event_sink,
+            task_spawner,
             &ctx.pi_bin,
             &ctx.sessions_dir,
             &workspace,
             env,
             Some(id.clone()),
-            None,
+            runtime_config,
         )
         .map_err(|e| e.to_string())?,
     );

@@ -201,7 +201,7 @@ async fn sweep(state: &AppState, handle: &AppHandle, settings: &AutoArchiveSetti
         if let Ok(Some(updated)) = state.store.get(&c.id) {
             let _ = handle.emit(
                 "app-event",
-                crate::pi_rpc::AppEvent::ConversationUpdated {
+                crate::app_event::AppEvent::ConversationUpdated {
                     conversation: updated,
                 },
             );

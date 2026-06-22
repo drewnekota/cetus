@@ -1,13 +1,14 @@
 mod agent;
+mod app_event;
 mod auto_archive;
 mod automation;
 mod automation_tool;
 mod ax;
 mod bash;
 mod biasing;
+pub use cetus_bridge::{bridge, pi_rpc};
 mod caps_remap;
 mod capture;
-pub mod chrome_use;
 mod commands;
 mod corrections;
 mod cua;
@@ -22,15 +23,17 @@ mod hotkey;
 mod locale;
 mod mcp;
 mod mcp_oauth;
+mod mcp_tool;
 mod meeting;
 mod memory;
 mod model;
+mod model_bridge;
 mod notify;
 mod ocr;
 #[cfg(target_os = "macos")]
 mod panel;
-mod pi_rpc;
 mod plugins;
+mod prompts;
 mod provider;
 mod quick;
 mod run_engine;
@@ -41,6 +44,7 @@ mod skill_tool;
 mod skills;
 mod slash_commands;
 mod store;
+mod tauri_bridge;
 #[cfg(target_os = "macos")]
 mod text_input;
 mod titling;
@@ -186,7 +190,7 @@ impl AppState {
         // this conversation's system prompt so the agent can orchestrate.
         let mut extra = String::new();
         if ultra::load_settings(&self.store).enabled {
-            extra.push_str(pi_rpc::ULTRA_SYSTEM_PROMPT);
+            extra.push_str(prompts::ULTRA_SYSTEM_PROMPT);
         }
         if let Some(p) = plugins::extra_system_prompt(&self.store) {
             extra.push_str(&p);
@@ -194,20 +198,28 @@ impl AppState {
         // Concrete "reply in <language>" anchor from the resolved UI locale, so
         // the model doesn't drift to whatever language recent context was in.
         extra.push_str(&locale::locale_system_prompt(&self.store));
-        let extra_prompt = (!extra.is_empty()).then_some(extra);
+        let mut runtime_config =
+            prompts::cetus_runtime_config((!extra.is_empty()).then_some(extra));
+        if let Some(pi_dir) = self.pi_bin.parent() {
+            runtime_config.plugin_extensions =
+                plugins::bridge_plugin_extensions(pi_dir, &self.store);
+        }
         // Spawn the subprocess and run session init (new/switch + apply_choice,
         // several RPC round-trips) WITHOUT the pool lock. Holding it here was the
         // app-wide serialization point: while one conversation cold-started,
         // every other conversation's pool access blocked. Done unlocked, distinct
         // conversations spawn concurrently.
+        let event_sink = Arc::new(tauri_bridge::TauriEventSink::new(self.handle.clone()));
+        let task_spawner = Arc::new(tauri_bridge::TauriTaskSpawner);
         let pi = Arc::new(pi_rpc::PiRpc::spawn(
-            self.handle.clone(),
+            event_sink,
+            task_spawner,
             &self.pi_bin,
             &self.sessions_dir,
             &workspace,
             env,
             Some(conv_id.to_string()),
-            extra_prompt,
+            runtime_config,
         )?);
         // A conversation minted by `new_conversation` has no session yet (it
         // skips the eager spawn). Create one now; an existing conversation just
@@ -220,7 +232,7 @@ impl AppState {
             pi.switch_session(&conv.session_file).await?;
             None
         };
-        pi.apply_choice(conv.model).await?;
+        model_bridge::apply_choice(&pi, conv.model).await?;
 
         // Install under a SHORT lock, losing a same-id race gracefully: if another
         // caller finished first and its pi is alive, keep theirs and drop ours —
@@ -582,6 +594,12 @@ pub fn run() {
                     handle: handle.clone(),
                     app_data_dir: app_data_dir.clone(),
                 };
+                let mcp_ctx = mcp_tool::McpToolCtx {
+                    store: store.clone(),
+                    pool: pis.clone(),
+                    handle: handle.clone(),
+                    app_data_dir: app_data_dir.clone(),
+                };
                 app.handle().listen("app-event", move |event| {
                     let payload = event.payload();
                     run_engine::handle_app_event(&registry, payload);
@@ -589,6 +607,7 @@ pub fn run() {
                     agent::maybe_handle_control_request(&agent_ctx, payload);
                     automation_tool::maybe_handle_automation_request(&automation_ctx, payload);
                     skill_tool::maybe_handle_skill_request(&skill_ctx, payload);
+                    mcp_tool::maybe_handle_mcp_request(&mcp_ctx, payload);
                 });
             }
 
@@ -810,18 +829,6 @@ pub fn run() {
                 transcripts::transcripts_path(&app_data_dir),
             );
 
-            // Chrome Use native-host bridge: plugin tools read the extension's
-            // local JSONL inbox from this path. The extension/native host writes
-            // here after the user loads the Chrome extension and connects it.
-            std::env::set_var(
-                "CETUS_CHROME_USE_MESSAGES",
-                chrome_use::messages_path(&app_data_dir),
-            );
-            std::env::set_var(
-                "CETUS_CHROME_USE_COMMANDS",
-                chrome_use::commands_path(&app_data_dir),
-            );
-
             // User-installed Skills: point pi's agent dir at a cetus-managed
             // location (isolated from the user's personal ~/.pi) so pi discovers
             // and auto-enables every SKILL.md under `<agentDir>/skills`. Then
@@ -935,6 +942,30 @@ pub fn run() {
                 ));
             }
             Ok(())
+        })
+        // App menu bar. Start from the platform default (App / Edit / Window /
+        // Help) so copy, paste, select-all and the rest keep their accelerators,
+        // then graft a View menu carrying an explicit Reload bound to ⌘R — the
+        // bare WKWebView has no reload command, so without this menu item ⌘R
+        // never reaches the page (the JS guard is a focus-dependent fallback).
+        .menu(|app| {
+            use tauri::menu::{Menu, MenuItemBuilder, Submenu};
+            let menu = Menu::default(app)?;
+            let reload = MenuItemBuilder::with_id("view_reload", "Reload")
+                .accelerator("CmdOrCtrl+R")
+                .build(app)?;
+            let view = Submenu::with_items(app, "View", true, &[&reload])?;
+            // Conventional slot: right after Edit (App=0, Edit=1). Fall back to
+            // appending if the default menu's shape ever differs.
+            if menu.insert(&view, 2).is_err() {
+                let _ = menu.append(&view);
+            }
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            if event.id.as_ref() == "view_reload" {
+                reload_focused_window(app);
+            }
         });
 
     // Self-update plugin. Registered only in release builds so `tauri dev` never
@@ -981,10 +1012,6 @@ pub fn run() {
         commands::set_browser_panel_annotation_mode,
         commands::close_browser_panel,
         commands::open_path,
-        chrome_use::install_chrome_native_host,
-        chrome_use::open_chrome_extensions_page,
-        chrome_use::test_chrome_native_host,
-        chrome_use::chrome_use_status,
         commands::save_attachment,
         commands::list_automations,
         commands::create_automation,
@@ -1116,10 +1143,6 @@ pub fn run() {
         commands::set_browser_panel_annotation_mode,
         commands::close_browser_panel,
         commands::open_path,
-        chrome_use::install_chrome_native_host,
-        chrome_use::open_chrome_extensions_page,
-        chrome_use::test_chrome_native_host,
-        chrome_use::chrome_use_status,
         commands::save_attachment,
         commands::list_automations,
         commands::create_automation,
@@ -1337,6 +1360,20 @@ pub(crate) fn park_main(app: &AppHandle) {
         if let Some(w) = app.get_webview_window("main") {
             let _ = w.hide();
         }
+    }
+}
+
+/// Reload the focused window's webview — the View → Reload menu item / ⌘R. The
+/// bare WKWebView ships no reload of its own, so the menu drives it via JS.
+/// Targets whichever window currently has focus, falling back to the main one.
+fn reload_focused_window(app: &AppHandle) {
+    let target = app
+        .webview_windows()
+        .into_values()
+        .find(|w| w.is_focused().unwrap_or(false))
+        .or_else(|| app.get_webview_window("main"));
+    if let Some(win) = target {
+        let _ = win.eval("window.location.reload()");
     }
 }
 
@@ -1618,7 +1655,7 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
 /// Cheap (tiny number of small .ts files) and keeps tool updates flowing
 /// without bumping the install version or wiping the cache.
 fn sync_cetus_extensions(resource: &Path, target: &Path) -> std::io::Result<()> {
-    sync_cetus_extensions_from(&resource.join(crate::pi_rpc::CETUS_EXTENSIONS_DIR), target)
+    sync_cetus_extensions_from(&resource.join(crate::bridge::CETUS_EXTENSIONS_DIR), target)
 }
 
 /// Re-deploy `<resource>/cetus-plugins` over `<target>/cetus-plugins`.
@@ -1662,7 +1699,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// dir left behind by a previous name for the extensions tree. No-op when `src`
 /// is absent.
 fn sync_cetus_extensions_from(src: &Path, target: &Path) -> std::io::Result<()> {
-    let dst = target.join(crate::pi_rpc::CETUS_EXTENSIONS_DIR);
+    let dst = target.join(crate::bridge::CETUS_EXTENSIONS_DIR);
     if !src.exists() {
         return Ok(());
     }
@@ -1671,7 +1708,7 @@ fn sync_cetus_extensions_from(src: &Path, target: &Path) -> std::io::Result<()> 
     // copy is dead weight that hides rename bugs (it can leave an install with
     // tools the loader never sees). Pruned only once `src` is confirmed present
     // so we never strip the install down to no extensions at all.
-    for legacy in crate::pi_rpc::LEGACY_EXTENSION_DIRS {
+    for legacy in crate::bridge::LEGACY_EXTENSION_DIRS {
         let stale = target.join(legacy);
         if stale.is_dir() {
             match std::fs::remove_dir_all(&stale) {
@@ -1696,7 +1733,7 @@ fn sync_cetus_extensions_from(src: &Path, target: &Path) -> std::io::Result<()> 
 /// in by `env!`), and returns `None` once that directory is gone — so a shipped
 /// release, whose resources live elsewhere, never touches it.
 fn dev_ext_src() -> Option<PathBuf> {
-    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join(crate::pi_rpc::CETUS_EXTENSIONS_DIR);
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join(crate::bridge::CETUS_EXTENSIONS_DIR);
     p.is_dir().then_some(p)
 }
 

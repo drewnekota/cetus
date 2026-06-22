@@ -2,12 +2,12 @@
 //! backs the `browser-use` / `computer-use` pi extensions, and the emergency stop.
 //!
 //! The extensions tunnel two kinds of sentinel `ctx.ui.input` through
-//! [`crate::pi_rpc`]'s `dispatch_line` (titles [`crate::pi_rpc::AGENT_STEP_TITLE`]
-//! and [`crate::pi_rpc::CUA_REQUEST_TITLE`]), surfaced as
-//! [`crate::pi_rpc::AppEvent::AgentControlRequest`]. This module answers them:
+//! [`crate::pi_rpc`]'s `dispatch_line` (titles [`crate::bridge::AGENT_STEP_TITLE`]
+//! and [`crate::bridge::CUA_REQUEST_TITLE`]), surfaced as
+//! [`crate::app_event::AppEvent::AgentControlRequest`]. This module answers them:
 //!
 //! * `kind: "step"` — a live "watch" step. Re-emitted to the frontend as
-//!   [`crate::pi_rpc::AppEvent::AgentStep`] (the agent-control card) and acked.
+//!   [`crate::app_event::AppEvent::AgentStep`] (the agent-control card) and acked.
 //!   The model never receives this; it is for the human watcher only.
 //! * `kind: "cua"` — a native macOS accessibility call. Run through
 //!   [`crate::cua`] and the result (element list / action outcome) is replied to
@@ -18,8 +18,9 @@
 //! Replies go back through the parent pi's `extension_ui_response`, the exact
 //! mechanism Ultra uses (see [`crate::ultra`]).
 
+use crate::app_event::AppEvent;
 use crate::cua::CuaRuntime;
-use crate::pi_rpc::{AppEvent, PiRpc};
+use crate::pi_rpc::PiRpc;
 use crate::store::Store;
 use crate::AppState;
 use serde::{Deserialize, Serialize};

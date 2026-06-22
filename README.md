@@ -208,6 +208,9 @@ Outputs `.app` / `.dmg` on macOS. A real multi-size icon set is required for `ta
 - **Framing**: strict-LF JSONL. `tauri-plugin-shell` delivers stdout in arbitrary byte chunks, so the reader maintains its own accumulator and emits one line per `\n`, stripping optional `\r`. Generic line readers that split on Unicode separators (Node `readline`) are non-compliant.
 - **Sidecar packaging**: `src-tauri/binaries/pi-<target>` ships inside `.app/Contents/Resources/`. `PI_BIN` env var is the dev backdoor for iterating on pi.
 - **Extension UI**: when a pi extension calls `ctx.ui.select()` etc., pi sends `extension_ui_request` over the event stream. The frontend `DialogHost` renders a dialog and replies via the `extension_ui_respond` Tauri command.
+- **Bridge**: Cetus also intercepts known extension host tunnels and routes them
+  to native handlers. See [docs/bridge.md](docs/bridge.md) for the protocol,
+  security boundary, and open-source extraction plan.
 
 ## License
 

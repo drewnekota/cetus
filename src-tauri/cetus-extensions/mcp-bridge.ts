@@ -2,7 +2,7 @@
  * cetus MCP bridge — make user-configured MCP servers' tools callable by the agent.
  *
  * pi has no built-in MCP client (by design: see its README, "No MCP… build an
- * extension that adds MCP support"). cetus manages MCP servers in the Connectors
+ * extension that adds MCP support"). cetus manages MCP servers in the MCP
  * settings page (src-tauri/src/mcp.rs) and exports the ENABLED ones to a standard
  * config file — `{ "mcpServers": { … } }` — whose absolute path the host publishes
  * as `CETUS_MCP_CONFIG` (and `MCPORTER_CONFIG`). This extension reads that file via
@@ -12,16 +12,16 @@
  * ---------------------------------------------------------------------------
  * PROGRESSIVE DISCLOSURE
  * ---------------------------------------------------------------------------
- * Registering every connector tool as a first-class `mcp__server__tool` with its
- * full input schema inflates the model's tool list every single turn — with the
- * connector ecosystem (Gmail, Calendar, Notion, Meta Ads, …) that's easily
+ * Registering every MCP tool as a first-class `mcp__server__tool` with its full
+ * input schema inflates the model's tool list every single turn — with the MCP
+ * ecosystem (Gmail, Calendar, Notion, Meta Ads, …) that's easily
  * hundreds of schemas, the single largest per-turn token cost. So:
  *   - Few tools (≤ EAGER_IF_FEW)  → register them all directly, as before. Small
  *     setups keep direct, named tools and pay nothing for the machinery.
  *   - Many tools                  → register just three bridge tools — `mcp_search`
  *     (find tools by keyword), `mcp_describe` (get one tool's schema), `mcp_call`
  *     (invoke it) — backed by an in-memory catalog. The model discovers and calls
- *     connector tools on demand instead of carrying every schema every turn.
+ *     MCP tools on demand instead of carrying every schema every turn.
  *   - EAGER_SERVERS (default chrome-devtools) are ALWAYS registered directly: the
  *     browser system-prompt references `mcp__chrome-devtools__*` by literal name
  *     and those calls are latency-sensitive, so they must never hide behind a search.
@@ -51,8 +51,8 @@ const LIST_TIMEOUT_MS = 30_000;
 /** Per tool-call budget. */
 const CALL_TIMEOUT_MS = 120_000;
 /** Cap on any OAuth callback wait. mcporter defaults to 5 minutes; if the model
- *  invokes a connector whose token expired, `callTool` would otherwise hang the
- *  turn that long waiting on a browser approval. Bound it so an expired connector
+ *  invokes an MCP server whose token expired, `callTool` would otherwise hang the
+ *  turn that long waiting on a browser approval. Bound it so an expired MCP server
  *  fails fast instead (the explicit Authorize button is the real auth path). */
 const OAUTH_WAIT_TIMEOUT_MS = 8_000;
 /** Servers whose tools stay EAGERLY registered as `mcp__server__tool`, even when
@@ -92,7 +92,7 @@ export default function mcpBridge(pi: ExtensionAPI) {
       runtime = await createRuntime({
         configPath: CONFIG_PATH,
         clientInfo: { name: "cetus", version: "0.1.0" },
-        // Bound any OAuth callback wait so an expired connector can't hang a
+        // Bound any OAuth callback wait so an expired MCP server can't hang a
         // turn for mcporter's 5-minute default (see OAUTH_WAIT_TIMEOUT_MS).
         oauthTimeoutMs: OAUTH_WAIT_TIMEOUT_MS,
       });
@@ -110,6 +110,23 @@ export default function mcpBridge(pi: ExtensionAPI) {
   // while a build is in flight; cleared on completion so a failed/empty build
   // can be retried by a later session_start.
   let inFlight: Promise<{ rt: Runtime; catalog: CatalogEntry[] } | null> | null = null;
+  const ensureCatalog = (): Promise<{ rt: Runtime; catalog: CatalogEntry[] } | null> => {
+    if (cached) return Promise.resolve(cached);
+    if (!inFlight) {
+      inFlight = buildCatalog(getRuntime)
+        .then((res) => {
+          inFlight = null;
+          if (res) cached = res;
+          return res;
+        })
+        .catch((err) => {
+          inFlight = null; // let a later session_start/tool call retry
+          console.warn(`[cetus mcp-bridge] init failed: ${errMsg(err)}`);
+          return null;
+        });
+    }
+    return inFlight;
+  };
 
   // CRITICAL — why this handler must NOT await the MCP work:
   // pi awaits session_start BEFORE it starts reading stdin (rpc-mode binds the
@@ -123,27 +140,17 @@ export default function mcpBridge(pi: ExtensionAPI) {
   // its OWN tools, never session readiness — matching Claude Code's "an MCP
   // server erroring degrades silently and never blocks the agent" behavior.
   pi.on("session_start", () => {
+    registerBridgeTools(pi, ensureCatalog);
     if (cached) {
       // Already built this process: re-register into the now-live session
       // (cheap, no network) so a switched-in session sees the tools too.
       registerCatalog(pi, cached.rt, cached.catalog);
       return;
     }
-    if (!inFlight) {
-      inFlight = buildCatalog(getRuntime);
-      void inFlight
-        .then((res) => {
-          inFlight = null;
-          if (!res) return; // no config / no servers / no tools
-          cached = res;
-          registerCatalog(pi, res.rt, res.catalog);
-        })
-        .catch((err) => {
-          inFlight = null; // let a later session_start retry
-          console.warn(`[cetus mcp-bridge] init failed: ${errMsg(err)}`);
-        });
-    }
-    // else: a build is already running; its .then() registers for everyone.
+    void ensureCatalog().then((res) => {
+      if (res) registerCatalog(pi, res.rt, res.catalog);
+    });
+    // If a build is already running, ensureCatalog() reuses it.
     // Either way, return synchronously — session_start must never block.
   });
 }
@@ -172,7 +179,7 @@ async function buildCatalog(
   // BEFORE assigning fq-names. Promise.all settles in network-resolution order,
   // which varies run-to-run; this catalog feeds the tool list at position 0 of
   // every DeepSeek request, and uniqueName()'s de-dup suffixes depend on
-  // encounter order — so without a deterministic sort the SAME connector set
+  // encounter order — so without a deterministic sort the SAME MCP server set
   // yields a different tool prefix (and different colliding-tool names) across
   // spawns, defeating the prompt cache. Waiting for ALL servers before naming is
   // also why we don't register each server's tools as it connects: that would
@@ -229,20 +236,13 @@ function registerCatalog(pi: ExtensionAPI, rt: Runtime, catalog: CatalogEntry[])
   if (!useBridge) return;
 
   // --- Progressive disclosure: three bridge tools over the catalog ----------
-  // mcp_call/mcp_describe resolve against the FULL catalog (so any tool name
-  // works), while mcp_search surfaces only the bridged tools the model can't
-  // already see as direct tools.
-  const byName = new Map<string, CatalogEntry>(catalog.map((e) => [e.fqName, e]));
-  const resolve = (name: string): CatalogEntry | undefined => {
-    const want = String(name || "").trim();
-    if (byName.has(want)) return byName.get(want);
-    // Tolerate a bare tool name when it's unambiguous across servers.
-    const hits = catalog.filter((e) => e.toolName === want);
-    return hits.length === 1 ? hits[0] : undefined;
-  };
+  registerBridgeTools(pi, async () => ({ rt, catalog }));
+}
 
-  const serverNames = [...new Set(bridged.map((e) => e.server))].sort(cmp);
-
+function registerBridgeTools(
+  pi: ExtensionAPI,
+  getCatalog: () => Promise<{ rt: Runtime; catalog: CatalogEntry[] } | null>,
+) {
   // A stale captured ctx (session replaced while the background build ran) makes
   // pi.registerTool throw; swallow it — a fresh session_start will re-register.
   try {
@@ -250,24 +250,26 @@ function registerCatalog(pi: ExtensionAPI, rt: Runtime, catalog: CatalogEntry[])
       name: "mcp_search",
       label: "MCP: search tools",
       description:
-        "Discover external connector (MCP) tools by keyword. cetus has many " +
-        "connector tools that are NOT listed individually to save context. " +
+        "Discover external MCP tools by keyword. cetus has many " +
+        "MCP tools that are NOT listed individually to save context. " +
         "Search here first to find the right tool, then `mcp_describe` it for its " +
         "parameters, then run it with `mcp_call`. Returns matching tool names + " +
         "one-line descriptions.",
       promptSnippet:
-        `${bridged.length} external connector tools (servers: ${serverNames.join(", ")}) ` +
-        `are available via mcp_search → mcp_describe → mcp_call.`,
+        "External MCP tools may be available via mcp_search → mcp_describe → mcp_call. " +
+        "Use mcp_search first when a connector tool such as Gmail, Calendar, Notion, or CRM is needed.",
       parameters: {
         type: "object",
         properties: {
           query: { type: "string", description: "Keywords to match against tool names/descriptions. Omit to list all." },
-          server: { type: "string", description: `Optional: restrict to one server (${serverNames.join(", ")}).` },
+          server: { type: "string", description: "Optional: restrict to one MCP server name." },
         },
       },
       async execute(_id: string, params: unknown) {
+        const ctx = await bridgeContext(getCatalog);
+        if (!ctx) return asText("No MCP tools are available yet. Check the connector config or try again after authorization.");
         const p = (params ?? {}) as { query?: string; server?: string };
-        return asText(searchCatalog(bridged, p.query, p.server));
+        return asText(searchCatalog(ctx.bridged, p.query, p.server));
       },
     });
 
@@ -275,7 +277,7 @@ function registerCatalog(pi: ExtensionAPI, rt: Runtime, catalog: CatalogEntry[])
       name: "mcp_describe",
       label: "MCP: describe tool",
       description:
-        "Get the full input-parameter schema for one external connector (MCP) tool " +
+        "Get the full input-parameter schema for one external MCP tool " +
         "(name from mcp_search). Call this before mcp_call so you pass the right args.",
       parameters: {
         type: "object",
@@ -283,8 +285,10 @@ function registerCatalog(pi: ExtensionAPI, rt: Runtime, catalog: CatalogEntry[])
         required: ["name"],
       },
       async execute(_id: string, params: unknown) {
+        const ctx = await bridgeContext(getCatalog);
+        if (!ctx) return asText("No MCP tools are available yet. Check the connector config or try again after authorization.");
         const name = ((params ?? {}) as { name?: string }).name ?? "";
-        const e = resolve(name);
+        const e = ctx.resolve(name);
         if (!e) return asText(`Unknown MCP tool "${name}". Use mcp_search to find the exact name.`);
         const schema = JSON.stringify(normalizeSchema(e.inputSchema), null, 2);
         return asText(
@@ -299,8 +303,8 @@ function registerCatalog(pi: ExtensionAPI, rt: Runtime, catalog: CatalogEntry[])
       name: "mcp_call",
       label: "MCP: call tool",
       description:
-        "Invoke an external connector (MCP) tool by name (from mcp_search/mcp_describe), " +
-        "passing its arguments. This is how you actually run connector actions " +
+        "Invoke an external MCP tool by name (from mcp_search/mcp_describe), " +
+        "passing its arguments. This is how you actually run MCP actions " +
         "(send an email, query a CRM, etc.).",
       parameters: {
         type: "object",
@@ -311,8 +315,15 @@ function registerCatalog(pi: ExtensionAPI, rt: Runtime, catalog: CatalogEntry[])
         required: ["name"],
       },
       async execute(_id: string, params: unknown) {
+        const ctx = await bridgeContext(getCatalog);
+        if (!ctx) {
+          return {
+            content: [{ type: "text", text: "No MCP tools are available yet. Check the connector config or try again after authorization." }],
+            isError: true,
+          };
+        }
         const p = (params ?? {}) as { name?: string; args?: unknown };
-        const e = resolve(p.name ?? "");
+        const e = ctx.resolve(p.name ?? "");
         if (!e) {
           return {
             content: [
@@ -325,12 +336,38 @@ function registerCatalog(pi: ExtensionAPI, rt: Runtime, catalog: CatalogEntry[])
           };
         }
         const args = p.args && typeof p.args === "object" ? (p.args as Record<string, unknown>) : {};
-        return callMcp(rt, e, args);
+        return callMcp(ctx.rt, e, args);
       },
     });
   } catch (err) {
     console.warn(`[cetus mcp-bridge] bridge tools skipped: ${errMsg(err)}`);
   }
+}
+
+async function bridgeContext(
+  getCatalog: () => Promise<{ rt: Runtime; catalog: CatalogEntry[] } | null>,
+): Promise<
+  | {
+      rt: Runtime;
+      bridged: CatalogEntry[];
+      resolve: (name: string) => CatalogEntry | undefined;
+    }
+  | null
+> {
+  const res = await getCatalog();
+  if (!res) return null;
+
+  const bridged = res.catalog.filter((e) => !EAGER_SERVERS.has(e.server));
+  const byName = new Map<string, CatalogEntry>(res.catalog.map((e) => [e.fqName, e]));
+  const resolve = (name: string): CatalogEntry | undefined => {
+    const want = String(name || "").trim();
+    if (byName.has(want)) return byName.get(want);
+    // Tolerate a bare tool name when it's unambiguous across servers.
+    const hits = res.catalog.filter((e) => e.toolName === want);
+    return hits.length === 1 ? hits[0] : undefined;
+  };
+
+  return { rt: res.rt, bridged, resolve };
 }
 
 // ---- helpers ---------------------------------------------------------------

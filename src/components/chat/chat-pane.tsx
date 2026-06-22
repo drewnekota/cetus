@@ -1,13 +1,14 @@
 "use client";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
 import { AgentControlCard } from "@/components/chat/agent-control-card";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
-import { AlertTriangle, ArrowUp, RotateCw, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, MessageCircle, RotateCw, X } from "lucide-react";
 import {
   Composer,
   type ComposerAttachment,
+  type QuoteRequest,
   type QueuedMessage,
 } from "@/components/chat/composer";
 import {
@@ -96,6 +97,8 @@ export function ChatPane({
   const { locale } = useTranslation("chat");
   const hasMessages = useHasMessages(convId);
   const isStreaming = useIsStreaming(convId);
+  const [quoteRequest, setQuoteRequest] = useState<QuoteRequest | null>(null);
+  const quoteIdRef = useRef(0);
   // A fresh greeting per new chat. Keyed on focusToken (bumped when "New chat"
   // is clicked) + convId + locale so it re-rolls on a new chat but stays put
   // across keystrokes/re-renders. An explicit emptyHeadline prop still wins.
@@ -104,6 +107,10 @@ export function ChatPane({
     [locale, convId, focusToken],
   );
   const headline = emptyHeadline ?? randomHeadline;
+  const addQuote = useCallback((text: string) => {
+    quoteIdRef.current += 1;
+    setQuoteRequest({ id: quoteIdRef.current, text });
+  }, []);
 
   if (!hasMessages) {
     return (
@@ -129,6 +136,7 @@ export function ChatPane({
             onAbort={onAbort}
             ultra={ultra}
             onUltraToggle={onUltraToggle}
+            quoteRequest={quoteRequest}
           />
         </div>
       </div>
@@ -136,7 +144,7 @@ export function ChatPane({
   }
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
       <MessageList
         convId={convId}
         isStreaming={isStreaming}
@@ -144,8 +152,9 @@ export function ChatPane({
         onRetry={onRetry}
         onForkMessage={onForkMessage}
         retrying={retrying}
+        onQuote={addQuote}
       />
-      <div className="px-4 py-3">
+      <div className="relative z-10 bg-background px-4 pb-3 pt-2">
         <div className="mx-auto max-w-3xl space-y-2">
           {convId ? <AgentControlCard conversationId={convId} /> : null}
           <QueuedMessages
@@ -170,10 +179,11 @@ export function ChatPane({
             onAbort={onAbort}
             ultra={ultra}
             onUltraToggle={onUltraToggle}
+            quoteRequest={quoteRequest}
           />
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -217,6 +227,7 @@ function MessageList({
   onRetry,
   onForkMessage,
   retrying,
+  onQuote,
 }: {
   convId: string | null;
   isStreaming: boolean;
@@ -224,6 +235,7 @@ function MessageList({
   onRetry?: () => void;
   onForkMessage?: (messageKey: string, messageIndex: number) => void;
   retrying?: boolean;
+  onQuote: (text: string) => void;
 }) {
   const keys = useMessageKeys(convId);
   const roles = useMessageRoles(convId);
@@ -275,9 +287,10 @@ function MessageList({
   return (
     <div
       ref={scrollRef}
-      className="min-h-0 flex-1 overflow-y-auto"
+      className="scrollbar-slim relative min-h-0 flex-1 overscroll-contain overflow-y-auto bg-background"
       data-testid="message-list"
     >
+      <QuoteSelectionToolbar containerRef={contentRef} scrollRef={scrollRef} onQuote={onQuote} />
       <div ref={contentRef} className="mx-auto max-w-3xl px-6 py-4">
         {groups.map((g, gi) => {
           const isLast = gi === groups.length - 1;
@@ -343,6 +356,152 @@ function MessageList({
       </div>
     </div>
   );
+}
+
+function QuoteSelectionToolbar({
+  containerRef,
+  scrollRef,
+  onQuote,
+}: {
+  containerRef: RefObject<HTMLDivElement | null>;
+  scrollRef: RefObject<HTMLDivElement | null>;
+  onQuote: (text: string) => void;
+}) {
+  const { t } = useTranslation("chat");
+  const [selection, setSelection] = useState<{
+    text: string;
+    left: number;
+    top: number;
+  } | null>(null);
+
+  const readSelection = useCallback(() => {
+    const root = containerRef.current;
+    const sel = window.getSelection();
+    if (!root || !sel || sel.rangeCount === 0 || sel.isCollapsed) {
+      setSelection(null);
+      return;
+    }
+
+    const range = sel.getRangeAt(0);
+    const ancestor = range.commonAncestorContainer;
+    const node = ancestor.nodeType === Node.ELEMENT_NODE ? ancestor : ancestor.parentNode;
+    if (!node || !root.contains(node)) {
+      setSelection(null);
+      return;
+    }
+
+    const text = sel.toString().trim();
+    if (!text) {
+      setSelection(null);
+      return;
+    }
+
+    const rect = selectionAnchorRect(range);
+    if (rect.width === 0 && rect.height === 0) {
+      setSelection(null);
+      return;
+    }
+
+    setSelection({
+      text,
+      left: Math.round(rect.left + rect.width / 2),
+      top: Math.round(Math.max(8, rect.top - 8)),
+    });
+  }, [containerRef]);
+
+  useEffect(() => {
+    const onPointerUp = () => window.setTimeout(readSelection, 0);
+    const onKeyUp = () => readSelection();
+    const onSelectionChange = () => readSelection();
+    const onScroll = () => setSelection(null);
+
+    document.addEventListener("selectionchange", onSelectionChange);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("keyup", onKeyUp);
+    scrollRef.current?.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      document.removeEventListener("selectionchange", onSelectionChange);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("keyup", onKeyUp);
+      scrollRef.current?.removeEventListener("scroll", onScroll);
+    };
+  }, [readSelection, scrollRef]);
+
+  if (!selection) return null;
+
+  return (
+    <div
+      className="fixed z-50 -translate-x-1/2 -translate-y-full rounded-full border border-border bg-popover px-1 py-0.5 text-popover-foreground shadow-[0_4px_14px_rgba(0,0,0,0.10),0_1px_2px_rgba(0,0,0,0.06)]"
+      style={{ left: selection.left, top: selection.top }}
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          onQuote(selection.text);
+          window.getSelection()?.removeAllRanges();
+          setSelection(null);
+        }}
+        className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted"
+      >
+        <MessageCircle className="size-3.5" />
+        {t("quote.addToChat")}
+      </button>
+    </div>
+  );
+}
+
+function selectionAnchorRect(range: Range): DOMRect {
+  const rects = selectionTextRects(range);
+  if (rects.length === 0) return range.getBoundingClientRect();
+
+  // Anchor to the FIRST (top) line of the selection only, so the toolbar sits
+  // centered directly above where the selection begins. Using the full
+  // bounding box would center over the widest line, drifting the button off
+  // the visible top edge on multi-line selections.
+  const top = Math.min(...rects.map((rect) => rect.top));
+  const firstLine = rects.filter((rect) => rect.top <= top + 2);
+  const left = Math.min(...firstLine.map((rect) => rect.left));
+  const right = Math.max(...firstLine.map((rect) => rect.right));
+  const bottom = Math.max(...firstLine.map((rect) => rect.bottom));
+
+  return DOMRect.fromRect({
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  });
+}
+
+function selectionTextRects(range: Range): DOMRect[] {
+  const common = range.commonAncestorContainer;
+  const rects: DOMRect[] = [];
+
+  const pushTextNodeRects = (node: Text) => {
+    if (!node.data || !range.intersectsNode(node)) return;
+    const textRange = document.createRange();
+    const start = node === range.startContainer ? range.startOffset : 0;
+    const end = node === range.endContainer ? range.endOffset : node.data.length;
+    if (start >= end) return;
+
+    textRange.setStart(node, start);
+    textRange.setEnd(node, end);
+    rects.push(
+      ...Array.from(textRange.getClientRects()).filter(
+        (rect) => rect.width > 0 && rect.height > 0,
+      ),
+    );
+    textRange.detach();
+  };
+
+  if (common.nodeType === Node.TEXT_NODE) {
+    pushTextNodeRects(common as Text);
+    return rects;
+  }
+
+  const walker = document.createTreeWalker(common, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) pushTextNodeRects(walker.currentNode as Text);
+  return rects;
 }
 
 /** Inline failure row pinned to the end of the message list: surfaces a send /

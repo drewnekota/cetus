@@ -209,6 +209,20 @@ const SECTION_GROUPS: { labelKey: string; sections: Section[] }[] = [
   },
 ];
 
+const SETTINGS_SECTION_KEY = "cetus:settingsSection";
+const SECTION_IDS = new Set<SectionId>(
+  SECTION_GROUPS.flatMap((group) => group.sections.map((section) => section.id)),
+);
+
+function readSettingsSection(): SectionId {
+  if (typeof window === "undefined") return "general";
+  try {
+    const saved = window.localStorage.getItem(SETTINGS_SECTION_KEY);
+    if (SECTION_IDS.has(saved as SectionId)) return saved as SectionId;
+  } catch {}
+  return "general";
+}
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -231,7 +245,13 @@ export function SettingsPage({
 }: Props) {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
-  const [section, setSection] = useState<SectionId>("general");
+  const [section, setSection] = useState<SectionId>(readSettingsSection);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SETTINGS_SECTION_KEY, section);
+    } catch {}
+  }, [section]);
 
   // Esc closes the page. Capture phase + stopPropagation so it wins over the
   // app-level Esc handler (which also aborts streams).
@@ -3765,7 +3785,7 @@ function SlashCommandEditor({
 }
 
 // =============================================================================
-// Connectors (MCP servers)
+// MCP servers
 // =============================================================================
 
 function ConnectorsSection({ open }: { open: boolean }) {
@@ -3786,6 +3806,21 @@ function ConnectorsSection({ open }: { open: boolean }) {
   useEffect(() => {
     if (open) load();
   }, [open, load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    onAppEvent((e) => {
+      if (e.type === "mcp_updated") load();
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [load]);
 
   async function toggle(id: string, enabled: boolean) {
     setList((cs) => (cs ? cs.map((c) => (c.id === id ? { ...c, enabled } : c)) : cs));
@@ -4142,9 +4177,9 @@ function ConnectorRow({
 }
 
 /**
- * The expandable detail panel under a saved connector: runs a live handshake
+ * The expandable detail panel under a saved MCP server: runs a live handshake
  * (initialize + tools/list) on open and lists the server identity and the tools
- * it exposes (name + description). Re-probes when the connector changes.
+ * it exposes (name + description). Re-probes when the MCP server changes.
  */
 function ConnectorDetails({ connector }: { connector: McpConnector }) {
   const { t } = useTranslation("settings");

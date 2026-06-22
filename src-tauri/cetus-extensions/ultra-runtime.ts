@@ -9,20 +9,18 @@
  * Round-trip: `cetus.agent()` tunnels a sub-agent request to the Rust host
  * through a sentinel `ctx.ui.input` whose title is "__cetus_ultra_agent__" and
  * whose `placeholder` carries the JSON-encoded params. dispatch_line /
- * is_ultra_agent_request in pi_rpc.rs recognize it and route it to
+ * src-tauri/src/bridge.rs recognizes it and routes it to
  * ultra::handle_agent_request, which runs a sub-agent via run_agent_node and
  * replies through `extension_ui_response`. pi resolves `ctx.ui.input` to the
  * response's `value` (a JSON string of `{ ok, summary, result }`).
  *
- * Keep ULTRA_AGENT_TITLE and the request/reply shapes in sync with
- * pi_rpc.rs (ULTRA_AGENT_TITLE, is_ultra_agent_request) and ultra.rs (run_one,
- * the reply envelope).
+ * Keep HOST_TUNNELS.ultraAgent and the request/reply shapes in sync with
+ * src-tauri/src/bridge.rs and ultra.rs (run_one, the reply envelope).
  */
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-/** Must equal pi_rpc::ULTRA_AGENT_TITLE. */
-const ULTRA_AGENT_TITLE = "__cetus_ultra_agent__";
+import { HOST_TUNNELS } from "./bridge/protocol";
 
 // Compile-a-string-into-an-async-function constructor. Lets a script body use
 // top-level `await` and `return`.
@@ -109,7 +107,7 @@ function makeCetus(
     let raw: string | null | undefined;
     try {
       raw = await ctx.ui.input(
-        ULTRA_AGENT_TITLE,
+        HOST_TUNNELS.ultraAgent,
         JSON.stringify({ prompt, opts: opts ?? {} }),
         signal ? { signal } : undefined,
       );

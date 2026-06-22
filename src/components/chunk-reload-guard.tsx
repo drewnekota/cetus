@@ -120,6 +120,10 @@ export function ChunkReloadGuard() {
     };
     // Manual reload: Cmd+R (macOS) / Ctrl+R. Bypasses the cooldown — an explicit
     // refresh should always go through, even right after an auto-recover.
+    // Capture phase + a window-level listener so it wins over any focused
+    // surface (board, terminal, embedded browser, sidebar…) whose own keydown
+    // handler calls stopPropagation — in bubble phase those would swallow the
+    // event before it reached us, leaving Cmd+R dead while that surface is focused.
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "r" || e.key === "R")) {
         e.preventDefault();
@@ -128,11 +132,11 @@ export function ChunkReloadGuard() {
     };
     window.addEventListener("error", onError);
     window.addEventListener("unhandledrejection", onRejection);
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
     return () => {
       window.removeEventListener("error", onError);
       window.removeEventListener("unhandledrejection", onRejection);
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
     };
   }, []);
   return null;

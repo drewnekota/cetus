@@ -285,24 +285,6 @@ export interface PluginEntry {
   error?: string | null;
 }
 
-export interface ChromeUseStatus {
-  installed: boolean;
-  hostName: string;
-  extensionId: string;
-  manifestPath: string;
-  messagesPath: string;
-  commandsPath: string;
-  extensionOrigin: string;
-  lastMessage?: unknown | null;
-}
-
-export interface ChromeUseSelfTest {
-  ok: boolean;
-  message: string;
-  ack?: unknown | null;
-  logged?: unknown | null;
-}
-
 // ---- Dreaming (quiet-time memory consolidation) ---------------------------
 
 /** Settings for "dreaming": when you're not chatting with cetus, it reflects on
@@ -435,9 +417,9 @@ export interface SlashCommandInput {
   prompt: string;
 }
 
-// ---- Connectors (MCP servers) ---------------------------------------------
+// ---- MCP servers -----------------------------------------------------------
 
-/** Transport for an MCP connector: a local `stdio` command or a remote
+/** Transport for an MCP server: a local `stdio` command or a remote
  *  `http` (Streamable-HTTP / SSE) endpoint. */
 export type McpTransport = "stdio" | "http";
 
@@ -463,7 +445,7 @@ export interface McpConnector {
   updatedAt: number;
 }
 
-/** Create/update payload for a connector (server fills in ids + timestamps). */
+/** Create/update payload for an MCP server (server fills in ids + timestamps). */
 export interface McpConnectorInput {
   name: string;
   transport: McpTransport;
@@ -726,6 +708,8 @@ export type AppEvent =
   // Agent skills changed out-of-band — the skill-review pass proposed new skills
   // from recent sessions. The Skills settings page reloads on this.
   | { type: "skills_updated" }
+  // MCP servers changed out-of-band — the manage_mcp tool updated the MCP store.
+  | { type: "mcp_updated" }
   // A live computer/browser-use step: the agent took an action on the user's
   // behalf. Drives the in-chat "Controlling …" panel (AgentControlCard).
   | {

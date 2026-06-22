@@ -1,11 +1,11 @@
-//! User-configured **MCP servers** ("Connectors").
+//! User-configured **MCP servers**.
 //!
-//! pi ships with no built-in MCP client, so cetus manages connectors here and
+//! pi ships with no built-in MCP client, so cetus manages MCP servers here and
 //! makes them visible: each server is persisted (one JSON blob in `app_settings`)
 //! and the enabled set is exported to a standard `<app_data>/mcp.json`
 //! (`{ "mcpServers": { … } }`), whose path is published as `CETUS_MCP_CONFIG` so a
 //! future bridge extension can pick them up. This mirrors how Codex surfaces
-//! connectors: you add, edit, enable, and validate them in one place.
+//! MCP servers: you add, edit, enable, and validate them in one place.
 //!
 //! [`test_connector`] performs a *real* MCP handshake on demand — `initialize`
 //! then `tools/list` — over the configured transport, so the user can confirm a
@@ -47,7 +47,7 @@ fn default_transport() -> String {
     "stdio".to_string()
 }
 
-/// One configured connector. `transport` is `"stdio"` (a local command) or
+/// One configured MCP server. `transport` is `"stdio"` (a local command) or
 /// `"http"` (a remote Streamable-HTTP/SSE URL); the irrelevant fields are simply
 /// left empty for the other transport.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,7 +191,7 @@ fn http_spec(c: &McpConnector) -> Value {
     m
 }
 
-/// Build the mcporter config document from the enabled connectors + the browser
+/// Build the mcporter config document from the enabled MCP servers + the browser
 /// built-in + the user's discovered-import sources. The de-facto standard
 /// `{ "mcpServers": { name: spec } }` shape `mcporter` reads — a stdio server is
 /// `{ command, args, env }`, a remote one is `{ url, headers, auth? }`.
@@ -199,7 +199,7 @@ fn build_mcp_doc(store: &Store) -> Value {
     let state = load_state(store);
     let mut servers = serde_json::Map::new();
     for c in state.entries.iter().filter(|c| c.enabled) {
-        // De-dupe keys so two connectors named the same don't clobber each other.
+        // De-dupe keys so two MCP servers named the same don't clobber each other.
         let mut key = if c.name.trim().is_empty() {
             c.id.clone()
         } else {
@@ -222,14 +222,14 @@ fn build_mcp_doc(store: &Store) -> Value {
         servers.insert(key, spec);
     }
     // Built-in and user plugins may contribute MCP servers. Skipped if a user
-    // connector already claims the same key, so an explicit connector override
+    // MCP server already claims the same key, so an explicit MCP override
     // wins over plugin defaults.
     for (name, spec) in crate::plugins::enabled_mcp_servers(store) {
         servers.entry(name).or_insert(spec);
     }
     // `imports` controls mcporter's editor-config auto-import. Default empty so
     // cetus never silently inherits another tool's MCP servers; the user opts in
-    // per source via Settings → Connectors (Discovery settings). Empty also
+    // per source via Settings → MCP (Discovery settings). Empty also
     // suppresses mcporter's DEFAULT_IMPORTS fallback.
     let imports = crate::discovery::load_settings(store).mcp_imports;
     json!({ "mcpServers": servers, "imports": imports })
@@ -255,7 +255,7 @@ pub fn export_config(app_data_dir: &std::path::Path, store: &Store) {
 }
 
 /// Write a frozen per-conversation `mcp.json` to `path`, snapshotting the current
-/// connector + discovery config so later toggles never disturb this conversation.
+/// MCP + discovery config so later toggles never disturb this conversation.
 pub fn write_conv_config(path: &std::path::Path, store: &Store) {
     write_mcp_doc(path, &build_mcp_doc(store));
 }
@@ -266,7 +266,7 @@ fn validate(input: &McpConnectorInput) -> CmdResult<McpConnectorInput> {
     let mut input = input.clone();
     input.name = input.name.trim().to_string();
     if input.name.is_empty() {
-        return Err("give the connector a name".into());
+        return Err("give the MCP server a name".into());
     }
     input.transport = match input.transport.as_str() {
         "http" => "http".to_string(),
@@ -275,12 +275,12 @@ fn validate(input: &McpConnectorInput) -> CmdResult<McpConnectorInput> {
     if input.transport == "stdio" {
         input.command = input.command.trim().to_string();
         if input.command.is_empty() {
-            return Err("a stdio connector needs a command (e.g. npx)".into());
+            return Err("a stdio MCP server needs a command (e.g. npx)".into());
         }
     } else {
         input.url = input.url.trim().to_string();
         if !(input.url.starts_with("http://") || input.url.starts_with("https://")) {
-            return Err("an HTTP connector needs an http(s):// URL".into());
+            return Err("an HTTP MCP server needs an http(s):// URL".into());
         }
         // Only "oauth" is a recognized auth mode; anything else means static
         // headers (or none).
@@ -312,21 +312,25 @@ fn apply(connector: &mut McpConnector, input: McpConnectorInput) {
 
 #[tauri::command]
 pub async fn list_connectors(state: State<'_, AppState>) -> CmdResult<Vec<McpConnector>> {
-    Ok(load_state(&state.store).entries)
+    Ok(agent_list(&state.store))
 }
 
-#[tauri::command]
-pub async fn add_connector(
-    state: State<'_, AppState>,
+pub fn agent_list(store: &Store) -> Vec<McpConnector> {
+    load_state(store).entries
+}
+
+pub fn agent_add(
+    app_data_dir: &std::path::Path,
+    store: &Store,
     input: McpConnectorInput,
 ) -> CmdResult<McpConnector> {
     let input = validate(&input)?;
-    let mut s = load_state(&state.store);
+    let mut s = load_state(store);
     if s.entries.len() >= MAX_CONNECTORS {
-        return Err(format!("connector limit reached ({MAX_CONNECTORS})"));
+        return Err(format!("MCP server limit reached ({MAX_CONNECTORS})"));
     }
     let now = now_ms();
-    let mut connector = McpConnector {
+    let mut server = McpConnector {
         id: Uuid::new_v4().to_string(),
         name: String::new(),
         transport: default_transport(),
@@ -342,11 +346,71 @@ pub async fn add_connector(
         created_at: now,
         updated_at: now,
     };
-    apply(&mut connector, input);
-    s.entries.push(connector.clone());
-    save_state(&state.store, &s)?;
-    export_config(&state.app_data_dir, &state.store);
-    Ok(connector)
+    apply(&mut server, input);
+    s.entries.push(server.clone());
+    save_state(store, &s)?;
+    export_config(app_data_dir, store);
+    Ok(server)
+}
+
+pub fn agent_update(
+    app_data_dir: &std::path::Path,
+    store: &Store,
+    id: &str,
+    input: McpConnectorInput,
+) -> CmdResult<McpConnector> {
+    let input = validate(&input)?;
+    let mut s = load_state(store);
+    let server = s
+        .entries
+        .iter_mut()
+        .find(|c| c.id == id)
+        .ok_or_else(|| format!("MCP server not found: {id}"))?;
+    apply(server, input);
+    let updated = server.clone();
+    save_state(store, &s)?;
+    export_config(app_data_dir, store);
+    Ok(updated)
+}
+
+pub fn agent_set_enabled(
+    app_data_dir: &std::path::Path,
+    store: &Store,
+    id: &str,
+    enabled: bool,
+) -> CmdResult<McpConnector> {
+    let mut s = load_state(store);
+    let server = s
+        .entries
+        .iter_mut()
+        .find(|c| c.id == id)
+        .ok_or_else(|| format!("MCP server not found: {id}"))?;
+    server.enabled = enabled;
+    server.updated_at = now_ms();
+    let updated = server.clone();
+    save_state(store, &s)?;
+    export_config(app_data_dir, store);
+    Ok(updated)
+}
+
+pub fn agent_remove(app_data_dir: &std::path::Path, store: &Store, id: &str) -> CmdResult<bool> {
+    let mut s = load_state(store);
+    let before = s.entries.len();
+    s.entries.retain(|c| c.id != id);
+    let removed = s.entries.len() != before;
+    if removed {
+        save_state(store, &s)?;
+        export_config(app_data_dir, store);
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+pub async fn add_connector(
+    state: State<'_, AppState>,
+    input: McpConnectorInput,
+) -> CmdResult<McpConnector> {
+    agent_add(&state.app_data_dir, &state.store, input)
 }
 
 #[tauri::command]
@@ -355,18 +419,7 @@ pub async fn update_connector(
     id: String,
     input: McpConnectorInput,
 ) -> CmdResult<McpConnector> {
-    let input = validate(&input)?;
-    let mut s = load_state(&state.store);
-    let connector = s
-        .entries
-        .iter_mut()
-        .find(|c| c.id == id)
-        .ok_or_else(|| format!("connector not found: {id}"))?;
-    apply(connector, input);
-    let updated = connector.clone();
-    save_state(&state.store, &s)?;
-    export_config(&state.app_data_dir, &state.store);
-    Ok(updated)
+    agent_update(&state.app_data_dir, &state.store, &id, input)
 }
 
 #[tauri::command]
@@ -375,36 +428,18 @@ pub async fn set_connector_enabled(
     id: String,
     enabled: bool,
 ) -> CmdResult<McpConnector> {
-    let mut s = load_state(&state.store);
-    let connector = s
-        .entries
-        .iter_mut()
-        .find(|c| c.id == id)
-        .ok_or_else(|| format!("connector not found: {id}"))?;
-    connector.enabled = enabled;
-    connector.updated_at = now_ms();
-    let updated = connector.clone();
-    save_state(&state.store, &s)?;
-    export_config(&state.app_data_dir, &state.store);
-    Ok(updated)
+    agent_set_enabled(&state.app_data_dir, &state.store, &id, enabled)
 }
 
 #[tauri::command]
 pub async fn remove_connector(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    let mut s = load_state(&state.store);
-    let before = s.entries.len();
-    s.entries.retain(|c| c.id != id);
-    if s.entries.len() == before {
-        return Ok(()); // idempotent
-    }
-    save_state(&state.store, &s)?;
-    export_config(&state.app_data_dir, &state.store);
+    let _ = agent_remove(&state.app_data_dir, &state.store, &id)?;
     Ok(())
 }
 
 /// Connect to a server (as configured in `input`, saved or not) and run an MCP
 /// `initialize` + `tools/list`. Never mutates state; purely a validation probe.
-/// OAuth connectors can't be probed over a bare reqwest handshake (no bearer), so
+/// OAuth MCP servers can't be probed over a bare reqwest handshake (no bearer), so
 /// they go through mcporter, which uses the tokens it cached during `authorize`.
 #[tauri::command]
 pub async fn test_connector(
@@ -432,11 +467,11 @@ pub async fn test_connector(
     }
 }
 
-/// Run the OAuth 2.1 authorization flow for an http connector via mcporter. Writes
+/// Run the OAuth 2.1 authorization flow for an http MCP server via mcporter. Writes
 /// a one-server config (so the vault key — `{name, url}` — matches what the bridge
 /// later connects with), runs `mcporter auth <name>`, and lets mcporter open the
 /// browser + run the local callback server + persist tokens. Returns mcporter's
-/// output on success. If node isn't found, the connector still authorizes lazily
+/// output on success. If node isn't found, the MCP server still authorizes lazily
 /// on first use in a chat (the bridge runs the same flow), which the error notes.
 #[tauri::command]
 pub async fn authorize_connector(
@@ -445,7 +480,7 @@ pub async fn authorize_connector(
 ) -> CmdResult<String> {
     let input = validate(&input)?;
     if input.transport != "http" {
-        return Err("only HTTP connectors use OAuth".into());
+        return Err("only HTTP MCP servers use OAuth".into());
     }
     let tmp = state.app_data_dir.join("mcp-oauth-tmp.json");
     write_mcp_doc(&tmp, &one_server_oauth_doc(&input));
@@ -549,7 +584,7 @@ async fn mcporter_list(
 }
 
 /// One-server mcporter config with `auth: "oauth"` forced on, used for both the
-/// authorize and the list probes so they share the connector's vault key.
+/// authorize and the list probes so they share the MCP server's vault key.
 fn one_server_oauth_doc(input: &McpConnectorInput) -> Value {
     let mut spec = json!({ "url": input.url, "auth": "oauth" });
     if !input.headers.is_empty() {
@@ -620,8 +655,8 @@ async fn run_mcporter(
         .filter(|p| p.exists())
         .ok_or("mcporter CLI not found in the pi install")?;
     let node = resolve_node().ok_or(
-        "Node.js not found on PATH — install Node to authorize OAuth connectors here \
-         (otherwise the connector authorizes on first use inside a chat).",
+        "Node.js not found on PATH — install Node to authorize OAuth MCP servers here \
+         (otherwise the MCP server authorizes on first use inside a chat).",
     )?;
     let mut cmd = tokio::process::Command::new(node);
     cmd.arg(&cli)
@@ -655,7 +690,7 @@ async fn run_mcporter(
 
 /// Best-effort `node` resolution. GUI-launched apps get a minimal PATH, so we
 /// also probe the common install locations. cetus already relies on a system node
-/// for `npx`-based stdio connectors (e.g. chrome-devtools).
+/// for `npx`-based stdio MCP servers (e.g. chrome-devtools).
 fn resolve_node() -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
     if let Some(p) = std::env::var_os("CETUS_NODE")
@@ -825,6 +860,49 @@ fn collect_tools(resp: &Value) -> Vec<McpToolInfo> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_add_persists_source_state_and_exports_mcp_json() {
+        let root = std::env::temp_dir().join(format!("cetus-mcp-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = Store::open(&root.join("state.db")).unwrap();
+
+        let server = agent_add(
+            &root,
+            &store,
+            McpConnectorInput {
+                name: "Test MCP".to_string(),
+                transport: "stdio".to_string(),
+                command: "node".to_string(),
+                args: vec!["server.mjs".to_string()],
+                env: BTreeMap::new(),
+                url: String::new(),
+                headers: BTreeMap::new(),
+                auth: String::new(),
+                oauth_client_id: String::new(),
+                oauth_scope: String::new(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+
+        let list = agent_list(&store);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, server.id);
+
+        let exported: Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("mcp.json")).unwrap()).unwrap();
+        assert_eq!(exported["mcpServers"]["Test MCP"]["command"], "node");
+        assert_eq!(exported["mcpServers"]["Test MCP"]["args"][0], "server.mjs");
+
+        drop(store);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 // ---- Handshake: HTTP -------------------------------------------------------

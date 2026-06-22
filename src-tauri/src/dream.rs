@@ -303,7 +303,7 @@ async fn run_dream(state: &AppState, handle: &AppHandle, quiet_minutes: u32) -> 
         match memory::consolidate(&state.app_data_dir, ops) {
             Ok(n) if n > 0 => {
                 tracing::info!("dream: consolidated {n} memory note(s)");
-                let _ = handle.emit("app-event", crate::pi_rpc::AppEvent::MemoryUpdated);
+                let _ = handle.emit("app-event", crate::app_event::AppEvent::MemoryUpdated);
             }
             Ok(_) => {}
             Err(e) => tracing::warn!("dream: memory write failed: {e}"),

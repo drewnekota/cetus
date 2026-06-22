@@ -63,7 +63,7 @@
 │  ┌──────────────────────────────────────────────────────────────────────┐ │
 │  │  lib.rs              AppState、pi 进程池、窗口生命周期、启动逻辑    │ │
 │  │  commands.rs         Tauri commands（前端 invoke 的入口）            │ │
-│  │  pi_rpc.rs           pi --mode rpc 子进程封装（spawn/send/receive）  │ │
+│  │  cetus-bridge crate  pi --mode rpc 子进程封装与 bridge 协议          │ │
 │  │  store.rs            SQLite 元数据存储（对话、截屏、应用设置）        │ │
 │  │  agent.rs            浏览器/电脑控制设置 + host-tunnel handler        │ │
 │  │  ultra.rs            Ultra Code 模式设置                             │ │
@@ -119,7 +119,7 @@
 | --- | --- |
 | **`lib.rs`** | 应用启动入口。初始化 SQLite、pi 安装树、各子系统（scheduler、dreamer、capture、hotkey、MCP、skills、agent-control），管理 `AppState`（pi 进程池、store、inflight 去重集）。关闭窗口仅隐藏（保持后台运行）。 |
 | **`commands.rs`** | 所有 Tauri command 处理器：对话 CRUD、sendPrompt、abort、retry、auto-title、API key 管理、文件读写、automation CRUD、screen capture 设置、主题切换等。前端通过 `invoke()` 调用。 |
-| **`pi_rpc.rs`** | pi 子进程的生命周期管理：spawn（cwd 设为 pi-install 目录、注入 env、可选 Ultra/agent 系统提示词）、JSON-RPC 请求/响应（`send_prompt`、`switch_session`、`get_messages`、`abort` 等）、stdout 流读取（严格 LF JSONL 分割，不依赖 Node readline）。定义了所有 `AppEvent` 类型和 sentinel title 常量。 |
+| **`src-tauri/cetus-bridge`** | 本地 bridge crate：pi 子进程生命周期管理、JSON-RPC 请求/响应（`send_prompt`、`switch_session`、`get_messages`、`abort` 等）、stdout JSONL 流读取、host tunnel sentinel 常量、`RuntimeEvent`。Cetus app 通过 `app_event.rs`、`tauri_bridge.rs`、`model_bridge.rs` 适配到前端事件、Tauri runtime 和产品模型选择。 |
 | **`store.rs`** | SQLite 封装：conversations 表（id、title、session_file、workspace_dir、model、timestamps、review_state 等）、screenshots 表（OCR 文本 + 感知哈希索引）、app_settings 键值表。Schema 版本管理，大版本变更自动重建。 |
 | **`agent.rs`** | 浏览器/电脑控制的两层 gate：设置持久化 + env 标记导出（`CETUS_BROWSER_USE` / `CETUS_COMPUTER_USE`），host-tunnel handler（接收 pi 扩展的 `agent_control_request` 事件，分发给 cua.rs 执行或推向 UI 直播）。 |
 | **`scheduler.rs`** | 后台定时器（20s tick）：扫描 `next_run_at` 到期的 automation → 创建新对话 → spawn pi → 发送 prompt → 更新调度状态。与手动触发共享 `inflight` 去重集。 |
@@ -226,14 +226,14 @@ pi --mode rpc 处理流程（不在此仓库，但关键行为如下）：
 ### 阶段四：Rust 后端解析与路由
 
 ```
-pi_rpc.rs 的 stdout 读取循环（read_loop）：
+cetus-bridge 的 stdout 读取循环：
   │
   ├─ BufReader 逐行读取，按 \n 分割 JSONL
   ├─ 每行解析为 serde_json::Value
   ├─ dispatch_line() 分发：
   │   │
-  │   ├─ 大多数事件 → 包裹为 AppEvent::PiEvent { conversation_id, event }
-  │   │   └─ app_handle.emit("app-event", app_event)
+  │   ├─ 大多数事件 → RuntimeEvent::Protocol { conversation_id, event }
+  │   │   └─ app_event.rs 映射为 AppEvent::PiEvent 后 emit("app-event")
   │   │       → Tauri 全局事件，前端 page.tsx 的监听器收到
   │   │
   │   ├─ 特定 sentinel title（Ultra agent / Agent step / CUA）→ 路由到 Rust handler
@@ -241,7 +241,7 @@ pi_rpc.rs 的 stdout 读取循环（read_loop）：
   │   │   ├─ __cetus_agent_step__ → agent.rs → 推送到前端 AgentControlCard
   │   │   └─ __cetus_cua_request__ → agent.rs → cua.rs 执行 AX 操作
   │   │
-  │   └─ extension_ui_request → 包裹为 AppEvent::ExtensionUIRequest
+  │   └─ 普通 extension_ui_request → RuntimeEvent::Protocol
   │       └─ 前端 DialogHost 渲染对话框
   │
   ├─ agent_end → 触发 auto-title（若尚未生成）
@@ -284,7 +284,7 @@ page.tsx 的 app-event 监听器：
                                                       │
                                                    pi_for() (lazy spawn)
                                                       │
-                                                   pi_rpc.rs (stdin JSON-RPC)
+                                                   cetus-bridge (stdin JSON-RPC)
                                                       │
                                                       ▼
                                             pi --mode rpc 子进程
@@ -293,7 +293,7 @@ page.tsx 的 app-event 监听器：
                                                    stdout JSONL
                                                       │
                                                       ▼
-                                            pi_rpc.rs (read_loop + dispatch)
+                                            cetus-bridge (read_loop + dispatch)
                                                    ╱        ╲
                                                   ╱          ╲
                                      Tauri app-event      Rust handlers

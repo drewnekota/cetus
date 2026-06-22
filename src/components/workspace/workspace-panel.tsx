@@ -297,6 +297,7 @@ export function WorkspacePanel({
             state={active.browserState ?? createBrowserViewState()}
             onStateChange={(state) => onUpdateBrowserTab(active.id, state)}
             onAnnotate={onAnnotate}
+            visible={!hidden && motionState !== "closed"}
           />
         )}
       </div>

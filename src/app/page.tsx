@@ -94,6 +94,58 @@ const Onboarding = dynamic(
   { ssr: false },
 );
 
+const APP_VIEW_STATE_KEY = "cetus:viewState";
+
+interface PersistedAppViewState {
+  view?: SidebarView;
+  settingsOpen?: boolean;
+  historyOpen?: boolean;
+  detailId?: string | null;
+  boardWorkspaceFilter?: string | null;
+}
+
+function isSidebarView(value: unknown): value is SidebarView {
+  return (
+    value === "chat" ||
+    value === "board" ||
+    value === "automations" ||
+    value === "plugins"
+  );
+}
+
+function readAppViewState(): PersistedAppViewState {
+  if (typeof window === "undefined") return {};
+  const readLegacyView = (): SidebarView | undefined => {
+    try {
+      const v = window.localStorage.getItem("cetus:lastView");
+      return isSidebarView(v) ? v : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  try {
+    const raw = window.localStorage.getItem(APP_VIEW_STATE_KEY);
+    if (!raw) return { view: readLegacyView() };
+    const parsed = JSON.parse(raw) as PersistedAppViewState;
+    return {
+      view: isSidebarView(parsed.view) ? parsed.view : readLegacyView(),
+      settingsOpen: typeof parsed.settingsOpen === "boolean" ? parsed.settingsOpen : undefined,
+      historyOpen: typeof parsed.historyOpen === "boolean" ? parsed.historyOpen : undefined,
+      detailId:
+        typeof parsed.detailId === "string" || parsed.detailId === null
+          ? parsed.detailId
+          : undefined,
+      boardWorkspaceFilter:
+        typeof parsed.boardWorkspaceFilter === "string" ||
+        parsed.boardWorkspaceFilter === null
+          ? parsed.boardWorkspaceFilter
+          : undefined,
+    };
+  } catch {
+    return { view: readLegacyView() };
+  }
+}
+
 /** Replace an automation by id, or prepend if new. Keeps server ordering. */
 function mergeAutomation(list: Automation[], a: Automation): Automation[] {
   return list.some((x) => x.id === a.id)
@@ -269,9 +321,17 @@ function createInitialWorkspaceDocksByChat(): WorkspaceDocksByChatState {
 
 export default function Home() {
   useZoom();
+  const initialViewStateRef = useRef<PersistedAppViewState | null>(null);
+  if (initialViewStateRef.current === null) {
+    initialViewStateRef.current = readAppViewState();
+  }
+  const initialViewState = initialViewStateRef.current;
   const { t } = useTranslation("chat");
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [conversationsLoaded, setConversationsLoaded] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(() =>
+    initialViewState.view === "chat" ? loadLastActive() : null,
+  );
   const [piReady, setPiReady] = useState(false);
   // Store actions are pulled via getState() inside callbacks so we never
   // subscribe page.tsx to chat-store ticks.
@@ -308,14 +368,20 @@ export default function Home() {
   const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
   const [defaultWorkspace, setDefaultWorkspace] = useState<string>("");
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(
+    initialViewState.settingsOpen === true,
+  );
   // Latches true on first open so the code-split SettingsPage mounts (and its
   // chunk loads) lazily, then stays mounted for instant reopen.
-  const [settingsEverOpened, setSettingsEverOpened] = useState(false);
+  const [settingsEverOpened, setSettingsEverOpened] = useState(
+    initialViewState.settingsOpen === true,
+  );
   useEffect(() => {
     if (settingsOpen) setSettingsEverOpened(true);
   }, [settingsOpen]);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(
+    initialViewState.historyOpen === true,
+  );
   const [historyQuery, setHistoryQuery] = useState("");
   const [historyFrame, setHistoryFrame] = useState<Screenshot | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -333,6 +399,7 @@ export default function Home() {
   // for the static-export prerender, where window is absent) so a reload paints
   // the right page straight away instead of flashing the chat hero first.
   const [view, setView] = useState<SidebarView>(() => {
+    if (initialViewState.view) return initialViewState.view;
     if (typeof window === "undefined") return "chat";
     try {
       const v = localStorage.getItem("cetus:lastView");
@@ -358,9 +425,27 @@ export default function Home() {
   const bottomWorkspace = workspaceDocks.bottom;
   const sideWorkspacePresence = usePanelPresence(sideWorkspace.open);
   const bottomWorkspacePresence = usePanelPresence(bottomWorkspace.open);
-  const [boardWorkspaceFilter, setBoardWorkspaceFilter] = useState<string | null>(null);
+  const [boardWorkspaceFilter, setBoardWorkspaceFilter] = useState<string | null>(
+    initialViewState.boardWorkspaceFilter ?? null,
+  );
   const [newTaskOpen, setNewTaskOpen] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(
+    initialViewState.detailId ?? null,
+  );
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        APP_VIEW_STATE_KEY,
+        JSON.stringify({
+          view,
+          settingsOpen,
+          historyOpen,
+          detailId,
+          boardWorkspaceFilter,
+        } satisfies PersistedAppViewState),
+      );
+    } catch {}
+  }, [view, settingsOpen, historyOpen, detailId, boardWorkspaceFilter]);
   /** Ultra Code master switch, surfaced as a toggle in the composer. */
   const [ultraEnabled, setUltraEnabled] = useState(false);
   const [detailModelChoice, setDetailModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
@@ -620,12 +705,18 @@ export default function Home() {
           }
           case "pi_exited": {
             if (evt.conversationId) {
+              const r = runStatusRef.current[evt.conversationId];
+              const liveInStore = store.streamingIds.has(evt.conversationId);
+              // macOS sleep/resume can leave us with a late sidecar-exit event
+              // for a conversation whose run had already settled. Do not poison
+              // that transcript with a Retry state unless the frontend still
+              // believes this conversation has a live run.
+              if (!r?.running && !liveInStore) break;
               store.setError(
                 evt.conversationId,
                 `pi exited (code ${evt.code ?? "n/a"})`,
               );
               // Close out any live run so a trailing agent_end can't double-fire.
-              const r = runStatusRef.current[evt.conversationId];
               if (r) r.running = false;
               dispatchNotification("task_finished", {
                 title: convTitle(evt.conversationId),
@@ -711,6 +802,7 @@ export default function Home() {
   const refreshList = useCallback(async () => {
     const list = await api.listConversations(false);
     setConversations(list);
+    setConversationsLoaded(true);
     return list;
   }, []);
 
@@ -720,6 +812,7 @@ export default function Home() {
       await refreshList();
       chatStore.getState().drop(c.id);
       if (c.id === activeIdRef.current) {
+        saveLastActive(null);
         setActiveId(null);
       }
     },
@@ -729,6 +822,13 @@ export default function Home() {
   useEffect(() => {
     refreshList().catch(console.error);
   }, [refreshList]);
+
+  useEffect(() => {
+    if (!detailId) return;
+    if (!conversationsLoaded) return;
+    if (conversations.some((c) => c.id === detailId)) return;
+    setDetailId(null);
+  }, [conversations, conversationsLoaded, detailId]);
 
   const refreshAutomations = useCallback(async () => {
     const list = await api.listAutomations();
@@ -759,6 +859,17 @@ export default function Home() {
         chatStore.getState().hydrate(lastId, cached);
         cachedLacksUser = !cached.some((m) => m.role === "user");
       }
+      const row = conversationsRef.current.find((c) => c.id === lastId);
+      if (row) {
+        setModelChoice(row.model);
+        setWorkspaceDir(row.workspaceDir);
+      }
+      // A reload does not stop a running pi; it only remounts this webview.
+      // During a turn, get_messages cannot reply until the run completes, so
+      // calling switchConversation here can time out and falsely kick the UI
+      // back to a new chat. If IDB has a faithful render, keep it and let the
+      // existing app-event stream continue updating this conversation.
+      if (cached && cached.length > 0 && !cachedLacksUser) return;
       // Attach pi and pull the canonical conversation row for model/workspace.
       // We deliberately DON'T `reset` from pi's history when the cache is
       // faithful: that history is lossy for image turns, so IDB is the better
@@ -779,7 +890,7 @@ export default function Home() {
         })
         .catch((e) => {
           console.error("restore last active failed", lastId, e);
-          if (!cancelled && !isStale()) setActiveId(null);
+          if (!cancelled && !isStale() && !cached?.length) setActiveId(null);
         });
     })();
     return () => {
@@ -790,7 +901,7 @@ export default function Home() {
   // Persist last-active id whenever it changes, so the *next* cold start
   // knows what to hydrate.
   useEffect(() => {
-    saveLastActive(activeId);
+    if (activeId) saveLastActive(activeId);
   }, [activeId]);
 
   useEffect(() => {
@@ -1360,6 +1471,7 @@ export default function Home() {
     // "New chat" is a conversations action — land on the chat hero even when
     // triggered from the Automations destination.
     setView("chat");
+    saveLastActive(null);
     setActiveId(null);
     setFocusToken((t) => t + 1);
   }
@@ -1426,6 +1538,14 @@ export default function Home() {
           // history, so flag it to fall back below.
           cachedLacksUser = !cached.some((m) => m.role === "user");
         }
+      }
+      if (cacheHit && !cachedLacksUser) {
+        const row = conversationsRef.current.find((c) => c.id === id);
+        if (row) {
+          setModelChoice(row.model);
+          setWorkspaceDir(row.workspaceDir);
+        }
+        return;
       }
       let conversation: Conversation;
       let messages: PiMessage[];
@@ -1501,6 +1621,7 @@ export default function Home() {
       setNewTaskOpen(true);
     } else {
       setView("chat");
+      saveLastActive(null);
       setActiveId(null);
       setFocusToken((t) => t + 1);
     }
@@ -1882,6 +2003,10 @@ export default function Home() {
         chatStore.getState().hydrate(id, cached);
         cacheHit = true;
         cachedLacksUser = !cached.some((m) => m.role === "user");
+      }
+      if (cacheHit && !cachedLacksUser) {
+        setDetailLoading(false);
+        return;
       }
       try {
         const { messages } = await api.switchConversation(id);
