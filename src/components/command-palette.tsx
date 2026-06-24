@@ -34,6 +34,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { useTranslation } from "@/lib/i18n";
 import { workspaceName as shortenWorkspace } from "@/lib/paths";
 import { loadCachedMessages, useChatStore } from "@/lib/chat-store";
+import { shortcutDisplay, useKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import {
   buildSnippet,
   extractConversationText,
@@ -135,6 +136,7 @@ export function CommandPalette({
   onViewChange,
 }: Props) {
   const { t } = useTranslation("commandPalette");
+  const shortcuts = useKeyboardShortcuts();
   const [query, setQuery] = useState("");
   // convId -> flattened searchable text + a cached lowercased copy (so we don't
   // re-lowercase an 8k blob on every keystroke).
@@ -221,15 +223,15 @@ export function CommandPalette({
 
   const actions = useMemo(
     () => [
-      { id: "new", label: t("action.newChat.label"), keywords: t("action.newChat.keywords"), shortcut: "⌘N", icon: Plus, run: onNewChat },
-      { id: "chats", label: t("action.switchChats.label"), keywords: t("action.switchChats.keywords"), shortcut: "⌘1", icon: MessageSquare, run: () => onViewChange("chat") },
-      { id: "board", label: t("action.switchBoard.label"), keywords: t("action.switchBoard.keywords"), shortcut: "⌘2", icon: LayoutGrid, run: () => onViewChange("board") },
-      { id: "automations", label: t("action.switchAutomations.label"), keywords: t("action.switchAutomations.keywords"), shortcut: "⌘3", icon: Clock, run: () => onViewChange("automations") },
-      { id: "plugins", label: t("action.switchPlugins.label"), keywords: t("action.switchPlugins.keywords"), shortcut: "⌘4", icon: Blocks, run: () => onViewChange("plugins") },
-      { id: "settings", label: t("action.openSettings.label"), keywords: t("action.openSettings.keywords"), shortcut: "⌘,", icon: Settings, run: onOpenSettings },
+      { id: "new", label: t("action.newChat.label"), keywords: t("action.newChat.keywords"), shortcut: shortcutDisplay(shortcuts.newChat), icon: Plus, run: onNewChat },
+      { id: "chats", label: t("action.switchChats.label"), keywords: t("action.switchChats.keywords"), shortcut: shortcutDisplay(shortcuts.switchChats), icon: MessageSquare, run: () => onViewChange("chat") },
+      { id: "board", label: t("action.switchBoard.label"), keywords: t("action.switchBoard.keywords"), shortcut: shortcutDisplay(shortcuts.switchBoard), icon: LayoutGrid, run: () => onViewChange("board") },
+      { id: "automations", label: t("action.switchAutomations.label"), keywords: t("action.switchAutomations.keywords"), shortcut: shortcutDisplay(shortcuts.switchAutomations), icon: Clock, run: () => onViewChange("automations") },
+      { id: "plugins", label: t("action.switchPlugins.label"), keywords: t("action.switchPlugins.keywords"), shortcut: shortcutDisplay(shortcuts.switchPlugins), icon: Blocks, run: () => onViewChange("plugins") },
+      { id: "settings", label: t("action.openSettings.label"), keywords: t("action.openSettings.keywords"), shortcut: shortcutDisplay(shortcuts.openSettings), icon: Settings, run: onOpenSettings },
       { id: "screen-history", label: t("action.screenHistory.label"), keywords: t("action.screenHistory.keywords"), shortcut: "", icon: Monitor, run: () => onOpenScreenHistory() },
     ],
-    [t, onNewChat, onOpenSettings, onOpenScreenHistory, onViewChange],
+    [t, shortcuts, onNewChat, onOpenSettings, onOpenScreenHistory, onViewChange],
   );
 
   const shownActions = useMemo(

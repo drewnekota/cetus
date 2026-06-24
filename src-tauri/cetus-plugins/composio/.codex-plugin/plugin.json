@@ -1,0 +1,29 @@
+{
+  "name": "cetus.composio",
+  "displayName": "Composio",
+  "version": "0.1.0",
+  "description": "Connect user-owned Composio MCP servers so the agent can use the user's own SaaS integrations.",
+  "keywords": ["composio", "mcp", "integrations", "oauth", "saas"],
+  "activation": {
+    "enabledByDefault": false
+  },
+  "interface": {
+    "displayName": "Composio",
+    "shortDescription": "Use your own Composio account and MCP servers with Cetus.",
+    "longDescription": "This plugin supports the bring-your-own Composio model: users create and authenticate integrations in their own Composio account, then add the generated MCP endpoint to Cetus.",
+    "developerName": "Cetus",
+    "category": "integrations",
+    "capabilities": ["Read", "Write", "External Service"],
+    "websiteUrl": "https://composio.dev/",
+    "privacyPolicyUrl": "https://composio.dev/privacy",
+    "termsOfServiceUrl": "https://composio.dev/terms",
+    "defaultPrompt": [
+      "Help me connect my Composio MCP server to Cetus.",
+      "Use my connected Composio tools to summarize today's work."
+    ],
+    "brandColor": "#111111",
+    "riskLevel": "high"
+  },
+  "systemPrompt": "prompts/system.md",
+  "skills": "skills"
+}

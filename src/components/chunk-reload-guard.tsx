@@ -122,11 +122,12 @@ export function ChunkReloadGuard() {
     // refresh should always go through, even right after an auto-recover.
     // Capture phase + a window-level listener so it wins over any focused
     // surface (board, terminal, embedded browser, sidebar…) whose own keydown
-    // handler calls stopPropagation — in bubble phase those would swallow the
-    // event before it reached us, leaving Cmd+R dead while that surface is focused.
+    // handler calls stopPropagation. Stop propagation here too so the same
+    // keystroke cannot be reinterpreted as an embedded-surface reload.
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "r" || e.key === "R")) {
         e.preventDefault();
+        e.stopImmediatePropagation();
         window.location.reload();
       }
     };

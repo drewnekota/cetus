@@ -38,6 +38,7 @@ import {
 import { ViewToggle, type SidebarView } from "@/components/sidebar/view-toggle";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
+import { shortcutDisplay, useKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import { workspaceName } from "@/lib/paths";
 import { formatFullDateTime } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/conversation-search";
@@ -75,6 +76,18 @@ export const AppSidebar = memo(function AppSidebar({
   onOpenSettings,
 }: Props) {
   const { t } = useTranslation("sidebar");
+  const shortcuts = useKeyboardShortcuts();
+  const shortcutLabels = useMemo(
+    () => ({
+      newChat: shortcutDisplay(shortcuts.newChat),
+      archiveChat: shortcutDisplay(shortcuts.archiveChat),
+      switchChats: shortcutDisplay(shortcuts.switchChats),
+      switchBoard: shortcutDisplay(shortcuts.switchBoard),
+      switchAutomations: shortcutDisplay(shortcuts.switchAutomations),
+      switchPlugins: shortcutDisplay(shortcuts.switchPlugins),
+    }),
+    [shortcuts],
+  );
   const { width, startResize, resetWidth } = useSidebarWidth();
   const nowMs = useMinuteClock();
   const groups = useMemo(() => groupByWorkspace(conversations), [conversations]);
@@ -137,7 +150,14 @@ export const AppSidebar = memo(function AppSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <ViewToggle view={view} onChange={onViewChange} />
+        <ViewToggle
+          view={view}
+          onChange={onViewChange}
+          hints={{
+            chat: shortcutLabels.switchChats,
+            board: shortcutLabels.switchBoard,
+          }}
+        />
         {/* New chat + Automations are pinned with the header (logo + toggle) so
             they stay put while the conversation / workspace list scrolls. */}
         <SidebarMenu>
@@ -152,7 +172,7 @@ export const AppSidebar = memo(function AppSidebar({
             >
               <PlusCircle />
               <span>{newLabel}</span>
-              <Kbd className="ml-auto border-transparent">⌘N</Kbd>
+              <Kbd className="ml-auto border-transparent">{shortcutLabels.newChat}</Kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
           {/* Automations is its own destination (a scheduled-prompt feature),
@@ -166,7 +186,9 @@ export const AppSidebar = memo(function AppSidebar({
             >
               <Clock />
               <span>{t("nav.automations")}</span>
-              <Kbd className="ml-auto border-transparent">⌘3</Kbd>
+              <Kbd className="ml-auto border-transparent">
+                {shortcutLabels.switchAutomations}
+              </Kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
@@ -177,7 +199,9 @@ export const AppSidebar = memo(function AppSidebar({
             >
               <Blocks />
               <span>{t("nav.plugins")}</span>
-              <Kbd className="ml-auto border-transparent">⌘4</Kbd>
+              <Kbd className="ml-auto border-transparent">
+                {shortcutLabels.switchPlugins}
+              </Kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -227,7 +251,7 @@ export const AppSidebar = memo(function AppSidebar({
         ) : chatGroups.length === 0 ? (
           <div className="px-3 py-6 text-xs text-muted-foreground">
             {t("chats.empty.prefix")}{" "}
-            <Kbd className="border-border bg-muted">⌘N</Kbd>{" "}
+            <Kbd className="border-border bg-muted">{shortcutLabels.newChat}</Kbd>{" "}
             {t("chats.empty.suffix")}
           </div>
         ) : (
@@ -250,6 +274,7 @@ export const AppSidebar = memo(function AppSidebar({
                     nowMs={nowMs}
                     onSelect={onSelect}
                     onArchive={onArchive}
+                    archiveShortcut={shortcutLabels.archiveChat}
                   />
                 ))}
               </SidebarMenu>
@@ -391,6 +416,7 @@ const ConversationRow = memo(function ConversationRow({
   nowMs,
   onSelect,
   onArchive,
+  archiveShortcut,
 }: {
   conversation: Conversation;
   active: boolean;
@@ -399,6 +425,7 @@ const ConversationRow = memo(function ConversationRow({
   nowMs: number;
   onSelect: (id: string) => void;
   onArchive: (c: Conversation) => void;
+  archiveShortcut: string;
 }) {
   const { t } = useTranslation("sidebar");
   const archived = !!conversation.archivedAt;
@@ -474,7 +501,7 @@ const ConversationRow = memo(function ConversationRow({
         </TooltipTrigger>
         <TooltipContent side="right">
           <span>{archived ? t("action.unarchive") : t("action.archive")}</span>
-          <Kbd>⌘D</Kbd>
+          <Kbd>{archiveShortcut}</Kbd>
         </TooltipContent>
       </Tooltip>
     </SidebarMenuItem>

@@ -11,6 +11,7 @@ export type SidebarView = "chat" | "board" | "automations" | "plugins";
 interface Props {
   view: SidebarView;
   onChange: (v: SidebarView) => void;
+  hints?: Partial<Record<ToggleId, string>>;
 }
 
 type ToggleId = Extract<SidebarView, "chat" | "board">;
@@ -24,19 +25,20 @@ const ITEMS: {
   { id: "board", labelKey: "view.kanban", hint: "⌘2" },
 ];
 
-export function ViewToggle({ view, onChange }: Props) {
+export function ViewToggle({ view, onChange, hints }: Props) {
   const { t } = useTranslation("sidebar");
   return (
     <div className="inline-flex w-full items-center rounded-full border border-border bg-card p-0.5 shadow-[0px_1px_2px_0px_rgba(0,0,0,0.04)]">
       {ITEMS.map((it) => {
         const active = view === it.id;
         const label = t(it.labelKey);
+        const hint = hints?.[it.id] ?? it.hint;
         return (
           <button
             key={it.id}
             type="button"
             onClick={() => onChange(it.id)}
-            title={`${label} (${it.hint})`}
+            title={`${label} (${hint})`}
             className={cn(
               "inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
               active
@@ -45,14 +47,16 @@ export function ViewToggle({ view, onChange }: Props) {
             )}
           >
             {label}
-            <kbd
-              className={cn(
-                "font-sans text-[10px] leading-none tabular-nums",
-                active ? "text-primary-foreground/65" : "text-muted-foreground/60",
-              )}
-            >
-              {it.hint}
-            </kbd>
+            {hint && (
+              <kbd
+                className={cn(
+                  "font-sans text-[10px] leading-none tabular-nums",
+                  active ? "text-primary-foreground/65" : "text-muted-foreground/60",
+                )}
+              >
+                {hint}
+              </kbd>
+            )}
           </button>
         );
       })}

@@ -816,6 +816,7 @@ async fn finish_ptt(app: &AppHandle, runtime: &QuickRuntime) {
             );
         }
     }
+    text = crate::titling::normalize_zh_en_spacing(&text);
     crate::voice::hide_hud(app);
     if text.trim().is_empty() {
         return;

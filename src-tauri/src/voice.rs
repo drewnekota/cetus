@@ -912,10 +912,11 @@ pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Resu
             let app = app_s.clone();
             let app_data = app_data.clone();
             move |sentence: &str| {
-                let s = sentence.trim();
-                if s.is_empty() {
+                let normalized = crate::titling::normalize_zh_en_spacing(sentence.trim());
+                if normalized.is_empty() {
                     return;
                 }
+                let s = normalized.as_str();
                 tracing::info!("doubao asr (hands-free) sentence: {:?}", preview(s));
                 // Show the latest sentence in the HUD, then type/paste it into
                 // wherever the user is focused. Joining rules for consecutive

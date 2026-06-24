@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent,
 } from "react";
 import {
   ArrowLeft,
@@ -21,7 +22,12 @@ import { Input } from "@/components/ui/input";
 import { ZOOM_EVENT } from "@/hooks/use-zoom";
 import { useTranslation } from "@/lib/i18n";
 import { api } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
 import { listen } from "@tauri-apps/api/event";
+
+const URL_HISTORY_STORAGE_KEY = "cetus:browserUrlHistory";
+const MAX_SAVED_URLS = 80;
+const MAX_SUGGESTIONS = 8;
 
 export interface BrowserAnnotation {
   id: string;
@@ -74,6 +80,9 @@ export function BrowserView({ state, onStateChange, onAnnotate, visible = true }
   const [annotations, setAnnotations] = useState<BrowserAnnotation[]>(state.annotations);
   const [history, setHistory] = useState<string[]>(state.history);
   const [historyIndex, setHistoryIndex] = useState(state.historyIndex);
+  const [savedUrls, setSavedUrls] = useState(readSavedUrls);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [highlightedSuggestion, setHighlightedSuggestion] = useState(-1);
   const [openError, setOpenError] = useState<string | null>(null);
 
   const displayHost = useMemo(() => {
@@ -93,6 +102,22 @@ export function BrowserView({ state, onStateChange, onAnnotate, visible = true }
     }),
     [t],
   );
+
+  const suggestions = useMemo(() => {
+    const needle = address.trim().toLowerCase();
+    const candidates = uniqueUrls([
+      ...history.slice().reverse(),
+      ...savedUrls,
+    ]).filter((candidate) => candidate !== "about:blank");
+    const filtered = needle
+      ? candidates.filter((candidate) => urlMatches(candidate, needle))
+      : candidates;
+    return filtered.slice(0, MAX_SUGGESTIONS);
+  }, [address, history, savedUrls]);
+
+  useEffect(() => {
+    setHighlightedSuggestion(-1);
+  }, [address, suggestions.length]);
 
   useEffect(() => {
     onStateChangeRef.current = onStateChange;
@@ -203,31 +228,111 @@ export function BrowserView({ state, onStateChange, onAnnotate, visible = true }
     }
   }, [annotationLabels, inlinePreview, panelBounds, visible]);
 
-  function navigate(nextRaw: string, replace = false) {
+  const rememberUrl = useCallback((next: string) => {
+    if (next === "about:blank") return;
+    setSavedUrls((current) => {
+      const updated = uniqueUrls([next, ...current]).slice(0, MAX_SAVED_URLS);
+      writeSavedUrls(updated);
+      return updated;
+    });
+  }, []);
+
+  const reloadPage = useCallback(() => {
+    setLoading(true);
+    void openEmbedded(url);
+    if (inlinePreview) iframeRef.current?.contentWindow?.location.reload();
+  }, [inlinePreview, openEmbedded, url]);
+
+  const navigate = useCallback((nextRaw: string, replace = false) => {
     const next = normalizeUrl(nextRaw);
+    const currentIndex = historyIndex;
+    const shouldReplace = replace || next === url;
     setAddress(next);
     setUrl(next);
-    if (replace) {
-      setHistory((xs) => xs.map((x, i) => (i === historyIndex ? next : x)));
+    setSuggestionsOpen(false);
+    rememberUrl(next);
+    if (shouldReplace) {
+      setHistory((xs) => xs.map((x, i) => (i === currentIndex ? next : x)));
     } else {
-      setHistory((xs) => [...xs.slice(0, historyIndex + 1), next]);
-      setHistoryIndex((i) => i + 1);
+      setHistory((xs) => [...xs.slice(0, currentIndex + 1), next]);
+      setHistoryIndex(currentIndex + 1);
     }
     void openEmbedded(next);
-  }
+  }, [historyIndex, openEmbedded, rememberUrl, url]);
 
   function submitAddress(e: FormEvent) {
     e.preventDefault();
     navigate(address);
   }
 
-  function moveHistory(delta: -1 | 1) {
+  const moveHistory = useCallback((delta: -1 | 1) => {
     const nextIndex = historyIndex + delta;
     if (nextIndex < 0 || nextIndex >= history.length) return;
+    const next = history[nextIndex];
     setHistoryIndex(nextIndex);
-    setAddress(history[nextIndex]);
-    setUrl(history[nextIndex]);
-    void openEmbedded(history[nextIndex]);
+    setAddress(next);
+    setUrl(next);
+    setSuggestionsOpen(false);
+    rememberUrl(next);
+    void openEmbedded(next);
+  }, [history, historyIndex, openEmbedded, rememberUrl]);
+
+  function selectSuggestion(next: string) {
+    navigate(next, next === url);
+  }
+
+  function onAddressKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (!suggestionsOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      setSuggestionsOpen(suggestions.length > 0);
+    }
+    if (!suggestions.length) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightedSuggestion((i) => (i + 1) % suggestions.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightedSuggestion((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+    } else if (e.key === "Enter" && suggestionsOpen && highlightedSuggestion >= 0) {
+      e.preventDefault();
+      const suggestion = suggestions[highlightedSuggestion];
+      if (suggestion) selectSuggestion(suggestion);
+    } else if (e.key === "Escape") {
+      setSuggestionsOpen(false);
+    }
+  }
+
+  function onBrowserKeyDownCapture(e: KeyboardEvent<HTMLDivElement>) {
+    const mod = e.metaKey || e.ctrlKey;
+    const key = e.key.toLowerCase();
+    if (mod && !e.altKey && !e.shiftKey && key === "r") {
+      e.preventDefault();
+      e.stopPropagation();
+      reloadPage();
+      return;
+    }
+    if (mod && !e.altKey && !e.shiftKey && e.key === "[") {
+      e.preventDefault();
+      e.stopPropagation();
+      moveHistory(-1);
+      return;
+    }
+    if (mod && !e.altKey && !e.shiftKey && e.key === "]") {
+      e.preventDefault();
+      e.stopPropagation();
+      moveHistory(1);
+      return;
+    }
+    if (!e.metaKey && !e.ctrlKey && e.altKey && !e.shiftKey && e.key === "ArrowLeft") {
+      e.preventDefault();
+      e.stopPropagation();
+      moveHistory(-1);
+      return;
+    }
+    if (!e.metaKey && !e.ctrlKey && e.altKey && !e.shiftKey && e.key === "ArrowRight") {
+      e.preventDefault();
+      e.stopPropagation();
+      moveHistory(1);
+    }
   }
 
   async function setElementAnnotationMode(enabled: boolean) {
@@ -291,8 +396,11 @@ export function BrowserView({ state, onStateChange, onAnnotate, visible = true }
     <div
       className="flex h-full min-h-0 flex-1 flex-col bg-background"
       data-testid="browser-view"
+      data-browser-shortcuts="true"
+      data-visible={visible ? "true" : "false"}
       data-url={url}
       data-inline-preview={inlinePreview ? "true" : "false"}
+      onKeyDownCapture={onBrowserKeyDownCapture}
     >
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
         <div className="flex items-center gap-1">
@@ -325,10 +433,7 @@ export function BrowserView({ state, onStateChange, onAnnotate, visible = true }
             size="sm"
             variant="ghost"
             className="h-8 w-8 px-0"
-            onClick={() => {
-              void openEmbedded(url);
-              if (inlinePreview) iframeRef.current?.contentWindow?.location.reload();
-            }}
+            onClick={reloadPage}
             title={t("browser.reload")}
             aria-label={t("browser.reload")}
           >
@@ -340,11 +445,46 @@ export function BrowserView({ state, onStateChange, onAnnotate, visible = true }
             <Globe className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={(e) => {
+                setAddress(e.target.value);
+                setSuggestionsOpen(true);
+              }}
+              onFocus={() => setSuggestionsOpen(suggestions.length > 0)}
+              onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 120)}
+              onKeyDown={onAddressKeyDown}
               className="h-7 pl-8 pr-2 text-[13px]"
               spellCheck={false}
+              autoComplete="off"
               data-testid="browser-address"
             />
+            {suggestionsOpen && suggestions.length > 0 && (
+              <div
+                className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
+                data-testid="browser-url-suggestions"
+              >
+                {suggestions.map((suggestion, index) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    className={cn(
+                      "flex h-8 w-full items-center gap-2 px-2.5 text-left text-xs outline-hidden",
+                      index === highlightedSuggestion
+                        ? "bg-accent text-accent-foreground"
+                        : "hover:bg-accent hover:text-accent-foreground",
+                    )}
+                    onMouseEnter={() => setHighlightedSuggestion(index)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      selectSuggestion(suggestion);
+                    }}
+                    title={suggestion}
+                  >
+                    <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 truncate font-mono">{suggestion}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </form>
         <Button
@@ -378,7 +518,7 @@ export function BrowserView({ state, onStateChange, onAnnotate, visible = true }
           size="sm"
           variant="ghost"
           className="h-8 w-8 px-0"
-          onClick={() => api.openBrowserWindow(url).catch(console.error)}
+          onClick={() => api.openExternal(url).catch(console.error)}
           title={t("browser.openWindow")}
           aria-label={t("browser.openWindow")}
         >
@@ -462,6 +602,52 @@ function normalizeUrl(raw: string): string {
     return `http://${trimmed}`;
   }
   return `https://${trimmed}`;
+}
+
+function readSavedUrls(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(URL_HISTORY_STORAGE_KEY) || "[]",
+    ) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return uniqueUrls(parsed.filter((value): value is string => typeof value === "string"))
+      .filter((value) => value && value !== "about:blank")
+      .slice(0, MAX_SAVED_URLS);
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedUrls(urls: string[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(URL_HISTORY_STORAGE_KEY, JSON.stringify(urls));
+  } catch {
+    // URL suggestions are a convenience; private/locked storage should not break navigation.
+  }
+}
+
+function uniqueUrls(urls: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const url of urls) {
+    const trimmed = url.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    unique.push(trimmed);
+  }
+  return unique;
+}
+
+function urlMatches(url: string, needle: string): boolean {
+  if (url.toLowerCase().includes(needle)) return true;
+  try {
+    const parsed = new URL(url);
+    return parsed.host.toLowerCase().includes(needle);
+  } catch {
+    return false;
+  }
 }
 
 function currentZoom(): number {

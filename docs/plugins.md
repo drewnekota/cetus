@@ -18,6 +18,8 @@ my-plugin/
 ```
 
 `plugin.json` accepts either `id` or Codex-style `name` as the stable plugin id.
+Prefer `name` for new manifests; do not include both `id` and `name` in the same
+file because they map to the same internal field.
 
 ```json
 {
@@ -128,6 +130,21 @@ path is still Accessibility indices because they are more precise and auditable
 than pixels. For AX-blind or visually ambiguous screens, `computer_observe` can
 opt into `includeScreenshot: true`, returning the current screen image to the
 model alongside the numbered element list.
+
+CALL-E is implemented as `cetus.call-e`. It contributes a remote MCP server
+configuration for the `calle` server, prompt guidance, and a setup skill. It is
+disabled by default because it can place real outbound phone calls. Setup and
+verification may authenticate and list tools, but must not start a call. The
+expected CALL-E MCP tools include `plan_call`, `run_call`, and `get_call_run`.
+Agents should plan first, summarize recipient/goal/details, and only run a call
+after explicit user confirmation.
+
+Composio is implemented as `cetus.composio`. It is a bring-your-own Composio
+plugin: Cetus does not ship a shared Composio API key or shared account. Users
+create and authenticate toolkits in their own Composio project, generate a
+Composio MCP URL, and add it in Settings -> MCP with an `x-api-key` header.
+The plugin contributes prompt guidance and a setup skill; the actual SaaS tools
+come from the user's configured Composio MCP server.
 
 ## Surface Selection
 

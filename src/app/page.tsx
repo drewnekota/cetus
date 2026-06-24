@@ -74,6 +74,12 @@ import {
   type QuickLaunchPayload,
 } from "@/lib/types";
 import { composeWithContext } from "@/lib/quick-context";
+import {
+  KEYBOARD_SHORTCUTS_EVENT,
+  KEYBOARD_SHORTCUTS_STORAGE_KEY,
+  matchesShortcut,
+  readKeyboardShortcuts,
+} from "@/lib/keyboard-shortcuts";
 
 // The settings UI is a ~3900-line client component (plus react-markdown for the
 // skill previews). Code-split it so its chunk only loads the first time the user
@@ -407,6 +413,19 @@ export default function Home() {
     } catch {}
     return "chat";
   });
+  const [keyboardShortcuts, setKeyboardShortcuts] = useState(readKeyboardShortcuts);
+  useEffect(() => {
+    const reload = () => setKeyboardShortcuts(readKeyboardShortcuts());
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === KEYBOARD_SHORTCUTS_STORAGE_KEY) reload();
+    };
+    window.addEventListener(KEYBOARD_SHORTCUTS_EVENT, reload);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(KEYBOARD_SHORTCUTS_EVENT, reload);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
   useEffect(() => {
     try {
       localStorage.setItem("cetus:lastView", view);
@@ -914,7 +933,9 @@ export default function Home() {
     });
   }, [activeId, view]);
 
-  // Global keyboard shortcuts (parallels macOS app conventions):
+  // Global keyboard shortcuts (parallels macOS app conventions). App-level
+  // shortcuts are user-configurable in Settings; Cmd/Ctrl+R remains fixed as a
+  // recovery escape hatch.
   //   ⌘R    — reload the webview (works even behind a modal)
   //   ⌘K    — command palette
   //   ⌘N    — new chat / new board task
@@ -932,6 +953,8 @@ export default function Home() {
   //   Esc   — close artifacts panel, else abort current stream (palette closed)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const shortcut = (id: keyof typeof keyboardShortcuts) =>
+        matchesShortcut(e, keyboardShortcuts[id]);
       // ⌘R / Ctrl+R — reload the webview. Tauri binds no reload shortcut and
       // cetus has no app menu, so wire it here (focus-scoped to this window, so
       // it doesn't hijack ⌘R system-wide the way a global shortcut would).
@@ -952,7 +975,7 @@ export default function Home() {
       // anywhere. Handled before the modal guard (like ⌘R) so an open dialog
       // doesn't swallow it; it stacks over whatever's showing and owns its own
       // Esc to close. Toggles, so a second ⌘K dismisses it.
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") {
+      if (shortcut("commandPalette")) {
         e.preventDefault();
         setPaletteOpen((v) => !v);
         return;
@@ -976,47 +999,49 @@ export default function Home() {
           return;
         }
       }
-      if (
-        e.metaKey &&
-        e.altKey &&
-        !e.ctrlKey &&
-        !e.shiftKey &&
-        sideWorkspace.open &&
-        (e.key === "ArrowLeft" || e.key === "ArrowRight")
-      ) {
+      if (sideWorkspace.open && shortcut("previousWorkspaceTab")) {
         e.preventDefault();
-        switchWorkspaceTab("side", e.key === "ArrowRight" ? 1 : -1);
+        switchWorkspaceTab("side", -1);
         return;
       }
-      if (
-        e.metaKey &&
-        e.altKey &&
-        !e.ctrlKey &&
-        !e.shiftKey &&
-        (e.key === "ArrowUp" || e.key === "ArrowDown")
-      ) {
+      if (sideWorkspace.open && shortcut("nextWorkspaceTab")) {
         e.preventDefault();
-        switchChat(e.key === "ArrowDown" ? 1 : -1);
+        switchWorkspaceTab("side", 1);
         return;
       }
-      if (!mod || e.altKey) return;
-      const k = e.key.toLowerCase();
-      if (!e.shiftKey && k === "b") {
+      if (shortcut("previousChat")) {
+        e.preventDefault();
+        switchChat(-1);
+        return;
+      }
+      if (shortcut("nextChat")) {
+        e.preventDefault();
+        switchChat(1);
+        return;
+      }
+      if (shortcut("toggleWorkspace")) {
         e.preventDefault();
         toggleSideWorkspacePanel();
-      } else if (!e.shiftKey && k === "j") {
+      } else if (shortcut("toggleTerminal")) {
         e.preventDefault();
         toggleTerminalPanel();
-      } else if (!e.shiftKey && k === "t") {
+      } else if (shortcut("openBrowserTab")) {
         e.preventDefault();
         openWorkspaceTab("side", "browser", true);
-      } else if (!e.shiftKey && k === "p") {
+      } else if (shortcut("openFilesTab")) {
         e.preventDefault();
         openWorkspaceTab("side", "files");
-      } else if (!e.shiftKey && k === "w" && sideWorkspace.open && sideWorkspace.activeId) {
+      } else if (
+        shortcut("closeWorkspaceTab") &&
+        sideWorkspace.open &&
+        sideWorkspace.tabs.length > 0
+      ) {
         e.preventDefault();
-        closeWorkspaceTab("side", sideWorkspace.activeId);
-      } else if (!e.shiftKey && k === "n") {
+        closeWorkspaceTab(
+          "side",
+          sideWorkspace.activeId ?? sideWorkspace.tabs[0].id,
+        );
+      } else if (shortcut("newChat")) {
         e.preventDefault();
         if (view === "board") {
           setNewTaskOpen(true);
@@ -1025,7 +1050,7 @@ export default function Home() {
           // schedules from its own button.
           onNew();
         }
-      } else if (!e.shiftKey && k === "d") {
+      } else if (shortcut("archiveChat")) {
         const c = conversationsRef.current.find((x) => x.id === activeIdRef.current);
         if (c) {
           e.preventDefault();
@@ -1034,23 +1059,21 @@ export default function Home() {
             toast.error("Couldn't archive that conversation.");
           });
         }
-      } else if (k === "," || e.key === ",") {
+      } else if (shortcut("openSettings")) {
         e.preventDefault();
         setSettingsOpen(true);
-      } else if (
-        !e.shiftKey &&
-        (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4")
-      ) {
+      } else if (shortcut("switchChats")) {
         e.preventDefault();
-        setView(
-          e.key === "1"
-            ? "chat"
-            : e.key === "2"
-              ? "board"
-              : e.key === "3"
-                ? "automations"
-                : "plugins",
-        );
+        setView("chat");
+      } else if (shortcut("switchBoard")) {
+        e.preventDefault();
+        setView("board");
+      } else if (shortcut("switchAutomations")) {
+        e.preventDefault();
+        setView("automations");
+      } else if (shortcut("switchPlugins")) {
+        e.preventDefault();
+        setView("plugins");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1069,6 +1092,7 @@ export default function Home() {
     sideWorkspace.activeId,
     sideWorkspace.tabs,
     archiveConversation,
+    keyboardShortcuts,
   ]);
 
   function workspaceTitle(kind: WorkspaceTabKind, index: number): string {

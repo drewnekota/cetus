@@ -1,0 +1,30 @@
+{
+  "name": "cetus.call-e",
+  "displayName": "CALL-E",
+  "version": "0.1.0",
+  "description": "Connect to CALL-E so the agent can plan, place, and review real outbound phone calls.",
+  "keywords": ["call-e", "calle", "phone", "voice", "mcp"],
+  "activation": {
+    "enabledByDefault": false
+  },
+  "interface": {
+    "displayName": "CALL-E",
+    "shortDescription": "Plan and run real outbound phone calls through CALL-E.",
+    "longDescription": "CALL-E is an AI voice agent for making real phone calls on behalf of the user. The plugin contributes the CALL-E MCP server configuration plus setup and safety guidance.",
+    "developerName": "CALL-E, Inc.",
+    "category": "communication",
+    "capabilities": ["Interactive", "Read", "Write", "External Service"],
+    "websiteUrl": "https://www.heycall-e.com/",
+    "privacyPolicyUrl": "https://www.heycall-e.com/privacy-policy",
+    "termsOfServiceUrl": "https://www.heycall-e.com/terms-of-service",
+    "defaultPrompt": [
+      "Call the business and reschedule my appointment.",
+      "Plan a CALL-E phone call, but do not start it until I confirm."
+    ],
+    "brandColor": "#111111",
+    "riskLevel": "high"
+  },
+  "systemPrompt": "prompts/system.md",
+  "mcpServers": ".mcp.json",
+  "skills": "skills"
+}

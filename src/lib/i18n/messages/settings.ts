@@ -31,6 +31,7 @@ export const settings = {
     "nav.meetings": "Meetings",
     "nav.agent-control": "Computer & Browser",
     "nav.appearance": "Appearance",
+    "nav.keyboard-shortcuts": "Keyboard shortcuts",
     "nav.notifications": "Notifications",
     "nav.permissions": "Permissions",
     "nav.archived": "Archived chats",
@@ -185,6 +186,20 @@ export const settings = {
     "appearance.theme.label": "Theme",
     "appearance.theme.description":
       "Follow the system appearance, or lock to light or dark.",
+
+    // --- Keyboard shortcuts ----------------------------------------------
+    "keyboard.title": "Keyboard shortcuts",
+    "keyboard.description":
+      "Customize app shortcuts used while Cetus is focused. Global shortcuts for the launcher and meetings stay in their own sections.",
+    "keyboard.search": "Search shortcuts",
+    "keyboard.resetAll": "Reset all",
+    "keyboard.column.command": "Command",
+    "keyboard.column.keybinding": "Keybinding",
+    "keyboard.empty": "No shortcuts match your search.",
+    "keyboard.unassigned": "Unassigned",
+    "keyboard.clear": "Clear shortcut",
+    "keyboard.reset": "Reset to default",
+    "keyboard.conflict": "Also assigned to {commands}.",
 
     // --- Voice dictation --------------------------------------------------
     "voice.title": "Voice dictation",
@@ -560,6 +575,7 @@ export const settings = {
     "nav.meetings": "会议",
     "nav.agent-control": "电脑与浏览器",
     "nav.appearance": "外观",
+    "nav.keyboard-shortcuts": "键盘快捷键",
     "nav.notifications": "通知",
     "nav.permissions": "权限",
     "nav.archived": "已归档对话",
@@ -680,6 +696,19 @@ export const settings = {
     "appearance.description": "设置 Cetus 各处使用的主题，更改即时生效。",
     "appearance.theme.label": "主题",
     "appearance.theme.description": "跟随系统外观，或锁定为浅色或深色。",
+
+    "keyboard.title": "键盘快捷键",
+    "keyboard.description":
+      "自定义 Cetus 处于前台时使用的应用内快捷键。启动器和会议的全局快捷键仍在各自页面里设置。",
+    "keyboard.search": "搜索快捷键",
+    "keyboard.resetAll": "全部恢复默认",
+    "keyboard.column.command": "命令",
+    "keyboard.column.keybinding": "快捷键",
+    "keyboard.empty": "没有匹配的快捷键。",
+    "keyboard.unassigned": "未分配",
+    "keyboard.clear": "清除快捷键",
+    "keyboard.reset": "恢复默认",
+    "keyboard.conflict": "也分配给了 {commands}。",
 
     "voice.title": "语音听写",
     "voice.description":

@@ -126,8 +126,6 @@ export function PluginsView() {
                 plugin={plugin}
                 busy={busy}
                 labels={{
-                  builtIn: t("plugins.source.builtIn"),
-                  user: t("plugins.source.user"),
                   openFolder: t("plugins.openFolder"),
                   delete: t("plugins.delete"),
                 }}
@@ -177,8 +175,6 @@ function PluginCard({
   plugin: PluginEntry;
   busy: boolean;
   labels: {
-    builtIn: string;
-    user: string;
     openFolder: string;
     delete: string;
   };
@@ -186,14 +182,6 @@ function PluginCard({
   onDelete: (plugin: PluginEntry) => void;
   onError: (error: string) => void;
 }) {
-  const contributions = [
-    ...plugin.mcpServers.map((name) => `MCP: ${name}`),
-    ...plugin.apps.map((path) => `App: ${fileName(path)}`),
-    ...plugin.extensions.map((path) => `Extension: ${fileName(path)}`),
-    ...plugin.nativeCapabilities,
-    ...plugin.interfaceCapabilities,
-  ];
-
   return (
     <article
       className={cn(
@@ -207,8 +195,6 @@ function PluginCard({
             <h2 className="min-w-0 truncate text-sm font-medium">
               {plugin.displayName}
             </h2>
-            <Badge>{plugin.builtIn ? labels.builtIn : labels.user}</Badge>
-            {plugin.riskLevel && <Badge>{plugin.riskLevel}</Badge>}
           </div>
           <p className="mt-1 line-clamp-3 break-words text-xs leading-snug text-muted-foreground">
             {plugin.description || plugin.id}
@@ -226,14 +212,6 @@ function PluginCard({
           aria-label={plugin.displayName}
         />
       </div>
-
-      {contributions.length > 0 && (
-        <div className="mt-3 flex min-w-0 flex-wrap gap-1.5">
-          {contributions.map((label) => (
-            <Badge key={label}>{label}</Badge>
-          ))}
-        </div>
-      )}
 
       <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-2">
         <p className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
@@ -265,16 +243,4 @@ function PluginCard({
       </div>
     </article>
   );
-}
-
-function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-      {children}
-    </span>
-  );
-}
-
-function fileName(path: string) {
-  return path.split("/").pop() || path;
 }
