@@ -585,6 +585,9 @@ fn run_voice_monitor(runtime: QuickRuntime, tx: tokio::sync::mpsc::UnboundedSend
         let gen = runtime.voice_hf_gen.load(Ordering::Relaxed);
         let mut pending = gen.wrapping_sub(last_gen);
         while pending > 0 {
+            runtime
+                .last_open_ms
+                .store(crate::store::now_ms(), Ordering::Relaxed);
             let _ = tx.send(VoiceCmd::ToggleHandsFree);
             pending -= 1;
         }
@@ -611,6 +614,9 @@ fn run_voice_monitor(runtime: QuickRuntime, tx: tokio::sync::mpsc::UnboundedSend
             match press_start {
                 None => press_start = Some(Instant::now()),
                 Some(t) if t.elapsed() >= PTT_HOLD_THRESHOLD => {
+                    runtime
+                        .last_open_ms
+                        .store(crate::store::now_ms(), Ordering::Relaxed);
                     let _ = tx.send(VoiceCmd::StartPtt);
                     ptt_engaged = true;
                     press_start = None;

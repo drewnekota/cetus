@@ -12,9 +12,8 @@
 //! - **Conservative trigger**: archiving is irreversible-feeling (it pulls a
 //!   chat out of the sidebar), so the sweep is gated on the master switch and a
 //!   generous, user-chosen idle window. It never touches a chat that's still
-//!   open with a live pi — those aren't really "idle" and yanking one mid-use
-//!   would be jarring — nor automation-generated conversations, whose results
-//!   the user may not have seen yet.
+//!   visible in the chat pane, nor automation-generated conversations, whose
+//!   results the user may not have seen yet.
 //! - **Cheap when idle**: each tick is a settings read; it only lists/archives
 //!   when the feature is on, and only writes for rows that actually crossed the
 //!   threshold.
@@ -166,10 +165,17 @@ async fn sweep(state: &AppState, handle: &AppHandle, settings: &AutoArchiveSetti
         .store
         .list(false)
         .map_err(|e| anyhow!("list conversations: {e}"))?;
+    let visible_conversation_id = state.active_conversation().await;
 
     for c in active {
         // Already-old-enough rows only.
         if c.updated_at >= cutoff {
+            continue;
+        }
+        // The visible chat is not idle from the user's perspective. Keep it in
+        // place until they navigate away, even if its last persisted activity is
+        // older than the auto-archive threshold.
+        if visible_conversation_id.as_deref() == Some(c.id.as_str()) {
             continue;
         }
         // Leave automation-generated conversations alone — the user may not have

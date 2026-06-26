@@ -126,6 +126,8 @@ export const api = {
     }),
   switchConversation: (id: string) =>
     invoke<{ conversation: Conversation; messages: PiMessage[] }>("switch_conversation", { id }),
+  setActiveConversation: (id: string | null) =>
+    invoke<void>("set_active_conversation", { id }),
   archiveConversation: (id: string, archive: boolean) =>
     invoke<Conversation>("archive_conversation", { id, archive }),
   /** Set the human-in-the-loop review state; returns the updated row. */

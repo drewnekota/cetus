@@ -80,6 +80,15 @@ import {
   matchesShortcut,
   readKeyboardShortcuts,
 } from "@/lib/keyboard-shortcuts";
+import {
+  HIDDEN_WORKSPACES_STORAGE_KEY,
+  hideWorkspace,
+  loadHiddenWorkspaces,
+  loadRecentWorkspaces,
+  RECENT_WORKSPACES_CHANGED,
+  RECENT_WORKSPACES_STORAGE_KEY,
+  reorderRecentWorkspaces,
+} from "@/lib/recent-workspaces";
 
 // The settings UI is a ~3900-line client component (plus react-markdown for the
 // skill previews). Code-split it so its chunk only loads the first time the user
@@ -373,6 +382,8 @@ export default function Home() {
   }, [modelChoice]);
   const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
   const [defaultWorkspace, setDefaultWorkspace] = useState<string>("");
+  const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
+  const [hiddenWorkspaces, setHiddenWorkspaces] = useState<string[]>([]);
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(
     initialViewState.settingsOpen === true,
@@ -612,6 +623,29 @@ export default function Home() {
       .catch(console.error);
     api.defaultWorkspace().then(setDefaultWorkspace).catch(console.error);
   }, [refreshKeys]);
+
+  useEffect(() => {
+    const refresh = () => {
+      setRecentWorkspaces(loadRecentWorkspaces());
+      setHiddenWorkspaces(loadHiddenWorkspaces());
+    };
+    refresh();
+    const onStorage = (e: StorageEvent) => {
+      if (
+        e.key === RECENT_WORKSPACES_STORAGE_KEY ||
+        e.key === HIDDEN_WORKSPACES_STORAGE_KEY ||
+        e.key === null
+      ) {
+        refresh();
+      }
+    };
+    window.addEventListener(RECENT_WORKSPACES_CHANGED, refresh);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(RECENT_WORKSPACES_CHANGED, refresh);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   // Sync the Ultra Code master switch on mount and whenever the settings page
   // closes (where it can be toggled), so the composer toggle seeds correctly.
@@ -922,6 +956,16 @@ export default function Home() {
   useEffect(() => {
     if (activeId) saveLastActive(activeId);
   }, [activeId]);
+
+  // Tell the backend which conversation is actually visible in the chat pane.
+  // Auto-archive uses this to avoid removing a stale-but-open chat while the
+  // user is reading it. Other surfaces clear the marker so old chats can still
+  // archive once they are no longer foregrounded.
+  useEffect(() => {
+    api
+      .setActiveConversation(view === "chat" ? activeId : null)
+      .catch(console.error);
+  }, [activeId, view]);
 
   useEffect(() => {
     if (view !== "chat" || !activeId) return;
@@ -1491,10 +1535,13 @@ export default function Home() {
    *  conversation row is created lazily on the first send. This way clicking
    *  New chat multiple times never spawns orphan Untitled rows in the
    *  sidebar. Focus is yanked back to the textarea on every click. */
-  function onNew() {
+  function onNew(nextWorkspaceDir?: string) {
     // "New chat" is a conversations action — land on the chat hero even when
     // triggered from the Automations destination.
     setView("chat");
+    if (nextWorkspaceDir) {
+      setWorkspaceDir(nextWorkspaceDir);
+    }
     saveLastActive(null);
     setActiveId(null);
     setFocusToken((t) => t + 1);
@@ -1640,14 +1687,14 @@ export default function Home() {
     },
     [onSelectChat],
   );
-  const onNewSidebar = useCallback(() => {
+  const onNewSidebar = useCallback((nextWorkspaceDir?: string) => {
     if (viewRef.current === "board") {
+      if (nextWorkspaceDir) {
+        setWorkspaceDir(nextWorkspaceDir);
+      }
       setNewTaskOpen(true);
     } else {
-      setView("chat");
-      saveLastActive(null);
-      setActiveId(null);
-      setFocusToken((t) => t + 1);
+      onNew(nextWorkspaceDir);
     }
   }, []);
 
@@ -2104,6 +2151,69 @@ export default function Home() {
     [archiveConversation],
   );
 
+  const onRevealWorkspace = useCallback(async (dir: string) => {
+    try {
+      await api.openPath(dir);
+    } catch (e) {
+      console.error("reveal workspace failed", dir, e);
+      toast.error("Couldn't reveal that folder.");
+    }
+  }, []);
+
+  const onArchiveWorkspaceChats = useCallback(
+    async (dir: string) => {
+      const targets = conversationsRef.current.filter(
+        (c) => c.workspaceDir === dir && !c.archivedAt,
+      );
+      if (targets.length === 0) return;
+      try {
+        await Promise.all(
+          targets.map((c) => api.archiveConversation(c.id, true)),
+        );
+        const store = chatStore.getState();
+        for (const c of targets) store.drop(c.id);
+        await refreshList();
+        setDetailId((id) =>
+          id && targets.some((c) => c.id === id) ? null : id,
+        );
+        if (targets.some((c) => c.id === activeIdRef.current)) {
+          saveLastActive(null);
+          setActiveId(null);
+        }
+        setBoardWorkspaceFilter((filter) => (filter === dir ? null : filter));
+      } catch (e) {
+        console.error("archive workspace chats failed", dir, e);
+        toast.error("Couldn't archive those chats.");
+      }
+    },
+    [chatStore, refreshList],
+  );
+
+  const onRemoveWorkspace = useCallback(
+    (dir: string) => {
+      if (dir === defaultWorkspace) return;
+      const next = hideWorkspace(dir);
+      setRecentWorkspaces(next.recent);
+      setHiddenWorkspaces(next.hidden);
+      setBoardWorkspaceFilter((filter) => (filter === dir ? null : filter));
+      setWorkspaceDir((current) =>
+        current === dir ? (defaultWorkspace || null) : current,
+      );
+      const active = conversationsRef.current.find(
+        (c) => c.id === activeIdRef.current,
+      );
+      if (active?.workspaceDir === dir) {
+        saveLastActive(null);
+        setActiveId(null);
+      }
+    },
+    [defaultWorkspace],
+  );
+
+  const onReorderWorkspaces = useCallback((dirs: string[]) => {
+    setRecentWorkspaces(reorderRecentWorkspaces(dirs));
+  }, []);
+
   const onFork = useCallback(
     async (c: Conversation, messageKey?: string | null, messageIndex?: number | null) => {
       const store = chatStore.getState();
@@ -2374,12 +2484,18 @@ export default function Home() {
         streamingIds={streamingIds}
         unreadCompletedIds={unreadCompletedIds}
         defaultWorkspace={defaultWorkspace}
+        workspaceDirs={recentWorkspaces}
+        hiddenWorkspaceDirs={hiddenWorkspaces}
         view={view}
         onViewChange={setView}
         workspaceFilter={boardWorkspaceFilter}
         onWorkspaceFilterChange={setBoardWorkspaceFilter}
         onSelect={onSelectChat}
         onNew={onNewSidebar}
+        onRevealWorkspace={onRevealWorkspace}
+        onArchiveWorkspaceChats={onArchiveWorkspaceChats}
+        onRemoveWorkspace={onRemoveWorkspace}
+        onReorderWorkspaces={onReorderWorkspaces}
         onArchive={onArchive}
         onOpenSettings={openSettings}
       />

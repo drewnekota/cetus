@@ -547,6 +547,15 @@ pub async fn switch_conversation(
 }
 
 #[tauri::command]
+pub async fn set_active_conversation(
+    state: State<'_, AppState>,
+    id: Option<String>,
+) -> CmdResult<()> {
+    state.set_active_conversation(id).await;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn archive_conversation(
     state: State<'_, AppState>,
     id: String,

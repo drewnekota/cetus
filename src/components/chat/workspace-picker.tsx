@@ -11,6 +11,10 @@ import {
 } from "@/components/ui/select";
 import { useTranslation } from "@/lib/i18n";
 import { workspaceName as shorten } from "@/lib/paths";
+import {
+  loadRecentWorkspaces,
+  rememberRecentWorkspace,
+} from "@/lib/recent-workspaces";
 
 interface Props {
   workspaceDir: string | null;
@@ -22,26 +26,9 @@ interface Props {
   onNativePick?: (active: boolean) => void;
 }
 
-const KEY = "cetus:recentWorkspaces";
 /** Sentinel value for the "Add folder…" row — handled in onValueChange instead
  *  of becoming the selected value. */
 const ADD_FOLDER = "__add_folder__";
-
-function loadRecent(): string[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    const arr = raw ? (JSON.parse(raw) as unknown) : [];
-    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveRecent(dirs: string[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(dirs.slice(0, 8)));
-  } catch {}
-}
 
 export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disabled, onNativePick }: Props) {
   const { t } = useTranslation("chat");
@@ -49,7 +36,7 @@ export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disa
   const current = workspaceDir ?? defaultWorkspace;
 
   useEffect(() => {
-    setRecent(loadRecent());
+    setRecent(loadRecentWorkspaces());
   }, []);
 
   // Fold the active + default workspace into the list so they always appear and
@@ -63,9 +50,7 @@ export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disa
   }, [current, defaultWorkspace, recent]);
 
   function remember(dir: string) {
-    const next = [dir, ...recent.filter((d) => d !== dir)];
-    setRecent(next);
-    saveRecent(next);
+    setRecent(rememberRecentWorkspace(dir));
   }
 
   async function handleChange(value: string) {

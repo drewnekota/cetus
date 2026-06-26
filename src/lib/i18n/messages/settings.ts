@@ -97,6 +97,7 @@ export const settings = {
 
     // --- API keys ---------------------------------------------------------
     "providers.deepseek": "DeepSeek",
+    "providers.exa": "Exa (web search)",
     "providers.tavily": "Tavily (web search)",
     "providers.doubao": "Doubao (voice)",
     "providers.volcArk": "Volcano Ark (rewrite)",
@@ -618,6 +619,7 @@ export const settings = {
       "全部可选——没有它们 cetus 也能正常运行，每项功能只需要它自己用到的权限。",
 
     "providers.deepseek": "DeepSeek",
+    "providers.exa": "Exa（网页搜索）",
     "providers.tavily": "Tavily（网页搜索）",
     "providers.doubao": "豆包（语音）",
     "providers.volcArk": "Volcano Ark（改写）",
@@ -1039,6 +1041,7 @@ export const settings = {
     "nav.archived": "アーカイブ済みチャット",
 
     "providers.deepseek": "DeepSeek",
+    "providers.exa": "Exa（ウェブ検索）",
     "providers.tavily": "Tavily（ウェブ検索）",
     "providers.doubao": "Doubao（音声）",
     "providers.volcArk": "Volcano Ark（書き換え）",
@@ -1414,6 +1417,7 @@ export const settings = {
     "nav.archived": "보관된 대화",
 
     "providers.deepseek": "DeepSeek",
+    "providers.exa": "Exa(웹 검색)",
     "providers.tavily": "Tavily(웹 검색)",
     "providers.doubao": "Doubao(음성)",
     "providers.volcArk": "Volcano Ark(재작성)",
@@ -1782,6 +1786,7 @@ export const settings = {
     "nav.archived": "Chats archivados",
 
     "providers.deepseek": "DeepSeek",
+    "providers.exa": "Exa (búsqueda web)",
     "providers.tavily": "Tavily (búsqueda web)",
     "providers.doubao": "Doubao (voz)",
     "providers.volcArk": "Volcano Ark (reescritura)",
@@ -2151,6 +2156,7 @@ export const settings = {
     "nav.archived": "Conversas arquivadas",
 
     "providers.deepseek": "DeepSeek",
+    "providers.exa": "Exa (busca na web)",
     "providers.tavily": "Tavily (busca na web)",
     "providers.doubao": "Doubao (voz)",
     "providers.volcArk": "Volcano Ark (reescrita)",
@@ -2517,6 +2523,7 @@ export const settings = {
     "nav.archived": "Conversations archivées",
 
     "providers.deepseek": "DeepSeek",
+    "providers.exa": "Exa (recherche web)",
     "providers.tavily": "Tavily (recherche web)",
     "providers.doubao": "Doubao (voix)",
     "providers.volcArk": "Volcano Ark (réécriture)",
@@ -2883,6 +2890,7 @@ export const settings = {
     "nav.archived": "Archivierte Chats",
 
     "providers.deepseek": "DeepSeek",
+    "providers.exa": "Exa (Websuche)",
     "providers.tavily": "Tavily (Websuche)",
     "providers.doubao": "Doubao (Sprache)",
     "providers.volcArk": "Volcano Ark (Umschreiben)",
@@ -3249,6 +3257,7 @@ export const settings = {
     "nav.archived": "Chat archiviate",
 
     "providers.deepseek": "DeepSeek",
+    "providers.exa": "Exa (ricerca web)",
     "providers.tavily": "Tavily (ricerca web)",
     "providers.doubao": "Doubao (voce)",
     "providers.volcArk": "Volcano Ark (riscrittura)",
@@ -3615,6 +3624,7 @@ export const settings = {
     "nav.archived": "Архивные чаты",
 
     "providers.deepseek": "DeepSeek",
+    "providers.exa": "Exa (веб-поиск)",
     "providers.tavily": "Tavily (веб-поиск)",
     "providers.doubao": "Doubao (голос)",
     "providers.volcArk": "Volcano Ark (перезапись)",

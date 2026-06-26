@@ -141,7 +141,9 @@ import {
 // run at module level); `envHint` is a literal env-var name, never translated.
 const PROVIDERS: { id: string; labelKey: string; envHint: string }[] = [
   { id: "deepseek", labelKey: "providers.deepseek", envHint: "DEEPSEEK_API_KEY" },
-  // Optional. When set, web_search routes through Tavily instead of scraping.
+  // Optional. When set, web_search prefers Exa over Tavily.
+  { id: "exa", labelKey: "providers.exa", envHint: "EXA_API_KEY" },
+  // Optional. Fallback provider for web_search/web_fetch extraction.
   { id: "tavily", labelKey: "providers.tavily", envHint: "TAVILY_API_KEY" },
   // Doubao (Volcano Engine) real-time streaming ASR — the voice-dictation engine
   // (new-console X-Api-Key). Fast (~90ms), live partials, great zh/en, CN-native.

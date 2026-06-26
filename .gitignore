@@ -45,3 +45,9 @@ output/
 # Local signing config (identity string is private; never commit)
 scripts/signing.env
 scripts/release.env
+
+# Eval answer keys / de-blinding maps — kept local, NOT shipped publicly
+# (avoids benchmark contamination once the repo is public).
+evals/general-benchmark/v2/fixtures/**/expected.json
+evals/web-search/mapping.json
+evals/web-search/results.json

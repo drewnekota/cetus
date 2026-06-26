@@ -30,9 +30,10 @@ const ACCOUNT: &str = "providers";
 /// that pi expects.
 pub const KNOWN_PROVIDERS: &[(&str, &str)] = &[
     ("deepseek", "DEEPSEEK_API_KEY"),
-    // Powers the web-search extension's `web_search` / `web_fetch` tools (Tavily
-    // API). Absent → those tools are not registered and the agent falls back to
-    // the heavyweight browser_* tools for any web access.
+    // Powers the web-search extension's `web_search` / `web_fetch` tools.
+    // Exa is preferred when both Exa and Tavily keys are configured.
+    ("exa", "EXA_API_KEY"),
+    // Optional search/extract fallback for the same web-search extension.
     ("tavily", "TAVILY_API_KEY"),
     // Vision provider: the vision-bridge extension transcribes attached images
     // via Gemini (gemini-3.5-flash) so the text-only DeepSeek model can reason

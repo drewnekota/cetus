@@ -69,6 +69,10 @@ use tokio::sync::Mutex;
 /// new env vars).
 pub struct AppState {
     pub store: Arc<store::Store>,
+    /// Conversation currently visible in the chat pane. Auto-archive skips this
+    /// row even if its persisted `updated_at` is old, so a chat can't disappear
+    /// while the user is reading it.
+    active_conversation: Arc<Mutex<Option<String>>>,
     /// Shared with the scheduler task so an automation-fired conversation's pi
     /// lands in the same pool the rest of the app reuses via `pi_for`.
     pis: Arc<Mutex<HashMap<String, Arc<pi_rpc::PiRpc>>>>,
@@ -299,6 +303,14 @@ impl AppState {
     /// set_model_choice on an idle conversation, …).
     pub async fn pi_existing(&self, conv_id: &str) -> Option<Arc<pi_rpc::PiRpc>> {
         self.pis.lock().await.get(conv_id).cloned()
+    }
+
+    pub async fn set_active_conversation(&self, conv_id: Option<String>) {
+        *self.active_conversation.lock().await = conv_id;
+    }
+
+    pub async fn active_conversation(&self) -> Option<String> {
+        self.active_conversation.lock().await.clone()
     }
 
     /// Drop the pi owning `conv_id`. The Arc's Drop kills the child process.
@@ -615,6 +627,7 @@ pub fn run() {
             // global pi at boot.
             app.manage(AppState {
                 store,
+                active_conversation: Arc::new(Mutex::new(None)),
                 pis,
                 inflight,
                 handle,
@@ -982,6 +995,7 @@ pub fn run() {
         commands::new_conversation,
         commands::fork_conversation,
         commands::switch_conversation,
+        commands::set_active_conversation,
         commands::archive_conversation,
         commands::set_review_state,
         commands::delete_conversation,
@@ -1113,6 +1127,7 @@ pub fn run() {
         commands::new_conversation,
         commands::fork_conversation,
         commands::switch_conversation,
+        commands::set_active_conversation,
         commands::archive_conversation,
         commands::set_review_state,
         commands::delete_conversation,

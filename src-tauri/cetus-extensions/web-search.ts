@@ -1,6 +1,6 @@
 /**
  * web-search.ts — a pi extension that gives a TEXT-ONLY agent a lightweight web
- * lookup capability via Tavily, with ZERO npm dependencies (global `fetch`).
+ * lookup capability via Exa or Tavily, with ZERO npm dependencies (global `fetch`).
  *
  * ---------------------------------------------------------------------------
  * WHY THIS EXISTS
@@ -12,7 +12,7 @@
  * Without this extension the model has no choice: the browser is the *only* web
  * path, so it opens Chrome even for a one-line fact. This tool gives it a cheap
  * text path instead:
- *   - web_search(query) -> ranked results + Tavily's synthesized answer
+ *   - web_search(query) -> ranked results + concise snippets/highlights
  *   - web_fetch(url)    -> readable page text, capped, no browser
  * The agent-control system prompt (see pi_rpc.rs::agent_control_system_prompt)
  * routes read-only lookups here and reserves the browser for genuine
@@ -21,10 +21,9 @@
  * ---------------------------------------------------------------------------
  * AUTH
  * ---------------------------------------------------------------------------
- * Requires a Tavily API key. The host injects it as TAVILY_API_KEY at spawn
- * time from the keychain (see src-tauri/src/secrets.rs -> load_env). Absent ->
- * this extension registers NOTHING, so the agent falls back to the browser as
- * before. Changing the key respawns pi, so registration is re-evaluated.
+ * Requires an Exa or Tavily API key for web_search. The host injects keys at
+ * spawn time from the keychain (see src-tauri/src/secrets.rs -> load_env).
+ * Changing a key respawns pi, so provider selection is re-evaluated.
  */
 
 import { lookup } from "node:dns/promises";
@@ -74,6 +73,8 @@ type Extension = (ctx: ExtensionContext) => void;
 
 const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
 const TAVILY_EXTRACT_URL = "https://api.tavily.com/extract"; // web_fetch quality fallback
+const EXA_SEARCH_URL = "https://api.exa.ai/search";
+const EXA_CONTENTS_URL = "https://api.exa.ai/contents";
 
 const MIN_USEFUL_TEXT = 200; // below this, a plain fetch is treated as "thin" → fall back
 
@@ -111,8 +112,8 @@ function clamp(n: unknown, lo: number, hi: number, fallback: number): number {
 // link-local/CGNAT/metadata targets, resolve bare hostnames and check every
 // resolved IP, and follow redirects MANUALLY so a public URL can't 30x into an
 // internal one (the classic redirect TOCTOU). Fail closed on resolve errors.
-// (Tavily's extract path is unaffected — Tavily fetches server-side, so that
-// SSRF surface is Tavily's, not the user's machine/network.)
+// (Exa/Tavily extract paths are unaffected — they fetch server-side, so that
+// SSRF surface is the provider's, not the user's machine/network.)
 // ============================================================================
 
 const MAX_REDIRECTS = 5;
@@ -228,6 +229,37 @@ async function tavily(url: string, key: string, body: Record<string, unknown>): 
 	}
 }
 
+/** POST a JSON body to Exa with x-api-key auth and a hard timeout. */
+async function exa(url: string, key: string, body: Record<string, unknown>): Promise<any> {
+	const ctrl = new AbortController();
+	const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+	try {
+		const res = await fetch(url, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", "x-api-key": key },
+			body: JSON.stringify(body),
+			signal: ctrl.signal,
+		});
+		const text = await res.text();
+		if (!res.ok) {
+			throw new Error(`Exa HTTP ${res.status}: ${text.slice(0, 300)}`);
+		}
+		return JSON.parse(text);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+function resultSnippet(r: any): string {
+	if (typeof r?.content === "string" && r.content.trim()) return r.content;
+	if (typeof r?.summary === "string" && r.summary.trim()) return r.summary;
+	if (Array.isArray(r?.highlights) && r.highlights.length > 0) {
+		return r.highlights.map((h: unknown) => String(h).trim()).filter(Boolean).join(" ");
+	}
+	if (typeof r?.text === "string" && r.text.trim()) return r.text;
+	return "";
+}
+
 /** A few common HTML entities; enough for readable prose. */
 function decodeEntities(s: string): string {
 	return s
@@ -270,7 +302,7 @@ async function httpGet(url: string): Promise<{ body: string; contentType: string
 		let current = url;
 		for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
 			const safe = await isSafeUrl(current);
-			if (!safe.ok) throw new Error(`refused by SSRF guard — ${safe.reason}`);
+			if (safe.ok === false) throw new Error(`refused by SSRF guard — ${safe.reason}`);
 			const res = await fetch(current, {
 				redirect: "manual",
 				headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" },
@@ -298,14 +330,15 @@ async function httpGet(url: string): Promise<{ body: string; contentType: string
 // ============================================================================
 
 const ext: Extension = (ctx: ExtensionContext) => {
-	const key = process.env.TAVILY_API_KEY;
+	const tavilyKey = process.env.TAVILY_API_KEY;
+	const exaKey = process.env.EXA_API_KEY;
 	// Register UNCONDITIONALLY so the tools are always discoverable. Gating
 	// registration on the key meant that without a key the tool silently did not
 	// exist — indistinguishable from "the extension failed to load". Instead,
 	// when the key is absent, execute() returns this actionable message.
 	const NO_KEY =
-		'web_search/web_fetch need a Tavily API key. Add it in cetus Settings → ' +
-		'API Keys (provider "tavily"); the agent restarts and the tools activate.';
+		'web_search needs an Exa or Tavily API key. Add one in cetus Settings → ' +
+		'API Keys (provider "exa" or "tavily"); the agent restarts and the tools activate.';
 
 	// --------------------------------------------------------------- search
 	ctx.registerTool({
@@ -326,12 +359,42 @@ const ext: Extension = (ctx: ExtensionContext) => {
 		},
 		async execute(_toolCallId, args: { query?: string; count?: number }): Promise<ToolTextResult> {
 			const run = async (): Promise<string> => {
-				if (!key) return NO_KEY;
+				if (!exaKey && !tavilyKey) return NO_KEY;
 				const query = (args?.query ?? "").trim();
 				if (!query) return "web_search error: 'query' is required.";
 				const count = clamp(args?.count, 1, MAX_COUNT, DEFAULT_COUNT);
+				let exaErr = "";
+				if (exaKey) {
+					try {
+						const data = await exa(EXA_SEARCH_URL, exaKey, {
+							query,
+							type: "auto",
+							numResults: count,
+							contents: { highlights: true },
+						});
+						const results: any[] = Array.isArray(data?.results) ? data.results : [];
+						const output = typeof data?.output?.content === "string" ? data.output.content.trim() : "";
+						if (!results.length && !output) return `No results for "${query}".`;
+
+						const parts: string[] = [];
+						if (output) parts.push(`Answer: ${output}`, "");
+						parts.push(`Results for "${query}" (via Exa):`);
+						results.forEach((r, i) => {
+							const title = String(r?.title || "(untitled)").trim();
+							const url = String(r?.url || "");
+							const published = typeof r?.publishedDate === "string" ? `\nPublished: ${r.publishedDate}` : "";
+							const snippet = resultSnippet(r).replace(/\s+/g, " ").trim().slice(0, SNIPPET_CAP);
+							parts.push(`\n[${i + 1}] ${title}\n${url}${published}${snippet ? `\n${snippet}` : ""}`);
+						});
+						return parts.join("\n");
+					} catch (e) {
+						if (!tavilyKey) return errStr("web_search failed", e);
+						exaErr = e instanceof Error ? e.message : String(e);
+					}
+				}
+
 				try {
-					const data = await tavily(TAVILY_SEARCH_URL, key, {
+					const data = await tavily(TAVILY_SEARCH_URL, tavilyKey!, {
 						query,
 						max_results: count,
 						search_depth: "basic",
@@ -342,12 +405,13 @@ const ext: Extension = (ctx: ExtensionContext) => {
 					if (!results.length && !answer) return `No results for "${query}".`;
 
 					const parts: string[] = [];
+					if (exaErr) parts.push(`Note: Exa failed (${exaErr.slice(0, 200)}); fell back to Tavily.`, "");
 					if (answer) parts.push(`Answer: ${answer}`, "");
-					parts.push(`Results for "${query}":`);
+					parts.push(`Results for "${query}" (via Tavily):`);
 					results.forEach((r, i) => {
 						const title = String(r?.title || "(untitled)").trim();
 						const url = String(r?.url || "");
-						const snippet = String(r?.content || "")
+						const snippet = resultSnippet(r)
 							.replace(/\s+/g, " ")
 							.trim()
 							.slice(0, SNIPPET_CAP);
@@ -380,7 +444,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
 		},
 		// Strategy: try a plain (free, keyless) HTTP GET + HTML→text first. Only
 		// when that fails or yields too little text (JS-rendered SPA, soft block,
-		// non-HTML) do we fall back to Tavily's extractor — and only if a key is
+		// non-HTML) do we fall back to Exa/Tavily extraction — and only if
 		// configured. This keeps the common case key-free and fast.
 		async execute(_toolCallId, args: { url?: string }): Promise<ToolTextResult> {
 			const run = async (): Promise<string> => {
@@ -400,10 +464,29 @@ const ext: Extension = (ctx: ExtensionContext) => {
 					return `Fetched ${url}:\n\n${plainText.slice(0, EXTRACT_CAP)}`;
 				}
 
-				// Plain fetch was thin or failed — try Tavily extract if we have a key.
-				if (key) {
+				// Plain fetch was thin or failed — try Exa/Tavily extract if configured.
+				if (exaKey) {
 					try {
-						const data = await tavily(TAVILY_EXTRACT_URL, key, { urls: [url] });
+						const data = await exa(EXA_CONTENTS_URL, exaKey, {
+							urls: [url],
+							text: { maxCharacters: EXTRACT_CAP },
+						});
+						const results: any[] = Array.isArray(data?.results) ? data.results : [];
+						const status = Array.isArray(data?.statuses) ? data.statuses[0] : null;
+						const raw = resultSnippet(results[0]);
+						if (raw) return `Fetched ${url} (via Exa):\n\n${String(raw).slice(0, EXTRACT_CAP)}`;
+						if (status?.status === "error") {
+							const tag = status?.error?.tag ? ` — ${status.error.tag}` : "";
+							plainErr = plainErr || `Exa could not extract content${tag}`;
+						}
+					} catch (e) {
+						plainErr = plainErr || (e instanceof Error ? e.message : String(e));
+					}
+				}
+
+				if (tavilyKey) {
+					try {
+						const data = await tavily(TAVILY_EXTRACT_URL, tavilyKey, { urls: [url] });
 						const results: any[] = Array.isArray(data?.results) ? data.results : [];
 						const raw = results[0]?.raw_content ?? results[0]?.content;
 						if (raw) return `Fetched ${url} (via Tavily):\n\n${String(raw).slice(0, EXTRACT_CAP)}`;
@@ -414,7 +497,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
 
 				// Last resort: return whatever thin text we got, or a clear error.
 				if (plainText) return `Fetched ${url} (thin content):\n\n${plainText.slice(0, EXTRACT_CAP)}`;
-				const hint = key ? "" : " (no Tavily key configured for a richer fallback)";
+				const hint = exaKey || tavilyKey ? "" : " (no Exa/Tavily key configured for a richer fallback)";
 				return `web_fetch: could not read ${url}${plainErr ? ` — ${plainErr}` : ""}${hint}.`;
 			};
 			return asResult(await run());

@@ -1119,6 +1119,13 @@ pub(crate) fn preview(s: &str) -> String {
 /// from the app the user is dictating into. macOS only.
 #[cfg(target_os = "macos")]
 pub fn show_hud(app: &AppHandle) {
+    // Stamp before ANY event/sound/window work. Some of those operations can make
+    // macOS briefly mark cetus active; the activation observer must see this as a
+    // voice-HUD open and leave the parked/hidden main window alone.
+    app.state::<AppState>()
+        .quick
+        .last_open_ms
+        .store(crate::store::now_ms(), std::sync::atomic::Ordering::Relaxed);
     // The HUD webview persists hidden between sessions, so the previous
     // dictation's transcript/spinner state would flash on re-show — reset it
     // before the window appears.
@@ -1131,16 +1138,6 @@ pub fn show_hud(app: &AppHandle) {
     {
         play_start_chime();
     }
-    // Stamp the open so the app-activation observer and the Dock-`Reopen` handler
-    // ignore the activation that presenting the HUD can cause. Without this, a
-    // closed (parked off-screen) or ⌘H-hidden main window gets yanked to the
-    // foreground on every push-to-talk — the whole app "summons" itself just
-    // because dictation started. Same guard the launcher uses (see
-    // `quick::open_panel`); both read it via `last_open_ms` + the 1.5s window.
-    app.state::<AppState>()
-        .quick
-        .last_open_ms
-        .store(crate::store::now_ms(), std::sync::atomic::Ordering::Relaxed);
     let app = app.clone();
     let _ = app.clone().run_on_main_thread(move || {
         let Some(win) = app.get_webview_window("voice") else {

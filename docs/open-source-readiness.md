@@ -41,6 +41,11 @@ and the bridge packages.
 - [x] `research/` has no tracked files; local research clones stay ignored.
 - [x] `evals/` tracked files are fixtures/cases/scripts; generated
   `results/` and `workspaces/` outputs are ignored and checked by audit.
+- [x] Eval answer keys are kept local, not shipped: v2 `expected.json` files,
+  plus web-search `mapping.json` (de-blinding key) and `results.json`
+  (provider-labeled answers) are untracked and gitignored to avoid public
+  benchmark contamination. Scenarios, fixtures, runners, and the `blinded/`
+  set still ship.
 - [x] Tracked docs asset inventory exists in `docs/asset-release-review.md`.
 - [x] Audit script scans docs asset bytes for embedded private-looking strings.
 
@@ -49,7 +54,8 @@ and the bridge packages.
 - [ ] Full-repo private reference audit, not just bridge package audit.
 - [ ] Full-repo secret scan with a dedicated scanner before public release.
 - [x] Decide whether `research/` and eval docs ship publicly or stay ignored:
-  `research/` stays local/ignored; eval fixtures and benchmark scripts ship.
+  `research/` stays local/ignored; eval fixtures and benchmark scripts ship,
+  but eval answer keys / de-blinding maps stay local (see above).
 - [ ] Manually verify every bundled image/screenshot in `docs/` is visually
   publishable; see `docs/asset-release-review.md`.
 - [ ] Add release/package instructions for `cetus-bridge` and
