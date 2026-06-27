@@ -29,11 +29,6 @@ const GEMINI_MODEL = "gemini-flash-latest";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const GEMINI_TIMEOUT_MS = 60_000;
 
-// MiMo (OpenAI-compatible) handles IMAGES — cheaper + faster than Gemini. PDFs
-// stay on Gemini (MiMo's chat API takes images, not PDF documents).
-const MIMO_MODEL = "mimo-v2-flash";
-const MIMO_ENDPOINT = "https://api.xiaomimimo.com/v1/chat/completions";
-const MIMO_TIMEOUT_MS = 20_000;
 // Cap returned text so a giant spreadsheet/PDF can't blow the model's context.
 const MAX_CHARS = 120_000;
 const MAX_BYTES = 40 * 1024 * 1024;
@@ -188,67 +183,13 @@ async function readXlsx(path: string): Promise<string> {
 	return parts.join("\n\n");
 }
 
-// ---- Images: MiMo first, Gemini fallback --------------------------------
+// ---- Images --------------------------------------------------------------
 
 async function imageExtract(path: string, mimeType: string, question: string): Promise<string> {
-	const mimoKey = process.env.MIMO_API_KEY?.trim();
-	if (mimoKey) {
-		try {
-			const data = (await fs.readFile(path)).toString("base64");
-			return await mimoVision(data, mimeType, question, mimoKey);
-		} catch (err) {
-			// Only fall back if Gemini is configured; otherwise surface MiMo's error.
-			if (!process.env.GEMINI_API_KEY?.trim()) throw err;
-		}
-	}
 	return geminiExtract(path, mimeType, question);
 }
 
-async function mimoVision(
-	data: string,
-	mimeType: string,
-	question: string,
-	apiKey: string,
-): Promise<string> {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort("timeout"), MIMO_TIMEOUT_MS);
-	try {
-		const prompt =
-			`Describe this image in detail for a text-only assistant: visible text verbatim,` +
-			` objects, layout, and anything relevant to: ${question || "what is this?"}.` +
-			` Output plain text only, no preamble.`;
-		const resp = await fetch(MIMO_ENDPOINT, {
-			method: "POST",
-			headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-			body: JSON.stringify({
-				model: MIMO_MODEL,
-				messages: [
-					{
-						role: "user",
-						content: [
-							{ type: "text", text: prompt },
-							{ type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } },
-						],
-					},
-				],
-				max_completion_tokens: 2048,
-				temperature: 0.2,
-			}),
-			signal: controller.signal,
-		});
-		if (!resp.ok) {
-			throw new Error(`mimo ${resp.status}: ${(await resp.text().catch(() => "")).slice(0, 200)}`);
-		}
-		const json = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
-		const text = json.choices?.[0]?.message?.content?.trim();
-		if (!text) throw new Error("mimo returned an empty result");
-		return text;
-	} finally {
-		clearTimeout(timer);
-	}
-}
-
-// ---- Gemini (pdf + image fallback) --------------------------------------
+// ---- Gemini (pdf + image) -----------------------------------------------
 
 async function geminiExtract(path: string, mimeType: string, question: string): Promise<string> {
 	const apiKey = process.env.GEMINI_API_KEY?.trim();
