@@ -29,9 +29,9 @@ src-tauri/binaries/
 # In-repo clones used only for code reading (e.g. deepseek-tui).
 research/
 
-# Claude Code runtime locks
-.claude/scheduled_tasks.lock
-.claude/settings.local.json
+# Local agent / skill tooling (Claude Code, etc.) — not part of the app
+.claude/
+.agents/
 *.original.backup.*
 
 # Scratch image-generation outputs
