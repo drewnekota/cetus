@@ -4,133 +4,114 @@
 
 **English** · [简体中文](./README.zh-CN.md)
 
-**An affordable desktop agent, made possible by DeepSeek V4.1.**
-
-Cetus watches your screen, remembers what matters, and acts on your behalf — one assistant that actually knows your situation and can do the thing, made cheap enough to keep running all day.
+A desktop agent for macOS, built on DeepSeek V4.1. It watches your screen, remembers what matters, and can act on your behalf — cheap enough to keep running all day.
 
 ---
 
-## The thesis
+## Why Cetus
 
-An agent's value is the product of three things:
+Most AI assistants treat every conversation as a blank slate. They can reason well, but they don't know what you're working on, and they can't do much beyond chat.
 
-```
-agent  =  context  ×  intelligence  ×  abilities
-          (perceive)   (reason)        (act)
-```
+A useful agent needs three things: **context** (what it knows about your situation), **intelligence** (how well it reasons), and **abilities** (what it can actually do). For a while, intelligence was the hard part. It's not anymore — modern models are good, and DeepSeek V4.1 made them cheap. That changes what's worth building.
 
-It's a _product_, not a sum: all three are indispensable, the weakest factor caps the whole thing, and you win by lifting the most-neglected one — not by pushing the factor that's already strong even further.
+When tokens cost an order of magnitude less, things that didn't make sense before become practical:
 
-Today the industry pours most of its money into the middle term — and intelligence genuinely matters. But because it's a product, once intelligence is strong enough, what users feel next isn't the next increment of raw reasoning — it's whether the agent _knows their situation_ and _can do the thing_. Context and abilities are exactly where most agents are starving. So Cetus makes a deliberate bet:
+- Running continuous screen capture and OCR for recall
+- Spinning up N parallel attempts on the same task and keeping the best
+- Scheduling agents that work while you're away
+- Letting one agent orchestrate sub-agents for a single request
 
-> **All three are indispensable. Intelligence is now both strong and cheap — so the leverage is in the factors the field under-invests in: richer context, more abilities, and a loop that keeps running.**
+Cetus spends those savings on the parts most agents skimp on: giving the agent richer context about your situation and more ways to actually do things.
 
-This is what DeepSeek V4.1 unlocks. When tokens are an order of magnitude cheaper, things that were economically impossible with frontier models become routine:
+### Memory and Dreaming
 
-- **continuously** capturing and OCR-ing your screen for recall,
-- **fanning out** N parallel attempts at a task and keeping the best,
-- **scheduling** agents that wake up and work while you're away,
-- letting an agent **orchestrate sub-agents** for a single request.
-
-We're not trading intelligence away — V4.1 keeps it strong. We're spending what it saves on the two factors that have been starved. That rebalancing is the whole product.
-
-### Context × Intelligence × Abilities — and the loop that makes it compound
-
-The three factors describe a single moment. What makes an agent _yours_ is how it compounds across time — and that's a fourth thing the formula hides:
+The three factors describe a single moment. What makes an agent useful over time is whether it accumulates anything.
 
 ![Cetus — the agent loop](docs/agent-loop.png)
 
-- **Memory** is context the agent writes back to itself — it turns one-shot tasks into accumulated understanding instead of starting from zero every session.
-- **Dreaming** is intelligence applied to memory while idle: while you're away, cetus reflects on your recent conversations and consolidates them into durable memory — turning raw experience into preferences that persist. It's how a generic agent grinds itself into one that _gets you_. On by default.
+- **Memory** is context the agent writes back to itself — so the next session picks up where the last one left off instead of starting from scratch.
+- **Dreaming** runs while you're idle: Cetus reflects on recent conversations and consolidates them into durable notes, turning raw history into preferences that persist. On by default.
 
-The per-moment factors are being commoditized for everyone. The compounding loop is what's personal — and what's defensible.
+## What's in the app
 
-### Where this is going: multimodal, because life is
-
-Today Cetus reasons over text — screen OCR, transcripts, typed prompts. That's a waypoint, not the destination. As models keep improving, a single multimodal model that's both smart enough and cheap enough to run all day is coming — and the reason to bet on it is almost embarrassingly simple: **life itself is multimodal.** A person's day is video, sound, speech, and gesture — not a stream of tokens.
-
-So a real life assistant has to meet life on its own terms: take multimodal input and produce multimodal output — _natively_. By multimodal we mean genuinely _understanding_ video and speech and _responding_ in kind — not the workarounds we lean on today (sampling frames out of a video, flattening speech to text). Those are bridges for an era when multimodal intelligence is still scarce and expensive. When it isn't, the bridges come down, and the agent simply perceives and acts in the same modalities you already live in.
-
-## What this maps to in the app
-
-| Axis                      | In Cetus today                                                                                                                                                                                                                                                                                                                                       |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Context — perceive**    | Rewind-style screen capture with on-device Apple Vision OCR (off by default; screen content is sensitive) · **meeting memory** — Granola-style on-device transcription of your calls into searchable notes · a **contextful launcher** that attaches your screenshot, active app, browser URL and selection · third-party data through pi connectors |
-| **Intelligence — reason** | DeepSeek **V4.1 Flash** ⚡ / **V4.1 Pro** ✨ · the pi harness · **Ultra Code** mode (the agent authors a workflow and orchestrates sub-agents) · **parallel solutions** (best-of-N fan-out with side-by-side review)                                                                                                                                 |
-| **Abilities — act**       | pi tools & skills · 30+ providers and any OpenAI-compatible endpoint · scheduled **automations** that mint background conversations · on-device **voice dictation** · a global double-⌘ **launcher** for act-from-anywhere on the desktop                                                                                                            |
-| **The loop — compound**   | **Memory**: durable notes (identity, preferences, projects) both you and the agent edit, injected fresh each turn · **Dreaming**: offline memory consolidation while you're idle (on by default)                                                                                                                                                                                  |
+| | Cetus today |
+| --- | --- |
+| **Context** | Rewind-style screen capture with on-device Apple Vision OCR (off by default) · **meeting memory** — on-device call transcription into searchable notes · a **contextful launcher** that attaches your screenshot, active app, browser URL, and selection · third-party data through pi connectors |
+| **Intelligence** | DeepSeek **V4.1 Flash** ⚡ / **V4.1 Pro** ✨ · the pi harness · **Ultra Code** mode (the agent authors a workflow and orchestrates sub-agents) · **parallel solutions** (best-of-N fan-out with side-by-side review) |
+| **Abilities** | pi tools & skills · 30+ providers and any OpenAI-compatible endpoint · scheduled **automations** that start background conversations · on-device **voice dictation** · a global double-⌘ **launcher** |
+| **Memory** | Durable notes you and the agent both edit (identity, preferences, projects), injected each turn · **Dreaming**: offline consolidation while idle (on by default) |
 
 ## A tour of Cetus
 
-### Chat — one box, do anything
+### Chat
 
-A single composer drives everything: pick a **workspace** (the working directory), pick a **preset** (Daily ⚡ / High / Max / UltraCode ✨), attach files or a screenshot, and go. Replies stream live with collapsible **thinking** blocks and **tool-use** cards (args, results, error highlighting, partial output).
+A single composer: pick a **workspace** (working directory), a **preset** (Daily ⚡ / High / Max / UltraCode ✨), optionally attach files or a screenshot, and send. Replies stream live with collapsible **thinking** blocks and **tool-use** cards showing args, results, and any errors.
 
 ![Cetus chat — What should we work on?](docs/screenshot-chat.png)
 
-### Kanban — long-running work has a home
+### Kanban
 
-Every conversation is a card, tracked across **In progress · Needs review · Done** — filtered to one workspace or all of them. Background runs (automations, parallel solutions) surface here so work that outlives a single sitting doesn't get lost in a chat list.
+Every conversation is a card tracked across **In progress · Needs review · Done**, filtered by workspace or across all of them. Background runs (automations, parallel solutions) surface here, so work that spans multiple sessions doesn't get buried in a chat list.
 
 ![Cetus Kanban board](docs/screenshot-kanban.png)
 
-### Automations — prompts that run on a schedule
+### Automations
 
-Saved prompts that fire on a schedule (`at` / `every` / `cron` / `daily`). Each run starts a **fresh background conversation** — e.g. a weekday-09:00 _Daily news digest_ that searches the last 24 hours and renders an HTML summary while you're away.
+Saved prompts that fire on a schedule (`at` / `every` / `cron` / `daily`). Each run starts a fresh background conversation — e.g. a weekday-09:00 news digest that searches the last 24 hours and renders an HTML summary while you're away.
 
 ![Cetus Automations](docs/screenshot-automations.png)
 
-### Quick launcher — contextful, act from anywhere
+### Quick launcher
 
-A global **double-⌘** frosted panel: _Ask Cetus anything_ without leaving the app you're in — and it shows up already knowing your situation. Cetus reads what's in front of you and attaches it as **removable context chips**: a **screenshot** of what you're looking at, the **active app**, the current **browser URL**, and any **selected text**. Keep the chips that matter, drop the rest, then start a **New** run or continue the **Last** one — workspace + preset picked inline, ↵ to start, esc to dismiss.
+A global **double-⌘** panel: ask Cetus anything without leaving the app you're in. It reads what's in front of you and attaches it as removable context chips: a screenshot of your screen, the active app, the current browser URL, and any selected text. Keep what's useful, drop the rest, then start a new run or continue the last one.
 
 ![Cetus quick launcher](docs/screenshot-launcher.png)
 
-### Voice input — a global, Wispr-Flow-style push-to-talk
+### Voice input
 
-Hold the hotkey from _any_ app and just talk — Cetus pops a floating equalizer HUD that reacts to your voice, transcribes on-device, and drops the cleaned-up text wherever your cursor is. It's the same Seed-ASR + cleanup stack as the in-app mic, but it follows you everywhere on the desktop instead of living inside a single text box.
+Hold a hotkey from any app and talk — Cetus pops a floating equalizer HUD, transcribes on-device with Seed-ASR, and drops the cleaned-up text wherever your cursor is. The same stack as the in-app mic, but it follows you across the desktop.
 
 ![Cetus voice HUD — the floating equalizer that listens while you talk](docs/voice-hud.jpeg)
 
-> 📸 Yes, that's a _phone photo of a screen_. The HUD is a borderless, always-on-top overlay that politely dodges every screenshot tool I threw at it — so I did what any reasonable person would do and pointed my camera at the monitor. Authenticity over pixels. 😄
+> 📸 Yes, that's a phone photo of a screen. The HUD is a borderless always-on-top overlay that dodged every screenshot tool I threw at it, so I pointed my camera at the monitor instead. 😄
 
-### Meeting memory — Granola-style notes for every call
+### Meeting memory
 
-Turn on **meeting memory** and Cetus quietly transcribes your meetings into searchable notes — on-device, text-only, no audio ever stored. It runs three ways:
+Turn on **meeting memory** and Cetus quietly transcribes your calls into searchable notes — on-device, text only, no audio stored.
 
-- **Auto-detect** — when another app grabs your mic (Zoom, Teams, FaceTime, Feishu…), Cetus starts a session on its own and stops when the call ends. Nothing to remember to press.
-- **Manual** — a global hotkey (default **⌘⇧M**) starts/stops a session by hand, for the in-person meetings nothing can auto-detect.
-- **Both sides of the conversation** — _your_ mic is you; **system audio** is everyone else, captured separately so the transcript knows who said what (macOS 14.2+; gracefully falls back to mic-only below that).
+- **Auto-detect** — when another app grabs your mic (Zoom, Teams, FaceTime, Feishu…), Cetus starts a session and stops when the call ends. Nothing to press.
+- **Manual** — global hotkey (default **⌘⇧M**) for in-person meetings that auto-detect can't pick up.
+- **Both sides** — your mic is you; system audio is everyone else, captured separately so the transcript knows who said what (macOS 14.2+; falls back to mic-only below that).
 
-Transcription is **100% on-device** via Apple's Speech framework — streaming, punctuated, segmented on natural pauses. While a session is live, a small floating pill (red dot + elapsed timer + stop button) sits at the top of your screen without stealing focus. When the meeting ends, a single **DeepSeek V4.1 Pro** pass distills a title and clean markdown **minutes** — key points, decisions, and action items.
+Transcription is 100% on-device via Apple's Speech framework — streaming, punctuated, segmented on natural pauses. While a session is live, a small floating pill (red dot + elapsed timer + stop button) sits at the top of your screen without stealing focus. When the call ends, one DeepSeek V4.1 Pro pass distills a title and clean markdown **minutes** — key points, decisions, action items.
 
-Best of all, those notes become **context the agent can reach**: ask _"what did we decide about the launch date?"_ or _"pull the action items from this morning's standup"_ and Cetus searches your meeting history (`search_meeting_history`) — all from a local log, nothing leaves the machine. Off by default; the master switch means Cetus never listens, including auto-detect, until you opt in. macOS-only for now.
+Those notes become context the agent can reach: ask "what did we decide about the launch date?" and Cetus searches your meeting history (`search_meeting_history`) — all local, nothing uploaded. Off by default; the master switch means Cetus never listens until you opt in. macOS only for now.
 
 ![Cetus meeting memory — Settings → Meetings](docs/screenshot-meetings.png)
 
-### Screen context — Rewind-style recall, on your terms
+### Screen context
 
-With screen context on, Cetus periodically captures frames, dedupes them with a perceptual hash, and OCRs them **on-device with Apple Vision** so the agent can recall what you were working on — then search the history by OCR text or app. Images and text stay on your Mac; nothing is uploaded. It's **off by default** (screen content is sensitive), and the controls keep you in charge: capture interval, how long to keep history, on-device OCR, and an **excluded-apps** list that pauses capture while a sensitive app (1Password, Messages…) is frontmost.
+With screen context on, Cetus periodically captures frames, dedupes them with a perceptual hash, and OCRs on-device with Apple Vision so the agent can recall what you were working on — and you can search by OCR text or app. Images and text stay on your Mac; nothing is uploaded. Off by default; controls include capture interval, retention period, and an excluded-apps list that pauses capture when sensitive apps (1Password, Messages…) are frontmost.
 
 ![Cetus screen context settings](docs/screenshot-screen-history.png)
 
-### Settings — capabilities & permissions, one switch at a time
+### Settings
 
-Each ability is opt-in. **Computer & Browser control** lets the agent drive your browser and Mac apps through _numbered element lists, never raw pixels_, and it confirms anything consequential (sending, deleting, purchasing, submitting, authenticating) with a Stop button always in reach. Alongside it: API Keys, Memory, Dreaming, Skills, Connectors, Voice, and Screen context.
+Each capability is opt-in. **Computer & Browser control** lets the agent drive your browser and Mac apps through numbered element lists (not raw pixels), with a confirmation step before anything consequential (sending, deleting, purchasing, submitting, authenticating) and a Stop button always in reach.
 
 ![Cetus settings — Computer & Browser control](docs/screenshot-settings.png)
 
 ## Also in the box
 
-- **Persistent memory** the user and agent both edit, injected fresh each turn (identity, preferences, projects)
+- **Persistent memory** you and the agent both edit, injected each turn (identity, preferences, projects)
 - **Parallel solutions**: fan one prompt into N candidate runs, then keep one and archive the rest
-- **Ultra Code** mode: host-orchestrated workflow engine where the agent spawns its own sub-agents
-- **Voice dictation** (on-device, macOS), in-app and as a global push-to-talk
-- **Meeting memory** (on-device, macOS): Granola-style transcription with auto-detect, system-audio capture, and DeepSeek-distilled minutes the agent can search
+- **Ultra Code** mode: the agent spawns its own sub-agents for a single request
+- **Voice dictation** (on-device, macOS) — in-app and as a global push-to-talk
+- **Meeting memory** (on-device, macOS) — auto-detect, system-audio capture, DeepSeek-distilled minutes the agent can search
 - New / switch / rename / archive / delete conversations (SQLite-backed metadata)
 - Abort in-flight runs · one pi RPC subprocess shared across conversations via `switch_session`
 - pi binary bundled as a Tauri sidecar — no PATH dependency for end users
-- **Any-model under the hood**: pi natively supports 30+ providers (Anthropic, OpenAI, Google, Bedrock, Ollama, LM Studio, OpenRouter, …) and any OpenAI-compatible endpoint. The current UI is DeepSeek-only; swap models with one line in `model-picker.tsx`.
+- **Any model under the hood**: pi supports 30+ providers (Anthropic, OpenAI, Google, Bedrock, Ollama, LM Studio, OpenRouter, …) and any OpenAI-compatible endpoint; the current UI is DeepSeek-only, swap models with one line in `model-picker.tsx`
 
 ## Requirements
 
@@ -175,7 +156,7 @@ This skips `tauri-plugin-shell` entirely and uses raw `tokio::process::Command`.
 pnpm tauri build
 ```
 
-Outputs `.app` / `.dmg` on macOS. A real multi-size icon set is required for `tauri build` (the full set lives under `src-tauri/icons/`, regenerate it with `pnpm tauri icon <path-to-1024px.png>`).
+Outputs `.app` / `.dmg` on macOS. A real multi-size icon set is required for `tauri build` (lives under `src-tauri/icons/`, regenerate with `pnpm tauri icon <path-to-1024px.png>`).
 
 ## Architecture
 
@@ -208,29 +189,16 @@ Outputs `.app` / `.dmg` on macOS. A real multi-size icon set is required for `ta
 - **Framing**: strict-LF JSONL. `tauri-plugin-shell` delivers stdout in arbitrary byte chunks, so the reader maintains its own accumulator and emits one line per `\n`, stripping optional `\r`. Generic line readers that split on Unicode separators (Node `readline`) are non-compliant.
 - **Sidecar packaging**: `src-tauri/binaries/pi-<target>` ships inside `.app/Contents/Resources/`. `PI_BIN` env var is the dev backdoor for iterating on pi.
 - **Extension UI**: when a pi extension calls `ctx.ui.select()` etc., pi sends `extension_ui_request` over the event stream. The frontend `DialogHost` renders a dialog and replies via the `extension_ui_respond` Tauri command.
-- **Bridge**: Cetus also intercepts known extension host tunnels and routes them
-  to native handlers. See [docs/bridge.md](docs/bridge.md) for the protocol,
-  security boundary, and open-source extraction plan.
+- **Bridge**: Cetus also intercepts known extension host tunnels and routes them to native handlers. See [docs/bridge.md](docs/bridge.md) for the protocol, security boundary, and open-source extraction plan.
 
 ## Reusable bridge packages
 
-The host/extension **bridge** is factored into two standalone, provider-neutral
-packages you can depend on without pulling in the rest of the app:
+The host/extension bridge is factored into two standalone, provider-neutral packages you can depend on without pulling in the rest of the app:
 
-- **[`cetus-bridge`](src-tauri/cetus-bridge)** (Rust crate) — the product-light
-  host runtime: JSONL subprocess RPC around `pi --mode rpc`, deterministic
-  extension loading, host-tunnel classification, and injectable `EventSink` /
-  `TaskSpawner` traits. Tauri, app storage, and model-provider choices stay out
-  of the crate — they live in app-side adapters (`tauri_bridge.rs`,
-  `app_event.rs`, `model_bridge.rs`). `examples/minimal_host.rs` shows the
-  smallest integration.
-- **[`@cetus/bridge-protocol`](packages/cetus-bridge-protocol)** (TypeScript) —
-  the extension-side protocol: the shared `HOST_TUNNELS` sentinels, `callHost()`,
-  `toolResult()`, and host-tunnel types.
+- **[`cetus-bridge`](src-tauri/cetus-bridge)** (Rust crate) — the product-light host runtime: JSONL subprocess RPC around `pi --mode rpc`, deterministic extension loading, host-tunnel classification, and injectable `EventSink` / `TaskSpawner` traits. Tauri, app storage, and model-provider choices stay out of the crate — they live in app-side adapters (`tauri_bridge.rs`, `app_event.rs`, `model_bridge.rs`). `examples/minimal_host.rs` shows the smallest integration.
+- **[`@cetus/bridge-protocol`](packages/cetus-bridge-protocol)** (TypeScript) — the extension-side protocol: the shared `HOST_TUNNELS` sentinels, `callHost()`, `toolResult()`, and host-tunnel types.
 
-Both are MIT-licensed and carry no Cetus- or DeepSeek-specific code, so other
-agent hosts can reuse the same bridge. See [docs/bridge.md](docs/bridge.md) for
-the protocol and security boundary.
+Both are MIT-licensed and carry no Cetus- or DeepSeek-specific code, so other agent hosts can reuse the same bridge. See [docs/bridge.md](docs/bridge.md) for the protocol and security boundary.
 
 ## License
 
