@@ -41,7 +41,7 @@ agent  =  context  ×  intelligence  ×  abilities
 ![Cetus —— the agent loop](docs/agent-loop.png)
 
 - **Memory（记忆）** 是 agent 写回给自己的 context —— 它把一次性的任务，变成不断累积的理解，而不是每个 session 都从零开始。
-- **Dreaming（做梦）** *（路线图）* 是在空闲时把智力作用于记忆：把原始经历压缩成持久的偏好，并提炼出新的技能。这是一个通用 agent 把自己打磨成*懂你*的那个 agent 的过程。
+- **Dreaming（做梦）** 是在空闲时把智力作用于记忆：你离开时，cetus 反思你最近的对话，把它们整合成持久的记忆 —— 把原始经历沉淀为长存的偏好。这是一个通用 agent 把自己打磨成*懂你*的那个 agent 的过程。默认开启。
 
 瞬间层面的那几个因子，正在对所有人变成商品。能复利的那个循环，才是属于你个人的 —— 也才是有护城河的。
 
@@ -58,7 +58,7 @@ agent  =  context  ×  intelligence  ×  abilities
 | **Context —— 感知** | Rewind 式的屏幕截取 + 设备端 Apple Vision OCR（默认关闭；屏幕内容是敏感的）· **会议记忆** —— Granola 式的设备端转写，把你的通话变成可搜索的纪要 · **带上下文的启动器**，自动附上截图、当前 app、浏览器 URL 与选中文本 · 通过 pi connectors 接入第三方数据 |
 | **Intelligence —— 认知** | DeepSeek **V4.1 Flash** ⚡ / **V4.1 Pro** ✨ · pi harness · **Ultra Code** 模式（agent 自己编写 workflow 并编排子 agent）· **并行解法**（best-of-N 铺开 + 并排对比挑选） |
 | **Abilities —— 行动** | pi 的 tools 与 skills · 30+ 模型供应商及任意 OpenAI 兼容端点 · 定时**自动化任务**，在后台开出新对话 · 设备端**语音听写** · 全局双击 ⌘ **启动器**，在桌面任何地方随手发起 |
-| **循环 —— 复利** | **Memory**：持久笔记（身份、偏好、进行中的项目），你和 agent 都能编辑，每一轮都新鲜注入 · **Dreaming**：离线整合 —— *路线图* |
+| **循环 —— 复利** | **Memory**：持久笔记（身份、偏好、进行中的项目），你和 agent 都能编辑，每一轮都新鲜注入 · **Dreaming**：空闲时的离线记忆整合（默认开启） |
 
 ## 界面一览
 

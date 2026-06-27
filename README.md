@@ -41,7 +41,7 @@ The three factors describe a single moment. What makes an agent _yours_ is how i
 ![Cetus — the agent loop](docs/agent-loop.png)
 
 - **Memory** is context the agent writes back to itself — it turns one-shot tasks into accumulated understanding instead of starting from zero every session.
-- **Dreaming** _(roadmap)_ is intelligence applied to memory while idle: compressing raw experience into durable preferences and minting new skills. It's how a generic agent grinds itself into one that _gets you_.
+- **Dreaming** is intelligence applied to memory while idle: while you're away, cetus reflects on your recent conversations and consolidates them into durable memory — turning raw experience into preferences that persist. It's how a generic agent grinds itself into one that _gets you_. On by default.
 
 The per-moment factors are being commoditized for everyone. The compounding loop is what's personal — and what's defensible.
 
@@ -58,7 +58,7 @@ So a real life assistant has to meet life on its own terms: take multimodal inpu
 | **Context — perceive**    | Rewind-style screen capture with on-device Apple Vision OCR (off by default; screen content is sensitive) · **meeting memory** — Granola-style on-device transcription of your calls into searchable notes · a **contextful launcher** that attaches your screenshot, active app, browser URL and selection · third-party data through pi connectors |
 | **Intelligence — reason** | DeepSeek **V4.1 Flash** ⚡ / **V4.1 Pro** ✨ · the pi harness · **Ultra Code** mode (the agent authors a workflow and orchestrates sub-agents) · **parallel solutions** (best-of-N fan-out with side-by-side review)                                                                                                                                 |
 | **Abilities — act**       | pi tools & skills · 30+ providers and any OpenAI-compatible endpoint · scheduled **automations** that mint background conversations · on-device **voice dictation** · a global double-⌘ **launcher** for act-from-anywhere on the desktop                                                                                                            |
-| **The loop — compound**   | **Memory**: durable notes (identity, preferences, projects) both you and the agent edit, injected fresh each turn · **Dreaming**: offline consolidation — _roadmap_                                                                                                                                                                                  |
+| **The loop — compound**   | **Memory**: durable notes (identity, preferences, projects) both you and the agent edit, injected fresh each turn · **Dreaming**: offline memory consolidation while you're idle (on by default)                                                                                                                                                                                  |
 
 ## A tour of Cetus
 
