@@ -209,6 +209,15 @@ pnpm tauri build
 - **Sidecar 打包**：`src-tauri/binaries/pi-<target>` 打进 `.app/Contents/Resources/`。`PI_BIN` 环境变量是迭代 pi 的开发后门。
 - **Extension UI**：当某个 pi extension 调用 `ctx.ui.select()` 等，pi 会通过事件流发出 `extension_ui_request`。前端 `DialogHost` 渲染一个对话框，并通过 `extension_ui_respond` Tauri 命令回复。
 
+## 可复用的 bridge 包
+
+host/extension 之间的 **bridge** 被拆成了两个独立、与具体 provider 无关的包，你可以单独依赖它们，而不用引入整个 app：
+
+- **[`cetus-bridge`](src-tauri/cetus-bridge)**（Rust crate）—— 产品无关的 host 运行时：围绕 `pi --mode rpc` 的 JSONL 子进程 RPC、确定性的 extension 加载、host tunnel 分类，以及可注入的 `EventSink` / `TaskSpawner` trait。Tauri、app 存储、模型 provider 选择都留在 crate 之外，由 app 侧适配器承接（`tauri_bridge.rs`、`app_event.rs`、`model_bridge.rs`）。`examples/minimal_host.rs` 给出了最小集成示例。
+- **[`@cetus/bridge-protocol`](packages/cetus-bridge-protocol)**（TypeScript）—— extension 侧协议：共享的 `HOST_TUNNELS` 哨兵列表、`callHost()`、`toolResult()`，以及 host tunnel 的类型定义。
+
+两个包都是 MIT 协议，且不含任何 Cetus / DeepSeek 专属代码，因此其他 agent host 也能复用同一套 bridge。协议与安全边界详见 [docs/bridge.md](docs/bridge.md)。
+
 ## 许可证
 
 MIT（与 pi 一致）。

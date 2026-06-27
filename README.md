@@ -212,6 +212,26 @@ Outputs `.app` / `.dmg` on macOS. A real multi-size icon set is required for `ta
   to native handlers. See [docs/bridge.md](docs/bridge.md) for the protocol,
   security boundary, and open-source extraction plan.
 
+## Reusable bridge packages
+
+The host/extension **bridge** is factored into two standalone, provider-neutral
+packages you can depend on without pulling in the rest of the app:
+
+- **[`cetus-bridge`](src-tauri/cetus-bridge)** (Rust crate) — the product-light
+  host runtime: JSONL subprocess RPC around `pi --mode rpc`, deterministic
+  extension loading, host-tunnel classification, and injectable `EventSink` /
+  `TaskSpawner` traits. Tauri, app storage, and model-provider choices stay out
+  of the crate — they live in app-side adapters (`tauri_bridge.rs`,
+  `app_event.rs`, `model_bridge.rs`). `examples/minimal_host.rs` shows the
+  smallest integration.
+- **[`@cetus/bridge-protocol`](packages/cetus-bridge-protocol)** (TypeScript) —
+  the extension-side protocol: the shared `HOST_TUNNELS` sentinels, `callHost()`,
+  `toolResult()`, and host-tunnel types.
+
+Both are MIT-licensed and carry no Cetus- or DeepSeek-specific code, so other
+agent hosts can reuse the same bridge. See [docs/bridge.md](docs/bridge.md) for
+the protocol and security boundary.
+
 ## License
 
 MIT (matches pi).
