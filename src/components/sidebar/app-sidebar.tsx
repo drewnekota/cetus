@@ -76,7 +76,6 @@ interface Props {
   activeId: string | null;
   streamingIds: Set<string>;
   unreadCompletedIds: Set<string>;
-  defaultWorkspace: string;
   workspaceDirs: string[];
   hiddenWorkspaceDirs: string[];
   view: SidebarView;
@@ -99,7 +98,6 @@ export const AppSidebar = memo(function AppSidebar({
   activeId,
   streamingIds,
   unreadCompletedIds,
-  defaultWorkspace,
   workspaceDirs,
   hiddenWorkspaceDirs,
   view,
@@ -131,30 +129,12 @@ export const AppSidebar = memo(function AppSidebar({
   const { width, startResize, resetWidth } = useSidebarWidth();
   const nowMs = useMinuteClock();
   const groups = useMemo(
-    () =>
-      groupByWorkspace(
-        conversations,
-        workspaceDirs,
-        hiddenWorkspaceDirs,
-        defaultWorkspace,
-      ),
-    [conversations, workspaceDirs, hiddenWorkspaceDirs, defaultWorkspace],
+    () => groupByWorkspace(conversations, workspaceDirs, hiddenWorkspaceDirs),
+    [conversations, workspaceDirs, hiddenWorkspaceDirs],
   );
   const chatGroups = groups;
-  // The default "Chats" group is pinned to the top; every other folder is
-  // long-press-draggable to reorder.
-  const defaultGroup = useMemo(
-    () => groups.find((g) => g.dir === defaultWorkspace),
-    [groups, defaultWorkspace],
-  );
-  const sortableGroups = useMemo(
-    () => groups.filter((g) => g.dir !== defaultWorkspace),
-    [groups, defaultWorkspace],
-  );
-  const sortableIds = useMemo(
-    () => sortableGroups.map((g) => g.dir),
-    [sortableGroups],
-  );
+  // Every workspace folder is long-press-draggable to reorder — none is pinned.
+  const sortableIds = useMemo(() => groups.map((g) => g.dir), [groups]);
   // A short hold before a press becomes a drag, so clicks/scrolls on a folder
   // header don't start a reorder. The tolerance lets a tiny jitter through.
   const sensors = useSensors(
@@ -298,6 +278,8 @@ export const AppSidebar = memo(function AppSidebar({
           <SidebarGroup>
             <SidebarGroupLabel>{t("section.workspaces")}</SidebarGroupLabel>
             <SidebarMenu>
+              {/* "All workspaces" is a pseudo-filter (null), pinned at the very
+                  top and never reorderable. */}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   onClick={() => onWorkspaceFilterChange(null)}
@@ -309,29 +291,35 @@ export const AppSidebar = memo(function AppSidebar({
                   </span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              {groups.map((g) => (
-                <SidebarMenuItem key={g.dir}>
-                  <SidebarMenuButton
-                    onClick={() => onWorkspaceFilterChange(g.dir)}
-                    isActive={workspaceFilter === g.dir}
-                  >
-                    <Folder />
-                    <span className="truncate">
-                      {shorten(g.dir, defaultWorkspace, t("workspace.default"))}
-                    </span>
-                    <span
-                      className={cn(
-                        "ml-auto text-[11px]",
-                        workspaceFilter === g.dir
-                          ? "text-sidebar-accent-foreground/80"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {workspaceCounts.get(g.dir) ?? 0}
-                    </span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={(e) => setActiveDragDir(String(e.active.id))}
+                onDragCancel={() => setActiveDragDir(null)}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+                  {groups.map((g) => (
+                    <SortableWorkspaceFilterRow
+                      key={g.dir}
+                      dir={g.dir}
+                      label={workspaceName(g.dir)}
+                      count={workspaceCounts.get(g.dir) ?? 0}
+                      active={workspaceFilter === g.dir}
+                      onSelect={() => onWorkspaceFilterChange(g.dir)}
+                    />
+                  ))}
+                </SortableContext>
+                {typeof document !== "undefined" &&
+                  createPortal(
+                    <DragOverlay dropAnimation={null}>
+                      {activeDragDir ? (
+                        <WorkspaceDragGhost label={workspaceName(activeDragDir)} />
+                      ) : null}
+                    </DragOverlay>,
+                    document.body,
+                  )}
+              </DndContext>
             </SidebarMenu>
           </SidebarGroup>
         ) : chatGroups.length === 0 ? (
@@ -348,32 +336,12 @@ export const AppSidebar = memo(function AppSidebar({
             onDragCancel={() => setActiveDragDir(null)}
             onDragEnd={handleDragEnd}
           >
-            {defaultGroup && (
-              <SidebarGroup>
-                <WorkspaceGroupView
-                  group={defaultGroup}
-                  label={shorten(defaultGroup.dir, defaultWorkspace, t("workspace.default"))}
-                  isDefaultWorkspace
-                  activeId={activeId}
-                  streamingIds={streamingIds}
-                  unreadCompletedIds={unreadCompletedIds}
-                  nowMs={nowMs}
-                  archiveShortcut={shortcutLabels.archiveChat}
-                  onNew={onNew}
-                  onSelect={onSelect}
-                  onArchive={onArchive}
-                  onRevealWorkspace={onRevealWorkspace}
-                  onArchiveWorkspaceChats={onArchiveWorkspaceChats}
-                  onRemoveWorkspace={onRemoveWorkspace}
-                />
-              </SidebarGroup>
-            )}
             <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-              {sortableGroups.map((g) => (
+              {groups.map((g) => (
                 <SortableWorkspaceGroup
                   key={g.dir}
                   group={g}
-                  label={shorten(g.dir, defaultWorkspace, t("workspace.default"))}
+                  label={workspaceName(g.dir)}
                   activeId={activeId}
                   streamingIds={streamingIds}
                   unreadCompletedIds={unreadCompletedIds}
@@ -392,13 +360,7 @@ export const AppSidebar = memo(function AppSidebar({
               createPortal(
                 <DragOverlay dropAnimation={null}>
                   {activeDragDir ? (
-                    <WorkspaceDragGhost
-                      label={shorten(
-                        activeDragDir,
-                        defaultWorkspace,
-                        t("workspace.default"),
-                      )}
-                    />
+                    <WorkspaceDragGhost label={workspaceName(activeDragDir)} />
                   ) : null}
                 </DragOverlay>,
                 document.body,
@@ -424,12 +386,25 @@ export const AppSidebar = memo(function AppSidebar({
   );
 });
 
+// The folder row's "active" look (accent header + revealed action icons) shows
+// on hover, while its dropdown is open, or under *keyboard* focus. We key off
+// `:has(:focus-visible)` rather than `:focus-within` on purpose: when a menu is
+// dismissed by mouse, Radix returns focus to the trigger, and `:focus-within`
+// would leave the whole row stuck in its hover state until you clicked away.
+const ROW_ACCENT_CLASS =
+  "group-hover/project-row:bg-sidebar-accent group-hover/project-row:text-sidebar-accent-foreground " +
+  "group-has-[[data-state=open]]/project-row:bg-sidebar-accent group-has-[[data-state=open]]/project-row:text-sidebar-accent-foreground " +
+  "group-has-[:focus-visible]/project-row:bg-sidebar-accent group-has-[:focus-visible]/project-row:text-sidebar-accent-foreground";
+
+const ROW_ACTION_CLASS =
+  "flex size-4 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-hidden transition-opacity " +
+  "hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring " +
+  "group-hover/project-row:opacity-100 group-has-[[data-state=open]]/project-row:opacity-100 group-has-[:focus-visible]/project-row:opacity-100";
+
 interface WorkspaceGroupViewProps {
   group: { dir: string; items: Conversation[] };
   label: string;
-  isDefaultWorkspace?: boolean;
-  /** Drag-handle props (attributes + listeners) from useSortable. Absent on the
-   *  pinned default group, which can't be dragged. */
+  /** Drag-handle props (attributes + listeners) from useSortable. */
   handleProps?: Record<string, unknown>;
   activeId: string | null;
   streamingIds: Set<string>;
@@ -450,7 +425,6 @@ interface WorkspaceGroupViewProps {
 function WorkspaceGroupView({
   group,
   label,
-  isDefaultWorkspace = false,
   handleProps,
   activeId,
   streamingIds,
@@ -471,7 +445,8 @@ function WorkspaceGroupView({
         <SidebarGroupLabel
           {...handleProps}
           className={cn(
-            "pr-16 group-hover/project-row:bg-sidebar-accent group-hover/project-row:text-sidebar-accent-foreground group-focus-within/project-row:bg-sidebar-accent group-focus-within/project-row:text-sidebar-accent-foreground",
+            "pr-16",
+            ROW_ACCENT_CLASS,
             handleProps && "cursor-grab touch-none select-none active:cursor-grabbing",
           )}
         >
@@ -479,29 +454,19 @@ function WorkspaceGroupView({
           <span className="truncate">{label}</span>
         </SidebarGroupLabel>
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => onNew(group.dir)}
-                className="flex size-4 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-hidden transition-opacity hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover/project-row:opacity-100 group-focus-within/project-row:opacity-100"
-              >
-                <SquarePen className="size-3" />
-                <span className="sr-only">
-                  {t("action.newChatIn", { workspace: label })}
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
+          <button
+            type="button"
+            onClick={() => onNew(group.dir)}
+            className={ROW_ACTION_CLASS}
+          >
+            <SquarePen className="size-3" />
+            <span className="sr-only">
               {t("action.newChatIn", { workspace: label })}
-            </TooltipContent>
-          </Tooltip>
+            </span>
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex size-4 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-hidden transition-opacity hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover/project-row:opacity-100 group-focus-within/project-row:opacity-100"
-              >
+              <button type="button" className={ROW_ACTION_CLASS}>
                 <MoreHorizontal className="size-3" />
                 <span className="sr-only">{t("action.more")}</span>
               </button>
@@ -520,7 +485,6 @@ function WorkspaceGroupView({
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                disabled={isDefaultWorkspace}
                 variant="destructive"
                 onSelect={() => onRemoveWorkspace(group.dir)}
               >
@@ -577,6 +541,76 @@ function SortableWorkspaceGroup(props: Omit<WorkspaceGroupViewProps, "handleProp
         />
       </SidebarGroup>
     </div>
+  );
+}
+
+/** A workspace row in the board view's filter list. The whole row doubles as a
+ *  click-to-filter button and (when `handleProps` is supplied) a drag handle. */
+function WorkspaceFilterButton({
+  label,
+  count,
+  active,
+  onSelect,
+  handleProps,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onSelect: () => void;
+  handleProps?: Record<string, unknown>;
+}) {
+  return (
+    <SidebarMenuButton
+      {...handleProps}
+      onClick={onSelect}
+      isActive={active}
+      className={cn(handleProps && "cursor-grab touch-none select-none active:cursor-grabbing")}
+    >
+      <Folder />
+      <span className="truncate">{label}</span>
+      <span
+        className={cn(
+          "ml-auto text-[11px]",
+          active ? "text-sidebar-accent-foreground/80" : "text-muted-foreground",
+        )}
+      >
+        {count}
+      </span>
+    </SidebarMenuButton>
+  );
+}
+
+/** A board-view filter row wired into dnd-kit's sortable list. A 250ms hold
+ *  starts a drag; a plain click still filters. */
+function SortableWorkspaceFilterRow({
+  dir,
+  label,
+  count,
+  active,
+  onSelect,
+}: {
+  dir: string;
+  label: string;
+  count: number;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: dir });
+  return (
+    <SidebarMenuItem
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(isDragging && "opacity-0")}
+    >
+      <WorkspaceFilterButton
+        label={label}
+        count={count}
+        active={active}
+        onSelect={onSelect}
+        handleProps={{ ...attributes, ...listeners }}
+      />
+    </SidebarMenuItem>
   );
 }
 
@@ -803,31 +837,20 @@ function groupByWorkspace(
   items: Conversation[],
   workspaceDirs: string[],
   hiddenWorkspaceDirs: string[],
-  defaultWorkspace: string,
 ): { dir: string; items: Conversation[] }[] {
   const order: string[] = [];
   const map = new Map<string, Conversation[]>();
   const hidden = new Set(hiddenWorkspaceDirs);
   const ensure = (dir: string) => {
-    if (dir !== defaultWorkspace && hidden.has(dir)) return;
+    if (hidden.has(dir)) return;
     if (!dir || map.has(dir)) return;
     map.set(dir, []);
     order.push(dir);
   };
-  ensure(defaultWorkspace);
   for (const dir of workspaceDirs) ensure(dir);
   for (const c of items) {
     ensure(c.workspaceDir);
     map.get(c.workspaceDir)?.push(c);
   }
   return order.map((dir) => ({ dir, items: map.get(dir)! }));
-}
-
-function shorten(
-  p: string,
-  defaultWorkspace: string,
-  defaultLabel: string,
-): string {
-  if (p === defaultWorkspace) return defaultLabel;
-  return workspaceName(p);
 }

@@ -2191,7 +2191,6 @@ export default function Home() {
 
   const onRemoveWorkspace = useCallback(
     (dir: string) => {
-      if (dir === defaultWorkspace) return;
       const next = hideWorkspace(dir);
       setRecentWorkspaces(next.recent);
       setHiddenWorkspaces(next.hidden);
@@ -2483,7 +2482,6 @@ export default function Home() {
         activeId={activeId}
         streamingIds={streamingIds}
         unreadCompletedIds={unreadCompletedIds}
-        defaultWorkspace={defaultWorkspace}
         workspaceDirs={recentWorkspaces}
         hiddenWorkspaceDirs={hiddenWorkspaces}
         view={view}
