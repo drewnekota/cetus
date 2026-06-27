@@ -173,7 +173,9 @@ impl AppState {
             .get(conv_id)?
             .ok_or_else(|| anyhow::anyhow!("conversation not found: {conv_id}"))?;
         let workspace = PathBuf::from(&conv.workspace_dir);
-        std::fs::create_dir_all(&workspace).ok();
+        if cetus_bridge::remote::parse_remote_workspace(&conv.workspace_dir).is_none() {
+            std::fs::create_dir_all(&workspace).ok();
+        }
         let mut env = secrets::load_env();
         // Custom DeepSeek endpoint (proxy / self-host / region). The
         // deepseek-endpoint extension reads this and overrides the provider's

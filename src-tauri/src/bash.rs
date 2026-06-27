@@ -60,8 +60,15 @@ pub async fn run_bash(
     cwd: Option<String>,
 ) -> Result<BashResult, String> {
     let dir = cwd
-        .filter(|d| std::path::Path::new(d).is_dir())
+        .filter(|d| {
+            cetus_bridge::remote::parse_remote_workspace(d).is_some()
+                || std::path::Path::new(d).is_dir()
+        })
         .unwrap_or_else(|| state.default_workspace.to_string_lossy().to_string());
+
+    if let Some(remote) = cetus_bridge::remote::parse_remote_workspace(&dir) {
+        return run_remote_bash(remote, command).await;
+    }
 
     // Use the user's interactive shell so PATH / aliases match their terminal;
     // `-l -c` loads the login profile then runs the command string. Fall back
@@ -110,5 +117,52 @@ pub async fn run_bash(
         exit_code: output.status.code().unwrap_or(-1),
         timed_out: false,
         cwd: dir,
+    })
+}
+
+async fn run_remote_bash(
+    remote: cetus_bridge::remote::RemoteWorkspace,
+    command: String,
+) -> Result<BashResult, String> {
+    let script = format!(
+        "mkdir -p {} && cd {} && exec \"${{SHELL:-/bin/sh}}\" -lc {}",
+        cetus_bridge::remote::shell_word(&remote.path),
+        cetus_bridge::remote::shell_word(&remote.path),
+        cetus_bridge::remote::shell_word(&command),
+    );
+    let mut ssh = Command::new("ssh");
+    ssh.args(cetus_bridge::remote::remote_command_args(&remote, &script))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let child = ssh
+        .spawn()
+        .map_err(|e| format!("failed to launch ssh {}: {e}", remote.target))?;
+    let pid = child.id();
+    let output = match tokio::time::timeout(TIMEOUT, child.wait_with_output()).await {
+        Ok(res) => res.map_err(|e| e.to_string())?,
+        Err(_) => {
+            if let Some(pid) = pid {
+                let _ = std::process::Command::new("/bin/kill")
+                    .arg("-9")
+                    .arg(pid.to_string())
+                    .output();
+            }
+            return Ok(BashResult {
+                stdout: String::new(),
+                stderr: format!("Command timed out after {}s.", TIMEOUT.as_secs()),
+                exit_code: -1,
+                timed_out: true,
+                cwd: remote.display(),
+            });
+        }
+    };
+
+    Ok(BashResult {
+        stdout: cap(String::from_utf8_lossy(&output.stdout).into_owned()),
+        stderr: cap(String::from_utf8_lossy(&output.stderr).into_owned()),
+        exit_code: output.status.code().unwrap_or(-1),
+        timed_out: false,
+        cwd: remote.display(),
     })
 }

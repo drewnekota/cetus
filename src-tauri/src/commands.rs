@@ -358,7 +358,9 @@ pub async fn new_conversation(
     let workspace = workspace_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| state.default_workspace.clone());
-    std::fs::create_dir_all(&workspace).map_err(err)?;
+    if cetus_bridge::remote::parse_remote_workspace(&workspace.to_string_lossy()).is_none() {
+        std::fs::create_dir_all(&workspace).map_err(err)?;
+    }
 
     // Mint the id up front; the pi is spawned lazily by `pi_for` on first use
     // (send_prompt / switch) rather than here. Spawning a pi eagerly costs a
@@ -812,6 +814,9 @@ pub async fn list_workspace_files(
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| state.default_workspace.clone());
+    if cetus_bridge::remote::parse_remote_workspace(&dir.to_string_lossy()).is_some() {
+        return Ok(Vec::new());
+    }
     let mut entries = Vec::with_capacity(MAX_ENTRIES.min(128));
     collect_workspace_files(&dir, &dir, 0, MAX_DEPTH, MAX_ENTRIES, &mut entries)?;
     Ok(entries)
@@ -894,7 +899,9 @@ pub async fn set_workspace(
     id: String,
     workspace_dir: String,
 ) -> CmdResult<Conversation> {
-    std::fs::create_dir_all(&workspace_dir).map_err(err)?;
+    if cetus_bridge::remote::parse_remote_workspace(&workspace_dir).is_none() {
+        std::fs::create_dir_all(&workspace_dir).map_err(err)?;
+    }
     state
         .store
         .set_workspace(&id, &workspace_dir, now_ms())

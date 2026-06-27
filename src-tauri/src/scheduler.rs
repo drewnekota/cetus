@@ -297,7 +297,9 @@ async fn create_conversation(
     } else {
         PathBuf::from(&auto.workspace_dir)
     };
-    std::fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+    if cetus_bridge::remote::parse_remote_workspace(&workspace.to_string_lossy()).is_none() {
+        std::fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+    }
 
     let id = Uuid::new_v4().to_string();
     let env = secrets::load_env();

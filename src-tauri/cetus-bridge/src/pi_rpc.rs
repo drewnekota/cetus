@@ -18,7 +18,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -84,6 +84,7 @@ pub struct PiRpc {
     /// Conversation this pi instance serves. None during the brief window
     /// where new_conversation has spawned pi but not yet persisted the row.
     pub conversation_id: Option<String>,
+    remote: Option<Arc<crate::remote::RemoteRuntime>>,
     // FnOnce that kills the underlying child. Fired exactly once on Drop so
     // dropping the Arc replaces the live process instead of leaking it.
     shutdown: Mutex<Option<Box<dyn FnOnce() + Send>>>,
@@ -114,6 +115,7 @@ impl PiRpc {
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let last_activity: LastActivity = Arc::new(Mutex::new(std::time::Instant::now()));
         let alive = Arc::new(AtomicBool::new(true));
+        let mut extra_env = extra_env;
 
         tracing::info!(
             "spawning pi bin={} cwd={} conv={:?}",
@@ -121,6 +123,16 @@ impl PiRpc {
             cwd.display(),
             conversation_id
         );
+        let remote = match crate::remote::parse_remote_workspace(&cwd.to_string_lossy()) {
+            Some(workspace) => Some(Arc::new(crate::remote::prepare_remote_runtime(
+                workspace,
+                bin,
+                sessions_dir,
+                conversation_id.as_deref(),
+                &mut extra_env,
+            )?)),
+            None => None,
+        };
         let shutdown = spawn_process(
             bin,
             sessions_dir,
@@ -134,6 +146,7 @@ impl PiRpc {
             extra_env,
             conversation_id.clone(),
             config,
+            remote.clone(),
         )?;
 
         Ok(Self {
@@ -143,6 +156,7 @@ impl PiRpc {
             last_activity,
             alive,
             conversation_id,
+            remote,
             shutdown: Mutex::new(Some(shutdown)),
         })
     }
@@ -280,18 +294,32 @@ impl PiRpc {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("get_state missing sessionFile"))?
             .to_string();
+        if let Some(remote) = &self.remote {
+            let local = sync_remote_session(remote.clone(), session_file.clone()).await?;
+            return Ok(local.to_string_lossy().to_string());
+        }
         Ok(session_file)
     }
 
     pub async fn switch_session(&self, path: &str) -> Result<()> {
+        let session_path = if let Some(remote) = &self.remote {
+            let local = PathBuf::from(path);
+            let remote = remote.clone();
+            tokio::task::spawn_blocking(move || crate::remote::upload_session(&remote, &local))
+                .await
+                .map_err(|e| anyhow!("session upload task failed: {e}"))??
+        } else {
+            path.to_string()
+        };
         let _ = self
-            .request(json!({"type": "switch_session", "sessionPath": path}))
+            .request(json!({"type": "switch_session", "sessionPath": session_path}))
             .await?;
         Ok(())
     }
 
     pub async fn get_messages(&self) -> Result<Vec<Value>> {
         let resp = self.request(json!({"type": "get_messages"})).await?;
+        self.sync_current_remote_session().await;
         let messages = resp
             .pointer("/data/messages")
             .and_then(|v| v.as_array())
@@ -302,13 +330,27 @@ impl PiRpc {
 
     pub async fn get_state(&self) -> Result<Value> {
         let resp = self.request(json!({"type": "get_state"})).await?;
-        Ok(resp.get("data").cloned().unwrap_or(Value::Null))
+        let mut data = resp.get("data").cloned().unwrap_or(Value::Null);
+        if let (Some(remote), Some(path)) = (
+            &self.remote,
+            data.get("sessionFile").and_then(|v| v.as_str()).map(String::from),
+        ) {
+            let local = crate::remote::local_session_path(remote, &path);
+            if let Some(obj) = data.as_object_mut() {
+                obj.insert(
+                    "sessionFile".to_string(),
+                    Value::String(local.to_string_lossy().to_string()),
+                );
+            }
+        }
+        Ok(data)
     }
 
     /// User messages that can be forked from, oldest→newest: `[{entryId, text}]`.
     /// Used to find the rewind point for a "retry" (the last user message).
     pub async fn get_fork_messages(&self) -> Result<Vec<Value>> {
         let resp = self.request(json!({"type": "get_fork_messages"})).await?;
+        self.sync_current_remote_session().await;
         let messages = resp
             .pointer("/data/messages")
             .and_then(|v| v.as_array())
@@ -326,6 +368,7 @@ impl PiRpc {
             .request(json!({"type": "fork", "entryId": entry_id}))
             .await?;
         check_success(&resp, "fork")?;
+        self.sync_current_remote_session().await;
         Ok(resp
             .pointer("/data/text")
             .and_then(|v| v.as_str())
@@ -368,6 +411,7 @@ impl PiRpc {
                 .unwrap_or("unknown error");
             bail!("pi rejected prompt: {err}");
         }
+        self.sync_current_remote_session().await;
         Ok(())
     }
 
@@ -400,6 +444,31 @@ impl PiRpc {
         tracing::info!("pi set_thinking_level → {level}");
         Ok(())
     }
+
+    async fn sync_current_remote_session(&self) {
+        let Some(remote) = self.remote.clone() else {
+            return;
+        };
+        match self.request(json!({"type": "get_state"})).await {
+            Ok(state) => {
+                if let Some(path) = state.pointer("/data/sessionFile").and_then(|v| v.as_str()) {
+                    if let Err(e) = sync_remote_session(remote, path.to_string()).await {
+                        tracing::warn!("remote session sync failed: {e}");
+                    }
+                }
+            }
+            Err(e) => tracing::warn!("remote session state lookup failed: {e}"),
+        }
+    }
+}
+
+async fn sync_remote_session(
+    remote: Arc<crate::remote::RemoteRuntime>,
+    remote_path: String,
+) -> Result<PathBuf> {
+    tokio::task::spawn_blocking(move || crate::remote::download_session(&remote, &remote_path))
+        .await
+        .map_err(|e| anyhow!("session download task failed: {e}"))?
 }
 
 fn check_success(resp: &Value, op: &str) -> Result<()> {
@@ -436,25 +505,53 @@ fn spawn_process(
     extra_env: Vec<(String, String)>,
     conversation_id: Option<String>,
     config: crate::bridge::RuntimeConfig,
+    remote: Option<Arc<crate::remote::RemoteRuntime>>,
 ) -> Result<Box<dyn FnOnce() + Send>> {
-    let mut command = TokioCommand::new(bin);
-    command
-        .arg("--mode")
-        .arg("rpc")
-        .arg("--session-dir")
-        .arg(sessions_dir)
-        .arg("--append-system-prompt")
-        .arg(&config.append_system_prompt);
+    let mut remote_args = Vec::<String>::new();
+    let mut remote_script_parts = Vec::<String>::new();
+    let (mut command, pi_dir_for_extensions): (TokioCommand, Option<PathBuf>) =
+        if let Some(remote) = &remote {
+            let cmd = TokioCommand::new("ssh");
+            let runtime = remote.as_ref();
+            let mut args = vec![
+                runtime.pi_bin.clone(),
+                "--mode".to_string(),
+                "rpc".to_string(),
+                "--session-dir".to_string(),
+                runtime.sessions_dir.clone(),
+                "--append-system-prompt".to_string(),
+                config.append_system_prompt.clone(),
+            ];
+            remote_args.append(&mut args);
+            (cmd, Some(PathBuf::from(&runtime.pi_dir)))
+        } else {
+            let mut cmd = TokioCommand::new(bin);
+            cmd.arg("--mode")
+                .arg("rpc")
+                .arg("--session-dir")
+                .arg(sessions_dir)
+                .arg("--append-system-prompt")
+                .arg(&config.append_system_prompt);
+            (cmd, bin.parent().map(Path::to_path_buf))
+        };
 
-    if let Some(pi_dir) = bin.parent() {
+    if let Some(pi_dir) = pi_dir_for_extensions.as_deref() {
         append_owned_extensions(
             &mut command,
+            &mut remote_args,
             pi_dir,
+            bin.parent(),
             &config.extensions,
             &config.plugin_extensions.owned_extension_names,
+            remote.is_some(),
         );
         for p in &config.plugin_extensions.extension_paths {
-            if p.is_file() {
+            if remote.is_some() {
+                tracing::warn!(
+                    "skipping plugin pi extension {} for remote SSH runtime; plugin extensions must be installed in the remote pi tree",
+                    p.display()
+                );
+            } else if p.is_file() {
                 tracing::info!("loading plugin pi extension {}", p.display());
                 command.arg("--extension").arg(p);
             } else {
@@ -482,17 +579,36 @@ fn spawn_process(
         }
     }
 
+    if let Some(remote) = &remote {
+        for (k, v) in &extra_env {
+            remote_script_parts.push(format!("{k}={}", crate::remote::shell_word(v)));
+        }
+        remote_script_parts.push("exec".to_string());
+        remote_script_parts.extend(remote_args.iter().map(|a| crate::remote::shell_word(a)));
+        let script = format!(
+            "mkdir -p {} && cd {} && {}",
+            crate::remote::shell_word(&remote.workspace.path),
+            crate::remote::shell_word(&remote.workspace.path),
+            remote_script_parts.join(" ")
+        );
+        command.args(crate::remote::remote_command_args(&remote.workspace, &script));
+    } else {
+        command.current_dir(cwd);
+        for (k, v) in extra_env {
+            command.env(k, v);
+        }
+    }
+
     command
-        .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    for (k, v) in extra_env {
-        command.env(k, v);
-    }
     let mut child = command
         .spawn()
-        .with_context(|| format!("failed to spawn pi at {}", bin.display()))?;
+        .with_context(|| match &remote {
+            Some(remote) => format!("failed to spawn remote pi via ssh {}", remote.workspace.target),
+            None => format!("failed to spawn pi at {}", bin.display()),
+        })?;
 
     let stdin = child.stdin.take().context("pi stdin missing")?;
     let stdout = child.stdout.take().context("pi stdout missing")?;
@@ -556,12 +672,18 @@ fn spawn_process(
 
 fn append_owned_extensions(
     command: &mut TokioCommand,
+    remote_args: &mut Vec<String>,
     pi_dir: &Path,
+    local_pi_dir: Option<&Path>,
     config: &crate::bridge::ExtensionLoadConfig,
     plugin_owned: &std::collections::BTreeSet<String>,
+    is_remote: bool,
 ) {
     let ext_dir = pi_dir.join(config.directory_name);
-    match std::fs::read_dir(&ext_dir) {
+    let read_dir = local_pi_dir
+        .map(|p| p.join(config.directory_name))
+        .unwrap_or_else(|| ext_dir.clone());
+    match std::fs::read_dir(&read_dir) {
         Ok(entries) => {
             // Sort the .ts extension paths before handing them to pi. pi preserves
             // --extension order into its tool registry, and many providers benefit
@@ -584,7 +706,16 @@ fn append_owned_extensions(
                 .collect();
             for p in &paths {
                 tracing::info!("loading pi extension {}", p.display());
-                command.arg("--extension").arg(p);
+                if is_remote {
+                    let arg_path = match local_pi_dir.and_then(|local| p.strip_prefix(local).ok()) {
+                        Some(rel) => pi_dir.join(rel),
+                        None => p.clone(),
+                    };
+                    remote_args.push("--extension".to_string());
+                    remote_args.push(arg_path.to_string_lossy().to_string());
+                } else {
+                    command.arg("--extension").arg(p);
+                }
             }
             // Self-check: an install/sync that produces zero or partial
             // extensions must scream, not silently strand the agent's tools.

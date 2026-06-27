@@ -96,6 +96,9 @@ export const chat = {
     // Workspace picker
     "workspace.label": "Workspace",
     "workspace.addFolder": "Add folder…",
+    "workspace.addRemote": "Remote SSH…",
+    "workspace.remoteTitle": "Remote SSH workspace",
+    "workspace.remoteConnect": "Connect",
 
     // Thinking block
     "thinking.title": "Thinking",
@@ -237,6 +240,9 @@ export const chat = {
 
     "workspace.label": "工作区",
     "workspace.addFolder": "添加文件夹……",
+    "workspace.addRemote": "远程 SSH……",
+    "workspace.remoteTitle": "远程 SSH 工作区",
+    "workspace.remoteConnect": "连接",
 
     "thinking.title": "思考",
     "thinking.chars": "{count} 字符",
@@ -327,6 +333,9 @@ export const chat = {
 
     "workspace.label": "ワークスペース",
     "workspace.addFolder": "フォルダを追加…",
+    "workspace.addRemote": "Remote SSH…",
+    "workspace.remoteTitle": "Remote SSH workspace",
+    "workspace.remoteConnect": "Connect",
 
     "thinking.title": "思考",
     "thinking.chars": "{count} 文字",
@@ -413,6 +422,9 @@ export const chat = {
 
     "workspace.label": "작업 공간",
     "workspace.addFolder": "폴더 추가…",
+    "workspace.addRemote": "Remote SSH…",
+    "workspace.remoteTitle": "Remote SSH workspace",
+    "workspace.remoteConnect": "Connect",
 
     "thinking.title": "사고 중",
     "thinking.chars": "{count}자",
@@ -500,6 +512,9 @@ export const chat = {
 
     "workspace.label": "Espacio de trabajo",
     "workspace.addFolder": "Añadir carpeta…",
+    "workspace.addRemote": "Remote SSH…",
+    "workspace.remoteTitle": "Remote SSH workspace",
+    "workspace.remoteConnect": "Connect",
 
     "thinking.title": "Pensando",
     "thinking.chars": "{count} caracteres",
@@ -587,6 +602,9 @@ export const chat = {
 
     "workspace.label": "Espaço de trabalho",
     "workspace.addFolder": "Adicionar pasta…",
+    "workspace.addRemote": "Remote SSH…",
+    "workspace.remoteTitle": "Remote SSH workspace",
+    "workspace.remoteConnect": "Connect",
 
     "thinking.title": "Pensando",
     "thinking.chars": "{count} caracteres",
@@ -674,6 +692,9 @@ export const chat = {
 
     "workspace.label": "Espace de travail",
     "workspace.addFolder": "Ajouter un dossier…",
+    "workspace.addRemote": "Remote SSH…",
+    "workspace.remoteTitle": "Remote SSH workspace",
+    "workspace.remoteConnect": "Connect",
 
     "thinking.title": "Réflexion",
     "thinking.chars": "{count} caractères",
@@ -761,6 +782,9 @@ export const chat = {
 
     "workspace.label": "Arbeitsbereich",
     "workspace.addFolder": "Ordner hinzufügen…",
+    "workspace.addRemote": "Remote SSH…",
+    "workspace.remoteTitle": "Remote SSH workspace",
+    "workspace.remoteConnect": "Connect",
 
     "thinking.title": "Nachdenken",
     "thinking.chars": "{count} Zeichen",
@@ -848,6 +872,9 @@ export const chat = {
 
     "workspace.label": "Area di lavoro",
     "workspace.addFolder": "Aggiungi cartella…",
+    "workspace.addRemote": "Remote SSH…",
+    "workspace.remoteTitle": "Remote SSH workspace",
+    "workspace.remoteConnect": "Connect",
 
     "thinking.title": "Ragionamento",
     "thinking.chars": "{count} caratteri",
@@ -935,6 +962,9 @@ export const chat = {
 
     "workspace.label": "Рабочая область",
     "workspace.addFolder": "Добавить папку…",
+    "workspace.addRemote": "Remote SSH…",
+    "workspace.remoteTitle": "Remote SSH workspace",
+    "workspace.remoteConnect": "Connect",
 
     "thinking.title": "Размышление",
     "thinking.chars": "{count} симв.",

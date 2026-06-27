@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { Folder, FolderPlus } from "lucide-react";
+import { Folder, FolderPlus, Server } from "lucide-react";
 import { api } from "@/lib/tauri";
 import {
   Select,
@@ -15,6 +15,9 @@ import {
   loadRecentWorkspaces,
   rememberRecentWorkspace,
 } from "@/lib/recent-workspaces";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   workspaceDir: string | null;
@@ -29,10 +32,13 @@ interface Props {
 /** Sentinel value for the "Add folder…" row — handled in onValueChange instead
  *  of becoming the selected value. */
 const ADD_FOLDER = "__add_folder__";
+const ADD_REMOTE = "__add_remote__";
 
 export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disabled, onNativePick }: Props) {
   const { t } = useTranslation("chat");
   const [recent, setRecent] = useState<string[]>([]);
+  const [remoteOpen, setRemoteOpen] = useState(false);
+  const [remoteValue, setRemoteValue] = useState("");
   const current = workspaceDir ?? defaultWorkspace;
 
   useEffect(() => {
@@ -66,8 +72,21 @@ export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disa
       }
       return;
     }
+    if (value === ADD_REMOTE) {
+      setRemoteValue("");
+      setRemoteOpen(true);
+      return;
+    }
     remember(value);
     onChange(value);
+  }
+
+  function submitRemote() {
+    const value = remoteValue.trim();
+    if (!value) return;
+    remember(value);
+    onChange(value);
+    setRemoteOpen(false);
   }
 
   // `current` is always a string (workspaceDir ?? defaultWorkspace), so pass it
@@ -76,30 +95,68 @@ export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disa
   // warning. An empty string is a valid "nothing selected" yet still-controlled
   // value; the trigger renders its own placeholder text.
   return (
-    <Select value={current} onValueChange={handleChange} disabled={disabled}>
-      <SelectTrigger
-        size="sm"
-        title={current}
-        className="h-7 max-w-52 gap-1.5 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:ring-0 data-[size=sm]:h-7"
-      >
-        <Folder className="size-3" />
-        <span className="truncate">{current ? shorten(current) : t("workspace.label")}</span>
-      </SelectTrigger>
-      <SelectContent align="start" className="max-w-[22rem]">
-        {options.map((dir) => (
-          <SelectItem key={dir} value={dir} className="text-xs">
-            <Folder className="size-4" />
-            <span className="truncate" title={dir}>
-              {shorten(dir)}
-            </span>
+    <>
+      <Select value={current} onValueChange={handleChange} disabled={disabled}>
+        <SelectTrigger
+          size="sm"
+          title={current}
+          className="h-7 max-w-52 gap-1.5 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:ring-0 data-[size=sm]:h-7"
+        >
+          {current.startsWith("ssh://") || /^[^/:\s]+@?[^/:\s]+:/.test(current) ? (
+            <Server className="size-3" />
+          ) : (
+            <Folder className="size-3" />
+          )}
+          <span className="truncate">{current ? shorten(current) : t("workspace.label")}</span>
+        </SelectTrigger>
+        <SelectContent align="start" className="max-w-[22rem]">
+          {options.map((dir) => (
+            <SelectItem key={dir} value={dir} className="text-xs">
+              {dir.startsWith("ssh://") || /^[^/:\s]+@?[^/:\s]+:/.test(dir) ? (
+                <Server className="size-4" />
+              ) : (
+                <Folder className="size-4" />
+              )}
+              <span className="truncate" title={dir}>
+                {shorten(dir)}
+              </span>
+            </SelectItem>
+          ))}
+          <SelectSeparator />
+          <SelectItem value={ADD_REMOTE} className="text-xs text-muted-foreground">
+            <Server className="size-4" />
+            {t("workspace.addRemote")}
           </SelectItem>
-        ))}
-        <SelectSeparator />
-        <SelectItem value={ADD_FOLDER} className="text-xs text-muted-foreground">
-          <FolderPlus className="size-4" />
-          {t("workspace.addFolder")}
-        </SelectItem>
-      </SelectContent>
-    </Select>
+          <SelectItem value={ADD_FOLDER} className="text-xs text-muted-foreground">
+            <FolderPlus className="size-4" />
+            {t("workspace.addFolder")}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <Dialog open={remoteOpen} onOpenChange={setRemoteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("workspace.remoteTitle")}</DialogTitle>
+          </DialogHeader>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitRemote();
+            }}
+          >
+            <Input
+              value={remoteValue}
+              onChange={(e) => setRemoteValue(e.target.value)}
+              placeholder="ssh://user@host:2222/work/repo"
+              autoFocus
+            />
+            <Button type="submit" size="sm">
+              {t("workspace.remoteConnect")}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

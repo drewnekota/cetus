@@ -139,7 +139,9 @@ pub async fn run_agent_node(
 
     let mut full = prompt.to_string();
     if let Some(sub) = subdir {
-        std::fs::create_dir_all(workspace.join(sub)).ok();
+        if cetus_bridge::remote::parse_remote_workspace(&workspace.to_string_lossy()).is_none() {
+            std::fs::create_dir_all(workspace.join(sub)).ok();
+        }
         full.push_str(&format!(
             "\n\nIMPORTANT: write every file you create under the `./{sub}/` subfolder of the workspace."
         ));
