@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
 import { AgentControlCard } from "@/components/chat/agent-control-card";
@@ -429,7 +430,13 @@ function QuoteSelectionToolbar({
 
   if (!selection) return null;
 
-  return (
+  // Portal to <body>: the chat pane lives inside SidebarInset, which has a
+  // `backdrop-filter` — that establishes a containing block for fixed-position
+  // descendants, so a `position: fixed` toolbar rendered inline would resolve
+  // its viewport coordinates against the SidebarInset box (offset by the
+  // sidebar width) and drift sideways. Rendering into <body> escapes that
+  // containing block so `fixed` is viewport-relative again.
+  return createPortal(
     <div
       className="fixed z-50 -translate-x-1/2 -translate-y-full rounded-full border border-border bg-popover px-1 py-0.5 text-popover-foreground shadow-[0_4px_14px_rgba(0,0,0,0.10),0_1px_2px_rgba(0,0,0,0.06)]"
       style={{ left: selection.left, top: selection.top }}
@@ -447,7 +454,8 @@ function QuoteSelectionToolbar({
         <MessageCircle className="size-3.5" />
         {t("quote.addToChat")}
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
