@@ -9,6 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { ResourcesPopover } from "@/components/sidebar/resources-popover";
 import {
   Archive,
   ArchiveRestore,
@@ -175,12 +176,12 @@ export const AppSidebar = memo(function AppSidebar({
       className={cn(
         // `relative` anchors the drag-to-resize handle pinned to the right edge.
         "relative",
-        // Frosted look, but cheaper: a smaller blur radius and lower saturation
-        // cut the GPU recomposite cost of this large translucent surface, which
-        // otherwise compounds with a long conversation list into scroll jank.
-        "bg-sidebar/62 backdrop-blur-xl backdrop-saturate-150 dark:bg-sidebar/58",
-        // Keep the sidebar on the explicit theme token instead of macOS
-        // vibrancy, so light mode stays at the Codex-like #f8f8f9.
+        // Solid sidebar token, no backdrop-filter: the shell root already paints
+        // opaque bg-sidebar, so the old translucent+blurred surface only blurred
+        // a flat color while forcing a GPU recomposite of the whole strip on
+        // every repaint (and it compounded with a long conversation list into
+        // scroll jank).
+        "bg-sidebar",
         // Trim the row scale a notch below shadcn's defaults: 13px text (vs
         // 14px) and 14px icons (vs 16px). Scoped to this sidebar via descendant
         // selectors + `!` so they win over the menu-button base styles without
@@ -374,6 +375,9 @@ export const AppSidebar = memo(function AppSidebar({
           with a long conversation list. */}
       <SidebarFooter>
         <SidebarMenu>
+          <SidebarMenuItem>
+            <ResourcesPopover />
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton onClick={onOpenSettings} tooltip={t("nav.settings")}>
               <SettingsIcon />
@@ -788,11 +792,11 @@ const ConversationRow = memo(function ConversationRow({
   const title = conversation.title || t("conversation.untitled");
   const relativeTime = formatRelativeTime(conversation.updatedAt, nowMs);
   return (
-    // NB: no `content-visibility:auto` here. The sidebar's `backdrop-blur`
-    // ancestor establishes a containing block that breaks the browser's
-    // in-viewport detection for content-visibility, so rows get skipped
-    // (blank) even while visible. The minute-clock scoping already removed the
-    // per-minute re-render cost; a long list would need a real virtualizer.
+    // NB: no `content-visibility:auto` here. It broke under the sidebar's old
+    // `backdrop-blur` ancestor (containing block defeated in-viewport
+    // detection, blanking visible rows); the blur is gone now, but the
+    // minute-clock scoping already removed the per-minute re-render cost, and
+    // a long list would need a real virtualizer anyway.
     <SidebarMenuItem>
       <SidebarMenuButton
         onClick={() => onSelect(conversation.id)}

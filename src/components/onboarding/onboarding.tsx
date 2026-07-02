@@ -56,7 +56,7 @@ export function Onboarding() {
   if (show !== true) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/95 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background">
       <div className="mx-4 w-full max-w-lg rounded-2xl border border-border bg-background p-8 shadow-xl">
         {step === 0 ? (
           <div className="flex flex-col items-center text-center">

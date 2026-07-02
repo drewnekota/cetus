@@ -25,6 +25,7 @@
 import { promises as fs } from "node:fs";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { errMsg } from "./bridge/protocol";
 
 interface MemoryEntry {
 	id: string;
@@ -439,7 +440,7 @@ const manageMemoryTool = defineTool({
 				{ kind: "memory_updated", action: "delete", id, count: state.entries.length },
 			);
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+			const msg = errMsg(err);
 			return textResult(
 				`manage_memory: failed to write memory: ${msg}`,
 				{ kind: "memory_error", error: "write_failed" },

@@ -140,6 +140,10 @@ fn op_create(ctx: &AutomationToolCtx, p: &Value) -> Value {
         last_status: None,
         last_error: None,
         run_count: 0,
+        // The agent's automation tool doesn't take a backend; runs use pi.
+        backend: crate::store::default_backend(),
+        cli_model: String::new(),
+        cli_effort: String::new(),
     };
     if let Err(e) = ctx.store.insert_automation(&automation) {
         return json!({ "ok": false, "error": e.to_string() });
@@ -225,6 +229,10 @@ fn op_update(ctx: &AutomationToolCtx, p: &Value) -> Value {
         last_status: existing.last_status,
         last_error: existing.last_error,
         run_count: existing.run_count,
+        // Agent-driven updates never change the backend; keep what's stored.
+        backend: existing.backend,
+        cli_model: existing.cli_model,
+        cli_effort: existing.cli_effort,
     };
     if let Err(e) = ctx.store.update_automation(&updated) {
         return json!({ "ok": false, "error": e.to_string() });

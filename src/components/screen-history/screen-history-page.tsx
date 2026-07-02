@@ -203,7 +203,7 @@ export function ScreenHistoryPage({ open, onClose, initialQuery, initialFrame }:
           <div className="mx-auto max-w-6xl space-y-8">
             {groups.map(({ key, label, items }) => (
               <section key={key}>
-                <h2 className="sticky top-0 z-10 -mx-1 mb-3 bg-background/90 px-1 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur">
+                <h2 className="sticky top-0 z-10 -mx-1 mb-3 bg-background px-1 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {label} · {items.length}
                 </h2>
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">

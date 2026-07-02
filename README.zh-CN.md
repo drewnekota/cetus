@@ -37,7 +37,7 @@ Cetus 把这省下来的钱花在大多数 agent 欠缺的地方：给 agent 更
 | | Cetus 现在 |
 | --- | --- |
 | **Context** | Rewind 式屏幕截取 + 设备端 Apple Vision OCR（默认关闭）· **会议记忆** —— 设备端转写通话，生成可搜索的纪要 · **带上下文的启动器**，自动附上截图、当前 app、浏览器 URL 与选中文本 · 通过 pi connectors 接入第三方数据 |
-| **Intelligence** | DeepSeek **V4.1 Flash** ⚡ / **V4.1 Pro** ✨ · pi harness · **Ultra Code** 模式（agent 自己编写 workflow 并编排子 agent）· **并行解法**（best-of-N 并行跑 + 并排对比挑选） |
+| **Intelligence** | DeepSeek **V4.1 Flash** ⚡ / **V4.1 Pro** ✨ · pi harness · **可插拔 runtime** —— 任意对话可切到 **Claude Code** 或 **Codex** 上运行 · **Ultra Code** 模式（agent 自己编写 workflow 并编排子 agent）· **并行解法**（best-of-N 并行跑 + 并排对比挑选） |
 | **Abilities** | pi 的 tools 与 skills · 30+ 模型供应商及任意 OpenAI 兼容端点 · 定时**自动化任务**，在后台开出新对话 · 设备端**语音听写** · 全局双击 ⌘ **启动器** |
 | **Memory** | 持久笔记（身份、偏好、进行中的项目），你和 agent 都能编辑，每一轮都注入 · **Dreaming**：空闲时离线整合（默认开启） |
 
@@ -48,6 +48,12 @@ Cetus 把这省下来的钱花在大多数 agent 欠缺的地方：给 agent 更
 一个输入框搞定一切：选 **workspace**（工作目录）、选 **preset**（Daily ⚡ / High / Max / UltraCode ✨）、可选附上文件或截图，然后发出去。回复实时流式，带可折叠的 **thinking** 块和 **tool use** 卡片（参数、结果、错误高亮）。
 
 ![Cetus 对话](docs/screenshot-chat.png)
+
+### Agent runtime
+
+每个对话都可以选自己的引擎。默认是 **Cetus**（内置的 pi harness）；在输入框的 runtime 选择器里切到 **Claude Code** 或 **Codex**，同一个对话就跑在对应的官方 CLI 上 —— 旁边还有按对话生效的**模型**（Fable / Opus / Sonnet / Haiku · GPT-5.5 系列）和**推理力度**选项。
+
+CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（PATH 上找），**不需要单独登录**。Cetus 为每条消息跑一次 headless turn（`claude -p --output-format stream-json` / `codex exec --json`），把结构化事件流翻译进同一套聊天 UI（文本、thinking、工具卡片），用 CLI 自己的 session token 跨轮保持上下文，并在每个对话独立的 **git worktree** 里隔离改动。自动化任务同样可以指定 runtime —— 定时job 跑在 Claude Code 上、日常聊天留在 Cetus 上，互不影响。
 
 ### 看板
 
@@ -104,6 +110,7 @@ Cetus 把这省下来的钱花在大多数 agent 欠缺的地方：给 agent 更
 ## 还有这些
 
 - **持久记忆**：用户和 agent 都能编辑，每一轮都注入（身份、偏好、进行中的项目）
+- **可插拔 runtime**：任意对话（或自动化任务）都能跑在 **Claude Code** / **Codex** 上 —— headless 调用本机 CLI，流式渲染进原生聊天 UI，per-conversation git worktree 隔离
 - **并行解法**：把一个 prompt 铺开成 N 个候选运行，然后留一个、归档其余
 - **Ultra Code** 模式：agent 为单次请求派生自己的子 agent
 - **语音听写**（设备端，macOS）：在 app 内可用，也支持全局按住说话
@@ -119,6 +126,7 @@ Cetus 把这省下来的钱花在大多数 agent 欠缺的地方：给 agent 更
 - **Rust** stable（`rustc`、`cargo`）
 - **Tauri** 前置依赖：<https://v2.tauri.app/start/prerequisites/>
 - 一个 **`DEEPSEEK_API_KEY`**（或你选用的供应商；pi 会自动读取 `ANTHROPIC_API_KEY`、`OPENAI_API_KEY` 等）
+- **可选**：本机安装并登录过 **Claude Code**（`claude`）和/或 **Codex**（`codex`）CLI，即可把它们用作对话 runtime —— Cetus 复用其现有登录，无需额外配置
 
 ## 首次配置
 
@@ -188,6 +196,7 @@ pnpm tauri build
 - **流式**：pi 发出 `agent_start`、带 `assistantMessageEvent` 增量的 `message_update`，以及 `tool_execution_*` 事件。前端的 `chatReducer` 把这些折叠成按 `contentIndex` 索引的稳定 `RenderedMessage[]`，并用一张 `toolCallId → block` 旁表来路由执行更新。
 - **分帧**：严格 LF 的 JSONL。`tauri-plugin-shell` 以任意字节块投递 stdout，所以读取端维护自己的累加缓冲，按每个 `\n` 吐出一行，并剥掉可选的 `\r`。按 Unicode 分隔符切分的通用行读取器（Node `readline`）不符合规范。
 - **Sidecar 打包**：`src-tauri/binaries/pi-<target>` 打进 `.app/Contents/Resources/`。`PI_BIN` 环境变量是迭代 pi 的开发后门。
+- **CLI runtime**：跑在 **Claude Code** / **Codex** 上的对话完全绕过 pi RPC —— `cetus-bridge::cli_agent` 每个 turn 派生一个 headless CLI 进程（`claude -p --output-format stream-json` / `codex exec --json`），由带单测的 `EventTranslator` 把它们的 JSONL 翻译成 `chatReducer` 已经在消费的 PiEvent 流。上下文用各 CLI 的 resume token（claude `session_id` / codex `thread_id`）跨轮延续；turn 在 per-conversation git worktree 里执行。
 - **Extension UI**：当某个 pi extension 调用 `ctx.ui.select()` 等，pi 会通过事件流发出 `extension_ui_request`。前端 `DialogHost` 渲染一个对话框，并通过 `extension_ui_respond` Tauri 命令回复。
 
 ## 可复用的 bridge 包

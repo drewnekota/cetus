@@ -16,6 +16,7 @@ import { promises as fs } from "node:fs";
 import { extname, isAbsolute, resolve, basename } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { errMsg } from "./bridge/protocol";
 
 const PARAMS = Type.Object({
 	path: Type.String({
@@ -109,7 +110,7 @@ const sendArtifactTool = defineTool({
 		try {
 			stat = await fs.stat(abs);
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+			const msg = errMsg(err);
 			return {
 				content: [{ type: "text", text: `send_artifact: cannot read ${abs}: ${msg}` }],
 				details: { error: "stat_failed", path: abs },

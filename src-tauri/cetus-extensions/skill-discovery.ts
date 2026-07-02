@@ -10,6 +10,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { textResult } from "./bridge/protocol";
 
 const AGENT_DIR = process.env.PI_CODING_AGENT_DIR?.trim();
 const SKILLS_DIR = AGENT_DIR ? join(AGENT_DIR, "skills") : "";
@@ -48,7 +49,7 @@ export default function skillDiscovery(pi: ExtensionAPI) {
     }),
     async execute(_id, params) {
       const p = (params ?? {}) as { query?: string; includeVisible?: boolean };
-      return asText(searchSkills(catalog(), p.query, p.includeVisible === true));
+      return textResult(searchSkills(catalog(), p.query, p.includeVisible === true));
     },
   });
 
@@ -71,7 +72,7 @@ export default function skillDiscovery(pi: ExtensionAPI) {
         const text = raw.length > READ_LIMIT_CHARS
           ? `${raw.slice(0, READ_LIMIT_CHARS)}\n\n[truncated: ${raw.length - READ_LIMIT_CHARS} chars omitted]`
           : raw;
-        return asText(`skillId: ${skill.id}\nskillName: ${skill.name}\nskillDir: ${dirname(skill.filePath)}\n\n${text}`);
+        return textResult(`skillId: ${skill.id}\nskillName: ${skill.name}\nskillDir: ${dirname(skill.filePath)}\n\n${text}`);
       } catch (err) {
         return { content: [{ type: "text" as const, text: `Failed to read skill: ${(err as Error).message}` }], isError: true };
       }
@@ -180,5 +181,4 @@ function compact(s: string, max: number): string {
   return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
 }
 
-const asText = (text: string): any => ({ content: [{ type: "text", text }] });
 const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);

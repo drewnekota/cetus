@@ -135,6 +135,46 @@ export interface QuickOpenUrlPayload {
   openId: number;
 }
 
+/** Coding-agent runtime for a conversation. "pi" is the built-in Cetus
+ *  harness; claude-code / codex are headless CLI backends orchestrated
+ *  per-turn (spawned in a git worktree, streamed through the same chat UI). */
+export type BackendId = "pi" | "claude-code" | "codex";
+
+/** Where a CLI-backend conversation's isolated changes live (git repo
+ *  workspaces only). `exists` is false until the first turn creates it. */
+export interface WorktreeInfo {
+  path: string;
+  branch: string;
+  exists: boolean;
+}
+
+/** One question of a claude-code AskUserQuestion tool call. */
+export interface CliAskQuestion {
+  question: string;
+  /** Short chip label (≤12 chars). */
+  header: string;
+  options: { label: string; description?: string }[];
+  multiSelect: boolean;
+}
+
+/** A claude-code control_request surfaced in the chat: a permission prompt
+ *  (any tool) or an AskUserQuestion. Answered via api.cliControlRespond. */
+export interface CliControlRequest {
+  type: "cli_control_request";
+  requestId: string;
+  toolName: string;
+  input: Record<string, unknown> & { questions?: CliAskQuestion[] };
+  toolUseId: string;
+  suggestions?: unknown;
+}
+
+/** Persisted CLI-agent (claude-code / codex) switches. */
+export interface CliAgentSettings {
+  /** Skip the CLIs' permission prompts (headless turns can't answer them);
+   *  runs stay isolated in per-conversation git worktrees. */
+  bypassApprovals: boolean;
+}
+
 /** Payload the quick panel forwards to the main window on submit. */
 export interface QuickLaunchPayload {
   text: string;
@@ -149,6 +189,13 @@ export interface QuickLaunchPayload {
   ultra: boolean;
   /** Ambient context the user kept on the panel; null when none/all removed. */
   context: QuickContext | null;
+  /** Coding-agent runtime chosen in the launcher (Cetus / Claude Code /
+   *  Codex). Applied to newly-created conversations only. */
+  backend: BackendId;
+  /** CLI backends' model override ("" = the CLI's own default). */
+  cliModel: string;
+  /** CLI backends' reasoning-effort override ("" = the CLI's default). */
+  cliEffort: string;
 }
 
 export const DEFAULT_MODEL_CHOICE: ModelChoice = {
@@ -551,6 +598,11 @@ export interface Conversation {
   workspaceDir: string;
   /** Coding-agent backend: "pi" (default) | "claude-code" | "codex". */
   backend?: string;
+  /** Model override for CLI backends (claude --model / codex -m); empty →
+   *  the CLI's own default. Unused for pi. */
+  cliModel?: string;
+  /** Reasoning-effort override for CLI backends; empty → the CLI's default. */
+  cliEffort?: string;
   model: ModelChoice;
   createdAt: number;
   updatedAt: number;
@@ -678,6 +730,13 @@ export interface Automation {
   lastStatus: string | null;
   lastError: string | null;
   runCount: number;
+  /** Coding-agent runtime fired runs use: "pi" (default) | "claude-code" |
+   *  "codex". */
+  backend?: BackendId;
+  /** Model override for CLI backends; empty → the CLI's own default. */
+  cliModel?: string;
+  /** Reasoning-effort override for CLI backends; empty → the CLI's default. */
+  cliEffort?: string;
 }
 
 /** Create/update payload. Server derives run-state + next-run. */
@@ -688,6 +747,12 @@ export interface AutomationInput {
   model: ModelChoice;
   schedule: AutomationSchedule;
   enabled: boolean;
+  /** "pi" | "claude-code" | "codex" (defaults to "pi" server-side). */
+  backend: BackendId;
+  /** Model override for CLI backends; "" → the CLI's own default. */
+  cliModel: string;
+  /** Reasoning-effort override for CLI backends; "" → the CLI's default. */
+  cliEffort: string;
 }
 
 // Backend lifecycle events (emitted by our Rust code, not pi).

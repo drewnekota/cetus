@@ -40,6 +40,17 @@ pub struct Automation {
     pub last_status: Option<String>,
     pub last_error: Option<String>,
     pub run_count: i64,
+    /// Which agent runtime fired conversations run on: "pi" (default) |
+    /// "claude-code" | "codex". Additive; pre-existing rows default to "pi".
+    #[serde(default = "crate::store::default_backend")]
+    pub backend: String,
+    /// Model override for CLI backends (`claude --model` / `codex -m`);
+    /// empty → the CLI's configured default. Unused for pi.
+    #[serde(default)]
+    pub cli_model: String,
+    /// Reasoning-effort override for CLI backends; empty → the CLI's default.
+    #[serde(default)]
+    pub cli_effort: String,
 }
 
 /// How often an automation fires. Tagged union shared verbatim with the
@@ -154,6 +165,14 @@ pub struct AutomationInput {
     pub schedule: AutomationSchedule,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// "pi" | "claude-code" | "codex"; missing (older clients / the agent's
+    /// automation tool) → "pi".
+    #[serde(default = "crate::store::default_backend")]
+    pub backend: String,
+    #[serde(default)]
+    pub cli_model: String,
+    #[serde(default)]
+    pub cli_effort: String,
 }
 
 fn default_true() -> bool {

@@ -328,6 +328,14 @@ async fn run_dream(state: &AppState, handle: &AppHandle, quiet_minutes: u32) -> 
 /// Pull one conversation's transcript via pi. `pub(crate)` so the skill-review
 /// pass ([`crate::skill_review`]) reuses the exact same fetch.
 pub(crate) async fn fetch_transcript(state: &AppState, conv_id: &str) -> Result<String> {
+    // CLI-backend conversations have no pi to ask (their session_file is a
+    // resume token, not a session) — flatten the persisted transcript instead.
+    if let Some(conv) = state.store.get(conv_id)? {
+        if cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend).is_some() {
+            let msgs = state.store.list_cli_messages(conv_id)?;
+            return Ok(flatten_messages(&msgs));
+        }
+    }
     let pi = state.pi_for(conv_id).await?;
     let msgs = pi.get_messages().await?;
     Ok(flatten_messages(&msgs))
@@ -341,6 +349,13 @@ pub(crate) async fn fetch_transcript(state: &AppState, conv_id: &str) -> Result<
 /// disk read runs on a blocking thread so a large session file can't stall the
 /// async runtime.
 async fn dream_transcript(state: &AppState, conv: &Conversation) -> String {
+    // CLI-backend transcripts live in the store, not a session file.
+    if cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend).is_some() {
+        return match state.store.list_cli_messages(&conv.id) {
+            Ok(msgs) => flatten_messages(&msgs),
+            Err(_) => String::new(),
+        };
+    }
     if let Some(pi) = state.pi_existing(&conv.id).await {
         return match pi.get_messages().await {
             Ok(msgs) => flatten_messages(&msgs),

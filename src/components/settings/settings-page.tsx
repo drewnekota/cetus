@@ -4,7 +4,7 @@
 // a scrollable content pane. Opened from the sidebar, the command palette, or
 // ⌘, ; closed with Back or Esc.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownComponents } from "@/lib/markdown";
@@ -66,6 +66,7 @@ import {
   useTranslation,
   type LocalePreference,
 } from "@/lib/i18n";
+import { formatElapsed } from "@/lib/format";
 import {
   api,
   onAppEvent,
@@ -113,6 +114,7 @@ import {
   type QuickGesture,
   type QuickSessionMode,
   type QuickSettings,
+  type CliAgentSettings,
   type TranscriptState,
   type VoiceAsrEngine,
   type VoiceGesture,
@@ -250,7 +252,10 @@ type Props = {
   onConversationsChanged?: () => void;
 };
 
-export function SettingsPage({
+// Memoized because the panel latches mounted after first open (hidden via CSS)
+// inside the frequently-re-rendering Home component — without memo this whole
+// ~5k-line subtree reconciles on every unrelated Home state change.
+export const SettingsPage = memo(function SettingsPage({
   open,
   onClose,
   storedProviders,
@@ -386,7 +391,7 @@ export function SettingsPage({
       </div>
     </div>
   );
-}
+});
 
 /** A few placeholder rows for a list section's cold load — shown while the
  *  section's data is still null, so the body doesn't flash empty then snap in
@@ -428,6 +433,9 @@ function GeneralSection() {
   const { t: tc } = useTranslation("common");
   const { preference: localePref, setPreference: setLocalePref } = useLocale();
   const [settings, setSettings] = useState<QuickSettings>(DEFAULT_QUICK_SETTINGS);
+  const [cliSettings, setCliSettings] = useState<CliAgentSettings>({
+    bypassApprovals: true,
+  });
   const [appVersion, setAppVersion] = useState("");
   const [checkState, setCheckState] = useState<
     "idle" | "checking" | "upToDate" | "available" | "installing" | "failed"
@@ -436,6 +444,7 @@ function GeneralSection() {
 
   useEffect(() => {
     api.getQuickSettings().then(setSettings).catch(() => {});
+    api.getCliAgentSettings().then(setCliSettings).catch(() => {});
     import("@tauri-apps/api/app")
       .then(({ getVersion }) => getVersion())
       .then(setAppVersion)
@@ -446,6 +455,12 @@ function GeneralSection() {
     const next = { ...settings, ...patch };
     setSettings(next);
     api.setQuickSettings(next).catch(() => {});
+  }
+
+  function updateCli(patch: Partial<CliAgentSettings>) {
+    const next = { ...cliSettings, ...patch };
+    setCliSettings(next);
+    api.setCliAgentSettings(next).catch(() => {});
   }
 
   async function checkUpdates() {
@@ -523,6 +538,13 @@ function GeneralSection() {
           description={t("general.autoUpdate.description")}
           checked={settings.autoUpdate}
           onCheckedChange={(v) => update({ autoUpdate: v })}
+        />
+        <ToggleRow
+          id="cli-agents-bypass"
+          label={t("general.cliAgents.label")}
+          description={t("general.cliAgents.description")}
+          checked={cliSettings.bypassApprovals}
+          onCheckedChange={(v) => updateCli({ bypassApprovals: v })}
         />
         <div className="flex items-center justify-between gap-4 pt-1">
           <div className="min-w-0 space-y-0.5">
@@ -1962,11 +1984,27 @@ function MeetingsSection({ open }: { open: boolean }) {
 
   // While the section is visible, poll the live session (it can start/stop
   // underneath us via auto-detect or the hotkey) and tick the elapsed clock.
+  // Idle polls keep the previous status reference (and skip the clock tick) so
+  // they don't force a whole-section re-render every 2s when nothing changed.
   useEffect(() => {
     if (!open) return;
     const timer = setInterval(() => {
-      api.meetingStatus().then(setStatus).catch(() => {});
-      setClock((c) => c + 1);
+      api
+        .meetingStatus()
+        .then((next) => {
+          setStatus((prev) =>
+            prev &&
+            prev.recording === next.recording &&
+            prev.startedTs === next.startedTs &&
+            prev.auto === next.auto &&
+            prev.appHint === next.appHint &&
+            prev.segments === next.segments
+              ? prev
+              : next,
+          );
+          if (next.recording) setClock((c) => c + 1);
+        })
+        .catch(() => {});
     }, 2000);
     return () => clearInterval(timer);
   }, [open]);
@@ -2009,13 +2047,6 @@ function MeetingsSection({ open }: { open: boolean }) {
     reload();
   }
 
-  function elapsed(startedTs: number): string {
-    const secs = Math.max(0, Math.floor((Date.now() - startedTs) / 1000));
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  }
-
   if (!settings) return null;
 
   const recording = status?.recording ?? false;
@@ -2039,7 +2070,7 @@ function MeetingsSection({ open }: { open: boolean }) {
               </span>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">
-                  {t("status.recording")} {elapsed(status.startedTs)}
+                  {t("status.recording")} {formatElapsed(status.startedTs)}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
                   {status.auto
@@ -2746,9 +2777,11 @@ function MemorySection({ open }: { open: boolean }) {
     }
   }
 
-  const entries = store?.entries ?? [];
   // Newest first — most recently touched memories at the top.
-  const sorted = [...entries].sort((a, b) => b.updatedAt - a.updatedAt);
+  const sorted = useMemo(
+    () => [...(store?.entries ?? [])].sort((a, b) => b.updatedAt - a.updatedAt),
+    [store?.entries],
+  );
   const masterOn = store?.enabled ?? true;
 
   return (
@@ -3128,8 +3161,10 @@ function SkillsSection({ open }: { open: boolean }) {
     }
   }
 
-  const entries = store?.entries ?? [];
-  const sorted = [...entries].sort((a, b) => b.updatedAt - a.updatedAt);
+  const sorted = useMemo(
+    () => [...(store?.entries ?? [])].sort((a, b) => b.updatedAt - a.updatedAt),
+    [store?.entries],
+  );
   const masterOn = store?.enabled ?? true;
 
   return (
@@ -3725,7 +3760,10 @@ function SlashCommandsSection({ open }: { open: boolean }) {
     }
   }
 
-  const sorted = [...(commands ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = useMemo(
+    () => [...(commands ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [commands],
+  );
 
   return (
     <section>

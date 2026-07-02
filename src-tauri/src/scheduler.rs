@@ -183,6 +183,14 @@ async fn run_and_record(
         }
     }
 
+    // CLI backends (claude-code / codex) fire through the shared CLI-turn
+    // dispatcher instead of a pi: mint a plain row (no process, no session
+    // file), then dispatch the prompt — history persistence, worktree
+    // isolation, and streaming all ride the same path chat turns use.
+    if cetus_bridge::cli_agent::CliBackend::from_id(&auto.backend).is_some() {
+        return fire_cli(ctx, auto, guard).await;
+    }
+
     let created = create_conversation(ctx, auto).await;
     let ran_at = now_ms();
     match created {
@@ -268,6 +276,80 @@ async fn run_and_record(
     }
 }
 
+/// Fire an automation on a CLI backend: insert the conversation row (backend +
+/// model override carried from the automation; empty session_file — the first
+/// turn mints the resume token) and dispatch the prompt via
+/// [`crate::cli_backend::dispatch_turn`]. The dispatch is fire-and-stream, so
+/// the recorded "ok" means "launched", same as the pi path's contract.
+async fn fire_cli(
+    ctx: &SchedulerCtx,
+    auto: &Automation,
+    guard: InFlightGuard,
+) -> Result<Conversation, String> {
+    let workspace = if auto.workspace_dir.trim().is_empty() {
+        ctx.default_workspace.clone()
+    } else {
+        PathBuf::from(&auto.workspace_dir)
+    };
+    std::fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+    let now = now_ms();
+    let conv = Conversation {
+        id: Uuid::new_v4().to_string(),
+        title: run_title(&auto.name),
+        session_file: String::new(),
+        workspace_dir: workspace.to_string_lossy().to_string(),
+        model: auto.model,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+        source_automation_id: Some(auto.id.clone()),
+        parallel_group_id: None,
+        solution_index: None,
+        review_state: "none".to_string(),
+        backend: auto.backend.clone(),
+        cli_model: auto.cli_model.clone(),
+        cli_effort: auto.cli_effort.clone(),
+    };
+    let dispatched = (|| -> Result<(), String> {
+        ctx.store.insert(&conv).map_err(|e| e.to_string())?;
+        crate::cli_backend::dispatch_turn(&ctx.handle, &conv, &auto.prompt, Vec::new())
+    })();
+    let ran_at = now_ms();
+    match dispatched {
+        Ok(()) => {
+            let _ =
+                ctx.store
+                    .record_automation_outcome(&auto.id, ran_at, Some(&conv.id), "ok", None);
+            if let Ok(Some(updated)) = ctx.store.get_automation(&auto.id) {
+                emit(
+                    ctx,
+                    AppEvent::AutomationFired {
+                        automation: updated,
+                        conversation: conv.clone(),
+                    },
+                );
+            }
+            drop(guard); // dispatch is running detached; release the claim
+            Ok(conv)
+        }
+        Err(e) => {
+            tracing::warn!("automation {} (cli) failed to fire: {e}", auto.id);
+            let _ = ctx
+                .store
+                .record_automation_outcome(&auto.id, ran_at, None, "error", Some(&e));
+            if let Ok(Some(updated)) = ctx.store.get_automation(&auto.id) {
+                emit(
+                    ctx,
+                    AppEvent::AutomationUpdated {
+                        automation: updated,
+                    },
+                );
+            }
+            Err(e)
+        }
+    }
+}
+
 /// Run-now entry for the command layer. Fires immediately without shifting the
 /// schedule and returns the minted conversation so the UI can jump straight
 /// into it.
@@ -339,6 +421,8 @@ async fn create_conversation(
         solution_index: None,
         review_state: "none".to_string(),
         backend: crate::store::default_backend(),
+        cli_model: String::new(),
+        cli_effort: String::new(),
     };
     // Register the pi in the shared pool BEFORE the row becomes visible, so a
     // concurrent pi_for() reuses this process rather than spawning a second one

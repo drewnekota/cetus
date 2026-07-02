@@ -787,6 +787,13 @@ pub struct QuickSubmit {
     /// on the panel. None when no screenshot rode along or all chips were removed.
     #[serde(default)]
     pub context: Option<crate::ocr::AmbientContext>,
+    /// Coding-agent runtime chosen in the launcher ("pi" | "claude-code" |
+    /// "codex"). Missing (older panel builds) → "pi".
+    #[serde(default = "crate::store::default_backend")]
+    pub backend: String,
+    /// CLI backends' model override; empty → the CLI's own default.
+    #[serde(default)]
+    pub cli_model: String,
 }
 
 /// Hand the captured prompt to the main window, bring it forward, hide the
@@ -806,6 +813,8 @@ pub async fn quick_submit(app: AppHandle, payload: QuickSubmit) -> Result<(), St
             "reasoning": payload.reasoning,
             "ultra": payload.ultra,
             "context": payload.context,
+            "backend": payload.backend,
+            "cliModel": payload.cli_model,
         }),
     );
     // Routes through `focus_main` so a parked (warm off-screen) main window is

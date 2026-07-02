@@ -54,3 +54,11 @@ export function toolResult(reply: HostReply) {
   const text = reply.ok ? JSON.stringify(reply, null, 2) : `error: ${reply.error ?? "unknown error"}`;
   return { content: [{ type: "text" as const, text }] };
 }
+
+export function textResult(text: string) {
+  return { content: [{ type: "text" as const, text }] };
+}
+
+export function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}

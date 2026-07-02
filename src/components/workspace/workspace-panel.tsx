@@ -30,11 +30,9 @@ import {
 } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import hljs from "highlight.js/lib/common";
-import mammoth from "mammoth";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly";
-import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
@@ -43,6 +41,7 @@ import {
   createBrowserViewState,
   type BrowserViewState,
 } from "@/components/browser/browser-view";
+import { formatBytes } from "@/lib/artifact";
 import { useTranslation } from "@/lib/i18n";
 import { markdownComponents } from "@/lib/markdown";
 import { api } from "@/lib/tauri";
@@ -857,10 +856,13 @@ function OfficePreview({
       })
       .then(async (buffer) => {
         if (isWordExt(ext)) {
+          // mammoth/xlsx are ~2MB combined; load them only when an Office file is previewed.
+          const { default: mammoth } = await import("mammoth");
           const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
           if (alive) setDocHtml(result.value);
           return;
         }
+        const XLSX = await import("xlsx");
         const workbook = XLSX.read(buffer, { type: "array" });
         const firstSheetName = workbook.SheetNames[0];
         const firstSheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
@@ -1280,16 +1282,4 @@ function TerminalHistoryItem({
       ) : null}
     </div>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i++;
-  }
-  return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }

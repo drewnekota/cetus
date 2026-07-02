@@ -14,9 +14,16 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
+import { BACKENDS, CliTuningMenu } from "@/components/chat/backend-picker";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import { useTranslation } from "@/lib/i18n";
 import type { ComposerAttachment, ImageAttachment } from "@/components/chat/composer";
-import type { ModelChoice } from "@/lib/types";
+import type { BackendId, ModelChoice } from "@/lib/types";
 
 interface Props {
   open: boolean;
@@ -27,10 +34,14 @@ interface Props {
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
   /** Fire-and-forget submit. Parent creates the conversation and sends the
-   *  prompt; dialog just collects the text + attachments. */
+   *  prompt; dialog just collects the text + attachments + runtime choice
+   *  (backend "pi" | "claude-code" | "codex", cliModel "" = CLI default). */
   onSubmit: (
     text: string,
     attachments: ComposerAttachment[],
+    backend: BackendId,
+    cliModel: string,
+    cliEffort: string,
   ) => Promise<void>;
 }
 
@@ -58,6 +69,11 @@ export function CreateTaskDialog({
   // ComposerAttachment[] the submit handler expects.
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [createMore, setCreateMore] = useState(false);
+  // Runtime the task runs on (Cetus / Claude Code / Codex) + the CLI
+  // backends' optional model override. Sticky across "create more" resets.
+  const [backend, setBackend] = useState<BackendId>("pi");
+  const [cliModel, setCliModel] = useState("");
+  const [cliEffort, setCliEffort] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -123,7 +139,7 @@ export function CreateTaskDialog({
     if (!trimmed || submitting) return;
     setSubmitting(true);
     try {
-      await onSubmit(trimmed, attachments);
+      await onSubmit(trimmed, attachments, backend, backend === "pi" ? "" : cliModel, backend === "pi" ? "" : cliEffort);
       // Attachments are owned by the parent now; clear ours without revoking
       // (parent still references the data URLs).
       setAttachments([]);
@@ -137,7 +153,7 @@ export function CreateTaskDialog({
     } catch {
       setSubmitting(false);
     }
-  }, [text, attachments, submitting, createMore, onSubmit, onOpenChange]);
+  }, [text, attachments, submitting, createMore, backend, cliModel, cliEffort, onSubmit, onOpenChange]);
 
   // ⌘↵ submits.
   useEffect(() => {
@@ -241,8 +257,61 @@ export function CreateTaskDialog({
             defaultWorkspace={defaultWorkspace}
             onChange={onWorkspaceChange}
           />
-          <div className="ml-auto">
-            <ModelPicker value={modelChoice} onChange={onModelChange} />
+          <div className="ml-auto flex items-center gap-1">
+            <Select
+              value={backend}
+              onValueChange={(v) => {
+                setBackend(v as BackendId);
+                setCliModel("");
+                setCliEffort("");
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className={
+                  "h-7 gap-1.5 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted focus-visible:ring-0 data-[size=sm]:h-7 " +
+                  (backend === "claude-code"
+                    ? "text-[#d97757] hover:text-[#d97757]"
+                    : backend === "codex"
+                      ? "text-[#10a37f] hover:text-[#10a37f]"
+                      : "text-muted-foreground hover:text-foreground")
+                }
+              >
+                {(() => {
+                  const current =
+                    BACKENDS.find((b) => b.id === backend) ?? BACKENDS[0];
+                  const Icon = current.icon;
+                  return (
+                    <>
+                      <Icon className="size-3" />
+                      <span className="truncate">{current.label}</span>
+                    </>
+                  );
+                })()}
+              </SelectTrigger>
+              <SelectContent align="end">
+                {BACKENDS.map((b) => {
+                  const Icon = b.icon;
+                  return (
+                    <SelectItem key={b.id} value={b.id} className="text-xs">
+                      <Icon className="size-4" />
+                      <span className="truncate">{b.label}</span>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            {backend === "pi" ? (
+              <ModelPicker value={modelChoice} onChange={onModelChange} />
+            ) : (
+              <CliTuningMenu
+                backend={backend}
+                model={cliModel}
+                effort={cliEffort}
+                onModelChange={setCliModel}
+                onEffortChange={setCliEffort}
+              />
+            )}
           </div>
         </div>
 

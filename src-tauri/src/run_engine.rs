@@ -217,6 +217,8 @@ pub async fn run_agent_node(
         solution_index: None,
         review_state: "none".to_string(),
         backend: crate::store::default_backend(),
+        cli_model: String::new(),
+        cli_effort: String::new(),
     };
     ctx.sched.pool.lock().await.insert(id.clone(), pi.clone());
     if let Err(e) = ctx.sched.store.insert(&conv) {

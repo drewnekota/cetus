@@ -13,6 +13,7 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { readNdjsonLog } from "./bridge/ndjson-log";
 
 interface RecallEntry {
 	ts: number;
@@ -24,24 +25,7 @@ interface RecallEntry {
 async function loadEntries(): Promise<RecallEntry[]> {
 	const logPath = process.env.CETUS_SCREEN_LOG?.trim();
 	if (!logPath) return [];
-	const fs = await import("node:fs/promises");
-	let raw: string;
-	try {
-		raw = await fs.readFile(logPath, "utf8");
-	} catch {
-		return [];
-	}
-	const out: RecallEntry[] = [];
-	for (const line of raw.split("\n")) {
-		const s = line.trim();
-		if (!s) continue;
-		try {
-			out.push(JSON.parse(s) as RecallEntry);
-		} catch {
-			// skip malformed lines
-		}
-	}
-	return out;
+	return readNdjsonLog<RecallEntry>(logPath);
 }
 
 const PARAMS = Type.Object({

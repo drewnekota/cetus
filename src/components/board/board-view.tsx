@@ -1,11 +1,11 @@
 "use client";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, ArchiveRestore, Check, Clock, Folder, Images, MessageCircleQuestion, RotateCcw } from "lucide-react";
-import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/lib/format";
 import { useChatStore, loadCachedMessages } from "@/lib/chat-store";
+import type { ChatState } from "@/lib/chat-state";
 import { isArtifactDetails } from "@/lib/artifact";
 import { isReviewRequestDetails, type ReviewRequestDetails } from "@/lib/review";
 import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
@@ -354,6 +354,76 @@ const Card = memo(function Card({
   );
 });
 
+// Zustand runs every mounted card's selectors on every store tick — i.e. on
+// every streaming token, for every card on the board. The reducer replaces the
+// ChatState object only for the conversation that changed, so caching each
+// card's derived value by ChatState reference turns those per-token full-message
+// scans into O(1) WeakMap hits for every card except the one actually streaming.
+
+const previewCache = new WeakMap<ChatState, string | null>();
+const artifactCountCache = new WeakMap<ChatState, number>();
+const reviewCache = new WeakMap<ChatState, ReviewRequestDetails | null>();
+
+function computeLastReplyPreview(c: ChatState): string | null {
+  // Walk backwards: most recent assistant text wins.
+  for (let i = c.messages.length - 1; i >= 0; i--) {
+    const m = c.messages[i];
+    if (m.role !== "assistant") continue;
+    for (let j = m.blocks.length - 1; j >= 0; j--) {
+      const b = m.blocks[j];
+      if (b.kind === "text" && b.text.trim()) {
+        return b.text.replace(/\s+/g, " ").slice(0, 220);
+      }
+    }
+  }
+  return null;
+}
+
+function computeArtifactCount(c: ChatState): number {
+  let n = 0;
+  for (const m of c.messages) {
+    for (const b of m.blocks) {
+      if (
+        b.kind === "tool_use" &&
+        b.name === "send_artifact" &&
+        b.result &&
+        isArtifactDetails(b.result.details)
+      ) {
+        n++;
+      }
+    }
+  }
+  return n;
+}
+
+function computeLatestReviewRequest(c: ChatState): ReviewRequestDetails | null {
+  let latest: ReviewRequestDetails | null = null;
+  for (const m of c.messages) {
+    for (const b of m.blocks) {
+      if (
+        b.kind === "tool_use" &&
+        b.name === "request_review" &&
+        b.result &&
+        isReviewRequestDetails(b.result.details)
+      ) {
+        latest = b.result.details as ReviewRequestDetails; // last one wins
+      }
+    }
+  }
+  return latest;
+}
+
+function cachedDerive<T>(
+  cache: WeakMap<ChatState, T>,
+  c: ChatState,
+  compute: (c: ChatState) => T,
+): T {
+  if (cache.has(c)) return cache.get(c) as T;
+  const value = compute(c);
+  cache.set(c, value);
+  return value;
+}
+
 /** Pulls the last assistant text block from the in-memory chat (if any) and
  *  renders a 2-line preview. Conversations not yet opened this session show
  *  nothing — opening the card via SessionDetailDialog will populate the store
@@ -361,19 +431,7 @@ const Card = memo(function Card({
 function LastReplyPreview({ convId }: { convId: string }) {
   const preview = useChatStore((s) => {
     const c = s.chats[convId];
-    if (!c) return null;
-    // Walk backwards: most recent assistant text wins.
-    for (let i = c.messages.length - 1; i >= 0; i--) {
-      const m = c.messages[i];
-      if (m.role !== "assistant") continue;
-      for (let j = m.blocks.length - 1; j >= 0; j--) {
-        const b = m.blocks[j];
-        if (b.kind === "text" && b.text.trim()) {
-          return b.text.replace(/\s+/g, " ").slice(0, 220);
-        }
-      }
-    }
-    return null;
+    return c ? cachedDerive(previewCache, c, computeLastReplyPreview) : null;
   });
   if (!preview) return null;
   return (
@@ -387,52 +445,22 @@ function LastReplyPreview({ convId }: { convId: string }) {
  *  for conversations not yet hydrated (the board warms these from cache on
  *  mount, so the badge appears shortly after the board opens). */
 function useArtifactCount(convId: string): number {
-  return useChatStore(
-    useShallow((s) => {
-      const c = s.chats[convId];
-      if (!c) return 0;
-      let n = 0;
-      for (const m of c.messages) {
-        for (const b of m.blocks) {
-          if (
-            b.kind === "tool_use" &&
-            b.name === "send_artifact" &&
-            b.result &&
-            isArtifactDetails(b.result.details)
-          ) {
-            n++;
-          }
-        }
-      }
-      return n;
-    }),
-  );
+  return useChatStore((s) => {
+    const c = s.chats[convId];
+    return c ? cachedDerive(artifactCountCache, c, computeArtifactCount) : 0;
+  });
 }
 
 /** Latest request_review tool payload for a conversation (summary + questions),
  *  or null. Drives the "Needs your review" banner on the card. Returns null for
- *  conversations not yet hydrated — the board warms these from cache on mount. */
+ *  conversations not yet hydrated — the board warms these from cache on mount.
+ *  The WeakMap cache keeps the returned object identity-stable across ticks, so
+ *  a plain selector (no useShallow) suffices. */
 function useLatestReviewRequest(convId: string): ReviewRequestDetails | null {
-  return useChatStore(
-    useShallow((s): ReviewRequestDetails | null => {
-      const c = s.chats[convId];
-      if (!c) return null;
-      let latest: ReviewRequestDetails | null = null;
-      for (const m of c.messages) {
-        for (const b of m.blocks) {
-          if (
-            b.kind === "tool_use" &&
-            b.name === "request_review" &&
-            b.result &&
-            isReviewRequestDetails(b.result.details)
-          ) {
-            latest = b.result.details as ReviewRequestDetails; // last one wins
-          }
-        }
-      }
-      return latest;
-    }),
-  );
+  return useChatStore((s) => {
+    const c = s.chats[convId];
+    return c ? cachedDerive(reviewCache, c, computeLatestReviewRequest) : null;
+  });
 }
 
 function shorten(p: string, defaultWorkspace: string): string {

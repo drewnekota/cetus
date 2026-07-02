@@ -7,7 +7,33 @@ import { invoke } from "@tauri-apps/api/core";
 /// keep in production (silent on non-Tauri builds because invoke just rejects).
 export function ConsoleBridge() {
   useEffect(() => {
+    // Rate-limit the IPC: a component that warns in a render loop (or KaTeX
+    // grumbling mid-stream) would otherwise turn every console call into a
+    // Tauri round-trip and jank the UI. 20 lines/sec, then dropped with one
+    // marker line; the webview console still gets everything.
+    const WINDOW_MS = 1000;
+    const MAX_PER_WINDOW = 20;
+    let windowStart = 0;
+    let sentInWindow = 0;
+    let droppedInWindow = 0;
     const send = (level: string, msg: string) => {
+      const now = Date.now();
+      if (now - windowStart > WINDOW_MS) {
+        if (droppedInWindow > 0) {
+          invoke("log_fe", {
+            level: "warn",
+            msg: `console-bridge: dropped ${droppedInWindow} log line(s) (rate limit)`,
+          }).catch(() => {});
+        }
+        windowStart = now;
+        sentInWindow = 0;
+        droppedInWindow = 0;
+      }
+      if (sentInWindow >= MAX_PER_WINDOW) {
+        droppedInWindow++;
+        return;
+      }
+      sentInWindow++;
       invoke("log_fe", { level, msg }).catch(() => {});
     };
 

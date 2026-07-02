@@ -8,6 +8,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
+import { BACKENDS, CliTuningMenu } from "@/components/chat/backend-picker";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import { WEEKDAYS } from "@/lib/automation";
 import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -16,6 +23,7 @@ import {
   type Automation,
   type AutomationInput,
   type AutomationSchedule,
+  type BackendId,
   type ModelChoice,
 } from "@/lib/types";
 
@@ -77,6 +85,11 @@ export function AutomationDialog({
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<ModelChoice>(defaultModel ?? DEFAULT_MODEL_CHOICE);
+  // Which agent runtime fired runs use (Cetus / Claude Code / Codex) and the
+  // CLI backends' optional model override.
+  const [backend, setBackend] = useState<BackendId>("pi");
+  const [cliModel, setCliModel] = useState("");
+  const [cliEffort, setCliEffort] = useState("");
   const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(true);
 
@@ -100,6 +113,9 @@ export function AutomationDialog({
       setName(automation.name);
       setPrompt(automation.prompt);
       setModel(automation.model);
+      setBackend(automation.backend ?? "pi");
+      setCliModel(automation.cliModel ?? "");
+      setCliEffort(automation.cliEffort ?? "");
       setWorkspaceDir(automation.workspaceDir || null);
       setEnabled(automation.enabled);
       const s = automation.schedule;
@@ -120,6 +136,9 @@ export function AutomationDialog({
       setName("");
       setPrompt("");
       setModel(defaultModel ?? DEFAULT_MODEL_CHOICE);
+      setBackend("pi");
+      setCliModel("");
+      setCliEffort("");
       setWorkspaceDir(null);
       setEnabled(true);
       setMode("daily");
@@ -190,6 +209,9 @@ export function AutomationDialog({
           model,
           schedule,
           enabled,
+          backend,
+          cliModel: backend === "pi" ? "" : cliModel,
+          cliEffort: backend === "pi" ? "" : cliEffort,
         },
         automation?.id ?? null,
       );
@@ -391,8 +413,55 @@ export function AutomationDialog({
             defaultWorkspace={defaultWorkspace}
             onChange={setWorkspaceDir}
           />
-          <div className="ml-auto">
-            <ModelPicker value={model} onChange={setModel} />
+          <div className="ml-auto flex items-center gap-1">
+            <Select
+              value={backend}
+              onValueChange={(v) => {
+                setBackend(v as BackendId);
+                // Model/effort overrides belong to one backend's catalog.
+                setCliModel("");
+                setCliEffort("");
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className="h-7 gap-1.5 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:ring-0 data-[size=sm]:h-7"
+              >
+                {(() => {
+                  const current =
+                    BACKENDS.find((b) => b.id === backend) ?? BACKENDS[0];
+                  const Icon = current.icon;
+                  return (
+                    <>
+                      <Icon className="size-3" />
+                      <span className="truncate">{current.label}</span>
+                    </>
+                  );
+                })()}
+              </SelectTrigger>
+              <SelectContent align="end">
+                {BACKENDS.map((b) => {
+                  const Icon = b.icon;
+                  return (
+                    <SelectItem key={b.id} value={b.id} className="text-xs">
+                      <Icon className="size-4" />
+                      <span className="truncate">{b.label}</span>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            {backend === "pi" ? (
+              <ModelPicker value={model} onChange={setModel} />
+            ) : (
+              <CliTuningMenu
+                backend={backend}
+                model={cliModel}
+                effort={cliEffort}
+                onModelChange={setCliModel}
+                onEffortChange={setCliEffort}
+              />
+            )}
           </div>
         </div>
 

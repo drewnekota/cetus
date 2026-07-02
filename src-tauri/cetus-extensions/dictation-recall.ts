@@ -12,7 +12,7 @@
  */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 
 interface Entry {
   id?: string;
@@ -25,11 +25,11 @@ interface Store {
   entries?: Entry[];
 }
 
-function load(): Store {
+async function load(): Promise<Store> {
   const path = process.env.CETUS_DICTATION_PATH;
   if (!path) return {};
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as Store;
+    return JSON.parse(await readFile(path, "utf8")) as Store;
   } catch {
     return {};
   }
@@ -54,7 +54,7 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const store = load();
+      const store = await load();
       if (!store.enabled) {
         return {
           content: [

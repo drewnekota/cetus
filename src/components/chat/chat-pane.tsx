@@ -12,8 +12,9 @@ import { createPortal } from "react-dom";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
 import { AgentControlCard } from "@/components/chat/agent-control-card";
+import { CliControlCard } from "@/components/chat/cli-control-card";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
-import { AlertTriangle, ArrowUp, MessageCircle, RotateCw, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, GitBranch, MessageCircle, RotateCw, X } from "lucide-react";
 import {
   Composer,
   type ComposerAttachment,
@@ -32,7 +33,8 @@ import {
 } from "@/lib/chat-store";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeadline } from "@/lib/chat-flavor";
-import type { ModelChoice } from "@/lib/types";
+import type { BackendId, ModelChoice, WorktreeInfo } from "@/lib/types";
+import { api } from "@/lib/tauri";
 
 interface Props {
   /** Conversation id to subscribe to. Null means "new chat" — shows hero. */
@@ -73,6 +75,13 @@ interface Props {
   emptyHeadline?: string;
   /** Visually pause the composer (e.g. detail dialog before history loads). */
   disabled?: boolean;
+  /** Backend choice for the not-yet-created conversation (hero composer);
+   *  forwarded to the Composer. See Composer's prop docs. */
+  pendingBackend?: BackendId;
+  onPendingBackendChange?: (backend: BackendId) => void;
+  pendingCliModel?: string;
+  pendingCliEffort?: string;
+  onPendingTuningChange?: (model: string, effort: string) => void;
 }
 
 /** The shared "chat experience" body — messages list + composer with
@@ -104,6 +113,11 @@ export function ChatPane({
   draftKey,
   emptyHeadline,
   disabled,
+  pendingBackend,
+  onPendingBackendChange,
+  pendingCliModel,
+  pendingCliEffort,
+  onPendingTuningChange,
 }: Props) {
   const { locale } = useTranslation("chat");
   const hasMessages = useHasMessages(convId);
@@ -152,6 +166,11 @@ export function ChatPane({
             ultra={ultra}
             onUltraToggle={onUltraToggle}
             quoteRequest={quoteRequest}
+            pendingBackend={pendingBackend}
+            onPendingBackendChange={onPendingBackendChange}
+            pendingCliModel={pendingCliModel}
+            pendingCliEffort={pendingCliEffort}
+            onPendingTuningChange={onPendingTuningChange}
           />
         </div>
       </div>
@@ -175,6 +194,8 @@ export function ChatPane({
       </div>
       <div className="relative z-10 bg-background px-4 pb-3 pt-2">
         <div className="mx-auto max-w-3xl space-y-2">
+          {convId ? <WorktreeChip convId={convId} isStreaming={isStreaming} /> : null}
+          {convId ? <CliControlCard convId={convId} /> : null}
           {convId ? <AgentControlCard conversationId={convId} /> : null}
           <QueuedMessages
             items={queued ?? []}
@@ -203,6 +224,53 @@ export function ChatPane({
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Small affordance for CLI-backend conversations running in an isolated git
+ *  worktree: shows the branch the agent's changes land on, click to open the
+ *  worktree folder. Renders nothing for pi conversations / non-git workspaces /
+ *  before the first turn created the worktree. Re-checks when a turn ends so it
+ *  appears right after the first CLI run. */
+function WorktreeChip({
+  convId,
+  isStreaming,
+}: {
+  convId: string;
+  isStreaming: boolean;
+}) {
+  const { t } = useTranslation("chat");
+  const [info, setInfo] = useState<WorktreeInfo | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Fetch on conversation switch and again when a run finishes (the first
+    // turn is what creates the worktree).
+    if (isStreaming) return;
+    api
+      .conversationWorktree(convId)
+      .then((w) => {
+        if (!cancelled) setInfo(w);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [convId, isStreaming]);
+
+  if (!info?.exists) return null;
+  return (
+    <div className="flex justify-end">
+      <button
+        type="button"
+        onClick={() => api.openPath(info.path).catch(() => {})}
+        title={t("pane.worktree.tooltip", { path: info.path })}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <GitBranch className="size-3 shrink-0" />
+        <span className="truncate">{info.branch}</span>
+      </button>
     </div>
   );
 }

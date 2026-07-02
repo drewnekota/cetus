@@ -27,6 +27,7 @@
  */
 
 import { lookup } from "node:dns/promises";
+import { errMsg, textResult } from "./bridge/protocol";
 
 // ============================================================================
 // Minimal pi extension types (each .ts extension is loaded independently).
@@ -55,11 +56,10 @@ interface ToolDefinition {
  * the NEXT request build then crashes in the openai-completions provider
  * (`toolMsg.content.filter(...)` on undefined → "undefined is not an object
  * (evaluating 'content')"), the assistant turn ends with stopReason "error",
- * and the agent goes silent. Every string payload must go through asResult().
+ * and the agent goes silent. Every string payload must go through textResult().
  * (Matches the shape automation-tools.ts and mcp-bridge.ts already return.)
  */
 type ToolTextResult = { content: Array<{ type: "text"; text: string }> };
-const asResult = (text: string): ToolTextResult => ({ content: [{ type: "text", text }] });
 
 interface ExtensionContext {
 	registerTool(def: ToolDefinition): void;
@@ -93,8 +93,7 @@ const BROWSER_UA =
 // ============================================================================
 
 function errStr(prefix: string, e: unknown): string {
-	const msg = e instanceof Error ? e.message : String(e);
-	return `${prefix}: ${msg}`;
+	return `${prefix}: ${errMsg(e)}`;
 }
 
 function clamp(n: unknown, lo: number, hi: number, fallback: number): number {
@@ -389,7 +388,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
 						return parts.join("\n");
 					} catch (e) {
 						if (!tavilyKey) return errStr("web_search failed", e);
-						exaErr = e instanceof Error ? e.message : String(e);
+						exaErr = errMsg(e);
 					}
 				}
 
@@ -422,7 +421,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
 					return errStr("web_search failed", e);
 				}
 			};
-			return asResult(await run());
+			return textResult(await run());
 		},
 	} as ToolDefinition);
 
@@ -457,7 +456,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
 					const { body, contentType } = await httpGet(url);
 					plainText = /html/i.test(contentType) ? htmlToText(body) : body.trim();
 				} catch (e) {
-					plainErr = e instanceof Error ? e.message : String(e);
+					plainErr = errMsg(e);
 				}
 
 				if (plainText.length >= MIN_USEFUL_TEXT) {
@@ -480,7 +479,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
 							plainErr = plainErr || `Exa could not extract content${tag}`;
 						}
 					} catch (e) {
-						plainErr = plainErr || (e instanceof Error ? e.message : String(e));
+						plainErr = plainErr || errMsg(e);
 					}
 				}
 
@@ -491,7 +490,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
 						const raw = results[0]?.raw_content ?? results[0]?.content;
 						if (raw) return `Fetched ${url} (via Tavily):\n\n${String(raw).slice(0, EXTRACT_CAP)}`;
 					} catch (e) {
-						plainErr = plainErr || (e instanceof Error ? e.message : String(e));
+						plainErr = plainErr || errMsg(e);
 					}
 				}
 
@@ -500,7 +499,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
 				const hint = exaKey || tavilyKey ? "" : " (no Exa/Tavily key configured for a richer fallback)";
 				return `web_fetch: could not read ${url}${plainErr ? ` — ${plainErr}` : ""}${hint}.`;
 			};
-			return asResult(await run());
+			return textResult(await run());
 		},
 	} as ToolDefinition);
 };

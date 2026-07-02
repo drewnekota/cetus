@@ -70,6 +70,8 @@
  * return a string). No npm deps: only globals + the host tunnel are used.
  */
 
+import { errMsg } from "./bridge/protocol";
+
 // ----------------------------------------------------------------------------
 // pi extension types.
 //
@@ -202,7 +204,7 @@ async function cua(exCtx: ExtensionContext, payload: CuaPayload): Promise<CuaRep
   try {
     raw = await exCtx.ui.input(SENTINEL_CUA, JSON.stringify(payload));
   } catch (err) {
-    return { ok: false, error: `host tunnel failed: ${(err as Error).message}` };
+    return { ok: false, error: `host tunnel failed: ${errMsg(err)}` };
   }
   if (raw === null) return { ok: false, error: "host tunnel returned no reply" };
   try {
@@ -433,7 +435,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
         });
         return formatObservation(reply);
       } catch (err) {
-        return `computer_observe error: ${(err as Error).message}`;
+        return `computer_observe error: ${errMsg(err)}`;
       }
     },
   });
@@ -529,7 +531,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
             }
             ok = (await exCtx.ui.confirm(title, message)) === true;
           } catch (err) {
-            return `computer_act: confirmation failed: ${(err as Error).message}`;
+            return `computer_act: confirmation failed: ${errMsg(err)}`;
           }
           if (!ok) return "User declined the action.";
           // First-time approval is remembered; destructive actions are always
@@ -576,7 +578,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
           `computer_observe to get the new state.)`
         );
       } catch (err) {
-        return `computer_act error: ${(err as Error).message}`;
+        return `computer_act error: ${errMsg(err)}`;
       }
     },
   });
@@ -623,7 +625,7 @@ const ext: Extension = (ctx: ExtensionContext) => {
         const header = args.expect ? `Expected: ${args.expect}\n\n` : "";
         return header + formatObservation(reply);
       } catch (err) {
-        return `computer_verify error: ${(err as Error).message}`;
+        return `computer_verify error: ${errMsg(err)}`;
       }
     },
   });

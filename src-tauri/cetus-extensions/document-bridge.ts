@@ -24,6 +24,7 @@ import { promises as fs } from "node:fs";
 import { extname } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { errMsg } from "./bridge/protocol";
 
 const GEMINI_MODEL = "gemini-flash-latest";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
@@ -77,7 +78,7 @@ export default function (pi: ExtensionAPI) {
 				try {
 					stat = await fs.stat(path);
 				} catch (err) {
-					return errorResult(`cannot access ${path}: ${msg(err)}`);
+					return errorResult(`cannot access ${path}: ${errMsg(err)}`);
 				}
 				if (!stat.isFile()) return errorResult(`${path} is not a file`);
 				if (stat.size > MAX_BYTES) {
@@ -91,7 +92,7 @@ export default function (pi: ExtensionAPI) {
 					if (!text.trim()) return errorResult(`${path}: no readable text content found.`);
 					return { content: [{ type: "text", text: clip(text) }] };
 				} catch (err) {
-					return errorResult(`failed to read ${path}: ${msg(err)}`);
+					return errorResult(`failed to read ${path}: ${errMsg(err)}`);
 				}
 			},
 		}),
@@ -156,12 +157,12 @@ async function readPptx(path: string): Promise<string> {
 	const slides = zip
 		.file(/ppt\/slides\/slide\d+\.xml/)
 		.sort((a, b) => slideNo(a.name) - slideNo(b.name));
+	const xmls = await Promise.all(slides.map((slide) => slide.async("string")));
 	const out: string[] = [];
-	for (const slide of slides) {
-		const xml = await slide.async("string");
+	xmls.forEach((xml, i) => {
 		const runs = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((m) => decodeXml(m[1]));
-		if (runs.length) out.push(`# Slide ${slideNo(slide.name)}\n${runs.join("\n")}`);
-	}
+		if (runs.length) out.push(`# Slide ${slideNo(slides[i].name)}\n${runs.join("\n")}`);
+	});
 	if (!out.length) throw new Error("no slide text found in pptx");
 	return out.join("\n\n");
 }
@@ -260,10 +261,6 @@ function clip(text: string): string {
 	return text.length > MAX_CHARS
 		? `${text.slice(0, MAX_CHARS)}\n\n[…truncated — ${text.length} chars total; read a specific section if you need more]`
 		: text;
-}
-
-function msg(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }
 
 function errorResult(text: string) {

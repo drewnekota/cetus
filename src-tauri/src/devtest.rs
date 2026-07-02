@@ -298,6 +298,8 @@ async fn op_agent_prompt(
         solution_index: None,
         review_state: "none".to_string(),
         backend: crate::store::default_backend(),
+        cli_model: String::new(),
+        cli_effort: String::new(),
     };
     state
         .store

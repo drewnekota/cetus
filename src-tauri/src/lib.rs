@@ -9,6 +9,7 @@ mod biasing;
 pub use cetus_bridge::{bridge, pi_rpc};
 mod caps_remap;
 mod capture;
+mod cli_backend;
 mod commands;
 mod corrections;
 mod cua;
@@ -43,6 +44,7 @@ mod skill_review;
 mod skill_tool;
 mod skills;
 mod slash_commands;
+mod resources;
 mod store;
 mod tauri_bridge;
 #[cfg(target_os = "macos")]
@@ -103,9 +105,75 @@ pub struct AppState {
     /// Browser/computer "agent control": the macOS AX helper child + the
     /// emergency-stop flags. Shared with the app-event listener's AgentCtx.
     pub cua: cua::CuaRuntime,
+    /// In-flight CLI-backend turns (claude-code / codex), keyed by conversation
+    /// id. Presence = a turn is running; the Notify is its kill switch (fired
+    /// with `notify_one` so a signal sent between stream reads isn't lost) and
+    /// the sender feeds the child's stdin (control responses answering
+    /// permission prompts / AskUserQuestion).
+    cli_turns: std::sync::Mutex<HashMap<String, CliTurnHandle>>,
+}
+
+/// Handles onto one running CLI-backend turn.
+struct CliTurnHandle {
+    kill: Arc<tokio::sync::Notify>,
+    input: tokio::sync::mpsc::UnboundedSender<String>,
 }
 
 impl AppState {
+    /// Register a CLI-backend turn for `conv_id`, returning its kill switch
+    /// and the stdin-lines receiver for the runner. Errors when a turn is
+    /// already running — one turn per conversation.
+    #[allow(clippy::type_complexity)]
+    pub fn begin_cli_turn(
+        &self,
+        conv_id: &str,
+    ) -> Result<
+        (
+            Arc<tokio::sync::Notify>,
+            tokio::sync::mpsc::UnboundedReceiver<String>,
+        ),
+        String,
+    > {
+        let mut turns = self.cli_turns.lock().unwrap();
+        if turns.contains_key(conv_id) {
+            return Err("agent is already running for this conversation".to_string());
+        }
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        turns.insert(
+            conv_id.to_string(),
+            CliTurnHandle {
+                kill: notify.clone(),
+                input: tx,
+            },
+        );
+        Ok((notify, rx))
+    }
+
+    /// Clear a finished CLI turn's registration.
+    pub fn end_cli_turn(&self, conv_id: &str) {
+        self.cli_turns.lock().unwrap().remove(conv_id);
+    }
+
+    /// Fire the kill switch of a running CLI turn. No-op when idle.
+    pub fn abort_cli_turn(&self, conv_id: &str) {
+        if let Some(h) = self.cli_turns.lock().unwrap().get(conv_id) {
+            h.kill.notify_one();
+        }
+    }
+
+    /// Write one line into a running CLI turn's stdin (a control_response
+    /// answering a permission prompt or AskUserQuestion).
+    pub fn cli_send_input(&self, conv_id: &str, line: String) -> Result<(), String> {
+        let turns = self.cli_turns.lock().unwrap();
+        let Some(h) = turns.get(conv_id) else {
+            return Err("no running agent turn for this conversation".to_string());
+        };
+        h.input
+            .send(line)
+            .map_err(|_| "the agent turn already ended".to_string())
+    }
+
     /// Get-or-spawn the pi process owning `conv_id`. On first call we spawn,
     /// switch to the persisted session file, and push the conversation's
     /// model choice onto the fresh pi instance.
@@ -643,6 +711,7 @@ pub fn run() {
                 run_registry,
                 run_semaphore,
                 cua: cua.clone(),
+                cli_turns: std::sync::Mutex::new(HashMap::new()),
             });
 
             // Meeting memory: the single in-flight capture session, shared by
@@ -876,27 +945,17 @@ pub fn run() {
                 use window_vibrancy::{
                     apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState,
                 };
-                // Keep cetus out of App Nap so a long-idle window doesn't flash
-                // the bare vibrancy (no DOM) for a beat when you switch back to it.
+                // Keep cetus out of App Nap so a long-idle window doesn't come
+                // back with throttled timers for a beat when you switch to it.
                 panel::prevent_app_nap();
-                // Arc-style glass shell: the whole main window is a translucent
-                // vibrancy surface. The DOM keeps the content card opaque, so the
-                // frost shows through the sidebar + the margins around the card.
-                // No corner radius — the decorated window clips its own corners.
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = apply_vibrancy(
-                        &win,
-                        NSVisualEffectMaterial::Sidebar,
-                        Some(NSVisualEffectState::Active),
-                        None,
-                    );
-                    // Stop WebKit from throttling/suspending the main window's
-                    // webview while it's parked off-screen, so summoning it back
-                    // after a long idle doesn't flash the bare vibrancy surface.
-                    if let Ok(ptr) = win.ns_window() {
-                        panel::disable_occlusion_throttling(ptr);
-                    }
-                }
+                // NO vibrancy on the main window: the DOM shell paints an opaque
+                // bg-sidebar over the full window, so a behind-window blur was
+                // invisible — while still making WindowServer recompute a
+                // window-sized blur every time anything behind cetus repainted
+                // (steady multi-10% GPU with the window open on a busy desktop).
+                // Occlusion throttling stays enabled for the same reason: with
+                // an opaque DOM there is no bare-vibrancy flash to hide, so let
+                // WebKit suspend the webview whenever the window is covered.
                 if let Some(win) = app.get_webview_window("quick") {
                     let _ = apply_vibrancy(
                         &win,
@@ -1005,6 +1064,12 @@ pub fn run() {
         commands::send_prompt,
         commands::get_conversation,
         commands::set_conversation_backend,
+        commands::conversation_worktree,
+        commands::set_conversation_cli_model,
+        resources::resources_snapshot,
+        cli_backend::get_cli_agent_settings,
+        cli_backend::set_cli_agent_settings,
+        cli_backend::cli_control_respond,
         commands::retry_last_turn,
         commands::abort,
         commands::pi_ping,
@@ -1139,6 +1204,12 @@ pub fn run() {
         commands::send_prompt,
         commands::get_conversation,
         commands::set_conversation_backend,
+        commands::conversation_worktree,
+        commands::set_conversation_cli_model,
+        resources::resources_snapshot,
+        cli_backend::get_cli_agent_settings,
+        cli_backend::set_cli_agent_settings,
+        cli_backend::cli_control_respond,
         commands::retry_last_turn,
         commands::abort,
         commands::pi_ping,
@@ -1339,9 +1410,10 @@ fn main_is_parked() -> bool {
 }
 
 /// Hide the main window to the background on close while keeping its WKWebView
-/// warm, so reopening after a long idle doesn't flash the bare vibrancy (the
-/// same idle-discard issue [`crate::panel::park`] fixes for the launcher). Off
-/// macOS there is no warm-park trick, so just hide it.
+/// warm, so reopening after a long idle doesn't flash an empty (transparent)
+/// window before WebKit restores the backing store (the same idle-discard
+/// issue [`crate::panel::park`] fixes for the launcher). Off macOS there is no
+/// warm-park trick, so just hide it.
 pub(crate) fn park_main(app: &AppHandle) {
     // Persist the last on-screen geometry (the close handler recorded it just
     // before this call), then freeze recording so the off-screen park move

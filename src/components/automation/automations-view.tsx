@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { describeSchedule, formatLastRun, formatNextRun } from "@/lib/automation";
 import { useTranslation } from "@/lib/i18n";
 import { workspaceName } from "@/lib/paths";
+import { BACKENDS } from "@/components/chat/backend-picker";
 import type { Automation } from "@/lib/types";
 
 interface Props {
@@ -139,6 +140,11 @@ function AutomationCard({
             <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-medium text-foreground/80">
               {describeSchedule(a.schedule)}
             </span>
+            {a.backend && a.backend !== "pi" && (
+              <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-medium text-foreground/80">
+                {BACKENDS.find((b) => b.id === a.backend)?.label ?? a.backend}
+              </span>
+            )}
             {a.enabled ? (
               <span>{t("card.next", { time: formatNextRun(a.nextRunAt) })}</span>
             ) : (

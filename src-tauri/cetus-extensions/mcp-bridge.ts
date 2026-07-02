@@ -39,6 +39,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createRuntime, type Runtime, type ServerToolInfo } from "mcporter";
+import { errMsg, textResult } from "./bridge/protocol";
 
 /** Absolute path to the exported `{ mcpServers }` config (set by the host). */
 const CONFIG_PATH = process.env.CETUS_MCP_CONFIG?.trim() || process.env.MCPORTER_CONFIG?.trim();
@@ -267,9 +268,9 @@ function registerBridgeTools(
       },
       async execute(_id: string, params: unknown) {
         const ctx = await bridgeContext(getCatalog);
-        if (!ctx) return asText("No MCP tools are available yet. Check the connector config or try again after authorization.");
+        if (!ctx) return textResult("No MCP tools are available yet. Check the connector config or try again after authorization.");
         const p = (params ?? {}) as { query?: string; server?: string };
-        return asText(searchCatalog(ctx.bridged, p.query, p.server));
+        return textResult(searchCatalog(ctx.bridged, p.query, p.server));
       },
     });
 
@@ -286,12 +287,12 @@ function registerBridgeTools(
       },
       async execute(_id: string, params: unknown) {
         const ctx = await bridgeContext(getCatalog);
-        if (!ctx) return asText("No MCP tools are available yet. Check the connector config or try again after authorization.");
+        if (!ctx) return textResult("No MCP tools are available yet. Check the connector config or try again after authorization.");
         const name = ((params ?? {}) as { name?: string }).name ?? "";
         const e = ctx.resolve(name);
-        if (!e) return asText(`Unknown MCP tool "${name}". Use mcp_search to find the exact name.`);
+        if (!e) return textResult(`Unknown MCP tool "${name}". Use mcp_search to find the exact name.`);
         const schema = JSON.stringify(normalizeSchema(e.inputSchema), null, 2);
-        return asText(
+        return textResult(
           `${e.fqName} (server: ${e.server})\n` +
             `${e.description || "(no description)"}\n\nParameters (JSON Schema):\n${schema}\n\n` +
             `Call it with: mcp_call({ "name": "${e.fqName}", "args": { … } })`,
@@ -442,8 +443,6 @@ function searchCatalog(entries: CatalogEntry[], query?: string, server?: string)
   );
 }
 
-const asText = (text: string): any => ({ content: [{ type: "text", text }] });
-
 /** Sanitise to pi's tool-name charset and de-duplicate within a session. */
 function uniqueName(base: string, seen: Set<string>): string {
   const name = base.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 60) || "mcp_tool";
@@ -495,10 +494,6 @@ function safeJson(v: unknown): string {
 function compact(s: string, max: number): string {
   const oneLine = String(s || "").replace(/\s+/g, " ").trim();
   return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /** List a server's tools without ever opening a browser and WITHOUT disturbing

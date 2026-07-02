@@ -187,9 +187,11 @@
     height: 100%;
   }
   body {
-    /* Transparent so the macOS window vibrancy (Arc-style glass shell) shows
-       through. Opaque surfaces — the content card, the sidebar tint — paint
-       their own backgrounds on top. */
+    /* Transparent for the frameless launcher/HUD windows (quick panel glass,
+       voice + meeting capsules), which draw their own shapes on a transparent
+       NSWindow. The main window's shell paints an opaque background on top
+       (fixed inset-0 bg-sidebar in page.tsx) — no vibrancy, no backdrop-filter,
+       so WindowServer never recomputes a window-sized blur for it. */
     @apply antialiased text-foreground;
     background-color: transparent;
     font-feature-settings: "rlig" 1, "calt" 1;

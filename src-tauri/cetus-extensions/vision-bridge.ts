@@ -31,6 +31,7 @@
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "@earendil-works/pi-ai";
+import { errMsg } from "./bridge/protocol";
 
 // ---- Provider configuration ------------------------------------------------
 
@@ -197,14 +198,14 @@ async function transcribeImage(img: ImageContent): Promise<string> {
 		try {
 			return await transcribeWithGemini(img, geminiKey);
 		} catch (e) {
-			errors.push(`gemini: ${e instanceof Error ? e.message : String(e)}`);
+			errors.push(`gemini: ${errMsg(e)}`);
 		}
 	}
 	if (arkKey) {
 		try {
 			return await transcribeWithArk(img, arkKey);
 		} catch (e) {
-			errors.push(`ark: ${e instanceof Error ? e.message : String(e)}`);
+			errors.push(`ark: ${errMsg(e)}`);
 		}
 	}
 
@@ -244,9 +245,7 @@ export default function visionBridge(pi: ExtensionAPI) {
 					.then((desc) => ({ ok: true, block: `${labelFor(i)}\n${desc}` }))
 					.catch((e) => ({
 						ok: false,
-						block: `${labelFor(i)} (could not be read: ${
-							e instanceof Error ? e.message : String(e)
-						})`,
+						block: `${labelFor(i)} (could not be read: ${errMsg(e)})`,
 					})),
 			),
 		);

@@ -72,7 +72,9 @@ import {
   type PiEvent,
   type PiMessage,
   type QuickLaunchPayload,
+  type BackendId,
 } from "@/lib/types";
+import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
 import { composeWithContext } from "@/lib/quick-context";
 import {
   KEYBOARD_SHORTCUTS_EVENT,
@@ -359,11 +361,17 @@ export default function Home() {
     () => new Set(),
   );
   const [modelChoice, setModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
+  // Backend + CLI model/effort chosen on the hero composer before a
+  // conversation exists; applied to the conversation minted on first send.
+  const [pendingBackend, setPendingBackend] = useState<BackendId>("pi");
+  const [pendingCliModel, setPendingCliModel] = useState("");
+  const [pendingCliEffort, setPendingCliEffort] = useState("");
+  const onPendingTuningChange = useCallback((model: string, effort: string) => {
+    setPendingCliModel(model);
+    setPendingCliEffort(effort);
+  }, []);
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("cetus:lastModelChoice");
-      if (raw) setModelChoice((m) => ({ ...m, ...JSON.parse(raw) } as ModelChoice));
-    } catch {}
+    setModelChoice(mergeStoredModelChoice);
   }, []);
   // Persist the active model/reasoning choice on *every* change — manual picker,
   // launcher adopt, and conversation switch alike — so the quick launcher (which
@@ -376,9 +384,7 @@ export default function Home() {
       modelChoiceHydrated.current = true;
       return;
     }
-    try {
-      localStorage.setItem("cetus:lastModelChoice", JSON.stringify(modelChoice));
-    } catch {}
+    saveModelChoice(modelChoice);
   }, [modelChoice]);
   const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
   const [defaultWorkspace, setDefaultWorkspace] = useState<string>("");
@@ -781,7 +787,13 @@ export default function Home() {
           }
           case "pi_event": {
             const cid = evt.conversationId;
-            if (evt.event.type !== "extension_ui_request" && cid) {
+            // extension_ui_request → DialogHost; cli_control_request → the
+            // CliControlCard in the chat pane. Neither belongs in the reducer.
+            if (
+              evt.event.type !== "extension_ui_request" &&
+              (evt.event.type as string) !== "cli_control_request" &&
+              cid
+            ) {
               store.piEvent(cid, evt.event);
             }
             // The agent called request_review → park this conversation in the
@@ -854,10 +866,41 @@ export default function Home() {
 
   const refreshList = useCallback(async () => {
     const list = await api.listConversations(false);
-    setConversations(list);
+    // Reconcile against current rows instead of swapping in all-new objects:
+    // every rendered field bumps updated_at server-side, so id+updatedAt equal
+    // → the old object is still accurate and keeping its reference preserves
+    // the memo() on each sidebar row / board card. Without this, the trailing
+    // refresh after every send/archive re-rendered the entire list for rows
+    // that hadn't changed.
+    setConversations((prev) => {
+      const byId = new Map(prev.map((c) => [c.id, c]));
+      let identical = prev.length === list.length;
+      const next = list.map((c, i) => {
+        const old = byId.get(c.id);
+        const keep = old && old.updatedAt === c.updatedAt ? old : c;
+        if (identical && keep !== prev[i]) identical = false;
+        return keep;
+      });
+      return identical ? prev : next;
+    });
     setConversationsLoaded(true);
     return list;
   }, []);
+
+  // Identity-stable SettingsPage props — the panel stays mounted after first
+  // open and is memoized, so unstable inline callbacks here would defeat that.
+  const onSettingsSaved = useCallback(() => {
+    refreshKeys().catch(console.error);
+  }, [refreshKeys]);
+  const onSettingsConversationsChanged = useCallback(() => {
+    refreshList().catch(console.error);
+  }, [refreshList]);
+  const openHistoryFromSettings = useCallback(() => {
+    closeSettings();
+    setHistoryQuery("");
+    setHistoryFrame(null);
+    setHistoryOpen(true);
+  }, [closeSettings]);
 
   const archiveConversation = useCallback(
     async (c: Conversation) => {
@@ -1816,6 +1859,18 @@ export default function Home() {
     if (!id) {
       const c = await api.newConversation(workspaceDir ?? undefined);
       id = c.id;
+      // Apply the backend chosen on the hero composer before the first prompt
+      // goes out, so it already routes through Claude Code / Codex.
+      if (pendingBackend !== "pi") {
+        try {
+          await api.setConversationBackend(id, pendingBackend);
+          if (pendingCliModel || pendingCliEffort) {
+            await api.setConversationCliModel(id, pendingCliModel, pendingCliEffort);
+          }
+        } catch (e) {
+          console.error("[send] set backend failed", e);
+        }
+      }
       // Insert the freshly-minted row locally instead of refetching the whole
       // list over IPC — we already hold it. The trailing refreshList() after
       // sendPrompt re-sorts by updated_at.
@@ -1941,6 +1996,20 @@ export default function Home() {
       // current workspace, then the backend default.
       const c = await api.newConversation(p.workspaceDir ?? workspaceDir ?? undefined);
       target = c.id;
+      // Coding-agent runtime chosen in the launcher (Cetus / Claude Code /
+      // Codex). Applied to fresh conversations only — reusing "last" keeps
+      // that conversation's own backend. Awaited so the first send_prompt
+      // already routes through the chosen backend.
+      if (p.backend && p.backend !== "pi") {
+        try {
+          await api.setConversationBackend(c.id, p.backend);
+          if (p.cliModel || p.cliEffort) {
+            await api.setConversationCliModel(c.id, p.cliModel ?? "", p.cliEffort ?? "");
+          }
+        } catch (e) {
+          console.error("[quick-launch] set backend failed", e);
+        }
+      }
       // Local insert instead of a full refetch; trailing refreshList re-sorts.
       setConversations((cs) => mergeConversation(cs, c));
       setActiveId(target);
@@ -2017,9 +2086,24 @@ export default function Home() {
   async function onCreateTask(
     text: string,
     attachments: ComposerAttachment[],
+    backend: BackendId = "pi",
+    cliModel = "",
+    cliEffort = "",
   ) {
     const c = await api.newConversation(workspaceDir ?? undefined);
     const id = c.id;
+    // Runtime chosen in the dialog — applied before the first prompt goes out
+    // so it already routes through Claude Code / Codex.
+    if (backend !== "pi") {
+      try {
+        await api.setConversationBackend(id, backend);
+        if (cliModel || cliEffort) {
+          await api.setConversationCliModel(id, cliModel, cliEffort);
+        }
+      } catch (e) {
+        console.error("[create-task] set backend failed", e);
+      }
+    }
     // Show the new card immediately via a local insert (no IPC); the .finally
     // refreshList below re-sorts once the run starts bumping updated_at.
     setConversations((cs) => mergeConversation(cs, c));
@@ -2457,18 +2541,9 @@ export default function Home() {
           open={settingsOpen}
           onClose={closeSettings}
           storedProviders={storedProviders}
-          onSaved={() => {
-            refreshKeys().catch(console.error);
-          }}
-          onConversationsChanged={() => {
-            refreshList().catch(console.error);
-          }}
-          onOpenHistory={() => {
-            closeSettings();
-            setHistoryQuery("");
-            setHistoryFrame(null);
-            setHistoryOpen(true);
-          }}
+          onSaved={onSettingsSaved}
+          onConversationsChanged={onSettingsConversationsChanged}
+          onOpenHistory={openHistoryFromSettings}
         />
       )}
       <ScreenHistoryPage
@@ -2497,8 +2572,11 @@ export default function Home() {
         onArchive={onArchive}
         onOpenSettings={openSettings}
       />
+      {/* Opaque card, no backdrop-filter: the shell root paints solid bg-sidebar,
+          so a translucent+blurred card only re-blurred a flat color — at the cost
+          of a full-window GPU recomposite on every repaint. */}
       <SidebarInset
-        className="m-2 flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-background/64 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.45),0_3px_16px_rgb(0_0_0_/_0.045)] backdrop-blur-2xl backdrop-saturate-200 dark:bg-background/58 dark:shadow-[inset_0_1px_0_rgb(255_255_255_/_0.10),0_4px_18px_rgb(0_0_0_/_0.14)]"
+        className="m-2 flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-background shadow-[inset_0_1px_0_rgb(255_255_255_/_0.45),0_3px_16px_rgb(0_0_0_/_0.045)] dark:shadow-[inset_0_1px_0_rgb(255_255_255_/_0.10),0_4px_18px_rgb(0_0_0_/_0.14)]"
       >
         <div className="flex min-h-0 flex-1 flex-row">
           <div className="flex min-w-0 flex-1 flex-col">
@@ -2599,6 +2677,11 @@ export default function Home() {
                 onUltraToggle={onUltraToggle}
                 focusToken={focusToken}
                 disabled={!piReady}
+                pendingBackend={pendingBackend}
+                onPendingBackendChange={setPendingBackend}
+                pendingCliModel={pendingCliModel}
+                pendingCliEffort={pendingCliEffort}
+                onPendingTuningChange={onPendingTuningChange}
               />
             ) : (
               <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
@@ -2615,6 +2698,7 @@ export default function Home() {
                     streaming={isStreaming}
                     modelChoice={modelChoice}
                     onModelChange={onModelChange}
+                    conversationId={activeId}
                     workspaceDir={workspaceDir}
                     defaultWorkspace={defaultWorkspace}
                     onWorkspaceChange={onWorkspaceChange}
@@ -2623,6 +2707,11 @@ export default function Home() {
                     onAbort={onAbort}
                     ultra={ultraEnabled}
                     onUltraToggle={onUltraToggle}
+                    pendingBackend={pendingBackend}
+                    onPendingBackendChange={setPendingBackend}
+                    pendingCliModel={pendingCliModel}
+                    pendingCliEffort={pendingCliEffort}
+                    onPendingTuningChange={onPendingTuningChange}
                   />
                 </div>
               </div>

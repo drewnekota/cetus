@@ -72,6 +72,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
+import { errMsg } from "./bridge/protocol";
 
 // ----------------------------------------------------------------------------
 // pi extension types.
@@ -324,6 +325,9 @@ class BrowserSession {
 	 *  (e.g. quotes.toscrape.com/scroll), where it would otherwise keep scrolling
 	 *  to load "everything" and never stop to present results. */
 	consecutiveScrolls = 0;
+	/** For idle eviction — conversations rarely call browser_close, so sessions
+	 *  whose socket sits unused are reaped instead of living forever. */
+	lastUsedTs = Date.now();
 
 	constructor(cdp: CdpClient, sessionId: string, targetId: string, child: ChildProcess | null) {
 		this.cdp = cdp;
@@ -419,10 +423,34 @@ async function attachSession(convId: string): Promise<BrowserSession> {
 /** Get the live session for this conversation, attaching one if needed (or if the old one died). */
 async function getSession(convId: string, forceReattach = false): Promise<BrowserSession> {
 	const existing = sessions.get(convId);
-	if (existing && existing.cdp.isOpen && !forceReattach) return existing;
-	if (existing && !existing.cdp.isOpen) sessions.delete(convId);
+	if (existing && existing.cdp.isOpen && !forceReattach) {
+		existing.lastUsedTs = Date.now();
+		return existing;
+	}
+	if (existing) {
+		// Also covers forceReattach on a live session: close the old socket so it
+		// doesn't linger once the map entry is overwritten.
+		existing.cdp.close();
+		sessions.delete(convId);
+	}
 	return attachSession(convId);
 }
+
+/** Reap sessions whose socket has sat unused — most conversations never call
+ *  browser_close, so without this every browser-touching conversation leaks an
+ *  open WebSocket for the life of the process. Chrome itself is left running;
+ *  the next tool call transparently reattaches. */
+const SESSION_IDLE_MS = 30 * 60_000;
+const idleSweep = setInterval(() => {
+	const cutoff = Date.now() - SESSION_IDLE_MS;
+	for (const [convId, session] of sessions) {
+		if (session.lastUsedTs < cutoff) {
+			session.cdp.close();
+			sessions.delete(convId);
+		}
+	}
+}, 5 * 60_000);
+(idleSweep as { unref?: () => void }).unref?.();
 
 function delay(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
@@ -664,7 +692,7 @@ async function evalInPage<T = unknown>(session: BrowserSession, expression: stri
 		}
 		return { value: res.result?.value };
 	} catch (e) {
-		return { error: e instanceof Error ? e.message : String(e) };
+		return { error: errMsg(e) };
 	}
 }
 
@@ -784,8 +812,7 @@ async function observationBlock(session: BrowserSession, maxElements: number, in
 }
 
 function errStr(prefix: string, e: unknown): string {
-	const msg = e instanceof Error ? e.message : String(e);
-	return `${prefix}: ${msg}`;
+	return `${prefix}: ${errMsg(e)}`;
 }
 
 // ============================================================================

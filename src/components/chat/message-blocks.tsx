@@ -56,8 +56,11 @@ const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: stri
 /** While streaming, the tail bubble's text grows by a few chars per event. Re-
  *  parsing the whole markdown string on every token is O(n) per token → O(n²)
  *  over the message and is the dominant jank source on long replies. Throttle
- *  the value fed to the parser to ~once per `ms`; the full text is flushed the
- *  moment streaming settles, so the final render is always exact. */
+ *  the value fed to the parser to ~once per `ms` — and since each parse costs
+ *  O(current length), stretch the interval as the text grows so the total
+ *  parse work per second stays roughly constant instead of scaling with reply
+ *  length. The full text is flushed the moment streaming settles, so the final
+ *  render is always exact. */
 function useThrottledText(text: string, streaming: boolean, ms = 90): string {
   const [display, setDisplay] = useState(text);
   const latestRef = useRef(text);
@@ -74,10 +77,13 @@ function useThrottledText(text: string, streaming: boolean, ms = 90): string {
       return;
     }
     if (timerRef.current == null) {
+      // 0 chars → ms; 10k chars → ms+100; capped at 500ms so even a huge
+      // reply still visibly ticks twice a second.
+      const interval = Math.min(500, ms + latestRef.current.length / 100);
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
         setDisplay(latestRef.current);
-      }, ms);
+      }, interval);
     }
   }, [text, streaming, ms]);
 

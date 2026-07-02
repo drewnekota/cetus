@@ -6,11 +6,19 @@ import { AppWindow, CornerDownLeft, Globe, ImageOff, Loader2, TextSelect, X } fr
 import { Kbd } from "@/components/ui/kbd";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { ModelPicker } from "@/components/chat/model-picker";
+import { BACKENDS, CliTuningMenu } from "@/components/chat/backend-picker";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import { api } from "@/lib/tauri";
 import { useTranslation } from "@/lib/i18n";
 import {
   DEFAULT_MODEL_CHOICE,
   DEFAULT_QUICK_SETTINGS,
+  type BackendId,
   type ModelChoice,
   type QuickContext,
   type QuickOpenPayload,
@@ -18,6 +26,7 @@ import {
   type QuickScreenshot,
   type QuickSessionMode,
 } from "@/lib/types";
+import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
 import { cn } from "@/lib/utils";
 import {
   Tooltip,
@@ -55,6 +64,13 @@ export function QuickPanel() {
   // "cetus:lastModelChoice" localStorage key. Ultra Code is a global switch.
   const [modelChoice, setModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
   const [ultraEnabled, setUltraEnabled] = useState(false);
+  // Coding-agent runtime the launched task runs on (Cetus / Claude Code /
+  // Codex). Sticky across opens; applies to newly-created conversations.
+  const [backend, setBackend] = useState<BackendId>("pi");
+  // CLI backends' model + effort overrides ("" = the CLI's own defaults).
+  // Not persisted — reset with each backend choice.
+  const [cliModel, setCliModel] = useState("");
+  const [cliEffort, setCliEffort] = useState("");
   // True while the native "Add folder…" dialog is open, so the blur-to-dismiss
   // handler doesn't close the panel when that OS dialog steals focus.
   const pickingWorkspaceRef = useRef(false);
@@ -114,9 +130,23 @@ export function QuickPanel() {
     try {
       const saved = localStorage.getItem("cetus:quickWorkspace");
       if (saved) setWorkspaceDir(saved);
-      const rawModel = localStorage.getItem("cetus:lastModelChoice");
-      if (rawModel)
-        setModelChoice((m) => ({ ...m, ...JSON.parse(rawModel) } as ModelChoice));
+      const savedBackend = localStorage.getItem("cetus:quickBackend");
+      if (savedBackend && BACKENDS.some((b) => b.id === savedBackend)) {
+        setBackend(savedBackend as BackendId);
+      }
+    } catch {}
+    setModelChoice(mergeStoredModelChoice);
+  }, []);
+
+  const onBackendChange = useCallback((id: string) => {
+    const b = BACKENDS.find((x) => x.id === id);
+    if (!b) return;
+    setBackend(b.id);
+    // Model/effort overrides belong to one backend's catalog.
+    setCliModel("");
+    setCliEffort("");
+    try {
+      localStorage.setItem("cetus:quickBackend", b.id);
     } catch {}
   }, []);
 
@@ -129,9 +159,7 @@ export function QuickPanel() {
 
   const onModelChange = useCallback((next: ModelChoice) => {
     setModelChoice(next);
-    try {
-      localStorage.setItem("cetus:lastModelChoice", JSON.stringify(next));
-    } catch {}
+    saveModelChoice(next);
   }, []);
 
   const onUltraToggle = useCallback(() => {
@@ -158,11 +186,7 @@ export function QuickPanel() {
       // The panel stays mounted across opens, so re-read the shared model choice
       // each wake — the main window may have changed it (manual pick or just
       // switching conversations) since we last looked.
-      try {
-        const rawModel = localStorage.getItem("cetus:lastModelChoice");
-        if (rawModel)
-          setModelChoice((m) => ({ ...m, ...JSON.parse(rawModel) } as ModelChoice));
-      } catch {}
+      setModelChoice(mergeStoredModelChoice);
       api.getUltraSettings().then((s) => setUltraEnabled(s.enabled)).catch(() => {});
       focusSoon();
       openingRef.current = true;
@@ -258,6 +282,9 @@ export function QuickPanel() {
         ultra: ultraEnabled,
         // Context rides only in screenshot mode; whatever chips the user left on.
         context: includeScreenshot ? context : null,
+        backend,
+        cliModel: backend === "pi" ? "" : cliModel,
+        cliEffort: backend === "pi" ? "" : cliEffort,
       });
       // quick_submit hides the window for us; clear for the next open so a
       // with-screenshot submit doesn't leave a stale thumbnail that flashes
@@ -272,7 +299,7 @@ export function QuickPanel() {
       setSubmitting(false);
       submittingRef.current = false;
     }
-  }, [text, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, ultraEnabled]);
+  }, [text, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, ultraEnabled, backend, cliModel, cliEffort]);
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Escape") {
@@ -411,12 +438,24 @@ export function QuickPanel() {
             pickingWorkspaceRef.current = active;
           }}
         />
-        <ModelPicker
-          value={modelChoice}
-          onChange={onModelChange}
-          ultra={ultraEnabled}
-          onUltraToggle={onUltraToggle}
-        />
+        <BackendSelect value={backend} onChange={onBackendChange} />
+        {backend === "pi" ? (
+          <ModelPicker
+            value={modelChoice}
+            onChange={onModelChange}
+            ultra={ultraEnabled}
+            onUltraToggle={onUltraToggle}
+          />
+        ) : (
+          <CliTuningMenu
+            backend={backend}
+            model={cliModel}
+            effort={cliEffort}
+            onModelChange={setCliModel}
+            onEffortChange={setCliEffort}
+            className="h-8 rounded-md border border-black/10 bg-black/5 text-[13px] text-foreground dark:border-white/10 dark:bg-white/5"
+          />
+        )}
         <span className="ml-auto flex items-center gap-1.5 pr-1">
           <Kbd>
             <CornerDownLeft className="size-2.5" />
@@ -433,6 +472,41 @@ export function QuickPanel() {
         </span>
       </div>
     </div>
+  );
+}
+
+/** Compact coding-agent picker for the launcher's action strip: Cetus (the
+ *  built-in harness), Claude Code, or Codex. */
+function BackendSelect({
+  value,
+  onChange,
+}: {
+  value: BackendId;
+  onChange: (id: string) => void;
+}) {
+  const current = BACKENDS.find((b) => b.id === value) ?? BACKENDS[0];
+  const TriggerIcon = current.icon;
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger
+        size="sm"
+        className="gap-1.5 border-black/10 bg-black/5 px-2 text-[13px] shadow-none dark:border-white/10 dark:bg-white/5"
+      >
+        <TriggerIcon className="size-3.5" />
+        <span className="truncate">{current.label}</span>
+      </SelectTrigger>
+      <SelectContent align="start">
+        {BACKENDS.map((b) => {
+          const Icon = b.icon;
+          return (
+            <SelectItem key={b.id} value={b.id} className="text-[13px]">
+              <Icon className="size-4" />
+              <span className="truncate">{b.label}</span>
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
   );
 }
 

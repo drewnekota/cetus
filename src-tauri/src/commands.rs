@@ -385,6 +385,8 @@ pub async fn new_conversation(
         solution_index: None,
         review_state: "none".to_string(),
         backend: crate::store::default_backend(),
+        cli_model: String::new(),
+        cli_effort: String::new(),
     };
     state.store.insert(&c).map_err(err)?;
     Ok(c)
@@ -402,6 +404,11 @@ pub async fn fork_conversation(
         .get(&id)
         .map_err(err)?
         .ok_or_else(|| "conversation not found".to_string())?;
+
+    // CLI-backend conversations fork by cloning the persisted transcript.
+    if cetus_bridge::cli_agent::CliBackend::from_id(&source.backend).is_some() {
+        return fork_cli_conversation(&state, &source, message_id, message_index).await;
+    }
 
     // Ensure a lazily-created conversation has a concrete session file before
     // cloning it. For normal chats this is already populated.
@@ -451,6 +458,8 @@ pub async fn fork_conversation(
         solution_index: None,
         review_state: "none".to_string(),
         backend: crate::store::default_backend(),
+        cli_model: String::new(),
+        cli_effort: String::new(),
     };
     state.store.insert(&c).map_err(err)?;
 
@@ -465,6 +474,92 @@ pub async fn fork_conversation(
             messages = pi.get_messages().await.map_err(err)?;
         }
     }
+    Ok(SwitchResponse {
+        conversation: c,
+        messages,
+    })
+}
+
+/// Fork a claude-code/codex conversation: mint a sibling row (same backend and
+/// workspace), copy the transcript — truncated at the next user turn after the
+/// fork target, mirroring the pi fork contract — and pick the resume token the
+/// fork continues from. claude's `--resume` forks server-side sessions cheaply,
+/// so any row's `resume_before` token is a valid branch point; codex threads
+/// are single-lined, so a codex fork keeps the visual history but starts its
+/// context fresh (empty token) rather than cross-contaminating the source
+/// conversation's thread.
+async fn fork_cli_conversation(
+    state: &State<'_, AppState>,
+    source: &Conversation,
+    message_id: Option<String>,
+    message_index: Option<usize>,
+) -> CmdResult<SwitchResponse> {
+    let rows = state.store.list_cli_rows(&source.id).map_err(err)?;
+    let messages: Vec<Value> = rows.iter().map(|(_, m, _)| m.clone()).collect();
+
+    // Where to cut: the first user row after the target message (its turn and
+    // everything later stay out of the fork). No target → full copy.
+    let mut copy_limit: Option<usize> = None;
+    let mut fork_resume = source.session_file.clone();
+    if message_id.is_some() || message_index.is_some() {
+        let target_idx = find_fork_target_index(&messages, message_id.as_deref(), message_index)
+            .ok_or_else(|| "fork target message not found".to_string())?;
+        let cut = messages
+            .iter()
+            .enumerate()
+            .skip(target_idx + 1)
+            .find(|(_, m)| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .map(|(i, _)| i);
+        if let Some(cut_idx) = cut {
+            copy_limit = Some(cut_idx);
+            // The cut user row's resume_before is the token in effect at the
+            // cut point — exactly what the fork should resume from.
+            fork_resume = rows[cut_idx].2.clone().unwrap_or_default();
+        }
+    }
+    if source.backend == "codex" {
+        fork_resume = String::new();
+    }
+
+    let new_id = Uuid::new_v4().to_string();
+    let now = now_ms();
+    let c = Conversation {
+        id: new_id.clone(),
+        title: if source.title.trim().is_empty() {
+            String::new()
+        } else {
+            format!("{} (fork)", source.title)
+        },
+        session_file: fork_resume,
+        workspace_dir: source.workspace_dir.clone(),
+        model: source.model,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+        source_automation_id: None,
+        parallel_group_id: None,
+        solution_index: None,
+        review_state: "none".to_string(),
+        backend: source.backend.clone(),
+        cli_model: source.cli_model.clone(),
+        cli_effort: source.cli_effort.clone(),
+    };
+    state.store.insert(&c).map_err(err)?;
+    state
+        .store
+        .copy_cli_messages(&source.id, &new_id, copy_limit)
+        .map_err(err)?;
+
+    // Seed the fork's worktree from the source's branch when one exists, so the
+    // fork continues from the source's file state instead of repo HEAD.
+    // Best-effort: without a source branch the first turn creates one off HEAD.
+    let ws = std::path::PathBuf::from(&source.workspace_dir);
+    if cetus_bridge::worktree::is_git_repo(&ws) {
+        let src_branch = cetus_bridge::worktree::branch_name(&source.id);
+        let _ = cetus_bridge::worktree::ensure_worktree(&ws, &new_id, Some(&src_branch));
+    }
+
+    let messages = state.store.list_cli_messages(&new_id).map_err(err)?;
     Ok(SwitchResponse {
         conversation: c,
         messages,
@@ -539,6 +634,16 @@ pub async fn switch_conversation(
         .get(&id)
         .map_err(err)?
         .ok_or_else(|| "conversation not found".to_string())?;
+    // CLI-backend conversations replay from the persisted transcript — their
+    // session_file is a resume token, not a pi session, so a pi must never be
+    // spawned against it.
+    if cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend).is_some() {
+        let messages = state.store.list_cli_messages(&id).map_err(err)?;
+        return Ok(SwitchResponse {
+            conversation: conv,
+            messages,
+        });
+    }
     // pi_for lazy-spawns if this is the first time the conversation is opened
     // since the app launched. The fresh pi's switch_session + apply_choice
     // happen inside pi_for.
@@ -573,6 +678,7 @@ pub async fn archive_conversation(
     // process. Un-archiving just leaves it cold; next interaction lazy-spawns.
     if archive {
         state.kill_pi(&id).await;
+        state.abort_cli_turn(&id);
     }
     state
         .store
@@ -605,8 +711,61 @@ pub async fn set_review_state(
 #[tauri::command]
 pub async fn delete_conversation(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state.kill_pi(&id).await;
+    state.abort_cli_turn(&id);
     state.remove_conv_agent(&id);
+    // CLI-backend leftovers: the git worktree (its branch survives so finished
+    // work isn't lost), the persisted transcript, and on-disk attachments.
+    // All no-ops for pi conversations.
+    if let Ok(Some(conv)) = state.store.get(&id) {
+        if cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend).is_some() {
+            let ws = std::path::PathBuf::from(&conv.workspace_dir);
+            if cetus_bridge::worktree::is_git_repo(&ws) {
+                if let Err(e) = cetus_bridge::worktree::remove_worktree(&ws, &id) {
+                    tracing::warn!("worktree cleanup for {id} failed: {e:#}");
+                }
+            }
+        }
+    }
+    state.store.delete_cli_messages(&id).ok();
+    let _ = std::fs::remove_dir_all(crate::cli_backend::attachments_dir(&state.app_data_dir, &id));
     state.store.delete(&id).map_err(err)
+}
+
+/// Where a CLI-backend conversation's isolated changes live: the worktree path
+/// + branch, when the workspace is a git repo. None for pi conversations and
+/// non-repo workspaces — the UI hides the affordance.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeInfo {
+    pub path: String,
+    pub branch: String,
+    /// False until the first turn actually created the worktree.
+    pub exists: bool,
+}
+
+#[tauri::command]
+pub async fn conversation_worktree(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Option<WorktreeInfo>> {
+    let conv = state
+        .store
+        .get(&id)
+        .map_err(err)?
+        .ok_or_else(|| "conversation not found".to_string())?;
+    if cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend).is_none() {
+        return Ok(None);
+    }
+    let ws = std::path::PathBuf::from(&conv.workspace_dir);
+    if !cetus_bridge::worktree::is_git_repo(&ws) {
+        return Ok(None);
+    }
+    let path = cetus_bridge::worktree::worktree_path(&ws, &id);
+    Ok(Some(WorktreeInfo {
+        exists: path.join(".git").exists(),
+        path: path.to_string_lossy().to_string(),
+        branch: cetus_bridge::worktree::branch_name(&id),
+    }))
 }
 
 #[tauri::command]
@@ -665,58 +824,30 @@ pub async fn send_prompt(
         .get(&id)
         .map_err(err)?
         .ok_or_else(|| "conversation not found".to_string())?;
-    if let Some(backend) = cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend) {
-        let sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
-            std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(state.handle().clone()));
-        let ws = std::path::PathBuf::from(&conv.workspace_dir);
-        std::fs::create_dir_all(&ws).ok();
-        // Isolate in a per-conversation worktree when the workspace is a git repo
-        // (the Superset/Conductor pattern); otherwise run in the workspace itself.
-        let cwd = if cetus_bridge::worktree::is_git_repo(&ws) {
-            cetus_bridge::worktree::ensure_worktree(&ws, &id, None).unwrap_or_else(|_| ws.clone())
-        } else {
-            ws.clone()
-        };
-        let env = secrets::load_env();
-        let opts = cetus_bridge::cli_agent::CliRunOpts {
-            model: None,
-            // Reuse session_file as the CLI resume token (claude session_id /
-            // codex thread_id) so a conversation keeps context across turns.
-            resume: (!conv.session_file.is_empty()).then(|| conv.session_file.clone()),
-            bypass_approvals: false,
-        };
-        let bin = backend.default_bin().to_string();
-        let prompt = message.clone();
-        let store = state.store.clone();
-        let conv_id = id.clone();
-        // Fire-and-stream: return promptly; events arrive over the sink like pi.
-        tokio::spawn(async move {
-            match cetus_bridge::cli_agent::run_cli_turn(
-                sink,
-                backend,
-                &bin,
-                &cwd,
-                &prompt,
-                Some(conv_id.clone()),
-                env,
-                opts,
-            )
-            .await
-            {
-                Ok(Some(resume)) => {
-                    store.set_session_file(&conv_id, &resume).ok();
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    tracing::error!("cli backend {} turn failed: {e:#}", backend.as_str());
-                }
-            }
-        });
+    if cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend).is_some() {
+        crate::cli_backend::dispatch_turn(
+            state.handle(),
+            &conv,
+            &message,
+            images.unwrap_or_default(),
+        )?;
         let now = now_ms();
         state.store.touch(&id, now).ok();
+        // Same title contract as the pi path: paint the mechanical fallback
+        // immediately, upgrade to an AI title in the background on first send.
+        let was_untitled = conv.title.trim().is_empty();
         let title_src = strip_context_fence(&message);
         let fallback = derive_title(title_src);
         state.store.set_title_if_empty(&id, &fallback, now).ok();
+        if was_untitled && !title_src.trim().is_empty() {
+            spawn_auto_title(
+                state.store.clone(),
+                state.handle().clone(),
+                id.clone(),
+                title_src.to_string(),
+                fallback,
+            );
+        }
         return Ok(());
     }
 
@@ -790,6 +921,22 @@ pub async fn set_conversation_backend(
     Ok(())
 }
 
+/// Set a CLI-backend conversation's model override (`claude --model` /
+/// `codex -m`); empty string clears it back to the CLI's own default. Applies
+/// from the next turn.
+#[tauri::command]
+pub async fn set_conversation_cli_model(
+    state: State<'_, AppState>,
+    id: String,
+    model: String,
+    effort: String,
+) -> CmdResult<()> {
+    state
+        .store
+        .set_cli_model(&id, model.trim(), effort.trim(), now_ms())
+        .map_err(err)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RetryResponse {
@@ -807,6 +954,32 @@ pub struct RetryResponse {
 /// ChatGPT "regenerate" contract: a failed turn never persists into history.
 #[tauri::command]
 pub async fn retry_last_turn(state: State<'_, AppState>, id: String) -> CmdResult<RetryResponse> {
+    let conv = state
+        .store
+        .get(&id)
+        .map_err(err)?
+        .ok_or_else(|| "conversation not found".to_string())?;
+    // CLI backends: drop the last user turn (and everything after it) from the
+    // persisted transcript and rewind session_file to the resume token that was
+    // in effect before that turn, so the resend replays from the same context.
+    if cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend).is_some() {
+        let (row_id, message, resume_before) = state
+            .store
+            .last_cli_user_message(&id)
+            .map_err(err)?
+            .ok_or_else(|| "nothing to retry: no user message to roll back to".to_string())?;
+        let text = crate::cli_backend::message_text(&message);
+        state
+            .store
+            .delete_cli_messages_from(&id, row_id)
+            .map_err(err)?;
+        state
+            .store
+            .set_session_file(&id, resume_before.as_deref().unwrap_or(""))
+            .map_err(err)?;
+        let messages = state.store.list_cli_messages(&id).map_err(err)?;
+        return Ok(RetryResponse { text, messages });
+    }
     let pi = state.pi_for(&id).await.map_err(err)?;
     let forkable = pi.get_fork_messages().await.map_err(err)?;
     let last = forkable
@@ -866,7 +1039,9 @@ fn spawn_auto_title(
 
 #[tauri::command]
 pub async fn abort(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    // Only abort if a pi exists for this conv — otherwise it's a no-op.
+    // A running CLI turn (claude-code / codex) has a kill switch; firing it is
+    // a no-op when idle, as is the pi abort below when no pi exists.
+    state.abort_cli_turn(&id);
     if let Some(pi) = state.pi_existing(&id).await {
         pi.abort().await.map_err(err)?;
     }
@@ -1542,6 +1717,9 @@ pub async fn create_automation(
         last_status: None,
         last_error: None,
         run_count: 0,
+        backend: input.backend,
+        cli_model: input.cli_model,
+        cli_effort: input.cli_effort,
     };
     state.store.insert_automation(&automation).map_err(err)?;
     Ok(automation)
@@ -1587,6 +1765,9 @@ pub async fn update_automation(
         last_status: existing.last_status,
         last_error: existing.last_error,
         run_count: existing.run_count,
+        backend: input.backend,
+        cli_model: input.cli_model,
+        cli_effort: input.cli_effort,
     };
     state.store.update_automation(&updated).map_err(err)?;
     Ok(updated)
@@ -1698,9 +1879,9 @@ pub async fn search_screenshots(
 }
 
 /// Sync the native window appearance to the app's color theme. On macOS/Linux
-/// this is app-wide, so it fixes the frosted vibrancy behind every window (the
-/// launcher's HUD glass and the main window's sidebar/margins) when the user
-/// locks a theme that differs from the OS. `None` (the "system" preference)
+/// this is app-wide, so it fixes the frosted vibrancy behind the launcher's
+/// HUD glass when the user locks a theme that differs from the OS. `None`
+/// (the "system" preference)
 /// lets the OS drive it, which also keeps each webview's `prefers-color-scheme`
 /// tracking the system for live updates. Best-effort — a missing window or an
 /// unsupported platform is a no-op.

@@ -47,6 +47,15 @@ pub struct Conversation {
     /// [`cetus_bridge::cli_agent`]). Additive; pre-existing rows default to "pi".
     #[serde(default = "default_backend")]
     pub backend: String,
+    /// Model override passed to the CLI backend (`claude --model` / `codex -m`).
+    /// Empty → the CLI's own configured default. Unused for pi (which has the
+    /// typed ds_model/reasoning pair instead).
+    #[serde(default)]
+    pub cli_model: String,
+    /// Reasoning-effort override for the CLI backend (`claude --effort` /
+    /// codex `model_reasoning_effort`). Empty → the CLI's default.
+    #[serde(default)]
+    pub cli_effort: String,
 }
 
 /// Default backend for rows/payloads that predate the `backend` column.
@@ -153,7 +162,9 @@ impl Store {
                 parallel_group_id TEXT,
                 solution_index INTEGER,
                 review_state TEXT NOT NULL DEFAULT 'none',
-                backend TEXT NOT NULL DEFAULT 'pi'
+                backend TEXT NOT NULL DEFAULT 'pi',
+                cli_model TEXT NOT NULL DEFAULT '',
+                cli_effort TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_conv_archived ON conversations (archived_at);
             CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations (updated_at DESC);
@@ -233,6 +244,22 @@ impl Store {
                 text TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_mseg_meeting ON meeting_segments (meeting_id, ts);
+
+            -- Transcript rows for CLI-backend conversations (claude-code /
+            -- codex). pi conversations replay history from their session jsonl;
+            -- CLI turns have no such file, so each turn's messages (PiMessage
+            -- JSON, the shape the chat UI renders) land here. `resume_before` on
+            -- a user row is the backend resume token in effect BEFORE that turn,
+            -- which is what retry/fork restore to roll a turn back. Additive
+            -- like app_settings so it survives a conversations-table reset.
+            CREATE TABLE IF NOT EXISTS cli_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                message_json TEXT NOT NULL,
+                resume_before TEXT,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_cli_msgs_conv ON cli_messages (conversation_id, id);
             "#,
         )?;
         // Additive column for automation-minted conversations. A DB created
@@ -259,6 +286,38 @@ impl Store {
             "conversations",
             "backend",
             "TEXT NOT NULL DEFAULT 'pi'",
+        )?;
+        ensure_column(
+            &conn,
+            "conversations",
+            "cli_model",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        ensure_column(
+            &conn,
+            "conversations",
+            "cli_effort",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        // Coding-agent backend for automations (pi | claude-code | codex) and
+        // the CLI model override their fired conversations inherit. Additive.
+        ensure_column(
+            &conn,
+            "automations",
+            "backend",
+            "TEXT NOT NULL DEFAULT 'pi'",
+        )?;
+        ensure_column(
+            &conn,
+            "automations",
+            "cli_model",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        ensure_column(
+            &conn,
+            "automations",
+            "cli_effort",
+            "TEXT NOT NULL DEFAULT ''",
         )?;
         // Defensive: a conversations table created before ds_model/reasoning
         // existed (an older shape) won't get them from CREATE TABLE IF NOT
@@ -294,8 +353,8 @@ impl Store {
     pub fn insert(&self, c: &Conversation) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO conversations (id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            "INSERT INTO conversations (id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 c.id,
                 c.title,
@@ -311,6 +370,8 @@ impl Store {
                 c.solution_index,
                 c.review_state,
                 c.backend,
+                c.cli_model,
+                c.cli_effort,
             ],
         )?;
         Ok(())
@@ -319,10 +380,10 @@ impl Store {
     pub fn list(&self, include_archived: bool) -> Result<Vec<Conversation>> {
         let conn = self.read_conn.lock().unwrap();
         let sql = if include_archived {
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
              FROM conversations WHERE archived_at IS NOT NULL ORDER BY archived_at DESC"
         } else {
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
              FROM conversations WHERE archived_at IS NULL ORDER BY updated_at DESC"
         };
         let mut stmt = conn.prepare(sql)?;
@@ -337,7 +398,7 @@ impl Store {
     pub fn get(&self, id: &str) -> Result<Option<Conversation>> {
         let conn = self.read_conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
              FROM conversations WHERE id = ?1",
         )?;
         let row = stmt
@@ -372,6 +433,17 @@ impl Store {
         conn.execute(
             "UPDATE conversations SET backend = ?1, updated_at = ?2 WHERE id = ?3",
             params![backend, ts, id],
+        )?;
+        Ok(())
+    }
+
+    /// Set the CLI backend's model + reasoning-effort overrides for a
+    /// conversation (empty → the CLI's configured default).
+    pub fn set_cli_model(&self, id: &str, model: &str, effort: &str, ts: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET cli_model = ?1, cli_effort = ?2, updated_at = ?3 WHERE id = ?4",
+            params![model, effort, ts, id],
         )?;
         Ok(())
     }
@@ -455,6 +527,142 @@ impl Store {
         Ok(())
     }
 
+    // ---- cli_messages (claude-code / codex transcripts) ---------------------
+
+    /// Append one PiMessage-shaped JSON value to a CLI conversation's transcript.
+    /// `resume_before` should be set on user rows only: the backend resume token
+    /// in effect before the turn this message opens (empty conversation → None).
+    pub fn append_cli_message(
+        &self,
+        conv_id: &str,
+        message: &serde_json::Value,
+        resume_before: Option<&str>,
+        ts: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO cli_messages (conversation_id, message_json, resume_before, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![conv_id, message.to_string(), resume_before, ts],
+        )?;
+        Ok(())
+    }
+
+    /// A CLI conversation's full transcript, oldest first, as PiMessage JSON.
+    pub fn list_cli_messages(&self, conv_id: &str) -> Result<Vec<serde_json::Value>> {
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT message_json FROM cli_messages WHERE conversation_id = ?1 ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![conv_id], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            if let Ok(v) = serde_json::from_str(&r?) {
+                out.push(v);
+            }
+        }
+        Ok(out)
+    }
+
+    /// A CLI conversation's transcript with row-level detail, oldest first:
+    /// (row id, message JSON, resume token stored on the row). Fork truncation
+    /// needs the per-row resume tokens; plain rendering uses
+    /// [`Self::list_cli_messages`].
+    pub fn list_cli_rows(
+        &self,
+        conv_id: &str,
+    ) -> Result<Vec<(i64, serde_json::Value, Option<String>)>> {
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, message_json, resume_before FROM cli_messages
+             WHERE conversation_id = ?1 ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![conv_id], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, json, resume) = r?;
+            if let Ok(v) = serde_json::from_str(&json) {
+                out.push((id, v, resume));
+            }
+        }
+        Ok(out)
+    }
+
+    /// The most recent user row of a CLI conversation:
+    /// (row id, message JSON, resume token in effect before that turn).
+    pub fn last_cli_user_message(
+        &self,
+        conv_id: &str,
+    ) -> Result<Option<(i64, serde_json::Value, Option<String>)>> {
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, message_json, resume_before FROM cli_messages
+             WHERE conversation_id = ?1
+               AND json_extract(message_json, '$.role') = 'user'
+             ORDER BY id DESC LIMIT 1",
+        )?;
+        let row = stmt
+            .query_row(params![conv_id], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .optional()?;
+        Ok(row.and_then(|(id, json, resume)| {
+            serde_json::from_str(&json).ok().map(|v| (id, v, resume))
+        }))
+    }
+
+    /// Drop transcript rows from `from_id` (inclusive) on — the retry rollback.
+    pub fn delete_cli_messages_from(&self, conv_id: &str, from_id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM cli_messages WHERE conversation_id = ?1 AND id >= ?2",
+            params![conv_id, from_id],
+        )?;
+        Ok(())
+    }
+
+    /// Drop a conversation's whole CLI transcript (conversation deletion).
+    pub fn delete_cli_messages(&self, conv_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM cli_messages WHERE conversation_id = ?1",
+            params![conv_id],
+        )?;
+        Ok(())
+    }
+
+    /// Copy the first `limit` transcript rows (or all, when None) from one CLI
+    /// conversation to another — the fork clone. Timestamps carry over so the
+    /// fork reads as the same history.
+    pub fn copy_cli_messages(&self, src: &str, dst: &str, limit: Option<usize>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        match limit {
+            Some(n) => conn.execute(
+                "INSERT INTO cli_messages (conversation_id, message_json, resume_before, created_at)
+                 SELECT ?2, message_json, resume_before, created_at FROM cli_messages
+                 WHERE conversation_id = ?1 ORDER BY id ASC LIMIT ?3",
+                params![src, dst, n as i64],
+            )?,
+            None => conn.execute(
+                "INSERT INTO cli_messages (conversation_id, message_json, resume_before, created_at)
+                 SELECT ?2, message_json, resume_before, created_at FROM cli_messages
+                 WHERE conversation_id = ?1 ORDER BY id ASC",
+                params![src, dst],
+            )?,
+        };
+        Ok(())
+    }
+
     // ---- app_settings key/value -------------------------------------------
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
@@ -482,8 +690,8 @@ impl Store {
             "INSERT INTO automations
                 (id, name, prompt, workspace_dir, ds_model, reasoning, schedule_json,
                  enabled, created_at, updated_at, next_run_at, last_run_at,
-                 last_conversation_id, last_status, last_error, run_count)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+                 last_conversation_id, last_status, last_error, run_count, backend, cli_model, cli_effort)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
             params![
                 a.id,
                 a.name,
@@ -501,6 +709,9 @@ impl Store {
                 a.last_status,
                 a.last_error,
                 a.run_count,
+                a.backend,
+                a.cli_model,
+                a.cli_effort,
             ],
         )?;
         Ok(())
@@ -515,7 +726,7 @@ impl Store {
                 name=?2, prompt=?3, workspace_dir=?4, ds_model=?5, reasoning=?6,
                 schedule_json=?7, enabled=?8, updated_at=?9, next_run_at=?10,
                 last_run_at=?11, last_conversation_id=?12, last_status=?13,
-                last_error=?14, run_count=?15
+                last_error=?14, run_count=?15, backend=?16, cli_model=?17, cli_effort=?18
              WHERE id=?1",
             params![
                 a.id,
@@ -533,6 +744,9 @@ impl Store {
                 a.last_status,
                 a.last_error,
                 a.run_count,
+                a.backend,
+                a.cli_model,
+                a.cli_effort,
             ],
         )?;
         Ok(())
@@ -966,7 +1180,7 @@ fn row_to_screenshot(r: &rusqlite::Row<'_>) -> rusqlite::Result<Screenshot> {
 
 const AUTOMATION_COLS: &str = "id, name, prompt, workspace_dir, ds_model, reasoning, \
     schedule_json, enabled, created_at, updated_at, next_run_at, last_run_at, \
-    last_conversation_id, last_status, last_error, run_count";
+    last_conversation_id, last_status, last_error, run_count, backend, cli_model, cli_effort";
 
 fn row_to_automation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
     let model_str: String = r.get(4)?;
@@ -996,6 +1210,9 @@ fn row_to_automation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
         last_status: r.get(13)?,
         last_error: r.get(14)?,
         run_count: r.get(15)?,
+        backend: r.get(16)?,
+        cli_model: r.get(17)?,
+        cli_effort: r.get(18)?,
     })
 }
 
@@ -1018,6 +1235,8 @@ fn row_to_conversation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> 
         solution_index: r.get(11)?,
         review_state: r.get(12)?,
         backend: r.get(13)?,
+        cli_model: r.get(14)?,
+        cli_effort: r.get(15)?,
     })
 }
 
@@ -1102,4 +1321,71 @@ pub fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn temp_store() -> (Store, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "cetus-store-test-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        (Store::open(&path).unwrap(), path)
+    }
+
+    #[test]
+    fn cli_messages_round_trip_retry_and_fork_copy() {
+        let (store, path) = temp_store();
+
+        // Turn 1: user (no prior resume) + assistant.
+        store
+            .append_cli_message(
+                "c1",
+                &json!({"role":"user","content":[{"type":"text","text":"first"}]}),
+                None,
+                1,
+            )
+            .unwrap();
+        store
+            .append_cli_message("c1", &json!({"role":"assistant","content":[]}), None, 2)
+            .unwrap();
+        // Turn 2: user resumed from sess-1.
+        store
+            .append_cli_message(
+                "c1",
+                &json!({"role":"user","content":[{"type":"text","text":"second"}]}),
+                Some("sess-1"),
+                3,
+            )
+            .unwrap();
+        store
+            .append_cli_message("c1", &json!({"role":"assistant","content":[]}), None, 4)
+            .unwrap();
+
+        let msgs = store.list_cli_messages("c1").unwrap();
+        assert_eq!(msgs.len(), 4);
+
+        // Retry contract: last user row carries its pre-turn resume token, and
+        // deleting from it drops the whole failed turn.
+        let (row_id, msg, resume) = store.last_cli_user_message("c1").unwrap().unwrap();
+        assert_eq!(msg["content"][0]["text"], json!("second"));
+        assert_eq!(resume.as_deref(), Some("sess-1"));
+        store.delete_cli_messages_from("c1", row_id).unwrap();
+        assert_eq!(store.list_cli_messages("c1").unwrap().len(), 2);
+
+        // Fork copy honors the row limit; full copy takes everything.
+        store.copy_cli_messages("c1", "c2", Some(1)).unwrap();
+        assert_eq!(store.list_cli_messages("c2").unwrap().len(), 1);
+        store.copy_cli_messages("c1", "c3", None).unwrap();
+        assert_eq!(store.list_cli_messages("c3").unwrap().len(), 2);
+
+        store.delete_cli_messages("c1").unwrap();
+        assert!(store.list_cli_messages("c1").unwrap().is_empty());
+
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+    }
 }

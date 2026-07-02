@@ -37,7 +37,7 @@ The three factors describe a single moment. What makes an agent useful over time
 | | Cetus today |
 | --- | --- |
 | **Context** | Rewind-style screen capture with on-device Apple Vision OCR (off by default) · **meeting memory** — on-device call transcription into searchable notes · a **contextful launcher** that attaches your screenshot, active app, browser URL, and selection · third-party data through pi connectors |
-| **Intelligence** | DeepSeek **V4.1 Flash** ⚡ / **V4.1 Pro** ✨ · the pi harness · **Ultra Code** mode (the agent authors a workflow and orchestrates sub-agents) · **parallel solutions** (best-of-N fan-out with side-by-side review) |
+| **Intelligence** | DeepSeek **V4.1 Flash** ⚡ / **V4.1 Pro** ✨ · the pi harness · **pluggable runtimes** — run any conversation on **Claude Code** or **Codex** instead of the built-in engine · **Ultra Code** mode (the agent authors a workflow and orchestrates sub-agents) · **parallel solutions** (best-of-N fan-out with side-by-side review) |
 | **Abilities** | pi tools & skills · 30+ providers and any OpenAI-compatible endpoint · scheduled **automations** that start background conversations · on-device **voice dictation** · a global double-⌘ **launcher** |
 | **Memory** | Durable notes you and the agent both edit (identity, preferences, projects), injected each turn · **Dreaming**: offline consolidation while idle (on by default) |
 
@@ -48,6 +48,12 @@ The three factors describe a single moment. What makes an agent useful over time
 A single composer: pick a **workspace** (working directory), a **preset** (Daily ⚡ / High / Max / UltraCode ✨), optionally attach files or a screenshot, and send. Replies stream live with collapsible **thinking** blocks and **tool-use** cards showing args, results, and any errors.
 
 ![Cetus chat — What should we work on?](docs/screenshot-chat.png)
+
+### Agent runtimes
+
+Every conversation picks its engine. **Cetus** (the bundled pi harness) is the default; flip the composer's runtime picker to **Claude Code** or **Codex** and the same conversation runs on the vendor CLI instead — with per-conversation **model** (Fable / Opus / Sonnet / Haiku · GPT-5.5 family) and **reasoning-effort** overrides next to it.
+
+The CLI runtimes reuse whatever `claude` / `codex` you already have installed and logged in on your `PATH` — no separate sign-in. Cetus runs one headless turn per message (`claude -p --output-format stream-json` / `codex exec --json`), translates the structured event stream into the same chat UI (text, thinking, tool cards), resumes context across turns via each CLI's session token, and isolates edits in a per-conversation **git worktree**. Automations can fire on any runtime, so a scheduled job can run on Claude Code while your chats stay on Cetus.
 
 ### Kanban
 
@@ -104,6 +110,7 @@ Each capability is opt-in. **Computer & Browser control** lets the agent drive y
 ## Also in the box
 
 - **Persistent memory** you and the agent both edit, injected each turn (identity, preferences, projects)
+- **Pluggable runtimes**: run any conversation (or automation) on **Claude Code** or **Codex** — headless turns of your locally installed CLIs, streamed into the native chat UI, isolated in per-conversation git worktrees
 - **Parallel solutions**: fan one prompt into N candidate runs, then keep one and archive the rest
 - **Ultra Code** mode: the agent spawns its own sub-agents for a single request
 - **Voice dictation** (on-device, macOS) — in-app and as a global push-to-talk
@@ -119,6 +126,7 @@ Each capability is opt-in. **Computer & Browser control** lets the agent drive y
 - **Rust** stable (`rustc`, `cargo`)
 - **Tauri** prerequisites: <https://v2.tauri.app/start/prerequisites/>
 - A **`DEEPSEEK_API_KEY`** (or your provider of choice; pi auto-picks up `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)
+- **Optional**: the **Claude Code** (`claude`) and/or **Codex** (`codex`) CLIs installed and logged in, if you want them as conversation runtimes — Cetus reuses their existing login, no extra setup
 
 ## First-time setup
 
@@ -188,6 +196,7 @@ Outputs `.app` / `.dmg` on macOS. A real multi-size icon set is required for `ta
 - **Streaming**: pi emits `agent_start`, `message_update` with `assistantMessageEvent` deltas, and `tool_execution_*` events. The frontend `chatReducer` folds these into stable `RenderedMessage[]` indexed by `contentIndex`, with a `toolCallId → block` side-table to route execution updates.
 - **Framing**: strict-LF JSONL. `tauri-plugin-shell` delivers stdout in arbitrary byte chunks, so the reader maintains its own accumulator and emits one line per `\n`, stripping optional `\r`. Generic line readers that split on Unicode separators (Node `readline`) are non-compliant.
 - **Sidecar packaging**: `src-tauri/binaries/pi-<target>` ships inside `.app/Contents/Resources/`. `PI_BIN` env var is the dev backdoor for iterating on pi.
+- **CLI runtimes**: conversations on **Claude Code** / **Codex** bypass the pi RPC entirely — `cetus-bridge::cli_agent` spawns one headless CLI process per turn (`claude -p --output-format stream-json` / `codex exec --json`), and a unit-tested `EventTranslator` maps their JSONL into the same PiEvent stream `chatReducer` already consumes. Context persists across turns via each CLI's resume token (claude `session_id` / codex `thread_id`); turns run inside a per-conversation git worktree.
 - **Extension UI**: when a pi extension calls `ctx.ui.select()` etc., pi sends `extension_ui_request` over the event stream. The frontend `DialogHost` renders a dialog and replies via the `extension_ui_respond` Tauri command.
 - **Bridge**: Cetus also intercepts known extension host tunnels and routes them to native handlers. See [docs/bridge.md](docs/bridge.md) for the protocol, security boundary, and open-source extraction plan.
 

@@ -13,7 +13,7 @@ import { useTranslation } from "@/lib/i18n";
 import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
 import { api } from "@/lib/tauri";
 import { readDraft, writeDraft } from "@/lib/draft-store";
-import type { ModelChoice } from "@/lib/types";
+import type { BackendId, ModelChoice } from "@/lib/types";
 
 /** Walk back from the caret to find an open `/<token>` the user is typing: a `/`
  *  at line start or after whitespace, with no whitespace between it and the
@@ -112,6 +112,15 @@ interface Props {
   draftKey?: string;
   /** Selected text from the current conversation to append as a Markdown quote. */
   quoteRequest?: QuoteRequest | null;
+  /** Backend choice held before a conversation exists (the hero composer):
+   *  the parent applies it to the conversation minted on first send. Omit to
+   *  hide the backend picker on conversation-less composers (dialogs). */
+  pendingBackend?: BackendId;
+  onPendingBackendChange?: (backend: BackendId) => void;
+  /** Pending-mode CLI model/effort (hero composer), applied on first send. */
+  pendingCliModel?: string;
+  pendingCliEffort?: string;
+  onPendingTuningChange?: (model: string, effort: string) => void;
 }
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB — Gemini limit is generous but base64 inflates 33%
@@ -149,6 +158,11 @@ export function Composer({
   focusToken,
   draftKey,
   quoteRequest,
+  pendingBackend,
+  onPendingBackendChange,
+  pendingCliModel,
+  pendingCliEffort,
+  onPendingTuningChange,
 }: Props) {
   const { t, locale } = useTranslation("chat");
   // A random hero placeholder, re-rolled per new chat (focusToken bumps) so the
@@ -183,6 +197,10 @@ export function Composer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+  // Mirrors the BackendPicker's value so pi-only affordances (the DeepSeek
+  // model picker) hide when a CLI backend serves this conversation — the CLIs
+  // run their own default models, so the picker would be a no-op there.
+  const [backend, setBackend] = useState<BackendId>("pi");
   const rootRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -498,9 +516,16 @@ export function Composer({
         // Bash mode: tint the frame so it's unmistakably "running a command",
         // not "messaging the agent".
         bashMode && "border-primary/60 ring-1 ring-primary/40",
-        variant === "hero"
-          ? "bg-card/60 p-2 backdrop-blur-xl backdrop-saturate-150"
-          : "bg-card p-1.5",
+        // CLI backends tint the frame so it's obvious at a glance which
+        // runtime the next message runs on: Claude Code gets Anthropic's
+        // clay orange, Codex a teal. Bash mode's tint wins while active.
+        !bashMode &&
+          backend === "claude-code" &&
+          "border-[#d97757]/60 ring-1 ring-[#d97757]/30 dark:border-[#d97757]/50",
+        !bashMode &&
+          backend === "codex" &&
+          "border-[#10a37f]/60 ring-1 ring-[#10a37f]/30 dark:border-[#10a37f]/50",
+        variant === "hero" ? "bg-card p-2" : "bg-card p-1.5",
       )}
     >
       {isDragging && (
@@ -680,17 +705,33 @@ export function Composer({
             onChange={onWorkspaceChange}
             disabled={disabled}
           />
-          <ModelPicker
-            value={modelChoice}
-            onChange={onModelChange}
-            ultra={ultra}
-            onUltraToggle={onUltraToggle}
-            // Recycling pis to apply the prompt change mid-stream would abort
-            // the active run, so only allow toggling Ultra when idle.
-            lockUltra={streaming}
+          {backend === "pi" && (
+            <ModelPicker
+              value={modelChoice}
+              onChange={onModelChange}
+              ultra={ultra}
+              onUltraToggle={onUltraToggle}
+              // Recycling pis to apply the prompt change mid-stream would abort
+              // the active run, so only allow toggling Ultra when idle.
+              lockUltra={streaming}
+              disabled={disabled}
+            />
+          )}
+          <BackendPicker
+            conversationId={conversationId ?? null}
             disabled={disabled}
+            pendingValue={pendingBackend}
+            pendingModel={pendingCliModel}
+            pendingEffort={pendingCliEffort}
+            onPendingTuningChange={onPendingTuningChange}
+            onBackendChange={(b) => {
+              setBackend(b);
+              if (!conversationId) {
+                onPendingBackendChange?.(b);
+                onPendingTuningChange?.("", "");
+              }
+            }}
           />
-          <BackendPicker conversationId={conversationId ?? null} disabled={disabled} />
         </div>
         {bashMode ? (
           // Terminal commands are independent of the agent stream, so always

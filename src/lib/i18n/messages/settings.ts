@@ -80,6 +80,9 @@ export const settings = {
     "general.autoUpdate.label": "Automatic updates",
     "general.autoUpdate.description":
       "Check for and install updates in the background. Applied the next time you open Cetus.",
+    "general.cliAgents.label": "CLI agents: skip permission prompts",
+    "general.cliAgents.description":
+      "Let Claude Code / Codex run without approval prompts. Their work stays isolated in per-conversation git worktrees. Off = every tool call asks first — approval cards appear in the chat, like the native apps.",
     "update.check.label": "Updates",
     "update.check.current": "You're on v{version}.",
     "update.check.button": "Check for updates",
@@ -547,6 +550,9 @@ export const settings = {
     "general.description": "语言和应用级基础设置。",
     "general.autoUpdate.label": "自动更新",
     "general.autoUpdate.description": "在后台检查并安装更新，下次打开 Cetus 时生效。",
+    "general.cliAgents.label": "CLI 智能体：跳过权限确认",
+    "general.cliAgents.description":
+      "让 Claude Code / Codex 无需逐项确认即可执行。它们的改动隔离在每个会话独立的 git worktree 中。关闭后每次工具调用都会先询问——审批卡片会出现在聊天里，与原生应用一致。",
     "update.check.label": "更新",
     "update.check.current": "当前版本 v{version}。",
     "update.check.button": "检查更新",

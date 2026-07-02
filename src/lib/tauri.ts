@@ -39,6 +39,8 @@ import type {
   VoiceInsertMode,
   VoicePermissions,
   WorkspaceFileEntry,
+  WorktreeInfo,
+  CliAgentSettings,
   DevtestDomOp,
   DevtestDomArgs,
 } from "./types";
@@ -140,6 +142,23 @@ export const api = {
    *  "pi" | "claude-code" | "codex". The next send_prompt routes accordingly. */
   setConversationBackend: (id: string, backend: string) =>
     invoke<void>("set_conversation_backend", { id, backend }),
+  /** Set a CLI-backend conversation's model + reasoning-effort overrides
+   *  (claude --model/--effort / codex -m + model_reasoning_effort); "" restores
+   *  the CLI's own defaults. Applies from the next turn. */
+  setConversationCliModel: (id: string, model: string, effort: string) =>
+    invoke<void>("set_conversation_cli_model", { id, model, effort }),
+  /** Worktree path + branch of a CLI-backend conversation (null for pi
+   *  conversations and non-git workspaces). */
+  conversationWorktree: (id: string) =>
+    invoke<WorktreeInfo | null>("conversation_worktree", { id }),
+  getCliAgentSettings: () => invoke<CliAgentSettings>("get_cli_agent_settings"),
+  setCliAgentSettings: (settings: CliAgentSettings) =>
+    invoke<void>("set_cli_agent_settings", { settings }),
+  /** Answer a claude control_request (permission prompt / AskUserQuestion).
+   *  `response` is `{behavior:"allow", updatedInput?}` or
+   *  `{behavior:"deny", message}`. */
+  cliControlRespond: (id: string, requestId: string, response: unknown) =>
+    invoke<void>("cli_control_respond", { id, requestId, response }),
   deleteConversation: (id: string) => invoke<void>("delete_conversation", { id }),
   renameConversation: (id: string, title: string) =>
     invoke<Conversation>("rename_conversation", { id, title }),

@@ -100,6 +100,77 @@ function withoutStreaming(set: Set<string>, id: string): Set<string> {
   return next;
 }
 
+// ---------- Per-frame pi-event batching -------------------------------------
+//
+// Streaming deltas arrive many times per second. Applying each one through
+// set() meant an O(messages) array copy + a full byKey re-index + a zustand
+// notify (waking every mounted selector: board cards, sidebar dots, …) PER
+// TOKEN — pure bookkeeping, since the visible markdown already repaints on its
+// own ~90ms throttle. Buffer pi events and flush them in one set() per ~frame:
+// the reducer runs per event (ordering-exact), but the copies, re-index, and
+// notify happen once per flush.
+//
+// Ordering with other actions is preserved by flushing the buffer synchronously
+// at the head of every other mutation (userSent, reset, endStream, …), so an
+// interleaved action can never observe—or apply against—pre-buffer state.
+
+const FLUSH_MS = 16;
+let pendingPiEvents: { id: string; event: PiEvent }[] = [];
+let piFlushTimer: number | null = null;
+
+function flushPiEvents() {
+  if (piFlushTimer != null) {
+    clearTimeout(piFlushTimer);
+    piFlushTimer = null;
+  }
+  if (pendingPiEvents.length === 0) return;
+  const batch = pendingPiEvents;
+  pendingPiEvents = [];
+  useChatStore.setState((s) => {
+    // Group per conversation, preserving each conversation's event order.
+    const byConv = new Map<string, PiEvent[]>();
+    for (const { id, event } of batch) {
+      const q = byConv.get(id);
+      if (q) q.push(event);
+      else byConv.set(id, [event]);
+    }
+    let chats = s.chats;
+    let streamingIds = s.streamingIds;
+    let chatsCopied = false;
+    for (const [id, events] of byConv) {
+      const prev = chats[id] ?? emptyChatState;
+      let next: ChatState = prev;
+      for (const event of events) {
+        next = chatReducer(next, { type: "pi_event", event });
+      }
+      if (next === prev) continue;
+      const withIndex =
+        next.messages !== prev.messages
+          ? { ...next, byKey: indexByKey(next.messages) }
+          : next;
+      if (!chatsCopied) {
+        chats = { ...chats };
+        chatsCopied = true;
+      }
+      chats[id] = withIndex;
+      const wasActive = prev.isStreaming || prev.awaitingAssistant;
+      const isActive = withIndex.isStreaming || withIndex.awaitingAssistant;
+      if (isActive !== wasActive) {
+        streamingIds = new Set(streamingIds);
+        if (isActive) streamingIds.add(id);
+        else streamingIds.delete(id);
+      }
+    }
+    if (!chatsCopied && streamingIds === s.streamingIds) return s;
+    return { chats, streamingIds };
+  });
+}
+
+function schedulePiFlush() {
+  if (piFlushTimer != null) return;
+  piFlushTimer = window.setTimeout(flushPiEvents, FLUSH_MS);
+}
+
 // ---------- In-memory LRU -------------------------------------------------
 //
 // Every conversation you open stays fully resident (messages + byKey index)
@@ -149,7 +220,8 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   chats: {},
   streamingIds: new Set<string>(),
   hydrated: {},
-  ensure: (id) =>
+  ensure: (id) => {
+    flushPiEvents();
     set((s) => {
       touchAccess(id);
       const chats = id in s.chats ? s.chats : { ...s.chats, [id]: emptyChatState };
@@ -162,8 +234,10 @@ export const useChatStore = create<ChatsStore>()((set) => ({
         streamingIds = withoutStreaming(streamingIds, d);
       }
       return { chats: nextChats, streamingIds };
-    }),
+    });
+  },
   drop: (id) => {
+    flushPiEvents();
     const i = accessOrder.indexOf(id);
     if (i !== -1) accessOrder.splice(i, 1);
     set((s) => {
@@ -174,20 +248,37 @@ export const useChatStore = create<ChatsStore>()((set) => ({
     });
   },
   reset: (id, messages) => {
+    flushPiEvents();
     touchAccess(id);
     set((s) => step(s, id, { type: "reset", messages }));
   },
-  userSent: (id, text, images, files) =>
-    set((s) => step(s, id, { type: "user_sent", text, images, files })),
-  piEvent: (id, event) => set((s) => step(s, id, { type: "pi_event", event })),
-  bashStart: (id, key, command, cwd) =>
-    set((s) => step(s, id, { type: "bash_start", key, command, cwd })),
-  bashDone: (id, key, result) =>
-    set((s) => step(s, id, { type: "bash_done", key, result })),
-  setError: (id, message) =>
-    set((s) => step(s, id, { type: "set_error", message })),
-  endStream: (id) => set((s) => step(s, id, { type: "end_stream" })),
+  userSent: (id, text, images, files) => {
+    flushPiEvents();
+    set((s) => step(s, id, { type: "user_sent", text, images, files }));
+  },
+  // Streaming hot path: buffered, applied once per frame (see flushPiEvents).
+  piEvent: (id, event) => {
+    pendingPiEvents.push({ id, event });
+    schedulePiFlush();
+  },
+  bashStart: (id, key, command, cwd) => {
+    flushPiEvents();
+    set((s) => step(s, id, { type: "bash_start", key, command, cwd }));
+  },
+  bashDone: (id, key, result) => {
+    flushPiEvents();
+    set((s) => step(s, id, { type: "bash_done", key, result }));
+  },
+  setError: (id, message) => {
+    flushPiEvents();
+    set((s) => step(s, id, { type: "set_error", message }));
+  },
+  endStream: (id) => {
+    flushPiEvents();
+    set((s) => step(s, id, { type: "end_stream" }));
+  },
   hydrate: (id, messages) => {
+    flushPiEvents();
     touchAccess(id);
     return set((s) => ({
       chats: {
@@ -205,6 +296,7 @@ export const useChatStore = create<ChatsStore>()((set) => ({
     }));
   },
   cloneRendered: (fromId, toId, throughKey) => {
+    flushPiEvents();
     touchAccess(toId);
     let cloned: RenderedMessage[] | null = null;
     set((s) => {
@@ -237,13 +329,6 @@ export const useChatStore = create<ChatsStore>()((set) => ({
 }));
 
 // ---------- Selectors ----------------------------------------------------
-
-const EMPTY_CHAT: ChatState = emptyChatState;
-
-/** Whole chat object — use sparingly (re-renders on any change in that conv). */
-export function useChat(convId: string | null | undefined): ChatState {
-  return useChatStore((s) => (convId ? s.chats[convId] : undefined) ?? EMPTY_CHAT);
-}
 
 /** Just the ordered list of message keys. Stable unless messages are added/removed. */
 export function useMessageKeys(convId: string | null | undefined): string[] {

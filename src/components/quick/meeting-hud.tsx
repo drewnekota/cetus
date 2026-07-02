@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader, Square } from "lucide-react";
 import { api, onAppEvent } from "@/lib/tauri";
+import { formatElapsed } from "@/lib/format";
 import { tt } from "@/lib/i18n";
 
 /** The floating meeting-recording pill. The component IS the pill — it floats
@@ -61,8 +62,7 @@ export function MeetingHud() {
 
   if (startedTs === null) return null;
 
-  const secs = Math.max(0, Math.floor((Date.now() - startedTs) / 1000));
-  const elapsed = `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, "0")}`;
+  const elapsed = formatElapsed(startedTs);
 
   async function onStop() {
     setStopping(true);
