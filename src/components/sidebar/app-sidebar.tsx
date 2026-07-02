@@ -2,9 +2,9 @@
 import {
   memo,
   useCallback,
-  useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -127,7 +127,6 @@ export const AppSidebar = memo(function AppSidebar({
     [shortcuts],
   );
   const { width, startResize, resetWidth } = useSidebarWidth();
-  const nowMs = useMinuteClock();
   const groups = useMemo(
     () => groupByWorkspace(conversations, workspaceDirs, hiddenWorkspaceDirs),
     [conversations, workspaceDirs, hiddenWorkspaceDirs],
@@ -176,7 +175,10 @@ export const AppSidebar = memo(function AppSidebar({
       className={cn(
         // `relative` anchors the drag-to-resize handle pinned to the right edge.
         "relative",
-        "bg-sidebar/62 backdrop-blur-2xl backdrop-saturate-200 dark:bg-sidebar/58",
+        // Frosted look, but cheaper: a smaller blur radius and lower saturation
+        // cut the GPU recomposite cost of this large translucent surface, which
+        // otherwise compounds with a long conversation list into scroll jank.
+        "bg-sidebar/62 backdrop-blur-xl backdrop-saturate-150 dark:bg-sidebar/58",
         // Keep the sidebar on the explicit theme token instead of macOS
         // vibrancy, so light mode stays at the Codex-like #f8f8f9.
         // Trim the row scale a notch below shadcn's defaults: 13px text (vs
@@ -345,7 +347,6 @@ export const AppSidebar = memo(function AppSidebar({
                   activeId={activeId}
                   streamingIds={streamingIds}
                   unreadCompletedIds={unreadCompletedIds}
-                  nowMs={nowMs}
                   archiveShortcut={shortcutLabels.archiveChat}
                   onNew={onNew}
                   onSelect={onSelect}
@@ -409,7 +410,6 @@ interface WorkspaceGroupViewProps {
   activeId: string | null;
   streamingIds: Set<string>;
   unreadCompletedIds: Set<string>;
-  nowMs: number;
   archiveShortcut: string;
   onNew: (workspaceDir?: string) => void;
   onSelect: (id: string) => void;
@@ -429,7 +429,6 @@ function WorkspaceGroupView({
   activeId,
   streamingIds,
   unreadCompletedIds,
-  nowMs,
   archiveShortcut,
   onNew,
   onSelect,
@@ -510,7 +509,6 @@ function WorkspaceGroupView({
               active={c.id === activeId}
               streaming={streamingIds.has(c.id)}
               unreadCompleted={unreadCompletedIds.has(c.id)}
-              nowMs={nowMs}
               onSelect={onSelect}
               onArchive={onArchive}
               archiveShortcut={archiveShortcut}
@@ -688,24 +686,56 @@ function useSidebarWidth() {
   return { width, startResize, resetWidth };
 }
 
-function useMinuteClock() {
-  const [nowMs, setNowMs] = useState(() => Date.now());
-
-  useEffect(() => {
-    const update = () => setNowMs(Date.now());
-    let interval: number | undefined;
-    const first = window.setTimeout(() => {
-      update();
-      interval = window.setInterval(update, 60_000);
+// A single app-wide minute clock. Rows subscribe individually via
+// useSyncExternalStore, so a tick re-renders only the conversation rows (whose
+// relative-time label can change) — not the whole sidebar, the dnd context, or
+// the workspace groups, the way prop-drilling a `nowMs` down the tree did.
+// Offscreen rows that re-render are skipped at layout/paint by
+// `content-visibility:auto`, so the per-minute cost stays flat no matter how
+// many conversations exist. The interval runs only while at least one row is
+// mounted, aligned to the wall-clock minute boundary.
+const minuteClock = (() => {
+  let now = Date.now();
+  const listeners = new Set<() => void>();
+  let first: number | undefined;
+  let interval: number | undefined;
+  const tick = () => {
+    now = Date.now();
+    for (const l of listeners) l();
+  };
+  const ensureRunning = () => {
+    if (first !== undefined || interval !== undefined) return;
+    first = window.setTimeout(() => {
+      first = undefined;
+      tick();
+      interval = window.setInterval(tick, 60_000);
     }, 60_000 - (Date.now() % 60_000));
+  };
+  const stop = () => {
+    if (first !== undefined) window.clearTimeout(first);
+    if (interval !== undefined) window.clearInterval(interval);
+    first = undefined;
+    interval = undefined;
+  };
+  return {
+    subscribe(cb: () => void) {
+      listeners.add(cb);
+      ensureRunning();
+      return () => {
+        listeners.delete(cb);
+        if (listeners.size === 0) stop();
+      };
+    },
+    get: () => now,
+  };
+})();
 
-    return () => {
-      window.clearTimeout(first);
-      if (interval) window.clearInterval(interval);
-    };
-  }, []);
-
-  return nowMs;
+function useMinuteNow(): number {
+  return useSyncExternalStore(
+    minuteClock.subscribe,
+    minuteClock.get,
+    minuteClock.get,
+  );
 }
 
 function SidebarResizeHandle({
@@ -738,7 +768,6 @@ const ConversationRow = memo(function ConversationRow({
   active,
   streaming,
   unreadCompleted,
-  nowMs,
   onSelect,
   onArchive,
   archiveShortcut,
@@ -747,16 +776,23 @@ const ConversationRow = memo(function ConversationRow({
   active: boolean;
   streaming: boolean;
   unreadCompleted: boolean;
-  nowMs: number;
   onSelect: (id: string) => void;
   onArchive: (c: Conversation) => void;
   archiveShortcut: string;
 }) {
   const { t } = useTranslation("sidebar");
+  // Read the minute clock here rather than as a prop, so a tick re-renders only
+  // the rows — not the whole sidebar tree (see minuteClock above).
+  const nowMs = useMinuteNow();
   const archived = !!conversation.archivedAt;
   const title = conversation.title || t("conversation.untitled");
   const relativeTime = formatRelativeTime(conversation.updatedAt, nowMs);
   return (
+    // NB: no `content-visibility:auto` here. The sidebar's `backdrop-blur`
+    // ancestor establishes a containing block that breaks the browser's
+    // in-viewport detection for content-visibility, so rows get skipped
+    // (blank) even while visible. The minute-clock scoping already removed the
+    // per-minute re-render cost; a long list would need a real virtualizer.
     <SidebarMenuItem>
       <SidebarMenuButton
         onClick={() => onSelect(conversation.id)}

@@ -100,22 +100,83 @@ function withoutStreaming(set: Set<string>, id: string): Set<string> {
   return next;
 }
 
+// ---------- In-memory LRU -------------------------------------------------
+//
+// Every conversation you open stays fully resident (messages + byKey index)
+// otherwise, so a long session that touches many chats grows the heap without
+// bound → GC pressure and a gradually slower app. We cap the number of resident
+// conversations and evict the least-recently-opened ones. Eviction is safe:
+// the sidebar list comes from page state, not this store, and reopening an
+// evicted conv rehydrates it from the IndexedDB cache (or pi history). The
+// active conv is always the most-recently-touched, so it is never evicted, and
+// any conv with an in-flight run is skipped.
+//
+// The cap sits above the board view's warm-up set (WARMUP_CAP = 90 cards
+// hydrated for previews), so normal board use never trips eviction; this only
+// bounds the unbounded accumulation from opening many chats over a session.
+
+const MAX_RESIDENT_CHATS = 128;
+/** Conversation ids in least-recently-opened → most-recent order. */
+const accessOrder: string[] = [];
+
+function touchAccess(id: string) {
+  const i = accessOrder.indexOf(id);
+  if (i !== -1) accessOrder.splice(i, 1);
+  accessOrder.push(id);
+}
+
+/** Pick LRU conversations to evict so `chats` fits MAX_RESIDENT_CHATS, never
+ *  evicting `keepId` or any conv with an active run. */
+function evictionTargets(
+  chats: Record<string, ChatState>,
+  streamingIds: Set<string>,
+  keepId: string,
+): string[] {
+  const residentCount = Object.keys(chats).length;
+  if (residentCount <= MAX_RESIDENT_CHATS) return [];
+  const drops: string[] = [];
+  let remaining = residentCount;
+  for (const id of accessOrder) {
+    if (remaining <= MAX_RESIDENT_CHATS) break;
+    if (id === keepId || !(id in chats) || streamingIds.has(id)) continue;
+    drops.push(id);
+    remaining--;
+  }
+  return drops;
+}
+
 export const useChatStore = create<ChatsStore>()((set) => ({
   chats: {},
   streamingIds: new Set<string>(),
   hydrated: {},
   ensure: (id) =>
-    set((s) =>
-      id in s.chats ? s : { chats: { ...s.chats, [id]: emptyChatState } },
-    ),
-  drop: (id) =>
+    set((s) => {
+      touchAccess(id);
+      const chats = id in s.chats ? s.chats : { ...s.chats, [id]: emptyChatState };
+      const drops = evictionTargets(chats, s.streamingIds, id);
+      if (drops.length === 0) return chats === s.chats ? s : { chats };
+      const nextChats = { ...chats };
+      let streamingIds = s.streamingIds;
+      for (const d of drops) {
+        delete nextChats[d];
+        streamingIds = withoutStreaming(streamingIds, d);
+      }
+      return { chats: nextChats, streamingIds };
+    }),
+  drop: (id) => {
+    const i = accessOrder.indexOf(id);
+    if (i !== -1) accessOrder.splice(i, 1);
     set((s) => {
       if (!(id in s.chats)) return s;
       const next = { ...s.chats };
       delete next[id];
       return { chats: next, streamingIds: withoutStreaming(s.streamingIds, id) };
-    }),
-  reset: (id, messages) => set((s) => step(s, id, { type: "reset", messages })),
+    });
+  },
+  reset: (id, messages) => {
+    touchAccess(id);
+    set((s) => step(s, id, { type: "reset", messages }));
+  },
   userSent: (id, text, images, files) =>
     set((s) => step(s, id, { type: "user_sent", text, images, files })),
   piEvent: (id, event) => set((s) => step(s, id, { type: "pi_event", event })),
@@ -126,8 +187,9 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   setError: (id, message) =>
     set((s) => step(s, id, { type: "set_error", message })),
   endStream: (id) => set((s) => step(s, id, { type: "end_stream" })),
-  hydrate: (id, messages) =>
-    set((s) => ({
+  hydrate: (id, messages) => {
+    touchAccess(id);
+    return set((s) => ({
       chats: {
         ...s.chats,
         [id]: {
@@ -140,8 +202,10 @@ export const useChatStore = create<ChatsStore>()((set) => ({
       // A hydrated (cached, settled) render is never mid-stream.
       streamingIds: withoutStreaming(s.streamingIds, id),
       hydrated: { ...s.hydrated, [id]: true },
-    })),
+    }));
+  },
   cloneRendered: (fromId, toId, throughKey) => {
+    touchAccess(toId);
     let cloned: RenderedMessage[] | null = null;
     set((s) => {
       const from = s.chats[fromId];
@@ -220,6 +284,57 @@ export function useMessageRoles(
   );
 }
 const EMPTY_ROLES: RenderedMessage["role"][] = [];
+
+/** Keys of the user messages, in order — one per turn. Drives the turn
+ *  navigator (TOC), where each tick maps to a user prompt. Shallow-stable: only
+ *  changes when a user message is added/removed, never on a streaming token. */
+export function useUserTurnKeys(convId: string | null | undefined): string[] {
+  return useChatStore(
+    useShallow((s) => {
+      const c = convId ? s.chats[convId] : undefined;
+      if (!c) return EMPTY_KEYS;
+      const out: string[] = [];
+      for (const m of c.messages) if (m.role === "user") out.push(m.key);
+      return out.length ? out : EMPTY_KEYS;
+    }),
+  );
+}
+
+function firstText(m: RenderedMessage | undefined): string {
+  if (!m) return "";
+  for (const b of m.blocks) {
+    if (b.kind === "text" && b.text.trim()) return b.text.trim();
+  }
+  return "";
+}
+
+/** Non-reactive read (called on hover, not subscribed) of a turn's preview for
+ *  the navigator popover: the user prompt plus a snippet of the assistant reply
+ *  that followed it. Kept off the reactive path so the navigator never
+ *  re-renders per streaming token. */
+export function getTurnPreview(
+  convId: string | null | undefined,
+  key: string,
+): { prompt: string; reply: string } {
+  const c = convId ? useChatStore.getState().chats[convId] : undefined;
+  if (!c) return { prompt: "", reply: "" };
+  const idx = c.messages.findIndex((m) => m.key === key);
+  if (idx < 0) return { prompt: "", reply: "" };
+  const prompt = firstText(c.messages[idx]);
+  let reply = "";
+  for (let i = idx + 1; i < c.messages.length; i++) {
+    const m = c.messages[i];
+    if (m.role === "user") break;
+    if (m.role === "assistant") {
+      const t = firstText(m);
+      if (t) {
+        reply = t;
+        break;
+      }
+    }
+  }
+  return { prompt, reply };
+}
 
 /** Several messages by key — re-renders only when one of *these* messages
  *  changes (useShallow does element-wise ref comparison). Drives the grouped

@@ -68,7 +68,11 @@ pull in later when a similar task recurs.\n\n\
 A good skill is a GENERALIZABLE, repeatable procedure or body of knowledge the \
 user will plausibly need AGAIN: a multi-step workflow they walked you through, a \
 project or tooling convention specific to how THEY work, a non-obvious technique \
-that worked, or domain knowledge particular to their recurring tasks.\n\n\
+that worked, or domain knowledge particular to their recurring tasks. A correction \
+the user made to your APPROACH for a whole class of task also qualifies — capture \
+the corrected steps as the convention to follow next time. (A one-off style gripe, \
+though — \"too verbose\", \"stop explaining\" — is a preference for MEMORY, not a \
+skill; don't propose a skill for it.)\n\n\
 Your DEFAULT is to propose NOTHING. Most conversations yield no durable skill — \
 that is normal and expected. Only propose one when you are confident it will save \
 real work in a future, unrelated session.\n\n\
@@ -77,7 +81,12 @@ DO NOT propose (these are the common mistakes — be strict):\n\
 \"answered question Y\"). A skill is reusable know-how, not a task log.\n\
 - Environment-specific failures or transient state (\"the browser was broken\", \
 \"the build failed because a key was missing\"). NEVER encode a temporary problem \
-as a standing instruction — the assistant would wrongly follow it for months.\n\
+as a standing instruction — the assistant would wrongly follow it for months. In \
+particular, never turn a negative capability claim (\"X tool doesn't work\", \
+\"can't do Y\") into a skill: it hardens into a refusal the assistant keeps citing \
+against itself long after the problem is fixed. If a tool failed only because of \
+setup, the durable lesson is the FIX (the install/config/env step), not the \
+failure.\n\
 - Anything re-derivable from the user's code, git history, or files.\n\
 - A skill that duplicates or barely differs from an EXISTING skill (listed below).\n\
 - Generic programming knowledge any assistant already has.\n\n\

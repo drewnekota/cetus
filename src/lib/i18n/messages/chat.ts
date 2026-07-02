@@ -71,6 +71,7 @@ export const chat = {
     "pane.removeFromQueue": "Remove from queue",
     "pane.retry": "Retry",
     "pane.retrying": "Retrying…",
+    "pane.loadEarlier": "Load earlier messages",
     "quote.addToChat": "Add to chat",
 
     // Message bubble
@@ -220,6 +221,7 @@ export const chat = {
     "pane.removeFromQueue": "从队列移除",
     "pane.retry": "重试",
     "pane.retrying": "重试中…",
+    "pane.loadEarlier": "加载更早的消息",
     "quote.addToChat": "添加到对话",
 
     "bubble.attachment": "附件",

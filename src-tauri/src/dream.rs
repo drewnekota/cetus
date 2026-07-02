@@ -76,9 +76,13 @@ Your DEFAULT is to save NOTHING. Most conversations contain nothing durable — 
 that is normal and expected. Only save a fact if you are confident the user would \
 still want the assistant to know it weeks from now, in a completely unrelated \
 conversation.\n\n\
-SAVE only: the user's stable preferences (tools, languages, style), their ongoing \
-projects and goals, recurring workflows and conventions, and important decisions \
-they expect to be honored later.\n\n\
+SAVE only: the user's stable preferences (tools, languages, style), how they \
+expect you to behave and communicate, their ongoing projects and goals, recurring \
+workflows and conventions, and important decisions they expect to be honored \
+later. A correction or frustration the user voices about HOW you work — \"stop \
+doing X\", \"you're too verbose\", \"always use Y\", \"don't explain, just answer\", \
+or an explicit \"remember that …\" — is a FIRST-CLASS durable preference: save it \
+so the next conversation starts already knowing.\n\n\
 DO NOT save (these are the common mistakes — be strict):\n\
 - One-off tasks or how they were done (\"helped delete a launchd job\", \"fixed a \
 bug in X\", \"answered a question about Y\"). The fact that a task happened is NOT durable.\n\
