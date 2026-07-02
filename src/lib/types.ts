@@ -549,6 +549,8 @@ export interface Conversation {
   sessionFile: string;
   /** Absolute path used as pi's cwd for this conversation. */
   workspaceDir: string;
+  /** Coding-agent backend: "pi" (default) | "claude-code" | "codex". */
+  backend?: string;
   model: ModelChoice;
   createdAt: number;
   updatedAt: number;

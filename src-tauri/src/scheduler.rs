@@ -338,6 +338,7 @@ async fn create_conversation(
         parallel_group_id: None,
         solution_index: None,
         review_state: "none".to_string(),
+        backend: crate::store::default_backend(),
     };
     // Register the pi in the shared pool BEFORE the row becomes visible, so a
     // concurrent pi_for() reuses this process rather than spawning a second one

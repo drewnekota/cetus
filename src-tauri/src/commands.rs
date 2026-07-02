@@ -384,6 +384,7 @@ pub async fn new_conversation(
         parallel_group_id: None,
         solution_index: None,
         review_state: "none".to_string(),
+        backend: crate::store::default_backend(),
     };
     state.store.insert(&c).map_err(err)?;
     Ok(c)
@@ -449,6 +450,7 @@ pub async fn fork_conversation(
         parallel_group_id: None,
         solution_index: None,
         review_state: "none".to_string(),
+        backend: crate::store::default_backend(),
     };
     state.store.insert(&c).map_err(err)?;
 
@@ -653,6 +655,71 @@ pub async fn send_prompt(
     message: String,
     images: Option<Vec<ImageAttachment>>,
 ) -> CmdResult<()> {
+    // Route CLI-agent backends (claude-code / codex) to the headless-CLI runner
+    // instead of the long-lived pi RPC. Each turn spawns the vendor CLI in the
+    // conversation's workspace (isolated in a git worktree when it's a repo) and
+    // streams its events into the same `app-event` channel the pi path uses, so
+    // the chat UI renders a claude/codex turn with no frontend changes.
+    let conv = state
+        .store
+        .get(&id)
+        .map_err(err)?
+        .ok_or_else(|| "conversation not found".to_string())?;
+    if let Some(backend) = cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend) {
+        let sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
+            std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(state.handle().clone()));
+        let ws = std::path::PathBuf::from(&conv.workspace_dir);
+        std::fs::create_dir_all(&ws).ok();
+        // Isolate in a per-conversation worktree when the workspace is a git repo
+        // (the Superset/Conductor pattern); otherwise run in the workspace itself.
+        let cwd = if cetus_bridge::worktree::is_git_repo(&ws) {
+            cetus_bridge::worktree::ensure_worktree(&ws, &id, None).unwrap_or_else(|_| ws.clone())
+        } else {
+            ws.clone()
+        };
+        let env = secrets::load_env();
+        let opts = cetus_bridge::cli_agent::CliRunOpts {
+            model: None,
+            // Reuse session_file as the CLI resume token (claude session_id /
+            // codex thread_id) so a conversation keeps context across turns.
+            resume: (!conv.session_file.is_empty()).then(|| conv.session_file.clone()),
+            bypass_approvals: false,
+        };
+        let bin = backend.default_bin().to_string();
+        let prompt = message.clone();
+        let store = state.store.clone();
+        let conv_id = id.clone();
+        // Fire-and-stream: return promptly; events arrive over the sink like pi.
+        tokio::spawn(async move {
+            match cetus_bridge::cli_agent::run_cli_turn(
+                sink,
+                backend,
+                &bin,
+                &cwd,
+                &prompt,
+                Some(conv_id.clone()),
+                env,
+                opts,
+            )
+            .await
+            {
+                Ok(Some(resume)) => {
+                    store.set_session_file(&conv_id, &resume).ok();
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::error!("cli backend {} turn failed: {e:#}", backend.as_str());
+                }
+            }
+        });
+        let now = now_ms();
+        state.store.touch(&id, now).ok();
+        let title_src = strip_context_fence(&message);
+        let fallback = derive_title(title_src);
+        state.store.set_title_if_empty(&id, &fallback, now).ok();
+        return Ok(());
+    }
+
     let pi = state.pi_for(&id).await.map_err(err)?;
     let image_values: Vec<Value> = images
         .unwrap_or_default()
@@ -694,6 +761,32 @@ pub async fn send_prompt(
             fallback,
         );
     }
+    Ok(())
+}
+
+/// Fetch a single conversation row (read-only). Used by the backend picker to
+/// show the conversation's current backend without a full list scan.
+#[tauri::command]
+pub async fn get_conversation(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Option<crate::store::Conversation>> {
+    state.store.get(&id).map_err(err)
+}
+
+/// Switch which coding-agent backend serves a conversation:
+/// "pi" (built-in) | "claude-code" | "codex". The next `send_prompt` routes
+/// accordingly. Idempotent.
+#[tauri::command]
+pub async fn set_conversation_backend(
+    state: State<'_, AppState>,
+    id: String,
+    backend: String,
+) -> CmdResult<()> {
+    state
+        .store
+        .set_backend(&id, &backend, now_ms())
+        .map_err(err)?;
     Ok(())
 }
 

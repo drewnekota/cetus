@@ -133,6 +133,13 @@ export const api = {
   /** Set the human-in-the-loop review state; returns the updated row. */
   setReviewState: (id: string, state: ReviewState) =>
     invoke<Conversation>("set_review_state", { id, stateValue: state }),
+  /** Read a single conversation row (for the backend picker's current value). */
+  getConversation: (id: string) =>
+    invoke<Conversation | null>("get_conversation", { id }),
+  /** Switch the coding-agent backend for a conversation:
+   *  "pi" | "claude-code" | "codex". The next send_prompt routes accordingly. */
+  setConversationBackend: (id: string, backend: string) =>
+    invoke<void>("set_conversation_backend", { id, backend }),
   deleteConversation: (id: string) => invoke<void>("delete_conversation", { id }),
   renameConversation: (id: string, title: string) =>
     invoke<Conversation>("rename_conversation", { id, title }),

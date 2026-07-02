@@ -297,6 +297,7 @@ async fn op_agent_prompt(
         parallel_group_id: None,
         solution_index: None,
         review_state: "none".to_string(),
+        backend: crate::store::default_backend(),
     };
     state
         .store

@@ -1,5 +1,13 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
@@ -13,12 +21,14 @@ import {
   type QueuedMessage,
 } from "@/components/chat/composer";
 import {
+  getTurnPreview,
   useAwaitingAssistant,
   useChatError,
   useHasMessages,
   useIsStreaming,
   useMessageKeys,
   useMessageRoles,
+  useUserTurnKeys,
 } from "@/lib/chat-store";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeadline } from "@/lib/chat-flavor";
@@ -112,6 +122,9 @@ export function ChatPane({
     quoteIdRef.current += 1;
     setQuoteRequest({ id: quoteIdRef.current, text });
   }, []);
+  // Lifted out of MessageList so the turn navigator (sibling overlay) can drive
+  // the same scroll container — scroll-to-turn and active-turn tracking.
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   if (!hasMessages) {
     return (
@@ -128,6 +141,7 @@ export function ChatPane({
             disabled={disabled}
             streaming={isStreaming}
             modelChoice={modelChoice}
+            conversationId={convId}
             onModelChange={onModelChange}
             workspaceDir={workspaceDir}
             defaultWorkspace={defaultWorkspace}
@@ -146,15 +160,19 @@ export function ChatPane({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <MessageList
-        convId={convId}
-        isStreaming={isStreaming}
-        onRegenerate={onRegenerate}
-        onRetry={onRetry}
-        onForkMessage={onForkMessage}
-        retrying={retrying}
-        onQuote={addQuote}
-      />
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <MessageList
+          convId={convId}
+          isStreaming={isStreaming}
+          onRegenerate={onRegenerate}
+          onRetry={onRetry}
+          onForkMessage={onForkMessage}
+          retrying={retrying}
+          onQuote={addQuote}
+          scrollRef={scrollRef}
+        />
+        <TurnNavigator convId={convId} scrollRef={scrollRef} />
+      </div>
       <div className="relative z-10 bg-background px-4 pb-3 pt-2">
         <div className="mx-auto max-w-3xl space-y-2">
           {convId ? <AgentControlCard conversationId={convId} /> : null}
@@ -170,6 +188,7 @@ export function ChatPane({
             disabled={disabled}
             streaming={isStreaming}
             modelChoice={modelChoice}
+            conversationId={convId}
             onModelChange={onModelChange}
             workspaceDir={workspaceDir}
             defaultWorkspace={defaultWorkspace}
@@ -187,6 +206,13 @@ export function ChatPane({
     </div>
   );
 }
+
+// Turns mounted on first open of a conversation. Anything older is deferred
+// behind a "Load earlier" button so a long history doesn't parse + lay out in
+// one shot. A turn = one user message or one merged assistant loop.
+const INITIAL_WINDOW = 40;
+// Additional turns revealed per "Load earlier" click.
+const LOAD_STEP = 40;
 
 type MessageGroup =
   | { kind: "assistant"; keys: string[] }
@@ -229,6 +255,7 @@ function MessageList({
   onForkMessage,
   retrying,
   onQuote,
+  scrollRef,
 }: {
   convId: string | null;
   isStreaming: boolean;
@@ -237,20 +264,79 @@ function MessageList({
   onForkMessage?: (messageKey: string, messageIndex: number) => void;
   retrying?: boolean;
   onQuote: (text: string) => void;
+  scrollRef: RefObject<HTMLDivElement | null>;
 }) {
+  const { t } = useTranslation("chat");
   const keys = useMessageKeys(convId);
   const roles = useMessageRoles(convId);
   // Merge consecutive assistant (+tool) messages into one group so the whole
   // agent loop reads as a single turn — one ASSISTANT header, one activity
   // timeline — instead of a header + tool cards per round.
   const groups = useMemo(() => buildGroups(keys, roles), [keys, roles]);
+
+  // Windowing: a very long conversation otherwise mounts every turn at once —
+  // each AssistantGroup runs a full markdown/KaTeX parse on mount and builds a
+  // huge DOM, so opening a long chat hitches. We mount only the turns from
+  // `firstShown` onward and reveal older ones on demand. Unlike a virtualizer
+  // this never unmounts what's already shown (preserving per-message
+  // subscriptions + activity-group expand state, same as the content-visibility
+  // approach below) — it only defers turns that were never on screen.
+  //
+  // `firstShown` is an ABSOLUTE index, not a count-from-end, so appending a new
+  // turn (user send / new agent reply) never slides the window and never
+  // unmounts a turn you're scrolled up reading — it only grows the tail.
+  const [firstShown, setFirstShown] = useState(0);
+  // Re-anchor to the tail on conversation switch and on the first load of a
+  // conversation's messages (groups 0 → N). Adjusting state during render
+  // (guarded by a ref) is React's sanctioned pattern here: it restarts the
+  // render with the corrected value before committing, so a long history never
+  // momentarily mounts in full. After load, appends leave `firstShown` put.
+  const windowInitRef = useRef<{ conv: string | null; loaded: boolean }>({
+    conv: null,
+    loaded: false,
+  });
+  if (
+    windowInitRef.current.conv !== convId ||
+    (!windowInitRef.current.loaded && groups.length > 0)
+  ) {
+    windowInitRef.current = { conv: convId, loaded: groups.length > 0 };
+    setFirstShown(Math.max(0, groups.length - INITIAL_WINDOW));
+  }
+  // Clamp in case a rollback (regenerate) shrank the list past the window.
+  const safeFirstShown = Math.min(firstShown, Math.max(0, groups.length - 1));
+  const hiddenCount = safeFirstShown;
+  const visibleGroups = useMemo(
+    () => (hiddenCount > 0 ? groups.slice(hiddenCount) : groups),
+    [groups, hiddenCount],
+  );
+
   const awaiting = useAwaitingAssistant(convId);
   // When the turn errored, the inline MessageError row owns the Retry action —
   // don't also put a Regenerate on the trailing user bubble (avoid two buttons).
   const hasError = !!useChatError(convId);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  // Set just before a "Load earlier" reveal so we can restore the reading
+  // position after the prepended turns grow the scroll height (otherwise the
+  // viewport jumps as content is added above).
+  const anchorRef = useRef<{ height: number; top: number } | null>(null);
+
+  const loadEarlier = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) anchorRef.current = { height: el.scrollHeight, top: el.scrollTop };
+    setFirstShown((f) => Math.max(0, f - LOAD_STEP));
+  }, []);
+
+  // Keep the previously-top turn pinned in place after a reveal. Runs before
+  // paint so there's no visible jump. Only fires when an anchor was armed by
+  // loadEarlier — the conversation-switch reset leaves it null.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const anchor = anchorRef.current;
+    if (!el || !anchor) return;
+    anchorRef.current = null;
+    el.scrollTop = anchor.top + (el.scrollHeight - anchor.height);
+  }, [safeFirstShown]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -293,8 +379,19 @@ function MessageList({
     >
       <QuoteSelectionToolbar containerRef={contentRef} scrollRef={scrollRef} onQuote={onQuote} />
       <div ref={contentRef} className="mx-auto max-w-3xl px-6 py-4">
-        {groups.map((g, gi) => {
-          const isLast = gi === groups.length - 1;
+        {hiddenCount > 0 && (
+          <div className="flex justify-center pb-3">
+            <button
+              type="button"
+              onClick={loadEarlier}
+              className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {t("pane.loadEarlier")}
+            </button>
+          </div>
+        )}
+        {visibleGroups.map((g, gi) => {
+          const isLast = gi === visibleGroups.length - 1;
           const messageIndex =
             g.kind === "assistant"
               ? keys.indexOf(g.keys[g.keys.length - 1])
@@ -340,6 +437,8 @@ function MessageList({
           return (
             <div
               key={g.kind === "assistant" ? g.keys[0] : g.key}
+              // Tag user turns so the turn navigator can scroll to / track them.
+              data-turn-key={g.kind === "single" ? g.key : undefined}
               style={
                 isLast
                   ? undefined
@@ -355,6 +454,150 @@ function MessageList({
           <MessageError convId={convId} onRetry={onRetry} retrying={retrying} />
         )}
       </div>
+    </div>
+  );
+}
+
+/** Codex-style turn navigator: a thin gutter of ticks down the left edge, one
+ *  per user turn. Ticks are evenly spaced and clustered together, vertically
+ *  centered in the viewport (not spread across the full scroll height). The
+ *  active tick (turn nearest the top of the viewport) brightens as you
+ *  scroll; hovering a tick ripples outward to its neighbors and reveals a
+ *  preview popover (prompt + reply snippet); click scrolls that turn to the
+ *  top. Lives in the otherwise-empty left margin (content is centered
+ *  max-w-3xl), and is pointer-transparent except on the ticks themselves so
+ *  it never fights text selection. */
+function TurnNavigator({
+  convId,
+  scrollRef,
+}: {
+  convId: string | null;
+  scrollRef: RefObject<HTMLDivElement | null>;
+}) {
+  const turnKeys = useUserTurnKeys(convId);
+  const [active, setActive] = useState(0);
+  const [hover, setHover] = useState<number | null>(null);
+
+  const findNode = useCallback(
+    (key: string) =>
+      scrollRef.current?.querySelector<HTMLElement>(
+        `[data-turn-key="${CSS.escape(key)}"]`,
+      ) ?? null,
+    [scrollRef],
+  );
+
+  // Track which turn sits at the top of the viewport so the matching tick
+  // brightens. rAF-throttled to stay off the scroll hot path.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || turnKeys.length === 0) return;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const top = el.getBoundingClientRect().top;
+      let next = 0;
+      for (let i = 0; i < turnKeys.length; i++) {
+        const node = findNode(turnKeys[i]);
+        if (!node) continue;
+        // The last turn whose top has scrolled above the fold is active.
+        if (node.getBoundingClientRect().top - top <= 8) next = i;
+        else break;
+      }
+      setActive(next);
+    };
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    update();
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [scrollRef, turnKeys, findNode]);
+
+  const scrollToTurn = useCallback(
+    (key: string) => {
+      const el = scrollRef.current;
+      const node = findNode(key);
+      if (!el || !node) return;
+      const delta =
+        node.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      el.scrollTo({ top: el.scrollTop + delta - 12, behavior: "smooth" });
+    },
+    [scrollRef, findNode],
+  );
+
+  if (turnKeys.length < 2) return null;
+
+  return (
+    <div className="pointer-events-none absolute inset-y-0 left-0 z-20 hidden w-12 sm:flex sm:flex-col sm:items-start sm:justify-center">
+      <div className="flex flex-col items-start gap-0.5">
+        {turnKeys.map((key, i) => {
+          const isActive = i === active;
+          // Idle: every tick is the same small width, only color marks the
+          // active one. Wave/ripple effect: while hovering, ticks near the
+          // hovered one widen and brighten too, tapering off with distance,
+          // like a dock magnification effect.
+          const dist = hover === null ? null : Math.abs(i - hover);
+          const width =
+            dist === 0 ? "w-5" : dist === 1 ? "w-4" : dist === 2 ? "w-3" : "w-2.5";
+          const color =
+            dist === 0
+              ? "bg-foreground"
+              : dist === 1
+                ? "bg-foreground/70"
+                : dist === 2
+                  ? "bg-foreground/50"
+                  : isActive
+                    ? "bg-foreground/60"
+                    : "bg-muted-foreground/40";
+          return (
+            <div
+              key={key}
+              className="pointer-events-auto relative flex items-center"
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover((h) => (h === i ? null : h))}
+            >
+              <button
+                type="button"
+                aria-label={`Jump to message ${i + 1}`}
+                onClick={() => scrollToTurn(key)}
+                className="flex h-3 items-center pl-3 pr-2"
+              >
+                <span
+                  className={`block h-0.5 rounded-full transition-all duration-150 ${width} ${color}`}
+                />
+              </button>
+              {hover === i && <TurnPreview convId={convId} turnKey={key} />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TurnPreview({
+  convId,
+  turnKey,
+}: {
+  convId: string | null;
+  turnKey: string;
+}) {
+  const { prompt, reply } = useMemo(
+    () => getTurnPreview(convId, turnKey),
+    [convId, turnKey],
+  );
+  if (!prompt && !reply) return null;
+  return (
+    <div className="pointer-events-none absolute left-9 top-1/2 w-72 -translate-y-1/2 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.08)]">
+      {prompt && (
+        <p className="line-clamp-2 text-xs font-medium text-foreground">{prompt}</p>
+      )}
+      {reply && (
+        <p className="mt-1.5 line-clamp-3 text-xs text-muted-foreground">{reply}</p>
+      )}
     </div>
   );
 }

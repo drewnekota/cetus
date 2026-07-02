@@ -5,6 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
 import { ModelPicker } from "@/components/chat/model-picker";
+import { BackendPicker } from "@/components/chat/backend-picker";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { SlashMenu, type SlashItem } from "@/components/chat/slash-menu";
 import { cn } from "@/lib/utils";
@@ -76,6 +77,9 @@ interface Props {
   streaming?: boolean;
   modelChoice: ModelChoice;
   onModelChange: (next: ModelChoice) => void;
+  /** Active conversation id — drives the backend picker (pi/claude-code/codex).
+   *  Null on the hero composer before a conversation exists (picker hides). */
+  conversationId?: string | null;
   workspaceDir: string | null;
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
@@ -130,6 +134,7 @@ export function Composer({
   streaming,
   modelChoice,
   onModelChange,
+  conversationId,
   workspaceDir,
   defaultWorkspace,
   onWorkspaceChange,
@@ -685,6 +690,7 @@ export function Composer({
             lockUltra={streaming}
             disabled={disabled}
           />
+          <BackendPicker conversationId={conversationId ?? null} disabled={disabled} />
         </div>
         {bashMode ? (
           // Terminal commands are independent of the agent stream, so always

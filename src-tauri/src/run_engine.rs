@@ -216,6 +216,7 @@ pub async fn run_agent_node(
         parallel_group_id: None,
         solution_index: None,
         review_state: "none".to_string(),
+        backend: crate::store::default_backend(),
     };
     ctx.sched.pool.lock().await.insert(id.clone(), pi.clone());
     if let Err(e) = ctx.sched.store.insert(&conv) {

@@ -42,6 +42,16 @@ pub struct Conversation {
     /// "pending" (agent asked for review → sits in the board's "Needs review"
     /// column) | "approved" | "changes_requested".
     pub review_state: String,
+    /// Which agent runtime backs this conversation: "pi" (default, the built-in
+    /// harness) | "claude-code" | "codex" (headless CLI backends orchestrated via
+    /// [`cetus_bridge::cli_agent`]). Additive; pre-existing rows default to "pi".
+    #[serde(default = "default_backend")]
+    pub backend: String,
+}
+
+/// Default backend for rows/payloads that predate the `backend` column.
+pub fn default_backend() -> String {
+    "pi".to_string()
 }
 
 /// One captured screen frame. Heavy pixels stay on disk at `file_path`; this
@@ -142,7 +152,8 @@ impl Store {
                 source_automation_id TEXT,
                 parallel_group_id TEXT,
                 solution_index INTEGER,
-                review_state TEXT NOT NULL DEFAULT 'none'
+                review_state TEXT NOT NULL DEFAULT 'none',
+                backend TEXT NOT NULL DEFAULT 'pi'
             );
             CREATE INDEX IF NOT EXISTS idx_conv_archived ON conversations (archived_at);
             CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations (updated_at DESC);
@@ -241,6 +252,14 @@ impl Store {
             "review_state",
             "TEXT NOT NULL DEFAULT 'none'",
         )?;
+        // Coding-agent backend selector (pi | claude-code | codex). Additive so
+        // an existing DB keeps its chats; pre-existing rows default to 'pi'.
+        ensure_column(
+            &conn,
+            "conversations",
+            "backend",
+            "TEXT NOT NULL DEFAULT 'pi'",
+        )?;
         // Defensive: a conversations table created before ds_model/reasoning
         // existed (an older shape) won't get them from CREATE TABLE IF NOT
         // EXISTS. Add them additively so reconciliation never leaves a row the
@@ -275,8 +294,8 @@ impl Store {
     pub fn insert(&self, c: &Conversation) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO conversations (id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT INTO conversations (id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 c.id,
                 c.title,
@@ -291,6 +310,7 @@ impl Store {
                 c.parallel_group_id,
                 c.solution_index,
                 c.review_state,
+                c.backend,
             ],
         )?;
         Ok(())
@@ -299,10 +319,10 @@ impl Store {
     pub fn list(&self, include_archived: bool) -> Result<Vec<Conversation>> {
         let conn = self.read_conn.lock().unwrap();
         let sql = if include_archived {
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend
              FROM conversations WHERE archived_at IS NOT NULL ORDER BY archived_at DESC"
         } else {
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend
              FROM conversations WHERE archived_at IS NULL ORDER BY updated_at DESC"
         };
         let mut stmt = conn.prepare(sql)?;
@@ -317,7 +337,7 @@ impl Store {
     pub fn get(&self, id: &str) -> Result<Option<Conversation>> {
         let conn = self.read_conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend
              FROM conversations WHERE id = ?1",
         )?;
         let row = stmt
@@ -341,6 +361,17 @@ impl Store {
         conn.execute(
             "UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3",
             params![title, ts, id],
+        )?;
+        Ok(())
+    }
+
+    /// Switch which coding-agent backend serves a conversation
+    /// ("pi" | "claude-code" | "codex").
+    pub fn set_backend(&self, id: &str, backend: &str, ts: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET backend = ?1, updated_at = ?2 WHERE id = ?3",
+            params![backend, ts, id],
         )?;
         Ok(())
     }
@@ -986,6 +1017,7 @@ fn row_to_conversation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> 
         parallel_group_id: r.get(10)?,
         solution_index: r.get(11)?,
         review_state: r.get(12)?,
+        backend: r.get(13)?,
     })
 }
 
