@@ -62,6 +62,122 @@ pub async fn set_cli_agent_settings(
     save_settings(&state.store, &settings).map_err(|e| e.to_string())
 }
 
+/// What a CLI backend actually runs when no per-conversation override is set,
+/// resolved from the vendor's own config on disk — so the tuning menu can echo
+/// "Default (Fable)" instead of a bare "Default". For codex it also carries the
+/// live model catalog from `models_cache.json` (the CLI's own fetched list),
+/// which replaces the static fallback catalog in the UI. Everything is
+/// best-effort: unreadable config → None → the UI shows a plain "Default".
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CliDefaults {
+    /// Raw configured model id (e.g. "claude-fable-5[1m]" / "gpt-5.5").
+    pub model: Option<String>,
+    /// Raw configured reasoning effort (e.g. "high" / "medium").
+    pub effort: Option<String>,
+    /// Codex only: the models the CLI itself lists (slug + display name).
+    pub models: Option<Vec<CliModelEntry>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliModelEntry {
+    pub id: String,
+    pub label: String,
+}
+
+#[tauri::command]
+pub async fn get_cli_defaults(backend: String) -> Result<CliDefaults, String> {
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map_err(|e| e.to_string())?;
+    Ok(match backend.as_str() {
+        "claude-code" => claude_defaults(&home),
+        "codex" => codex_defaults(&home),
+        _ => CliDefaults::default(),
+    })
+}
+
+fn claude_defaults(home: &Path) -> CliDefaults {
+    let raw =
+        std::fs::read_to_string(home.join(".claude/settings.json")).unwrap_or_default();
+    let v: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+    let s = |key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_string);
+    CliDefaults {
+        model: s("model"),
+        effort: s("effortLevel"),
+        models: None,
+    }
+}
+
+fn codex_defaults(home: &Path) -> CliDefaults {
+    // config.toml: `model` / `model_reasoning_effort` are top-level keys (they
+    // sit above the first [section]), so a line scan beats pulling in a full
+    // TOML parser as a dependency.
+    let cfg = std::fs::read_to_string(home.join(".codex/config.toml")).unwrap_or_default();
+    let mut model = None;
+    let mut effort = None;
+    for line in cfg.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            break;
+        }
+        if let Some(v) = toml_str_value(line, "model") {
+            model = Some(v);
+        }
+        if let Some(v) = toml_str_value(line, "model_reasoning_effort") {
+            effort = Some(v);
+        }
+    }
+    // models_cache.json is the catalog codex itself fetched; "hide" entries are
+    // internal (auto-review etc.).
+    let cache =
+        std::fs::read_to_string(home.join(".codex/models_cache.json")).unwrap_or_default();
+    let cache: Value = serde_json::from_str(&cache).unwrap_or(Value::Null);
+    let entries = cache.get("models").and_then(|m| m.as_array());
+    let models: Vec<CliModelEntry> = entries
+        .map(|arr| {
+            arr.iter()
+                .filter(|m| m.get("visibility").and_then(|v| v.as_str()) != Some("hide"))
+                .filter_map(|m| {
+                    let id = m.get("slug")?.as_str()?.to_string();
+                    let label = m
+                        .get("display_name")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or(&id)
+                        .to_string();
+                    Some(CliModelEntry { id, label })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    // No explicit effort in config → the default model's own default level.
+    if effort.is_none() {
+        effort = entries.and_then(|arr| {
+            arr.iter()
+                .find(|m| m.get("slug").and_then(|s| s.as_str()) == model.as_deref())
+                .and_then(|m| m.get("default_reasoning_level"))
+                .and_then(|d| d.as_str())
+                .map(str::to_string)
+        });
+    }
+    CliDefaults {
+        model,
+        effort,
+        models: (!models.is_empty()).then_some(models),
+    }
+}
+
+/// `key = "value"` on a single TOML line → value. Rejects longer keys sharing
+/// the prefix (`model` won't match `model_reasoning_effort` — the remainder
+/// must start with `=`).
+fn toml_str_value(line: &str, key: &str) -> Option<String> {
+    let rest = line.strip_prefix(key)?.trim_start();
+    let rest = rest.strip_prefix('=')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    rest.split('"').next().map(str::to_string)
+}
+
 /// Answer a claude `control_request` (permission prompt / AskUserQuestion)
 /// surfaced in the chat as a `cli_control_request` event. `response` is the
 /// inner permission result — `{"behavior":"allow","updatedInput":{...}}` or

@@ -27,6 +27,7 @@ import {
   type QuickSessionMode,
 } from "@/lib/types";
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
+import { loadBackendChoice, saveBackendChoice } from "@/lib/backend-choice";
 import { cn } from "@/lib/utils";
 import {
   Tooltip,
@@ -65,10 +66,11 @@ export function QuickPanel() {
   const [modelChoice, setModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
   const [ultraEnabled, setUltraEnabled] = useState(false);
   // Coding-agent runtime the launched task runs on (Cetus / Claude Code /
-  // Codex). Sticky across opens; applies to newly-created conversations.
+  // Codex) plus the CLI backends' model + effort overrides ("" = the CLI's own
+  // defaults). Sticky across opens and shared with the main window's hero
+  // composer via "cetus:lastBackendChoice"; applies to newly-created
+  // conversations.
   const [backend, setBackend] = useState<BackendId>("pi");
-  // CLI backends' model + effort overrides ("" = the CLI's own defaults).
-  // Not persisted — reset with each backend choice.
   const [cliModel, setCliModel] = useState("");
   const [cliEffort, setCliEffort] = useState("");
   // True while the native "Add folder…" dialog is open, so the blur-to-dismiss
@@ -130,11 +132,13 @@ export function QuickPanel() {
     try {
       const saved = localStorage.getItem("cetus:quickWorkspace");
       if (saved) setWorkspaceDir(saved);
-      const savedBackend = localStorage.getItem("cetus:quickBackend");
-      if (savedBackend && BACKENDS.some((b) => b.id === savedBackend)) {
-        setBackend(savedBackend as BackendId);
-      }
     } catch {}
+    const savedBackend = loadBackendChoice();
+    if (savedBackend) {
+      setBackend(savedBackend.backend);
+      setCliModel(savedBackend.cliModel);
+      setCliEffort(savedBackend.cliEffort);
+    }
     setModelChoice(mergeStoredModelChoice);
   }, []);
 
@@ -145,10 +149,24 @@ export function QuickPanel() {
     // Model/effort overrides belong to one backend's catalog.
     setCliModel("");
     setCliEffort("");
-    try {
-      localStorage.setItem("cetus:quickBackend", b.id);
-    } catch {}
+    saveBackendChoice({ backend: b.id, cliModel: "", cliEffort: "" });
   }, []);
+
+  const onCliModelChange = useCallback(
+    (m: string) => {
+      setCliModel(m);
+      saveBackendChoice({ backend, cliModel: m, cliEffort });
+    },
+    [backend, cliEffort],
+  );
+
+  const onCliEffortChange = useCallback(
+    (e: string) => {
+      setCliEffort(e);
+      saveBackendChoice({ backend, cliModel, cliEffort: e });
+    },
+    [backend, cliModel],
+  );
 
   const onWorkspaceChange = useCallback((dir: string) => {
     setWorkspaceDir(dir);
@@ -183,10 +201,16 @@ export function QuickPanel() {
       setScreenshotDenied(p.screenshotDefault && !p.screenshotPermission);
       setIncludeScreenshot(p.screenshotDefault);
       setContext(p.context);
-      // The panel stays mounted across opens, so re-read the shared model choice
-      // each wake — the main window may have changed it (manual pick or just
-      // switching conversations) since we last looked.
+      // The panel stays mounted across opens, so re-read the shared model and
+      // runtime choices each wake — the main window may have changed them
+      // (manual pick or just switching conversations) since we last looked.
       setModelChoice(mergeStoredModelChoice);
+      const savedBackend = loadBackendChoice();
+      if (savedBackend) {
+        setBackend(savedBackend.backend);
+        setCliModel(savedBackend.cliModel);
+        setCliEffort(savedBackend.cliEffort);
+      }
       api.getUltraSettings().then((s) => setUltraEnabled(s.enabled)).catch(() => {});
       focusSoon();
       openingRef.current = true;
@@ -451,8 +475,8 @@ export function QuickPanel() {
             backend={backend}
             model={cliModel}
             effort={cliEffort}
-            onModelChange={setCliModel}
-            onEffortChange={setCliEffort}
+            onModelChange={onCliModelChange}
+            onEffortChange={onCliEffortChange}
             className="h-8 rounded-md border border-black/10 bg-black/5 text-[13px] text-foreground dark:border-white/10 dark:bg-white/5"
           />
         )}

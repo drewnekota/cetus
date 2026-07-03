@@ -175,6 +175,17 @@ export interface CliAgentSettings {
   bypassApprovals: boolean;
 }
 
+/** What a CLI backend actually runs when no override is set, resolved from
+ *  the vendor's config on disk (claude settings.json / codex config.toml), so
+ *  the tuning menu can echo "Default (Fable)" instead of a bare "Default".
+ *  `models` is codex's own fetched catalog (models_cache.json); null → use the
+ *  static fallback catalog. */
+export interface CliDefaults {
+  model: string | null;
+  effort: string | null;
+  models: { id: string; label: string }[] | null;
+}
+
 /** Payload the quick panel forwards to the main window on submit. */
 export interface QuickLaunchPayload {
   text: string;

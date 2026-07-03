@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Bot, Check, ChevronDown, Cpu, SquareTerminal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "@/lib/tauri";
-import type { BackendId } from "@/lib/types";
+import type { BackendId, CliDefaults } from "@/lib/types";
 import {
   Select,
   SelectContent,
@@ -33,7 +33,9 @@ export const BACKENDS: { id: BackendId; label: string; icon: LucideIcon }[] = [
  *  `claude --model` / `codex -m`; "" keeps the CLI's own configured default
  *  (also the graceful fallback if a vendor renames a model — a stale id fails
  *  that one turn with a visible error, nothing sticks). Claude ids are the
- *  CLI's aliases (always resolve to the latest of each tier). */
+ *  CLI's aliases (always resolve to the latest of each tier). The codex list
+ *  is only the fallback when its models_cache.json can't be read — normally
+ *  the live catalog from `api.getCliDefaults` replaces it. */
 export const CLI_MODELS: Record<
   Exclude<BackendId, "pi">,
   { id: string; label: string }[]
@@ -47,15 +49,16 @@ export const CLI_MODELS: Record<
   ],
   codex: [
     { id: "", label: "Default" },
-    { id: "gpt-5.5-codex", label: "GPT-5.5 Codex" },
     { id: "gpt-5.5", label: "GPT-5.5" },
-    { id: "gpt-5.5-codex-mini", label: "GPT-5.5 Codex Mini" },
+    { id: "gpt-5.4", label: "GPT-5.4" },
+    { id: "gpt-5.4-mini", label: "GPT-5.4-Mini" },
+    { id: "gpt-5.3-codex-spark", label: "GPT-5.3-Codex-Spark" },
   ],
 };
 
 /** Reasoning-effort levels per CLI backend, matching what each CLI accepts
  *  natively: `claude --effort` (low…max) / codex `model_reasoning_effort`
- *  (minimal…xhigh). "" keeps the CLI's configured default. */
+ *  (low…xhigh). "" keeps the CLI's configured default. */
 export const CLI_EFFORTS: Record<
   Exclude<BackendId, "pi">,
   { id: string; label: string }[]
@@ -70,13 +73,42 @@ export const CLI_EFFORTS: Record<
   ],
   codex: [
     { id: "", label: "Default" },
-    { id: "minimal", label: "Minimal" },
     { id: "low", label: "Low" },
     { id: "medium", label: "Medium" },
     { id: "high", label: "High" },
     { id: "xhigh", label: "XHigh" },
   ],
 };
+
+/** One fetch of a backend's on-disk defaults per app session, shared by every
+ *  tuning menu instance (composer, quick panel, dialogs). */
+const defaultsCache = new Map<string, Promise<CliDefaults>>();
+function fetchCliDefaults(backend: string): Promise<CliDefaults> {
+  let p = defaultsCache.get(backend);
+  if (!p) {
+    p = api.getCliDefaults(backend).catch(() => ({
+      model: null,
+      effort: null,
+      models: null,
+    }));
+    defaultsCache.set(backend, p);
+  }
+  return p;
+}
+
+/** Human label for a raw configured default: exact catalog id first, then
+ *  substring (claude configs hold full ids like "claude-fable-5[1m]" while the
+ *  catalog carries aliases like "fable"), else the raw string as-is. */
+function resolveDefaultLabel(
+  raw: string | null | undefined,
+  catalog: { id: string; label: string }[],
+): string | null {
+  if (!raw) return null;
+  const exact = catalog.find((m) => m.id && m.id === raw);
+  if (exact) return exact.label;
+  const sub = catalog.find((m) => m.id && raw.includes(m.id));
+  return sub ? sub.label : raw;
+}
 
 /** Combined model + reasoning-effort menu for a CLI backend, styled after
  *  the native codex picker: one compact trigger ("Fable · Max"), a flat list
@@ -99,14 +131,38 @@ export function CliTuningMenu({
   disabled?: boolean;
   className?: string;
 }) {
-  const models = CLI_MODELS[backend];
+  // On-disk defaults (and codex's live model catalog) so "Default" echoes what
+  // it actually resolves to; until they load, plain "Default" renders.
+  const [defaults, setDefaults] = useState<CliDefaults | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchCliDefaults(backend).then((d) => {
+      if (!cancelled) setDefaults(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [backend]);
+
+  const models = defaults?.models
+    ? [{ id: "", label: "Default" }, ...defaults.models]
+    : CLI_MODELS[backend];
   const efforts = CLI_EFFORTS[backend];
   const curModel = models.find((m) => m.id === model) ?? models[0];
   const curEffort = efforts.find((e) => e.id === effort) ?? efforts[0];
-  const label =
-    curEffort.id === ""
-      ? curModel.label
-      : `${curModel.label} · ${curEffort.label}`;
+  const defaultModelLabel = resolveDefaultLabel(defaults?.model, models);
+  const defaultEffortLabel = resolveDefaultLabel(defaults?.effort, efforts);
+  // Menu rows spell the resolution out ("Default (Fable)"); the compact
+  // trigger shows the resolved name directly.
+  const modelRowLabel = (m: { id: string; label: string }) =>
+    m.id === "" && defaultModelLabel ? `Default (${defaultModelLabel})` : m.label;
+  const effortRowLabel = (e: { id: string; label: string }) =>
+    e.id === "" && defaultEffortLabel ? `Default (${defaultEffortLabel})` : e.label;
+  const shownModel =
+    curModel.id === "" ? (defaultModelLabel ?? curModel.label) : curModel.label;
+  const shownEffort =
+    curEffort.id === "" ? defaultEffortLabel : curEffort.label;
+  const label = shownEffort ? `${shownModel} · ${shownEffort}` : shownModel;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild disabled={disabled}>
@@ -131,14 +187,14 @@ export function CliTuningMenu({
             className="text-xs"
             onClick={() => onEffortChange(e.id)}
           >
-            <span className="flex-1">{e.label}</span>
+            <span className="flex-1">{effortRowLabel(e)}</span>
             {e.id === curEffort.id && <Check className="size-3.5" />}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className="text-xs">
-            {curModel.label}
+            {modelRowLabel(curModel)}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="min-w-44">
             <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -150,7 +206,7 @@ export function CliTuningMenu({
                 className="text-xs"
                 onClick={() => onModelChange(m.id)}
               >
-                <span className="flex-1">{m.label}</span>
+                <span className="flex-1">{modelRowLabel(m)}</span>
                 {m.id === curModel.id && <Check className="size-3.5" />}
               </DropdownMenuItem>
             ))}
@@ -233,12 +289,15 @@ export function BackendPicker({
     if (!b) return;
     setBackend(b.id);
     // Model/effort overrides belong to one backend's catalog; switching
-    // backends resets both to that CLI's defaults.
+    // backends resets both to that CLI's defaults. Only here (a user pick) —
+    // resetting on the load path would clobber a hydrated pending choice.
     setCliModel("");
     setCliEffort("");
     if (conversationId) {
       api.setConversationBackend(conversationId, b.id).catch(() => {});
       api.setConversationCliModel(conversationId, "", "").catch(() => {});
+    } else {
+      onPendingTuningChange?.("", "");
     }
   }
 

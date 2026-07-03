@@ -41,6 +41,7 @@ import type {
   WorkspaceFileEntry,
   WorktreeInfo,
   CliAgentSettings,
+  CliDefaults,
   DevtestDomOp,
   DevtestDomArgs,
 } from "./types";
@@ -151,6 +152,11 @@ export const api = {
    *  conversations and non-git workspaces). */
   conversationWorktree: (id: string) =>
     invoke<WorktreeInfo | null>("conversation_worktree", { id }),
+  /** The CLI's own configured defaults (model / effort / codex model catalog),
+   *  read from the vendor config on disk — lets the tuning menu echo what
+   *  "Default" resolves to. */
+  getCliDefaults: (backend: string) =>
+    invoke<CliDefaults>("get_cli_defaults", { backend }),
   getCliAgentSettings: () => invoke<CliAgentSettings>("get_cli_agent_settings"),
   setCliAgentSettings: (settings: CliAgentSettings) =>
     invoke<void>("set_cli_agent_settings", { settings }),

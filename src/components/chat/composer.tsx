@@ -705,6 +705,21 @@ export function Composer({
             onChange={onWorkspaceChange}
             disabled={disabled}
           />
+          {/* Runtime on the left, its model/effort tuning on the right — the
+              BackendPicker renders the CLI tuning menu itself; the pi model
+              picker follows for the built-in runtime. */}
+          <BackendPicker
+            conversationId={conversationId ?? null}
+            disabled={disabled}
+            pendingValue={pendingBackend}
+            pendingModel={pendingCliModel}
+            pendingEffort={pendingCliEffort}
+            onPendingTuningChange={onPendingTuningChange}
+            onBackendChange={(b) => {
+              setBackend(b);
+              if (!conversationId) onPendingBackendChange?.(b);
+            }}
+          />
           {backend === "pi" && (
             <ModelPicker
               value={modelChoice}
@@ -717,21 +732,6 @@ export function Composer({
               disabled={disabled}
             />
           )}
-          <BackendPicker
-            conversationId={conversationId ?? null}
-            disabled={disabled}
-            pendingValue={pendingBackend}
-            pendingModel={pendingCliModel}
-            pendingEffort={pendingCliEffort}
-            onPendingTuningChange={onPendingTuningChange}
-            onBackendChange={(b) => {
-              setBackend(b);
-              if (!conversationId) {
-                onPendingBackendChange?.(b);
-                onPendingTuningChange?.("", "");
-              }
-            }}
-          />
         </div>
         {bashMode ? (
           // Terminal commands are independent of the agent stream, so always

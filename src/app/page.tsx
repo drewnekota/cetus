@@ -75,6 +75,7 @@ import {
   type BackendId,
 } from "@/lib/types";
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
+import { loadBackendChoice, saveBackendChoice } from "@/lib/backend-choice";
 import { composeWithContext } from "@/lib/quick-context";
 import {
   KEYBOARD_SHORTCUTS_EVENT,
@@ -363,6 +364,8 @@ export default function Home() {
   const [modelChoice, setModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
   // Backend + CLI model/effort chosen on the hero composer before a
   // conversation exists; applied to the conversation minted on first send.
+  // Sticky across sessions (shared with the quick launcher) via
+  // "cetus:lastBackendChoice".
   const [pendingBackend, setPendingBackend] = useState<BackendId>("pi");
   const [pendingCliModel, setPendingCliModel] = useState("");
   const [pendingCliEffort, setPendingCliEffort] = useState("");
@@ -372,7 +375,27 @@ export default function Home() {
   }, []);
   useEffect(() => {
     setModelChoice(mergeStoredModelChoice);
+    const savedBackend = loadBackendChoice();
+    if (savedBackend) {
+      setPendingBackend(savedBackend.backend);
+      setPendingCliModel(savedBackend.cliModel);
+      setPendingCliEffort(savedBackend.cliEffort);
+    }
   }, []);
+  // Persist the new-chat runtime choice on every change past hydration (the
+  // same skip-first-run dance as modelChoice below).
+  const backendChoiceHydrated = useRef(false);
+  useEffect(() => {
+    if (!backendChoiceHydrated.current) {
+      backendChoiceHydrated.current = true;
+      return;
+    }
+    saveBackendChoice({
+      backend: pendingBackend,
+      cliModel: pendingCliModel,
+      cliEffort: pendingCliEffort,
+    });
+  }, [pendingBackend, pendingCliModel, pendingCliEffort]);
   // Persist the active model/reasoning choice on *every* change — manual picker,
   // launcher adopt, and conversation switch alike — so the quick launcher (which
   // reads "cetus:lastModelChoice") always mirrors what the main composer shows.
