@@ -373,6 +373,18 @@ export default function Home() {
     setPendingCliModel(model);
     setPendingCliEffort(effort);
   }, []);
+  // ⌃1/⌃2/⌃3 runtime switching: the request rides a token down to the
+  // BackendPicker (which owns the switch logic + its own state), same pattern
+  // as focusToken/quoteRequest.
+  const [backendSwitch, setBackendSwitch] = useState<{
+    token: number;
+    backend: BackendId;
+  } | null>(null);
+  const backendSwitchToken = useRef(0);
+  const requestBackendSwitch = useCallback((backend: BackendId) => {
+    backendSwitchToken.current += 1;
+    setBackendSwitch({ token: backendSwitchToken.current, backend });
+  }, []);
   useEffect(() => {
     setModelChoice(mergeStoredModelChoice);
     const savedBackend = loadBackendChoice();
@@ -1052,6 +1064,7 @@ export default function Home() {
   //   ⌘D    — archive current conversation
   //   ⌘,    — open settings
   //   ⌘1…⌘4 — switch sidebar view
+  //   ⌃1…⌃3 — switch the current chat's runtime (Cetus / Claude Code / Codex)
   //   ⌘B    — toggle workspace
   //   ⌘J    — toggle Terminal in the workspace
   //   ⌘T    — open a Browser tab in the right workspace
@@ -1160,6 +1173,11 @@ export default function Home() {
           // schedules from its own button.
           onNew();
         }
+      } else if (shortcut("newDefaultChat")) {
+        e.preventDefault();
+        // ⌥⌘N always lands a new chat in Chat (the default workspace), even
+        // from the board or with another folder selected.
+        onNew(defaultWorkspace || undefined);
       } else if (shortcut("archiveChat")) {
         const c = conversationsRef.current.find((x) => x.id === activeIdRef.current);
         if (c) {
@@ -1172,6 +1190,20 @@ export default function Home() {
       } else if (shortcut("openSettings")) {
         e.preventDefault();
         setSettingsOpen(true);
+      } else if (
+        view === "chat" &&
+        (shortcut("runtimeCetus") ||
+          shortcut("runtimeClaudeCode") ||
+          shortcut("runtimeCodex"))
+      ) {
+        e.preventDefault();
+        requestBackendSwitch(
+          shortcut("runtimeCetus")
+            ? "pi"
+            : shortcut("runtimeClaudeCode")
+              ? "claude-code"
+              : "codex",
+        );
       } else if (shortcut("switchChats")) {
         e.preventDefault();
         setView("chat");
@@ -1203,6 +1235,8 @@ export default function Home() {
     sideWorkspace.tabs,
     archiveConversation,
     keyboardShortcuts,
+    defaultWorkspace,
+    requestBackendSwitch,
   ]);
 
   function workspaceTitle(kind: WorkspaceTabKind, index: number): string {
@@ -2582,6 +2616,7 @@ export default function Home() {
         unreadCompletedIds={unreadCompletedIds}
         workspaceDirs={recentWorkspaces}
         hiddenWorkspaceDirs={hiddenWorkspaces}
+        defaultWorkspace={defaultWorkspace}
         view={view}
         onViewChange={setView}
         workspaceFilter={boardWorkspaceFilter}
@@ -2705,6 +2740,7 @@ export default function Home() {
                 pendingCliModel={pendingCliModel}
                 pendingCliEffort={pendingCliEffort}
                 onPendingTuningChange={onPendingTuningChange}
+                backendSwitch={backendSwitch}
               />
             ) : (
               <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
@@ -2735,6 +2771,7 @@ export default function Home() {
                     pendingCliModel={pendingCliModel}
                     pendingCliEffort={pendingCliEffort}
                     onPendingTuningChange={onPendingTuningChange}
+                    backendSwitch={backendSwitch}
                   />
                 </div>
               </div>

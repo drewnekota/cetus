@@ -264,6 +264,12 @@ pub struct EventTranslator {
     /// codex item ids whose tool card was already emitted at `item.started`,
     /// so `item.completed` only adds the result.
     started_items: std::collections::HashSet<String>,
+    /// True once the assistant `message_start` was emitted. It is deferred to
+    /// the first content-bearing event (not `start()`): a CLI process takes
+    /// seconds to boot, and opening the bubble at spawn time would clear the
+    /// frontend's "thinking…" placeholder into a bare empty ASSISTANT header
+    /// for that whole gap.
+    opened: bool,
 }
 
 /// One in-flight content block streamed via claude partial events.
@@ -298,6 +304,7 @@ impl EventTranslator {
             saw_result: false,
             result_error: None,
             started_items: std::collections::HashSet::new(),
+            opened: false,
         }
     }
 
@@ -327,12 +334,33 @@ impl EventTranslator {
         i
     }
 
-    /// PiEvents to emit before feeding any lines: opens the assistant bubble.
+    /// PiEvents to emit before feeding any lines. Only `agent_start` — the
+    /// assistant `message_start` is deferred to the first content event (see
+    /// `with_open`) so the frontend keeps its "thinking…" placeholder up while
+    /// the CLI boots instead of a bare empty ASSISTANT bubble.
     pub fn start(&self) -> Vec<Value> {
-        vec![
-            json!({ "type": "agent_start" }),
-            json!({ "type": "message_start", "message": { "role": "assistant" } }),
-        ]
+        vec![json!({ "type": "agent_start" })]
+    }
+
+    /// Prepend the deferred assistant `message_start` when `events` carries the
+    /// first message-level content of the turn. Non-message events (e.g.
+    /// `cli_control_request` cards) don't open the bubble.
+    fn with_open(&mut self, mut events: Vec<Value>) -> Vec<Value> {
+        if !self.opened
+            && events.iter().any(|e| {
+                matches!(
+                    e.get("type").and_then(|t| t.as_str()),
+                    Some("message_update") | Some("tool_execution_start") | Some("tool_execution_end")
+                )
+            })
+        {
+            self.opened = true;
+            events.insert(
+                0,
+                json!({ "type": "message_start", "message": { "role": "assistant" } }),
+            );
+        }
+        events
     }
 
     /// PiEvents to emit after the process exits. `error` surfaces a failure as a
@@ -343,7 +371,13 @@ impl EventTranslator {
             out.extend(self.emit_text(&format!("⚠️ agent error: {msg}")));
         }
         self.flush_assistant();
-        out.push(json!({ "type": "message_end" }));
+        let mut out = self.with_open(out);
+        // message_end only makes sense for a bubble that was opened; a turn
+        // that produced nothing closes with agent_end alone (the reducer
+        // clears its placeholder there).
+        if self.opened {
+            out.push(json!({ "type": "message_end" }));
+        }
         out.push(json!({ "type": "agent_end" }));
         self.finished = true;
         out
@@ -429,10 +463,11 @@ impl EventTranslator {
             // Non-JSON chatter (banners, "Reading additional input…") is ignored.
             Err(_) => return Vec::new(),
         };
-        match self.backend {
+        let events = match self.backend {
             CliBackend::ClaudeCode => self.on_claude(&v),
             CliBackend::Codex => self.on_codex(&v),
-        }
+        };
+        self.with_open(events)
     }
 
     fn on_claude(&mut self, v: &Value) -> Vec<Value> {
@@ -455,8 +490,33 @@ impl EventTranslator {
                 };
                 self.on_claude_stream_event(event)
             }
-            // Cumulative snapshots — redundant with stream_event partials.
-            "assistant" => Vec::new(),
+            // Cumulative snapshots — normally redundant with stream_event
+            // partials and ignored. The exception is synthetic messages
+            // (model "<synthetic>"): output of locally-handled slash commands
+            // (/usage, /context, /compact, …) and CLI-side notices, which never
+            // stream partials. Emit their text so those turns aren't blank.
+            "assistant" => {
+                let msg = v.get("message");
+                let model = msg.and_then(|m| m.get("model")).and_then(|m| m.as_str());
+                if model != Some("<synthetic>") {
+                    return Vec::new();
+                }
+                let mut out = Vec::new();
+                let blocks = msg
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array());
+                if let Some(blocks) = blocks {
+                    for b in blocks {
+                        if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            let t = b.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                            if !t.is_empty() {
+                                out.extend(self.emit_text(t));
+                            }
+                        }
+                    }
+                }
+                out
+            }
             // Permission prompt / AskUserQuestion. Forwarded to the frontend
             // as a card; the host answers over stdin via the input channel.
             "control_request" => {
@@ -1011,14 +1071,20 @@ mod tests {
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\": "}}}"#));
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"ls\"}"}}}"#));
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#));
+        // the first content event opens the assistant bubble (deferred
+        // message_start — not emitted at spawn time)
         assert_eq!(
             types(&ev),
-            vec!["message_update:toolcall_start", "message_update:toolcall_end"]
+            vec![
+                "message_start",
+                "message_update:toolcall_start",
+                "message_update:toolcall_end"
+            ]
         );
         // the tool_use id + parsed input land on toolcall_end
-        assert_eq!(ev[1]["assistantMessageEvent"]["toolCall"]["id"], json!("tool-9"));
+        assert_eq!(ev[2]["assistantMessageEvent"]["toolCall"]["id"], json!("tool-9"));
         assert_eq!(
-            ev[1]["assistantMessageEvent"]["toolCall"]["arguments"]["command"],
+            ev[2]["assistantMessageEvent"]["toolCall"]["arguments"]["command"],
             json!("ls")
         );
 
@@ -1056,6 +1122,41 @@ mod tests {
         // result flags the turn as complete (bidirectional close signal)
         tr.on_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"done"}"#);
         assert!(tr.saw_result);
+    }
+
+    #[test]
+    fn claude_synthetic_snapshot_renders_slash_command_output() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        // Captured from claude 2.1.199: `/usage` (and /cost, /context, /compact)
+        // is handled locally and arrives ONLY as a synthetic assistant snapshot
+        // — no stream_event partials.
+        let ev = tr.on_line(
+            r#"{"type":"assistant","message":{"id":"m1","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Current session: 28% used"}]}}"#,
+        );
+        assert_eq!(
+            types(&ev),
+            vec![
+                "message_start",
+                "message_update:text_start",
+                "message_update:text_delta",
+                "message_update:text_end"
+            ]
+        );
+        assert_eq!(
+            ev[3]["assistantMessageEvent"]["content"],
+            json!("Current session: 28% used")
+        );
+        // …and it persists as a normal assistant message for history replay.
+        tr.finish(None);
+        let msgs = tr.take_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["content"][0]["text"], json!("Current session: 28% used"));
+
+        // Real-model snapshots stay ignored (partials already streamed them).
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        assert!(tr
+            .on_line(r#"{"type":"assistant","message":{"model":"claude-fable-5","content":[{"type":"text","text":"dup"}]}}"#)
+            .is_empty());
     }
 
     #[test]
@@ -1117,13 +1218,14 @@ mod tests {
         assert_eq!(
             types(&ev),
             vec![
+                "message_start",
                 "message_update:toolcall_start",
                 "message_update:toolcall_end",
                 "tool_execution_start",
                 "tool_execution_end"
             ]
         );
-        assert_eq!(ev[1]["assistantMessageEvent"]["toolCall"]["name"], json!("shell"));
+        assert_eq!(ev[2]["assistantMessageEvent"]["toolCall"]["name"], json!("shell"));
 
         let ev = tr.on_line(
             r#"{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"OK"}}"#,
@@ -1148,6 +1250,7 @@ mod tests {
         assert_eq!(
             types(&ev),
             vec![
+                "message_start",
                 "message_update:toolcall_start",
                 "message_update:toolcall_end",
                 "tool_execution_start"
@@ -1163,16 +1266,20 @@ mod tests {
 
     #[test]
     fn turn_open_and_close_events() {
+        // message_start is deferred to the first content event, so a turn that
+        // never produced content opens no bubble and closes with agent_end only.
         let mut tr = EventTranslator::new(CliBackend::Codex);
-        assert_eq!(types(&tr.start()), vec!["agent_start", "message_start"]);
-        assert_eq!(types(&tr.finish(None)), vec!["message_end", "agent_end"]);
+        assert_eq!(types(&tr.start()), vec!["agent_start"]);
+        assert_eq!(types(&tr.finish(None)), vec!["agent_end"]);
 
         let mut tr = EventTranslator::new(CliBackend::Codex);
         let ev = tr.finish(Some("boom"));
-        // an error turns into a visible text block before close
+        // an error turns into a visible text block before close — which opens
+        // the (deferred) bubble first
         assert_eq!(
             types(&ev),
             vec![
+                "message_start",
                 "message_update:text_start",
                 "message_update:text_delta",
                 "message_update:text_end",

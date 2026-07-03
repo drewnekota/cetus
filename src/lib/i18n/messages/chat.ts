@@ -63,6 +63,7 @@ export const chat = {
 
     // Chat pane
     "pane.assistant": "assistant",
+    "pane.thinking": "Thinking…",
     "pane.queued": "Queued",
     "pane.attachmentCount": "{count} attachment(s)",
     "pane.emptyMessage": "(empty)",

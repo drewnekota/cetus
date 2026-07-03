@@ -256,3 +256,24 @@
     background-color: color-mix(in oklch, currentColor 40%, transparent);
   }
 }
+
+@keyframes shimmer-text {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Claude Code-style status shimmer: a foreground highlight sweeping through
+   muted text. Theme variables keep it right in light and dark. */
+@utility animate-shimmer-text {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-muted-foreground) 0%,
+    var(--color-foreground) 50%,
+    var(--color-muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: shimmer-text 2s linear infinite;
+}

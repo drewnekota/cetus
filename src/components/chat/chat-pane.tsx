@@ -82,6 +82,8 @@ interface Props {
   pendingCliModel?: string;
   pendingCliEffort?: string;
   onPendingTuningChange?: (model: string, effort: string) => void;
+  /** Keyboard runtime-switch request (token-keyed), forwarded to the Composer. */
+  backendSwitch?: { token: number; backend: BackendId } | null;
 }
 
 /** The shared "chat experience" body — messages list + composer with
@@ -118,6 +120,7 @@ export function ChatPane({
   pendingCliModel,
   pendingCliEffort,
   onPendingTuningChange,
+  backendSwitch,
 }: Props) {
   const { locale } = useTranslation("chat");
   const hasMessages = useHasMessages(convId);
@@ -171,6 +174,7 @@ export function ChatPane({
             pendingCliModel={pendingCliModel}
             pendingCliEffort={pendingCliEffort}
             onPendingTuningChange={onPendingTuningChange}
+            backendSwitch={backendSwitch}
           />
         </div>
       </div>
@@ -221,6 +225,7 @@ export function ChatPane({
             ultra={ultra}
             onUltraToggle={onUltraToggle}
             quoteRequest={quoteRequest}
+            backendSwitch={backendSwitch}
           />
         </div>
       </div>
@@ -918,20 +923,38 @@ function QueuedMessages({
   );
 }
 
-/** Shown between the user's send and pi's first message_start event so the
- *  conversation doesn't feel like it's hanging. Three dots, no layout shift. */
+/** Shown between the user's send and the first message_start event so the
+ *  conversation doesn't feel like it's hanging. For CLI backends
+ *  (claude-code / codex) this covers the whole process boot — message_start is
+ *  deferred until real content streams — so it reads like the native desktop
+ *  apps: a shimmering status word plus an elapsed-seconds counter once the
+ *  wait is long enough to notice. */
 function ThinkingPlaceholder() {
   const { t } = useTranslation("chat");
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const id = window.setInterval(
+      () => setElapsed(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    );
+    return () => window.clearInterval(id);
+  }, []);
   return (
     <div className="flex w-full justify-start py-3">
       <div className="flex max-w-[88%] flex-col gap-2 items-start">
         <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           {t("pane.assistant")}
         </div>
-        <div className="flex items-center gap-1.5 text-muted-foreground">
-          <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
-          <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
-          <span className="size-1.5 animate-bounce rounded-full bg-current" />
+        <div className="flex items-baseline gap-2 text-sm">
+          <span className="animate-shimmer-text font-medium">
+            {t("pane.thinking")}
+          </span>
+          {elapsed >= 3 && (
+            <span className="text-xs tabular-nums text-muted-foreground/70">
+              {elapsed}s
+            </span>
+          )}
         </div>
       </div>
     </div>

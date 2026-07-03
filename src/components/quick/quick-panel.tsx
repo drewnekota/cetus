@@ -6,7 +6,12 @@ import { AppWindow, CornerDownLeft, Globe, ImageOff, Loader2, TextSelect, X } fr
 import { Kbd } from "@/components/ui/kbd";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { ModelPicker } from "@/components/chat/model-picker";
-import { BACKENDS, CliTuningMenu } from "@/components/chat/backend-picker";
+import {
+  BACKENDS,
+  CliTuningMenu,
+  RuntimeShortcutHint,
+  useRuntimeShortcuts,
+} from "@/components/chat/backend-picker";
 import {
   Select,
   SelectContent,
@@ -142,15 +147,20 @@ export function QuickPanel() {
     setModelChoice(mergeStoredModelChoice);
   }, []);
 
-  const onBackendChange = useCallback((id: string) => {
-    const b = BACKENDS.find((x) => x.id === id);
-    if (!b) return;
-    setBackend(b.id);
-    // Model/effort overrides belong to one backend's catalog.
-    setCliModel("");
-    setCliEffort("");
-    saveBackendChoice({ backend: b.id, cliModel: "", cliEffort: "" });
-  }, []);
+  const onBackendChange = useCallback(
+    (id: string) => {
+      const b = BACKENDS.find((x) => x.id === id);
+      // Same runtime again (e.g. a repeated shortcut) is a no-op so it doesn't
+      // reset the model/effort overrides.
+      if (!b || b.id === backend) return;
+      setBackend(b.id);
+      // Model/effort overrides belong to one backend's catalog.
+      setCliModel("");
+      setCliEffort("");
+      saveBackendChoice({ backend: b.id, cliModel: "", cliEffort: "" });
+    },
+    [backend],
+  );
 
   const onCliModelChange = useCallback(
     (m: string) => {
@@ -167,6 +177,10 @@ export function QuickPanel() {
     },
     [backend, cliModel],
   );
+
+  // ⌃1/⌃2/⌃3 (user-editable) switch the launcher's runtime, mirroring the
+  // main composer. This window only receives keys while the panel is up.
+  useRuntimeShortcuts(onBackendChange);
 
   const onWorkspaceChange = useCallback((dir: string) => {
     setWorkspaceDir(dir);
@@ -526,6 +540,7 @@ function BackendSelect({
             <SelectItem key={b.id} value={b.id} className="text-[13px]">
               <Icon className="size-4" />
               <span className="truncate">{b.label}</span>
+              <RuntimeShortcutHint backend={b.id} />
             </SelectItem>
           );
         })}

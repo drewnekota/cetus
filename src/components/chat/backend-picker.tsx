@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bot, Check, ChevronDown, Cpu, SquareTerminal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "@/lib/tauri";
@@ -22,12 +22,68 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import {
+  matchesShortcut,
+  shortcutDisplay,
+  useKeyboardShortcuts,
+  type ShortcutId,
+} from "@/lib/keyboard-shortcuts";
 
 export const BACKENDS: { id: BackendId; label: string; icon: LucideIcon }[] = [
   { id: "pi", label: "Cetus", icon: Bot },
   { id: "claude-code", label: "Claude Code", icon: Cpu },
   { id: "codex", label: "Codex", icon: SquareTerminal },
 ];
+
+/** The user-editable shortcut bound to each runtime (⌃1/⌃2/⌃3 by default). */
+export const RUNTIME_SHORTCUT_IDS: Record<BackendId, ShortcutId> = {
+  pi: "runtimeCetus",
+  "claude-code": "runtimeClaudeCode",
+  codex: "runtimeCodex",
+};
+
+/** Window keydown → runtime switch, matched against the user's (editable)
+ *  shortcut map. For surfaces that own their backend state directly — the
+ *  quick launcher and the task/automation dialogs. The main composer instead
+ *  routes through page.tsx's modal-guarded handler, so don't enable this
+ *  where that handler is already live. */
+export function useRuntimeShortcuts(
+  onSwitch: (backend: BackendId) => void,
+  enabled: boolean = true,
+) {
+  const shortcuts = useKeyboardShortcuts();
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      const target: BackendId | null = matchesShortcut(e, shortcuts.runtimeCetus)
+        ? "pi"
+        : matchesShortcut(e, shortcuts.runtimeClaudeCode)
+          ? "claude-code"
+          : matchesShortcut(e, shortcuts.runtimeCodex)
+            ? "codex"
+            : null;
+      if (!target) return;
+      e.preventDefault();
+      onSwitch(target);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [enabled, shortcuts, onSwitch]);
+}
+
+/** Right-aligned shortcut hint inside a runtime SelectItem (e.g. "⌃2").
+ *  Live-updates when the user rebinds the shortcut; renders nothing when
+ *  unassigned. */
+export function RuntimeShortcutHint({ backend }: { backend: BackendId }) {
+  const shortcuts = useKeyboardShortcuts();
+  const display = shortcutDisplay(shortcuts[RUNTIME_SHORTCUT_IDS[backend]]);
+  if (!display || display === "Unassigned") return null;
+  return (
+    <span className="ml-auto pl-3 text-[10px] tracking-wide text-muted-foreground/70">
+      {display}
+    </span>
+  );
+}
 
 /** Model overrides offered per CLI backend. Ids are passed straight through to
  *  `claude --model` / `codex -m`; "" keeps the CLI's own configured default
@@ -234,6 +290,7 @@ export function BackendPicker({
   pendingModel,
   pendingEffort,
   onPendingTuningChange,
+  backendSwitch,
 }: {
   conversationId: string | null;
   disabled?: boolean;
@@ -244,6 +301,10 @@ export function BackendPicker({
   pendingModel?: string;
   pendingEffort?: string;
   onPendingTuningChange?: (model: string, effort: string) => void;
+  /** Keyboard runtime-switch request (⌃1/⌃2/⌃3). Token-keyed so each press
+   *  applies exactly once; a stale value from before this picker mounted is
+   *  ignored. */
+  backendSwitch?: { token: number; backend: BackendId } | null;
 }) {
   const [backend, setBackendState] = useState<BackendId>("pi");
   const [cliModel, setCliModel] = useState("");
@@ -277,6 +338,20 @@ export function BackendPicker({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, pendingValue]);
+
+  // Apply a keyboard runtime-switch (⌃1/⌃2/⌃3) exactly once per token. The
+  // ref starts at the mount-time token so a request fired before this picker
+  // mounted doesn't replay on it (e.g. after switching conversations).
+  const handledSwitchToken = useRef(backendSwitch?.token ?? 0);
+  useEffect(() => {
+    if (!backendSwitch || backendSwitch.token === handledSwitchToken.current) return;
+    handledSwitchToken.current = backendSwitch.token;
+    const shownNow = conversationId ? backend : (pendingValue ?? "pi");
+    // Same runtime again is a no-op — don't reset the model/effort overrides.
+    if (backendSwitch.backend === shownNow) return;
+    select(backendSwitch.backend);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendSwitch]);
 
   if (!conversationId && pendingValue === undefined) return null;
 
@@ -340,6 +415,7 @@ export function BackendPicker({
               <SelectItem key={b.id} value={b.id} className="text-xs">
                 <Icon className="size-4" />
                 <span className="truncate">{b.label}</span>
+                <RuntimeShortcutHint backend={b.id} />
               </SelectItem>
             );
           })}

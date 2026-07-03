@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Folder, X, Inbox, PanelBottom, PanelRight } from "lucide-react";
+import { ArrowRight, Folder, MessageSquare, X, Inbox, PanelBottom, PanelRight } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -263,9 +263,22 @@ export function SessionDetailDialog({
             <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
               {conversation && (
                 <>
-                  <Folder className="size-3" />
-                  <span className="truncate" title={conversation.workspaceDir}>
-                    {workspaceName(conversation.workspaceDir)}
+                  {conversation.workspaceDir === defaultWorkspace ? (
+                    <MessageSquare className="size-3" />
+                  ) : (
+                    <Folder className="size-3" />
+                  )}
+                  <span
+                    className="truncate"
+                    title={
+                      conversation.workspaceDir === defaultWorkspace
+                        ? undefined
+                        : conversation.workspaceDir
+                    }
+                  >
+                    {conversation.workspaceDir === defaultWorkspace
+                      ? t("card.defaultWorkspace")
+                      : workspaceName(conversation.workspaceDir)}
                   </span>
                   <span>·</span>
                   <span>{t("session.updated", { time: formatTimestamp(conversation.updatedAt) })}</span>

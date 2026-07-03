@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useMemo } from "react";
 import type { RenderedBlock, RenderedMessage } from "@/lib/types";
-import { useMessagesByKeys } from "@/lib/chat-store";
+import { useIsStreaming, useMessagesByKeys } from "@/lib/chat-store";
 import { isArtifactDetails } from "@/lib/artifact";
 import { useTranslation } from "@/lib/i18n";
 import { AnswerBlock, MessageActions } from "./message-blocks";
@@ -93,7 +93,27 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork }: Props) {
   );
   // Built only when the user actually copies (see MessageActions.getText).
   const getAnswerText = useCallback(() => answerText(messages), [messages]);
+  const isStreaming = useIsStreaming(convId);
   if (messages.length === 0) return null;
+
+  // No visible content yet: mid-run this is the gap between the message
+  // opening and the first block streaming in — hold the shimmer instead of a
+  // bare ASSISTANT header. A settled empty turn renders nothing at all.
+  if (segments.length === 0) {
+    if (!isStreaming) return null;
+    return (
+      <div className="flex w-full justify-start py-3">
+        <div className="flex max-w-[88%] flex-col gap-2 items-start">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            {t("pane.assistant")}
+          </div>
+          <span className="animate-shimmer-text text-sm font-medium">
+            {t("pane.thinking")}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   const lastCreatedAt = messages[messages.length - 1].createdAt;
 

@@ -5,12 +5,16 @@ import { useEffect, useState } from "react";
 export type ShortcutId =
   | "commandPalette"
   | "newChat"
+  | "newDefaultChat"
   | "archiveChat"
   | "openSettings"
   | "switchChats"
   | "switchBoard"
   | "switchAutomations"
   | "switchPlugins"
+  | "runtimeCetus"
+  | "runtimeClaudeCode"
+  | "runtimeCodex"
   | "toggleWorkspace"
   | "toggleTerminal"
   | "openBrowserTab"
@@ -47,6 +51,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     defaultAccelerator: "Cmd+N",
   },
   {
+    id: "newDefaultChat",
+    label: "New chat in Chat",
+    description: "Start a new chat in Chat, wherever you are",
+    defaultAccelerator: "Alt+Cmd+N",
+  },
+  {
     id: "archiveChat",
     label: "Archive chat",
     description: "Archive the current chat",
@@ -81,6 +91,24 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: "Switch to plugins",
     description: "Show installed plugins",
     defaultAccelerator: "Cmd+4",
+  },
+  {
+    id: "runtimeCetus",
+    label: "Runtime: Cetus",
+    description: "Switch the current chat to the Cetus runtime",
+    defaultAccelerator: "Ctrl+1",
+  },
+  {
+    id: "runtimeClaudeCode",
+    label: "Runtime: Claude Code",
+    description: "Switch the current chat to the Claude Code runtime",
+    defaultAccelerator: "Ctrl+2",
+  },
+  {
+    id: "runtimeCodex",
+    label: "Runtime: Codex",
+    description: "Switch the current chat to the Codex runtime",
+    defaultAccelerator: "Ctrl+3",
   },
   {
     id: "toggleWorkspace",

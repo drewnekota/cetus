@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { ResourcesPopover } from "@/components/sidebar/resources-popover";
@@ -17,6 +18,7 @@ import {
   Clock,
   Folder,
   FolderOpen,
+  MessageSquare,
   MoreHorizontal,
   PlusCircle,
   Settings as SettingsIcon,
@@ -79,6 +81,9 @@ interface Props {
   unreadCompletedIds: Set<string>;
   workspaceDirs: string[];
   hiddenWorkspaceDirs: string[];
+  /** The backend's default workspace dir. Rendered as the standalone "Chat"
+   *  section rather than a folder — users shouldn't perceive it as one. */
+  defaultWorkspace: string;
   view: SidebarView;
   onViewChange: (v: SidebarView) => void;
   workspaceFilter: string | null;
@@ -101,6 +106,7 @@ export const AppSidebar = memo(function AppSidebar({
   unreadCompletedIds,
   workspaceDirs,
   hiddenWorkspaceDirs,
+  defaultWorkspace,
   view,
   onViewChange,
   workspaceFilter,
@@ -129,12 +135,27 @@ export const AppSidebar = memo(function AppSidebar({
   );
   const { width, startResize, resetWidth } = useSidebarWidth();
   const groups = useMemo(
-    () => groupByWorkspace(conversations, workspaceDirs, hiddenWorkspaceDirs),
-    [conversations, workspaceDirs, hiddenWorkspaceDirs],
+    () =>
+      groupByWorkspace(
+        conversations,
+        workspaceDirs,
+        hiddenWorkspaceDirs,
+        defaultWorkspace,
+      ),
+    [conversations, workspaceDirs, hiddenWorkspaceDirs, defaultWorkspace],
   );
   const chatGroups = groups;
-  // Every workspace folder is long-press-draggable to reorder — none is pinned.
-  const sortableIds = useMemo(() => groups.map((g) => g.dir), [groups]);
+  // The default workspace surfaces as the standalone "Chat" section, pinned
+  // first; only the real workspace folders below it are draggable.
+  const defaultGroup = useMemo(
+    () => groups.find((g) => g.dir === defaultWorkspace) ?? null,
+    [groups, defaultWorkspace],
+  );
+  const folderGroups = useMemo(
+    () => groups.filter((g) => g.dir !== defaultWorkspace),
+    [groups, defaultWorkspace],
+  );
+  const sortableIds = useMemo(() => folderGroups.map((g) => g.dir), [folderGroups]);
   // A short hold before a press becomes a drag, so clicks/scrolls on a folder
   // header don't start a reorder. The tolerance lets a tiny jitter through.
   const sensors = useSensors(
@@ -294,6 +315,19 @@ export const AppSidebar = memo(function AppSidebar({
                   </span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {/* "Chat" (the default workspace) is pinned below "All" and never
+                  reorderable — it isn't a folder to the user. */}
+              {defaultGroup && (
+                <SidebarMenuItem>
+                  <WorkspaceFilterButton
+                    label={t("workspace.default")}
+                    icon={<MessageSquare />}
+                    count={workspaceCounts.get(defaultGroup.dir) ?? 0}
+                    active={workspaceFilter === defaultGroup.dir}
+                    onSelect={() => onWorkspaceFilterChange(defaultGroup.dir)}
+                  />
+                </SidebarMenuItem>
+              )}
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
@@ -302,7 +336,7 @@ export const AppSidebar = memo(function AppSidebar({
                 onDragEnd={handleDragEnd}
               >
                 <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-                  {groups.map((g) => (
+                  {folderGroups.map((g) => (
                     <SortableWorkspaceFilterRow
                       key={g.dir}
                       dir={g.dir}
@@ -339,8 +373,29 @@ export const AppSidebar = memo(function AppSidebar({
             onDragCancel={() => setActiveDragDir(null)}
             onDragEnd={handleDragEnd}
           >
+            {/* "Chat" (the default workspace) is pinned first, outside the
+                sortable list — it reads as a plain section, not a folder. */}
+            {defaultGroup && (
+              <SidebarGroup>
+                <WorkspaceGroupView
+                  group={defaultGroup}
+                  label={t("workspace.default")}
+                  isDefault
+                  activeId={activeId}
+                  streamingIds={streamingIds}
+                  unreadCompletedIds={unreadCompletedIds}
+                  archiveShortcut={shortcutLabels.archiveChat}
+                  onNew={onNew}
+                  onSelect={onSelect}
+                  onArchive={onArchive}
+                  onRevealWorkspace={onRevealWorkspace}
+                  onArchiveWorkspaceChats={onArchiveWorkspaceChats}
+                  onRemoveWorkspace={onRemoveWorkspace}
+                />
+              </SidebarGroup>
+            )}
             <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-              {groups.map((g) => (
+              {folderGroups.map((g) => (
                 <SortableWorkspaceGroup
                   key={g.dir}
                   group={g}
@@ -409,6 +464,9 @@ const ROW_ACTION_CLASS =
 interface WorkspaceGroupViewProps {
   group: { dir: string; items: Conversation[] };
   label: string;
+  /** The standalone "Chat" section: chat icon instead of a folder, and no
+   *  folder-ish actions (reveal / remove) — it shouldn't read as a folder. */
+  isDefault?: boolean;
   /** Drag-handle props (attributes + listeners) from useSortable. */
   handleProps?: Record<string, unknown>;
   activeId: string | null;
@@ -429,6 +487,7 @@ interface WorkspaceGroupViewProps {
 function WorkspaceGroupView({
   group,
   label,
+  isDefault,
   handleProps,
   activeId,
   streamingIds,
@@ -453,7 +512,11 @@ function WorkspaceGroupView({
             handleProps && "cursor-grab touch-none select-none active:cursor-grabbing",
           )}
         >
-          <Folder className="mr-1.5 !size-3" />
+          {isDefault ? (
+            <MessageSquare className="mr-1.5 !size-3" />
+          ) : (
+            <Folder className="mr-1.5 !size-3" />
+          )}
           <span className="truncate">{label}</span>
         </SidebarGroupLabel>
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-2">
@@ -475,10 +538,14 @@ function WorkspaceGroupView({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="right" align="start" className="w-52">
-              <DropdownMenuItem onSelect={() => onRevealWorkspace(group.dir)}>
-                <FolderOpen />
-                <span>{t("action.reveal")}</span>
-              </DropdownMenuItem>
+              {/* Reveal / Remove are folder actions — the standalone Chat
+                  section keeps only Archive so it never reads as a folder. */}
+              {!isDefault && (
+                <DropdownMenuItem onSelect={() => onRevealWorkspace(group.dir)}>
+                  <FolderOpen />
+                  <span>{t("action.reveal")}</span>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 disabled={group.items.length === 0}
                 onSelect={() => onArchiveWorkspaceChats(group.dir)}
@@ -486,14 +553,18 @@ function WorkspaceGroupView({
                 <Archive />
                 <span>{t("action.archiveChats")}</span>
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={() => onRemoveWorkspace(group.dir)}
-              >
-                <X />
-                <span>{t("action.remove")}</span>
-              </DropdownMenuItem>
+              {!isDefault && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => onRemoveWorkspace(group.dir)}
+                  >
+                    <X />
+                    <span>{t("action.remove")}</span>
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -554,12 +625,15 @@ function WorkspaceFilterButton({
   active,
   onSelect,
   handleProps,
+  icon,
 }: {
   label: string;
   count: number;
   active: boolean;
   onSelect: () => void;
   handleProps?: Record<string, unknown>;
+  /** Overrides the folder glyph — the pinned "Chat" row shows a chat icon. */
+  icon?: ReactNode;
 }) {
   return (
     <SidebarMenuButton
@@ -568,7 +642,7 @@ function WorkspaceFilterButton({
       isActive={active}
       className={cn(handleProps && "cursor-grab touch-none select-none active:cursor-grabbing")}
     >
-      <Folder />
+      {icon ?? <Folder />}
       <span className="truncate">{label}</span>
       <span
         className={cn(
@@ -871,16 +945,21 @@ function groupByWorkspace(
   items: Conversation[],
   workspaceDirs: string[],
   hiddenWorkspaceDirs: string[],
+  defaultWorkspace: string,
 ): { dir: string; items: Conversation[] }[] {
   const order: string[] = [];
   const map = new Map<string, Conversation[]>();
   const hidden = new Set(hiddenWorkspaceDirs);
+  // The default workspace ("Chat") always exists and sits first — even with no
+  // conversations yet, and regardless of any stale hidden entry.
+  hidden.delete(defaultWorkspace);
   const ensure = (dir: string) => {
     if (hidden.has(dir)) return;
     if (!dir || map.has(dir)) return;
     map.set(dir, []);
     order.push(dir);
   };
+  ensure(defaultWorkspace);
   for (const dir of workspaceDirs) ensure(dir);
   for (const c of items) {
     ensure(c.workspaceDir);

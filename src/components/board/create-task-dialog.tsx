@@ -14,7 +14,12 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
-import { BACKENDS, CliTuningMenu } from "@/components/chat/backend-picker";
+import {
+  BACKENDS,
+  CliTuningMenu,
+  RuntimeShortcutHint,
+  useRuntimeShortcuts,
+} from "@/components/chat/backend-picker";
 import {
   Select,
   SelectContent,
@@ -78,6 +83,21 @@ export function CreateTaskDialog({
   const [attachError, setAttachError] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ⌃1/⌃2/⌃3 (user-editable) switch the task's runtime while the dialog is
+  // open — page.tsx's global handler is modal-guarded, so this is the only
+  // listener live here.
+  const switchRuntime = useCallback(
+    (b: BackendId) => {
+      if (b === backend) return;
+      setBackend(b);
+      // Model/effort overrides belong to one backend's catalog.
+      setCliModel("");
+      setCliEffort("");
+    },
+    [backend],
+  );
+  useRuntimeShortcuts(switchRuntime, open);
 
   // Reset on close. Focus on open (after the dialog mount animation settles).
   useEffect(() => {
@@ -296,6 +316,7 @@ export function CreateTaskDialog({
                     <SelectItem key={b.id} value={b.id} className="text-xs">
                       <Icon className="size-4" />
                       <span className="truncate">{b.label}</span>
+                      <RuntimeShortcutHint backend={b.id} />
                     </SelectItem>
                   );
                 })}

@@ -21,7 +21,7 @@ export const board = {
     "card.viewArtifacts": "View Artifacts",
     "card.archive": "Archive",
     "card.unarchive": "Unarchive",
-    "card.defaultWorkspace": "default",
+    "card.defaultWorkspace": "Chat",
 
     // Create-task dialog
     "create.srTitle": "Create a new task",
@@ -66,7 +66,7 @@ export const board = {
     "card.viewArtifacts": "查看产物",
     "card.archive": "归档",
     "card.unarchive": "取消归档",
-    "card.defaultWorkspace": "默认",
+    "card.defaultWorkspace": "对话",
 
     "create.srTitle": "创建新任务",
     "create.newTask": "新建任务",
@@ -108,7 +108,7 @@ export const board = {
     "card.viewArtifacts": "成果物を表示",
     "card.archive": "アーカイブ",
     "card.unarchive": "アーカイブ解除",
-    "card.defaultWorkspace": "デフォルト",
+    "card.defaultWorkspace": "チャット",
 
     "create.srTitle": "新しいタスクを作成",
     "create.newTask": "新規タスク",
@@ -150,7 +150,7 @@ export const board = {
     "card.viewArtifacts": "산출물 보기",
     "card.archive": "보관",
     "card.unarchive": "보관 해제",
-    "card.defaultWorkspace": "기본",
+    "card.defaultWorkspace": "채팅",
 
     "create.srTitle": "새 작업 만들기",
     "create.newTask": "새 작업",
@@ -192,7 +192,7 @@ export const board = {
     "card.viewArtifacts": "Ver artefactos",
     "card.archive": "Archivar",
     "card.unarchive": "Desarchivar",
-    "card.defaultWorkspace": "predeterminado",
+    "card.defaultWorkspace": "Chat",
 
     "create.srTitle": "Crear una nueva tarea",
     "create.newTask": "Nueva tarea",
@@ -234,7 +234,7 @@ export const board = {
     "card.viewArtifacts": "Ver artefatos",
     "card.archive": "Arquivar",
     "card.unarchive": "Desarquivar",
-    "card.defaultWorkspace": "padrão",
+    "card.defaultWorkspace": "Chat",
 
     "create.srTitle": "Criar uma nova tarefa",
     "create.newTask": "Nova tarefa",
@@ -276,7 +276,7 @@ export const board = {
     "card.viewArtifacts": "Voir les artefacts",
     "card.archive": "Archiver",
     "card.unarchive": "Désarchiver",
-    "card.defaultWorkspace": "par défaut",
+    "card.defaultWorkspace": "Discussion",
 
     "create.srTitle": "Créer une nouvelle tâche",
     "create.newTask": "Nouvelle tâche",
@@ -318,7 +318,7 @@ export const board = {
     "card.viewArtifacts": "Artefakte ansehen",
     "card.archive": "Archivieren",
     "card.unarchive": "Aus Archiv holen",
-    "card.defaultWorkspace": "Standard",
+    "card.defaultWorkspace": "Chat",
 
     "create.srTitle": "Neue Aufgabe erstellen",
     "create.newTask": "Neue Aufgabe",
@@ -360,7 +360,7 @@ export const board = {
     "card.viewArtifacts": "Visualizza artefatti",
     "card.archive": "Archivia",
     "card.unarchive": "Annulla archiviazione",
-    "card.defaultWorkspace": "predefinito",
+    "card.defaultWorkspace": "Chat",
 
     "create.srTitle": "Crea una nuova attività",
     "create.newTask": "Nuova attività",
@@ -402,7 +402,7 @@ export const board = {
     "card.viewArtifacts": "Просмотреть артефакты",
     "card.archive": "В архив",
     "card.unarchive": "Из архива",
-    "card.defaultWorkspace": "по умолчанию",
+    "card.defaultWorkspace": "Чат",
 
     "create.srTitle": "Создать новую задачу",
     "create.newTask": "Новая задача",

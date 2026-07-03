@@ -30,7 +30,7 @@ export const automation = {
     "card.disable": "Disable automation",
     "card.edit": "Edit",
     "card.delete": "Delete",
-    "card.defaultWorkspace": "default",
+    "card.defaultWorkspace": "Chat",
 
     // Dialog — title / breadcrumb
     "dialog.editTitle": "Edit automation",
@@ -143,7 +143,7 @@ export const automation = {
     "card.disable": "停用自动化",
     "card.edit": "编辑",
     "card.delete": "删除",
-    "card.defaultWorkspace": "默认",
+    "card.defaultWorkspace": "对话",
 
     "dialog.editTitle": "编辑自动化",
     "dialog.newTitle": "新建自动化",
@@ -247,7 +247,7 @@ export const automation = {
     "card.disable": "自動化を無効化",
     "card.edit": "編集",
     "card.delete": "削除",
-    "card.defaultWorkspace": "デフォルト",
+    "card.defaultWorkspace": "チャット",
 
     "dialog.editTitle": "自動化を編集",
     "dialog.newTitle": "新しい自動化",
@@ -351,7 +351,7 @@ export const automation = {
     "card.disable": "자동화 사용 안 함",
     "card.edit": "편집",
     "card.delete": "삭제",
-    "card.defaultWorkspace": "기본",
+    "card.defaultWorkspace": "채팅",
 
     "dialog.editTitle": "자동화 편집",
     "dialog.newTitle": "새 자동화",
@@ -455,7 +455,7 @@ export const automation = {
     "card.disable": "Desactivar automatización",
     "card.edit": "Editar",
     "card.delete": "Eliminar",
-    "card.defaultWorkspace": "predeterminado",
+    "card.defaultWorkspace": "Chat",
 
     "dialog.editTitle": "Editar automatización",
     "dialog.newTitle": "Nueva automatización",
@@ -559,7 +559,7 @@ export const automation = {
     "card.disable": "Desativar automação",
     "card.edit": "Editar",
     "card.delete": "Excluir",
-    "card.defaultWorkspace": "padrão",
+    "card.defaultWorkspace": "Chat",
 
     "dialog.editTitle": "Editar automação",
     "dialog.newTitle": "Nova automação",
@@ -663,7 +663,7 @@ export const automation = {
     "card.disable": "Désactiver l'automatisation",
     "card.edit": "Modifier",
     "card.delete": "Supprimer",
-    "card.defaultWorkspace": "par défaut",
+    "card.defaultWorkspace": "Discussion",
 
     "dialog.editTitle": "Modifier l'automatisation",
     "dialog.newTitle": "Nouvelle automatisation",
@@ -767,7 +767,7 @@ export const automation = {
     "card.disable": "Automatisierung deaktivieren",
     "card.edit": "Bearbeiten",
     "card.delete": "Löschen",
-    "card.defaultWorkspace": "Standard",
+    "card.defaultWorkspace": "Chat",
 
     "dialog.editTitle": "Automatisierung bearbeiten",
     "dialog.newTitle": "Neue Automatisierung",
@@ -871,7 +871,7 @@ export const automation = {
     "card.disable": "Disattiva automazione",
     "card.edit": "Modifica",
     "card.delete": "Elimina",
-    "card.defaultWorkspace": "predefinito",
+    "card.defaultWorkspace": "Chat",
 
     "dialog.editTitle": "Modifica automazione",
     "dialog.newTitle": "Nuova automazione",
@@ -975,7 +975,7 @@ export const automation = {
     "card.disable": "Отключить автоматизацию",
     "card.edit": "Изменить",
     "card.delete": "Удалить",
-    "card.defaultWorkspace": "по умолчанию",
+    "card.defaultWorkspace": "Чат",
 
     "dialog.editTitle": "Изменить автоматизацию",
     "dialog.newTitle": "Новая автоматизация",

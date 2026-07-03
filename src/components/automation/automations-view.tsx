@@ -2,6 +2,7 @@
 import {
   Clock,
   Folder,
+  MessageSquare,
   MoreHorizontal,
   Pencil,
   Play,
@@ -151,7 +152,11 @@ function AutomationCard({
               <span className="text-warning/80">{t("card.paused")}</span>
             )}
             <span className="inline-flex min-w-0 items-center gap-1">
-              <Folder className="size-3 shrink-0" />
+              {!a.workspaceDir || a.workspaceDir === defaultWorkspace ? (
+                <MessageSquare className="size-3 shrink-0" />
+              ) : (
+                <Folder className="size-3 shrink-0" />
+              )}
               <span className="truncate">
                 {shorten(a.workspaceDir, defaultWorkspace, t("card.defaultWorkspace"))}
               </span>

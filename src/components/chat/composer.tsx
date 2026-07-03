@@ -121,7 +121,45 @@ interface Props {
   pendingCliModel?: string;
   pendingCliEffort?: string;
   onPendingTuningChange?: (model: string, effort: string) => void;
+  /** Keyboard runtime-switch request (token-keyed), applied by the
+   *  BackendPicker exactly once per token. */
+  backendSwitch?: { token: number; backend: BackendId } | null;
 }
+
+/** Claude Code built-in slash commands that work headless (verified against
+ *  CLI 2.1.199: handled locally, zero model tokens; /status, /model etc. are
+ *  TUI-only and refuse in -p mode). Offered in the slash menu for claude-code
+ *  conversations; the picked token is passed through to the CLI verbatim. */
+const CLAUDE_CLI_COMMANDS: SlashItem[] = [
+  {
+    kind: "command",
+    id: "cli:usage",
+    name: "usage",
+    description: "Claude subscription usage and limits",
+    prompt: "/usage ",
+  },
+  {
+    kind: "command",
+    id: "cli:cost",
+    name: "cost",
+    description: "Token spend and usage for this session",
+    prompt: "/cost ",
+  },
+  {
+    kind: "command",
+    id: "cli:context",
+    name: "context",
+    description: "Context window usage breakdown",
+    prompt: "/context ",
+  },
+  {
+    kind: "command",
+    id: "cli:compact",
+    name: "compact",
+    description: "Compact conversation history to free up context",
+    prompt: "/compact ",
+  },
+];
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB — Gemini limit is generous but base64 inflates 33%
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB — docx/xlsx/pdf etc., read on disk by the agent
@@ -163,6 +201,7 @@ export function Composer({
   pendingCliModel,
   pendingCliEffort,
   onPendingTuningChange,
+  backendSwitch,
 }: Props) {
   const { t, locale } = useTranslation("chat");
   // A random hero placeholder, re-rolled per new chat (focusToken bumps) so the
@@ -277,8 +316,11 @@ export function Composer({
     const q = slashQuery.toLowerCase();
     const match = (it: SlashItem) =>
       it.name.toLowerCase().includes(q) || it.description.toLowerCase().includes(q);
-    return [...slashCommands.filter(match), ...slashSkills.filter(match)];
-  }, [slashCommands, slashSkills, slashQuery]);
+    // Runtime built-ins first: on claude-code they're what /-muscle-memory
+    // from the native CLI reaches for.
+    const builtins = backend === "claude-code" ? CLAUDE_CLI_COMMANDS.filter(match) : [];
+    return [...builtins, ...slashCommands.filter(match), ...slashSkills.filter(match)];
+  }, [slashCommands, slashSkills, slashQuery, backend]);
 
   const slashVisible = slashOpen && slashItems.length > 0;
   const slashIdx = Math.min(slashActive, slashItems.length - 1);
@@ -715,6 +757,7 @@ export function Composer({
             pendingModel={pendingCliModel}
             pendingEffort={pendingCliEffort}
             onPendingTuningChange={onPendingTuningChange}
+            backendSwitch={backendSwitch}
             onBackendChange={(b) => {
               setBackend(b);
               if (!conversationId) onPendingBackendChange?.(b);

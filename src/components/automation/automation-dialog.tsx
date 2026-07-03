@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Clock, CornerDownLeft, Command as CommandKey } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
-import { BACKENDS, CliTuningMenu } from "@/components/chat/backend-picker";
+import {
+  BACKENDS,
+  CliTuningMenu,
+  RuntimeShortcutHint,
+  useRuntimeShortcuts,
+} from "@/components/chat/backend-picker";
 import {
   Select,
   SelectContent,
@@ -102,6 +107,20 @@ export function AutomationDialog({
   const [cronExpr, setCronExpr] = useState("0 9 * * *");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // ⌃1/⌃2/⌃3 (user-editable) switch the automation's runtime while the dialog
+  // is open — page.tsx's global handler is modal-guarded here.
+  const switchRuntime = useCallback(
+    (b: BackendId) => {
+      if (b === backend) return;
+      setBackend(b);
+      // Model/effort overrides belong to one backend's catalog.
+      setCliModel("");
+      setCliEffort("");
+    },
+    [backend],
+  );
+  useRuntimeShortcuts(switchRuntime, open);
 
   // Reset the form whenever the dialog opens (create defaults, or prefill the
   // automation being edited).
@@ -446,6 +465,7 @@ export function AutomationDialog({
                     <SelectItem key={b.id} value={b.id} className="text-xs">
                       <Icon className="size-4" />
                       <span className="truncate">{b.label}</span>
+                      <RuntimeShortcutHint backend={b.id} />
                     </SelectItem>
                   );
                 })}

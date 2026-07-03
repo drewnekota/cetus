@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { Folder, FolderPlus, Server } from "lucide-react";
+import { Folder, FolderPlus, MessageSquare, Server } from "lucide-react";
 import { api } from "@/lib/tauri";
 import {
   Select,
@@ -36,6 +36,11 @@ const ADD_REMOTE = "__add_remote__";
 
 export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disabled, onNativePick }: Props) {
   const { t } = useTranslation("chat");
+  // The default workspace surfaces as "Chat" (never its on-disk folder name) —
+  // users aren't meant to perceive it as a folder.
+  const { t: tSidebar } = useTranslation("sidebar");
+  const displayName = (dir: string) =>
+    dir === defaultWorkspace ? tSidebar("workspace.default") : shorten(dir);
   const [recent, setRecent] = useState<string[]>([]);
   const [remoteOpen, setRemoteOpen] = useState(false);
   const [remoteValue, setRemoteValue] = useState("");
@@ -99,26 +104,33 @@ export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disa
       <Select value={current} onValueChange={handleChange} disabled={disabled}>
         <SelectTrigger
           size="sm"
-          title={current}
+          title={current === defaultWorkspace ? undefined : current}
           className="h-7 max-w-52 gap-1.5 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:ring-0 data-[size=sm]:h-7"
         >
-          {current.startsWith("ssh://") || /^[^/:\s]+@?[^/:\s]+:/.test(current) ? (
+          {current === defaultWorkspace && current ? (
+            <MessageSquare className="size-3" />
+          ) : current.startsWith("ssh://") || /^[^/:\s]+@?[^/:\s]+:/.test(current) ? (
             <Server className="size-3" />
           ) : (
             <Folder className="size-3" />
           )}
-          <span className="truncate">{current ? shorten(current) : t("workspace.label")}</span>
+          <span className="truncate">{current ? displayName(current) : t("workspace.label")}</span>
         </SelectTrigger>
         <SelectContent align="start" className="max-w-[22rem]">
           {options.map((dir) => (
             <SelectItem key={dir} value={dir} className="text-xs">
-              {dir.startsWith("ssh://") || /^[^/:\s]+@?[^/:\s]+:/.test(dir) ? (
+              {dir === defaultWorkspace ? (
+                <MessageSquare className="size-4" />
+              ) : dir.startsWith("ssh://") || /^[^/:\s]+@?[^/:\s]+:/.test(dir) ? (
                 <Server className="size-4" />
               ) : (
                 <Folder className="size-4" />
               )}
-              <span className="truncate" title={dir}>
-                {shorten(dir)}
+              <span
+                className="truncate"
+                title={dir === defaultWorkspace ? undefined : dir}
+              >
+                {displayName(dir)}
               </span>
             </SelectItem>
           ))}

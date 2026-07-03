@@ -1,6 +1,6 @@
 "use client";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArchiveRestore, Check, Clock, Folder, Images, MessageCircleQuestion, RotateCcw } from "lucide-react";
+import { Archive, ArchiveRestore, Check, Clock, Folder, Images, MessageCircleQuestion, MessageSquare, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/lib/format";
@@ -305,11 +305,15 @@ const Card = memo(function Card({
       )}
       <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
         <span className="inline-flex min-w-0 items-center gap-1">
-          <Folder className="size-3 shrink-0" />
+          {conversation.workspaceDir === defaultWorkspace ? (
+            <MessageSquare className="size-3 shrink-0" />
+          ) : (
+            <Folder className="size-3 shrink-0" />
+          )}
           <span className="truncate">
             {conversation.workspaceDir === defaultWorkspace
               ? t("card.defaultWorkspace")
-              : shorten(conversation.workspaceDir, defaultWorkspace)}
+              : shorten(conversation.workspaceDir)}
           </span>
         </span>
         <span className="shrink-0 tabular-nums">
@@ -463,7 +467,6 @@ function useLatestReviewRequest(convId: string): ReviewRequestDetails | null {
   });
 }
 
-function shorten(p: string, defaultWorkspace: string): string {
-  if (p === defaultWorkspace) return "default";
+function shorten(p: string): string {
   return workspaceName(p);
 }
