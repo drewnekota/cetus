@@ -833,20 +833,14 @@ const ConversationRow = memo(function ConversationRow({
               aria-label={t("conversation.inProgress")}
               className="block size-3 animate-spin rounded-full border-2 border-current/35 border-t-current"
             />
+          ) : unreadCompleted ? (
+            <span className="block size-2 rounded-full bg-primary">
+              <span className="sr-only">Unread</span>
+            </span>
           ) : (
             relativeTime
           )}
         </span>
-        {(streaming || unreadCompleted) && (
-          <span
-            className={cn(
-              "shrink-0 transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
-              streaming ? "sr-only" : "size-2 rounded-full bg-primary",
-            )}
-          >
-            {streaming ? t("conversation.inProgress") : <span className="sr-only">Unread</span>}
-          </span>
-        )}
       </SidebarMenuButton>
       <Tooltip>
         <TooltipTrigger asChild>
