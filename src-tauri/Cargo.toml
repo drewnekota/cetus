@@ -93,3 +93,10 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 # DEV-ONLY in-app eval/debug bridge. NEVER add to `default`; compiled out of release.
 devtest = []
+
+# The screen-context loop pushes every captured Retina frame through `image`
+# (resize + JPEG encode). Unoptimized, that costs ~3s of a full core per 8s
+# tick in `tauri dev` — a constant fan-spin / battery drain. Keep the pixel
+# crate optimized even in dev builds; everything else stays fast-compile.
+[profile.dev.package.image]
+opt-level = 3

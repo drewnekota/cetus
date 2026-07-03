@@ -60,7 +60,7 @@ pub struct CaptureSettings {
 }
 
 fn default_interval() -> u64 {
-    8
+    30
 }
 fn default_retention() -> u32 {
     7
@@ -73,7 +73,7 @@ impl Default for CaptureSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            interval_seconds: 8,
+            interval_seconds: 30,
             excluded_apps: Vec::new(),
             retention_days: default_retention(),
             ocr_enabled: true,
@@ -165,20 +165,18 @@ fn capture_once(
     }
 
     let img = capture_primary()?;
-    // Downscale to the stored resolution exactly once: the perceptual hash, the
-    // full JPEG, and the thumbnail all derive from this single resized buffer.
-    // The old path did a separate full-resolution resize for each — a full-res
-    // dHash on *every* tick (including dropped duplicates) plus two more full-res
-    // downscales per kept frame. Hashing the resized image also makes dedupe
-    // independent of capture resolution.
-    let resized = downscale(&img, MAX_EDGE);
-    drop(img); // free the full-resolution buffer before encoding work
-    let hash = dhash(&resized);
+    // Dedupe BEFORE the expensive work: dhash's Nearest pre-shrink makes hashing
+    // the full-resolution frame near-free, so a duplicate tick (idle screen — the
+    // common case) costs only the grab + hash. The stored-resolution downscale,
+    // JPEG encodes, and OCR below run only for frames that actually changed.
+    let hash = dhash(&img);
     if let Some(p) = prev_hash {
         if hamming(p, hash) <= DEDUPE_HAMMING {
             return None;
         }
     }
+    let resized = downscale(&img, MAX_EDGE);
+    drop(img); // free the full-resolution buffer before encoding work
 
     // Re-sample the frontmost app now that we hold a frame about to be persisted.
     // The pre-capture check above avoids the grab in the common case, but if the
@@ -341,8 +339,21 @@ fn lum(p: &image::Rgba<u8>) -> u32 {
 
 /// 64-bit difference hash: downscale to 9x8 grayscale, then one bit per
 /// horizontal neighbour comparison.
+///
+/// Runs on the full-resolution capture on *every* tick — including dropped
+/// duplicates — so it must stay cheap. A Triangle filter straight to 9x8 reads
+/// every source pixel (~8M on Retina); the Nearest pre-shrink instead samples a
+/// fixed grid, bounding the cost regardless of capture resolution. Nearest is
+/// deterministic, so an unchanged screen still hashes identically (hamming 0).
 fn dhash(img: &image::RgbaImage) -> u64 {
-    let small = image::imageops::resize(img, 9, 8, image::imageops::FilterType::Triangle);
+    const PRE_W: u32 = 72;
+    const PRE_H: u32 = 64;
+    let small = if img.width() > PRE_W && img.height() > PRE_H {
+        let pre = image::imageops::resize(img, PRE_W, PRE_H, image::imageops::FilterType::Nearest);
+        image::imageops::resize(&pre, 9, 8, image::imageops::FilterType::Triangle)
+    } else {
+        image::imageops::resize(img, 9, 8, image::imageops::FilterType::Triangle)
+    };
     let mut hash: u64 = 0;
     let mut bit = 0u32;
     for y in 0..8u32 {

@@ -1867,7 +1867,7 @@ function ScreenContextSection({ onOpenHistory }: { onOpenHistory: () => void }) 
               value={settings.intervalSeconds}
               onChange={(e) =>
                 update({
-                  intervalSeconds: Math.max(2, Number(e.target.value) || 8),
+                  intervalSeconds: Math.max(2, Number(e.target.value) || 30),
                 })
               }
             />
