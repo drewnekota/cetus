@@ -899,15 +899,17 @@ function QueuedMessages({
               {t("pane.queued")}
             </span>
             <span className="min-w-0 flex-1 truncate text-foreground/80">{label}</span>
-            <button
-              type="button"
-              onClick={() => onSteer?.(m.id)}
-              title={t("pane.steerTooltip")}
-              className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-primary transition-colors hover:bg-primary/10"
-            >
-              <ArrowUp className="size-3" />
-              {t("pane.steerNow")}
-            </button>
+            {onSteer && (
+              <button
+                type="button"
+                onClick={() => onSteer(m.id)}
+                title={t("pane.steerTooltip")}
+                className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-primary transition-colors hover:bg-primary/10"
+              >
+                <ArrowUp className="size-3" />
+                {t("pane.steerNow")}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onRemove?.(m.id)}

@@ -53,6 +53,8 @@ A single composer: pick a **workspace** (working directory), a **preset** (Daily
 
 Every conversation picks its engine. **Cetus** (the bundled pi harness) is the default; flip the composer's runtime picker to **Claude Code** or **Codex** and the same conversation runs on the vendor CLI instead — with per-conversation **model** (Fable / Opus / Sonnet / Haiku · GPT-5.5 family) and **reasoning-effort** overrides next to it.
 
+![Cetus runtime picker — Cetus, Claude Code, or Codex per conversation](docs/screenshot-runtime-picker.png)
+
 The CLI runtimes reuse whatever `claude` / `codex` you already have installed and logged in on your `PATH` — no separate sign-in. Cetus runs one headless turn per message (`claude -p --output-format stream-json` / `codex exec --json`), translates the structured event stream into the same chat UI (text, thinking, tool cards), resumes context across turns via each CLI's session token, and isolates edits in a per-conversation **git worktree**. Automations can fire on any runtime, so a scheduled job can run on Claude Code while your chats stay on Cetus.
 
 ### Kanban

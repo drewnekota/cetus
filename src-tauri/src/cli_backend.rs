@@ -262,6 +262,40 @@ pub fn dispatch_turn(
     let sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
         std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(handle.clone()));
 
+    // Steer: a prompt sent while a claude turn is mid-run is injected into
+    // that turn over stdin (a bidirectional stream-json user message — the
+    // same steering the interactive CLI does on mid-run input) instead of
+    // failing "already running". The runner keeps the turn open through the
+    // injection (see run_cli_turn's steer grace). codex has no live stdin, so
+    // its runs keep the one-turn-at-a-time error and the UI's follow-up queue.
+    if backend == cetus_bridge::cli_agent::CliBackend::ClaudeCode {
+        let blocks: Vec<(String, String)> = images
+            .iter()
+            .map(|img| (img.mime_type.clone(), img.data.clone()))
+            .collect();
+        let line = cetus_bridge::cli_agent::claude_user_message_line(message, &blocks);
+        if state.cli_try_steer(&conv.id, line) {
+            let mut content = vec![serde_json::json!({ "type": "text", "text": message })];
+            for img in &images {
+                content.push(serde_json::json!({
+                    "type": "image", "data": img.data, "mimeType": img.mime_type,
+                }));
+            }
+            state
+                .store
+                .append_cli_message(
+                    &conv.id,
+                    &serde_json::json!({ "role": "user", "content": content }),
+                    None,
+                    now_ms(),
+                )
+                .ok();
+            return Ok(());
+        }
+        // No running turn (or it ended between check and send): fall through
+        // to a normal dispatch.
+    }
+
     let ws = PathBuf::from(&conv.workspace_dir);
     std::fs::create_dir_all(&ws).ok();
     let settings = load_settings(&state.store);
@@ -287,7 +321,7 @@ pub fn dispatch_turn(
     // stdin channel control responses ride in on. Registered before the user
     // message persists so a rejected double-send doesn't strand a transcript
     // row that never ran.
-    let (kill, input_rx) = state.begin_cli_turn(&conv.id)?;
+    let (kill, input_rx, steer_pending) = state.begin_cli_turn(&conv.id)?;
 
     // Image attachments: claude takes them inline on the stdin user message
     // (native content blocks); codex ingests file paths via `-i`.
@@ -356,6 +390,7 @@ pub fn dispatch_turn(
             opts,
             Some(kill),
             Some(input_rx),
+            Some(steer_pending),
         )
         .await;
         match outcome {
@@ -366,8 +401,19 @@ pub fn dispatch_turn(
                 for m in &o.messages {
                     store.append_cli_message(&conv_id, m, None, ts).ok();
                 }
-                if let Some(resume) = &o.resume_id {
-                    store.set_session_file(&conv_id, resume).ok();
+                if o.resume_rejected {
+                    // The stored token points at a session that isn't on disk
+                    // (its turn was killed before the CLI saved it) — reset it
+                    // so the next send starts fresh instead of failing forever.
+                    store.set_session_file(&conv_id, "").ok();
+                } else if o.streamed {
+                    // Only a turn that streamed content has certainly been
+                    // written to the CLI's session store; persisting the id of
+                    // one stopped earlier (Stop during boot) would poison
+                    // every later turn with an unresumable session.
+                    if let Some(resume) = &o.resume_id {
+                        store.set_session_file(&conv_id, resume).ok();
+                    }
                 }
             }
             Err(e) => {

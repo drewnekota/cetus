@@ -160,11 +160,12 @@ impl CliBackend {
     }
 }
 
-/// The opening lines written to claude's stdin: the control-protocol
-/// `initialize` handshake (which is what makes AskUserQuestion and
-/// `can_use_tool` prompts available in headless mode), then the user message
-/// carrying the prompt and any inline images.
-pub fn claude_stdin_lines(prompt: &str, image_blocks: &[(String, String)]) -> Vec<String> {
+/// One stream-json user message line for claude's stdin: the prompt plus any
+/// inline images. Sent as the opening message of a turn, and again mid-turn to
+/// steer — claude in bidirectional mode folds a user message injected while a
+/// turn runs into that turn (same as typing during a run in the interactive
+/// CLI).
+pub fn claude_user_message_line(prompt: &str, image_blocks: &[(String, String)]) -> String {
     let mut content = vec![json!({ "type": "text", "text": prompt })];
     for (mime, data) in image_blocks {
         content.push(json!({
@@ -172,6 +173,18 @@ pub fn claude_stdin_lines(prompt: &str, image_blocks: &[(String, String)]) -> Ve
             "source": { "type": "base64", "media_type": mime, "data": data },
         }));
     }
+    json!({
+        "type": "user",
+        "message": { "role": "user", "content": content },
+    })
+    .to_string()
+}
+
+/// The opening lines written to claude's stdin: the control-protocol
+/// `initialize` handshake (which is what makes AskUserQuestion and
+/// `can_use_tool` prompts available in headless mode), then the user message
+/// carrying the prompt and any inline images.
+pub fn claude_stdin_lines(prompt: &str, image_blocks: &[(String, String)]) -> Vec<String> {
     vec![
         json!({
             "type": "control_request",
@@ -179,11 +192,7 @@ pub fn claude_stdin_lines(prompt: &str, image_blocks: &[(String, String)]) -> Ve
             "request": { "subtype": "initialize" },
         })
         .to_string(),
-        json!({
-            "type": "user",
-            "message": { "role": "user", "content": content },
-        })
-        .to_string(),
+        claude_user_message_line(prompt, image_blocks),
     ]
 }
 
@@ -230,6 +239,15 @@ fn normalize_content(v: &Value) -> Value {
     }
 }
 
+/// True for claude JSONL lines that belong to a subagent's sidechain rather
+/// than the main conversation (the CLI stamps them with the launching Task
+/// call's `parent_tool_use_id`).
+fn is_sidechain(v: &Value) -> bool {
+    v.get("parent_tool_use_id")
+        .map(|p| !p.is_null())
+        .unwrap_or(false)
+}
+
 /// Stateful translator from a backend's raw JSONL lines to Cetus `PiEvent`
 /// values. Allocates a monotonic `contentIndex` per block and remembers which
 /// tool-call ids map to which block so `tool_execution_*` events line up with
@@ -270,6 +288,61 @@ pub struct EventTranslator {
     /// frontend's "thinking…" placeholder into a bare empty ASSISTANT header
     /// for that whole gap.
     opened: bool,
+    /// claude only: background subagents (Task/Agent tool) launched this turn,
+    /// keyed by the CLI's task_id. The CLI runs subagents async — the tool
+    /// result is just a launch ack and the real work streams later as task_*
+    /// system events. The runner must not close the turn on a `result` while
+    /// any of these are still pending (see `has_pending_tasks`).
+    background_tasks: std::collections::HashMap<String, BackgroundTask>,
+}
+
+/// One background subagent tracked from `task_started` to its
+/// `task_updated`/`task_notification` completion.
+#[derive(Clone)]
+struct BackgroundTask {
+    /// The Agent/Task tool_use id — the card the frontend shows for it.
+    tool_use_id: String,
+    subagent_type: String,
+    description: String,
+    done: bool,
+    /// The subagent's own tool calls, observed on its sidechain lines. Painted
+    /// onto the Agent card as a nested step list (`details.subagent.steps`).
+    /// Each step: { id, tool, detail, done }.
+    steps: Vec<Value>,
+    /// Latest `task_progress` description — the card's one-line status.
+    status_text: String,
+}
+
+impl BackgroundTask {
+    /// The `details` payload every update/end event on the Agent card carries.
+    /// The frontend replaces `result` wholesale per event, so steps must ride
+    /// along on all of them or they'd flash away mid-run.
+    fn details(&self, status: &str) -> Value {
+        json!({
+            "subagent": {
+                "type": self.subagent_type,
+                "description": self.description,
+                "status": status,
+                "steps": self.steps,
+            }
+        })
+    }
+}
+
+/// One line summarizing a subagent tool call's input — the field that carries
+/// the "what" of the call, mirroring the frontend's summarizeArgs.
+fn summarize_tool_input(input: &Value) -> String {
+    for key in ["description", "command", "file_path", "path", "pattern", "query", "url", "prompt"] {
+        if let Some(s) = input.get(key).and_then(|v| v.as_str()) {
+            let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+            let mut out: String = s.chars().take(120).collect();
+            if out.len() < s.len() {
+                out.push('…');
+            }
+            return out;
+        }
+    }
+    String::new()
 }
 
 /// One in-flight content block streamed via claude partial events.
@@ -305,7 +378,25 @@ impl EventTranslator {
             result_error: None,
             started_items: std::collections::HashSet::new(),
             opened: false,
+            background_tasks: std::collections::HashMap::new(),
         }
+    }
+
+    /// True while any background subagent launched this turn is still running.
+    /// The runner keeps reading past a `result` in that case: the CLI starts a
+    /// continuation turn on its own once the task completes, and killing the
+    /// child at the first `result` would orphan the subagent mid-flight.
+    pub fn has_pending_tasks(&self) -> bool {
+        self.background_tasks.values().any(|t| !t.done)
+    }
+
+    /// True if any background subagent ran during this turn (pending or done).
+    /// The runner uses this to hold the close briefly after a `result`: a
+    /// task's completion notification and the CLI's continuation turn can
+    /// race the result in either order, and killing on the result alone can
+    /// abandon the continuation that carries the subagent's report.
+    pub fn saw_background_tasks(&self) -> bool {
+        !self.background_tasks.is_empty()
     }
 
     /// Move the accumulated PiMessages out (call after `finish`).
@@ -468,6 +559,248 @@ impl EventTranslator {
         })]
     }
 
+    /// A main-chain claude tool result. Background subagent launches get
+    /// special treatment: the CLI answers the Agent/Task call immediately with
+    /// an internal-metadata ack (agentId, output file, "never quote this") and
+    /// the agent keeps working in the background. Showing that blob — and
+    /// settling the card — would read as a finished step. Instead the card
+    /// gets a clean status and stays running until `task_notification`.
+    fn emit_claude_tool_result(&mut self, id: &str, content: &Value, is_error: bool) -> Vec<Value> {
+        let task_id = self
+            .background_tasks
+            .iter()
+            .find(|(_, t)| t.tool_use_id == id)
+            .map(|(k, _)| k.clone());
+        if let Some(task_id) = task_id {
+            let task = self.background_tasks[&task_id].clone();
+            if !task.done && content.to_string().contains("Async agent launched successfully") {
+                let status = json!([{
+                    "type": "text",
+                    "text": format!(
+                        "{} agent running in background — {}",
+                        task.subagent_type, task.description
+                    ),
+                }]);
+                let details = task.details("running");
+                self.flush_assistant();
+                self.messages.push(json!({
+                    "role": "toolResult",
+                    "toolCallId": id,
+                    "toolName": self.tool_names.get(id).cloned().unwrap_or_else(|| "tool".to_string()),
+                    "content": status,
+                    "isError": false,
+                    "details": details,
+                }));
+                return vec![
+                    json!({ "type": "tool_execution_start", "toolCallId": id }),
+                    json!({
+                        "type": "tool_execution_update",
+                        "toolCallId": id,
+                        "partialResult": { "content": status, "details": details },
+                    }),
+                ];
+            }
+            // Synchronous subagent: the result is the real report and also
+            // ends the task — don't hold the turn open for it. Keep the step
+            // trace on the settled card (and the persisted row).
+            let details = {
+                let t = self.background_tasks.get_mut(&task_id).expect("task exists");
+                t.done = true;
+                t.details(if is_error { "failed" } else { "completed" })
+            };
+            let content = normalize_content(content);
+            self.flush_assistant();
+            self.messages.push(json!({
+                "role": "toolResult",
+                "toolCallId": id,
+                "toolName": self.tool_names.get(id).cloned().unwrap_or_else(|| "tool".to_string()),
+                "content": content,
+                "isError": is_error,
+                "details": details,
+            }));
+            return vec![
+                json!({ "type": "tool_execution_start", "toolCallId": id }),
+                json!({
+                    "type": "tool_execution_end",
+                    "toolCallId": id,
+                    "result": { "content": content, "details": details },
+                    "isError": is_error,
+                }),
+            ];
+        }
+        self.emit_tool_result(id, content, is_error)
+    }
+
+    /// A sidechain snapshot line (`parent_tool_use_id` set): the subagent's own
+    /// tool calls and results. They must not splice into the main transcript —
+    /// instead they accumulate as steps on the launching Agent/Task card so
+    /// the user can watch the subagent work.
+    fn on_claude_sidechain(&mut self, v: &Value) -> Vec<Value> {
+        let parent = v
+            .get("parent_tool_use_id")
+            .and_then(|p| p.as_str())
+            .unwrap_or("");
+        let Some(task) = self
+            .background_tasks
+            .values_mut()
+            .find(|t| t.tool_use_id == parent)
+        else {
+            return Vec::new();
+        };
+        let blocks = v
+            .pointer("/message/content")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut changed = false;
+        for b in &blocks {
+            match b.get("type").and_then(|t| t.as_str()).unwrap_or("") {
+                "tool_use" => {
+                    let id = b.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                    // Snapshots could repeat a block; a step per tool call.
+                    if task.steps.iter().any(|s| s["id"] == json!(id)) {
+                        continue;
+                    }
+                    task.steps.push(json!({
+                        "id": id,
+                        "tool": b.get("name").and_then(|n| n.as_str()).unwrap_or("tool"),
+                        "detail": summarize_tool_input(b.get("input").unwrap_or(&Value::Null)),
+                        "done": false,
+                    }));
+                    changed = true;
+                }
+                "tool_result" => {
+                    let id = b.get("tool_use_id").and_then(|i| i.as_str()).unwrap_or("");
+                    if let Some(s) = task.steps.iter_mut().find(|s| s["id"] == json!(id)) {
+                        s["done"] = json!(true);
+                        changed = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !changed || task.done {
+            return Vec::new();
+        }
+        let text = if task.status_text.is_empty() {
+            format!("{} agent running — {}", task.subagent_type, task.description)
+        } else {
+            task.status_text.clone()
+        };
+        vec![json!({
+            "type": "tool_execution_update",
+            "toolCallId": task.tool_use_id,
+            "partialResult": {
+                "content": [{ "type": "text", "text": text }],
+                "details": task.details("running"),
+            },
+        })]
+    }
+
+    /// Background-task lifecycle system events (claude). Progress is painted
+    /// onto the launching Agent/Task tool card via tool_execution_update; the
+    /// notification settles the card and releases the turn (has_pending_tasks).
+    fn on_claude_task_event(&mut self, subtype: &str, v: &Value) -> Vec<Value> {
+        let task_id = v.get("task_id").and_then(|t| t.as_str()).unwrap_or("");
+        if task_id.is_empty() {
+            return Vec::new();
+        }
+        match subtype {
+            "task_started" => {
+                let tool_use_id = v.get("tool_use_id").and_then(|t| t.as_str()).unwrap_or("");
+                if !tool_use_id.is_empty() {
+                    self.background_tasks.insert(task_id.to_string(), BackgroundTask {
+                        tool_use_id: tool_use_id.to_string(),
+                        subagent_type: v
+                            .get("subagent_type")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("Task")
+                            .to_string(),
+                        description: v
+                            .get("description")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("background task")
+                            .to_string(),
+                        done: false,
+                        steps: Vec::new(),
+                        status_text: String::new(),
+                    });
+                }
+                // No event yet: the tool card may not exist until toolcall_end,
+                // and the launch ack result paints the initial status anyway.
+                Vec::new()
+            }
+            "task_progress" => {
+                let Some(task) = self.background_tasks.get_mut(task_id) else {
+                    return Vec::new();
+                };
+                let desc = v
+                    .get("description")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("working…");
+                task.status_text = desc.to_string();
+                vec![json!({
+                    "type": "tool_execution_update",
+                    "toolCallId": task.tool_use_id,
+                    "partialResult": {
+                        "content": [{ "type": "text", "text": desc }],
+                        "details": task.details("running"),
+                    },
+                })]
+            }
+            "task_updated" => {
+                // Terminal status patch; the notification (which may race
+                // this) does the card settling.
+                if matches!(
+                    v.pointer("/patch/status").and_then(|s| s.as_str()),
+                    Some("completed") | Some("failed") | Some("stopped") | Some("killed")
+                ) {
+                    if let Some(t) = self.background_tasks.get_mut(task_id) {
+                        t.done = true;
+                    }
+                }
+                Vec::new()
+            }
+            "task_notification" => {
+                let Some(task) = self.background_tasks.get_mut(task_id) else {
+                    return Vec::new();
+                };
+                task.done = true;
+                let task = task.clone();
+                let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("completed");
+                let is_err = status != "completed";
+                // The notification carries the subagent's actual report in
+                // `summary` — for an async task this is the only place it
+                // surfaces (no main-chain tool_result follows).
+                let text = match v.get("summary").and_then(|s| s.as_str()) {
+                    Some(s) if !s.trim().is_empty() => s.to_string(),
+                    _ => format!("{} agent {} — {}", task.subagent_type, status, task.description),
+                };
+                let content = json!([{ "type": "text", "text": text }]);
+                let details = task.details(status);
+                // Keep the persisted transcript in sync with what the card
+                // now shows (the launch-ack row was already pushed).
+                for m in self.messages.iter_mut().rev() {
+                    if m.get("toolCallId").and_then(|i| i.as_str())
+                        == Some(task.tool_use_id.as_str())
+                    {
+                        m["content"] = content.clone();
+                        m["isError"] = json!(is_err);
+                        m["details"] = details.clone();
+                        break;
+                    }
+                }
+                vec![json!({
+                    "type": "tool_execution_end",
+                    "toolCallId": task.tool_use_id,
+                    "result": { "content": content, "details": details },
+                    "isError": is_err,
+                })]
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Translate one raw JSONL line from the CLI into zero or more PiEvents.
     pub fn on_line(&mut self, line: &str) -> Vec<Value> {
         let line = line.trim();
@@ -490,17 +823,27 @@ impl EventTranslator {
         let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match ty {
             "system" => {
-                if v.get("subtype").and_then(|s| s.as_str()) == Some("init") {
-                    if let Some(sid) = v.get("session_id").and_then(|s| s.as_str()) {
-                        self.resume_id = Some(sid.to_string());
+                match v.get("subtype").and_then(|s| s.as_str()).unwrap_or("") {
+                    "init" => {
+                        if let Some(sid) = v.get("session_id").and_then(|s| s.as_str()) {
+                            self.resume_id = Some(sid.to_string());
+                        }
+                        Vec::new()
                     }
+                    sub @ ("task_started" | "task_progress" | "task_updated"
+                    | "task_notification") => self.on_claude_task_event(sub, v),
+                    _ => Vec::new(),
                 }
-                Vec::new()
             }
             // Token-level partials (--include-partial-messages). These carry
             // the live content; the cumulative "assistant" snapshots below are
             // ignored to avoid double-rendering.
             "stream_event" => {
+                // Sidechain partials (a subagent's own stream) would collide
+                // with the parent's live_blocks — both count indexes from 0.
+                if is_sidechain(v) {
+                    return Vec::new();
+                }
                 let Some(event) = v.get("event") else {
                     return Vec::new();
                 };
@@ -512,6 +855,11 @@ impl EventTranslator {
             // (/usage, /context, /compact, …) and CLI-side notices, which never
             // stream partials. Emit their text so those turns aren't blank.
             "assistant" => {
+                // Sidechain snapshots (a subagent's own turns) feed the
+                // launching card's step list instead of the main transcript.
+                if is_sidechain(v) {
+                    return self.on_claude_sidechain(v);
+                }
                 let msg = v.get("message");
                 let model = msg.and_then(|m| m.get("model")).and_then(|m| m.as_str());
                 if model != Some("<synthetic>") {
@@ -555,6 +903,13 @@ impl EventTranslator {
             // Ack of our initialize handshake — nothing to do.
             "control_response" => Vec::new(),
             "user" => {
+                // Sidechain traffic: a subagent's internal tool results. They
+                // reference tool ids the frontend never saw, and emitting them
+                // would splice foreign results into the parent transcript —
+                // they settle the matching step on the launching card instead.
+                if is_sidechain(v) {
+                    return self.on_claude_sidechain(v);
+                }
                 let mut out = Vec::new();
                 let content = v
                     .get("message")
@@ -569,7 +924,7 @@ impl EventTranslator {
                                 .unwrap_or("");
                             let is_err = b.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
                             let c = b.get("content").cloned().unwrap_or(Value::Null);
-                            out.extend(self.emit_tool_result(id, &c, is_err));
+                            out.extend(self.emit_claude_tool_result(id, &c, is_err));
                         }
                     }
                 }
@@ -861,6 +1216,62 @@ pub struct CliTurnOutcome {
     pub messages: Vec<Value>,
     /// True when the turn was cut short by `abort` (the child was killed).
     pub aborted: bool,
+    /// True when message-level content streamed before the turn closed. Gates
+    /// persisting `resume_id`: the session id arrives in the CLI's very first
+    /// event, but the CLI only writes the session to disk once content flows —
+    /// a turn stopped/crashed before that emits an id that can never resume
+    /// ("No conversation found"), and storing it would fail every later turn.
+    pub streamed: bool,
+    /// True when the CLI rejected the `--resume` token (session not on disk —
+    /// see `streamed`). The caller should clear the stored token so the next
+    /// turn starts a fresh session instead of failing the same way forever.
+    pub resume_rejected: bool,
+}
+
+/// True for stdout lines showing claude actually started processing more work
+/// after a `result` (a steered turn beginning), as opposed to housekeeping it
+/// can flush while idling — rate-limit pings, hook bookkeeping, control acks.
+fn is_turn_activity(line: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    match v.get("type").and_then(|t| t.as_str()).unwrap_or("") {
+        "assistant" | "user" | "stream_event" | "control_request" => true,
+        // status ("requesting" — the first sign of a new API call) and task_*
+        // events are turn work; hook_started/hook_response fire while idle.
+        "system" => !matches!(
+            v.get("subtype").and_then(|s| s.as_str()).unwrap_or(""),
+            "hook_started" | "hook_response"
+        ),
+        _ => false,
+    }
+}
+
+/// Condense an auth-expiry stderr dump into one actionable line. codex logs
+/// every 401 retry (`token_invalidated`, `refresh_token_invalidated`) before
+/// exiting; none of that wall helps the user beyond "sign in again".
+fn auth_expired_hint(backend: CliBackend, stderr: &str) -> Option<String> {
+    let expired = [
+        "token_invalidated",
+        "refresh_token_invalidated",
+        "authentication token has been invalidated",
+        "401 Unauthorized",
+        "OAuth token has expired",
+    ]
+    .iter()
+    .any(|p| stderr.contains(p));
+    if !expired {
+        return None;
+    }
+    let login = match backend {
+        CliBackend::ClaudeCode => "claude, then /login",
+        CliBackend::Codex => "codex login",
+    };
+    Some(format!(
+        "{} session has expired. Run `{}` in a terminal to sign in again, then retry.",
+        backend.as_str(),
+        login
+    ))
 }
 
 /// Spawn a single headless turn of `backend` with cwd = `cwd`, stream its
@@ -874,9 +1285,18 @@ pub struct CliTurnOutcome {
 ///
 /// claude runs in bidirectional stream-json mode: the prompt goes over stdin,
 /// and `input_rx` lines (control responses answering permission prompts /
-/// AskUserQuestion) are forwarded to the child as they arrive. The turn closes
-/// on the terminal `result` event rather than EOF, since the child then idles
-/// waiting for more stdin.
+/// AskUserQuestion, plus steer user messages) are forwarded to the child as
+/// they arrive. The turn closes on the terminal `result` event rather than
+/// EOF, since the child then idles waiting for more stdin.
+///
+/// `steer_pending` counts steer messages injected via `input_rx` and not yet
+/// settled. claude normally folds a mid-turn user message into the running
+/// turn (one `result` covers both), but one that lands after the model already
+/// finished starts a NEW turn after the `result` we're about to close on —
+/// killing there would silently swallow the steer. With a pending steer the
+/// runner holds the close for a short quiet window instead: fresh turn
+/// activity keeps the loop streaming; silence means the steer merged and the
+/// child is just idling.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_cli_turn(
     sink: Arc<dyn EventSink>,
@@ -889,6 +1309,7 @@ pub async fn run_cli_turn(
     opts: CliRunOpts,
     abort: Option<Arc<tokio::sync::Notify>>,
     input_rx: Option<tokio::sync::mpsc::UnboundedReceiver<String>>,
+    steer_pending: Option<Arc<std::sync::atomic::AtomicUsize>>,
 ) -> Result<CliTurnOutcome> {
     let mut tr = EventTranslator::new(backend);
     let emit = |sink: &Arc<dyn EventSink>, events: Vec<Value>| {
@@ -935,6 +1356,8 @@ pub async fn run_cli_turn(
                 resume_id: None,
                 messages: tr.take_messages(),
                 aborted: false,
+                streamed: false,
+                resume_rejected: false,
             });
         }
     };
@@ -1013,6 +1436,114 @@ pub async fn run_cli_turn(
                 tr.saw_result = false;
                 continue;
             }
+            // Background subagents (async Task/Agent tool) outlive the turn
+            // that launched them: the CLI emits an intermediate `result`,
+            // then starts a continuation turn once the task completes.
+            // Killing here would orphan those agents mid-flight — keep
+            // reading until they settle (Stop still aborts via `abort`).
+            if tr.result_error.is_none() && tr.has_pending_tasks() {
+                tr.saw_result = false;
+                continue;
+            }
+            // A steer is unsettled (see `steer_pending` in the doc comment):
+            // hold the close for a short quiet window. Fresh turn activity
+            // means the steer landed as a new turn — resume the main loop and
+            // close on ITS result; silence means it merged into the turn that
+            // just ended and the child is idling for stdin.
+            let steered = steer_pending
+                .as_ref()
+                .map(|s| s.swap(0, std::sync::atomic::Ordering::SeqCst) > 0)
+                .unwrap_or(false);
+            if steered {
+                // Cleared so a second `result` inside the grace window is
+                // detectable; restored below when the quiet close stands — a
+                // result DID end this turn, and losing the flag would misread
+                // the kill as a dirty exit and stall on the stderr drain
+                // (which only EOFs once orphaned grandchildren exit).
+                tr.saw_result = false;
+                // The child reads queued stdin right after `result`; the
+                // steered turn's first status line lands well within 2s.
+                let deadline =
+                    tokio::time::Instant::now() + std::time::Duration::from_millis(2000);
+                let mut resumed = false;
+                loop {
+                    let line = tokio::select! {
+                        r = tokio::time::timeout_at(deadline, reader.next_line()) => match r {
+                            Ok(l) => l.unwrap_or(None), // Err/None: read error or EOF
+                            Err(_) => None,             // quiet — the steer merged
+                        },
+                        _ = async {
+                            match &abort {
+                                Some(n) => n.notified().await,
+                                None => std::future::pending::<()>().await,
+                            }
+                        } => {
+                            aborted = true;
+                            None
+                        }
+                    };
+                    let Some(line) = line else { break };
+                    let events = tr.on_line(&line);
+                    if !events.is_empty() {
+                        emit(&sink, events);
+                    }
+                    if tr.saw_result {
+                        break; // the steered turn already closed
+                    }
+                    if is_turn_activity(&line) {
+                        resumed = true;
+                        break;
+                    }
+                    // Idle housekeeping (rate-limit pings, hook bookkeeping):
+                    // keep draining until the deadline.
+                }
+                if resumed {
+                    continue;
+                }
+                tr.saw_result = true;
+            }
+            // A background subagent ran this turn. Its completion notification
+            // and the CLI's continuation turn (where the main agent digests
+            // the subagent's report) can arrive AFTER the `result` — observed
+            // in both orders on 2.1.201. Hold the close until the stream has
+            // been quiet for 2s; any turn activity resumes the main loop.
+            if !aborted && tr.result_error.is_none() && tr.saw_background_tasks() {
+                let mut resumed = false;
+                loop {
+                    let deadline =
+                        tokio::time::Instant::now() + std::time::Duration::from_millis(2000);
+                    let line = tokio::select! {
+                        r = tokio::time::timeout_at(deadline, reader.next_line()) => match r {
+                            Ok(l) => l.unwrap_or(None), // Err/None: read error or EOF
+                            Err(_) => None,             // quiet — the turn really is over
+                        },
+                        _ = async {
+                            match &abort {
+                                Some(n) => n.notified().await,
+                                None => std::future::pending::<()>().await,
+                            }
+                        } => {
+                            aborted = true;
+                            None
+                        }
+                    };
+                    let Some(line) = line else { break };
+                    let events = tr.on_line(&line);
+                    if !events.is_empty() {
+                        emit(&sink, events);
+                    }
+                    if tr.has_pending_tasks() || is_turn_activity(&line) {
+                        resumed = true;
+                        break;
+                    }
+                    // Housekeeping (rate-limit pings, hook bookkeeping) and
+                    // stray bare results: keep draining toward the quiet window.
+                }
+                if resumed && !aborted {
+                    tr.saw_result = false;
+                    continue;
+                }
+            }
             let _ = child.start_kill();
             break;
         }
@@ -1023,25 +1554,37 @@ pub async fn run_cli_turn(
 
     let status = child.wait().await?;
     let clean = status.success() || aborted || tr.saw_result;
-    let mut err = if clean {
-        None
-    } else {
-        // Drain stderr for a human-readable failure reason.
-        let mut msg = format!("{} exited with {}", backend.as_str(), status);
+    // Stderr carries the failure reason for a dirty exit, but also for a clean
+    // exit whose `result` reported an error — a rejected `--resume` logs its
+    // "No conversation found" reason only there. Drain it (bounded) whenever
+    // either might need it.
+    let mut stderr_buf = String::new();
+    if !clean || tr.result_error.is_some() {
         if let Some(se) = stderr {
             let mut lines = BufReader::new(se).lines();
-            let mut buf = String::new();
             while let Ok(Some(l)) = lines.next_line().await {
-                buf.push_str(&l);
-                buf.push('\n');
-                if buf.len() > 2000 {
+                stderr_buf.push_str(&l);
+                stderr_buf.push('\n');
+                if stderr_buf.len() > 2000 {
                     break;
                 }
             }
-            let buf = buf.trim();
-            if !buf.is_empty() {
-                msg = format!("{msg}: {buf}");
-            }
+        }
+    }
+    let stderr_buf = stderr_buf.trim();
+    // Our --resume token pointed at a session the CLI never wrote to disk (its
+    // turn was stopped/crashed before content streamed). It can never resume.
+    let resume_rejected =
+        opts.resume.is_some() && stderr_buf.contains("No conversation found with session ID");
+    let mut err = if clean {
+        None
+    } else {
+        let mut msg = format!("{} exited with {}", backend.as_str(), status);
+        if !stderr_buf.is_empty() {
+            msg = match auth_expired_hint(backend, stderr_buf) {
+                Some(hint) => hint,
+                None => format!("{msg}: {stderr_buf}"),
+            };
         }
         Some(msg)
     };
@@ -1051,12 +1594,27 @@ pub async fn run_cli_turn(
     if err.is_none() && tr.messages.is_empty() && tr.assistant_blocks_empty() {
         err = tr.result_error.take();
     }
+    if resume_rejected {
+        // Replace the bare "agent reported an error" with what happened and
+        // what to do; the caller resets the token, so a resend just works.
+        err = Some(format!(
+            "{} couldn't resume this conversation's session — it was interrupted \
+             before the CLI saved it. The stored session was reset; send your \
+             message again to continue.",
+            backend.as_str()
+        ));
+    }
 
+    // Captured before finish(): an error emitted there opens the bubble too,
+    // but only pre-existing streamed content means the CLI saved the session.
+    let streamed = tr.opened;
     emit(&sink, tr.finish(err.as_deref()));
     Ok(CliTurnOutcome {
         resume_id: tr.resume_id.clone(),
         messages: tr.take_messages(),
         aborted,
+        streamed,
+        resume_rejected,
     })
 }
 
@@ -1399,6 +1957,7 @@ mod tests {
             CliRunOpts::default(),
             Some(Arc::new(tokio::sync::Notify::new())),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1473,6 +2032,7 @@ mod tests {
             CliRunOpts::default(),
             Some(abort),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1482,11 +2042,137 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
         // What streamed before the stop is kept for the transcript.
         assert_eq!(outcome.messages.len(), 1);
+        // Content streamed → the CLI saved the session; resume id is safe.
+        assert!(outcome.streamed);
         let events = sink.0.lock().unwrap();
         assert_eq!(
             types(&events).last().map(String::as_str),
             Some("agent_end")
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Stop before any content streamed: the init event already carried a
+    /// session id, but claude hasn't written the session to disk yet, so the
+    /// outcome must flag the turn as not-streamed — persisting that id would
+    /// make every later `--resume` fail with "No conversation found".
+    #[tokio::test]
+    async fn run_cli_turn_abort_before_content_marks_unstreamed() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-cli-abort-early-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-boot.sh");
+        // The marker file signals "init is in the pipe" so the stop below can't
+        // fire before the child even booted (parallel test runs load the box
+        // enough for a fixed sleep to lose that race).
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             echo '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"ghost-session\"}'\n\
+             touch \"$0.ready\"\n\
+             sleep 30\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let abort = Arc::new(tokio::sync::Notify::new());
+        let killer = abort.clone();
+        let ready = script.with_extension("sh.ready");
+        tokio::spawn(async move {
+            while !ready.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            // One beat for the reader to consume the buffered init line, so the
+            // select can't randomly pick the abort branch and drop it.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            killer.notify_one();
+        });
+        let outcome = run_cli_turn(
+            sink.clone() as Arc<dyn EventSink>,
+            CliBackend::ClaudeCode,
+            &script.to_string_lossy(),
+            &dir,
+            "hi",
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+            Some(abort),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(outcome.aborted);
+        // The ghost session id was captured but flagged unsafe to persist.
+        assert_eq!(outcome.resume_id.as_deref(), Some("ghost-session"));
+        assert!(!outcome.streamed);
+        assert!(!outcome.resume_rejected);
+        // No error bubble — a user stop is not a failure.
+        let events = sink.0.lock().unwrap();
+        assert!(!types(&events).iter().any(|t| t == "message_update:text_end"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A `--resume` token the CLI can't find (its turn was killed before the
+    /// session hit disk) must be flagged so the caller resets it, and the bare
+    /// "agent reported an error" replaced with an actionable message.
+    #[tokio::test]
+    async fn run_cli_turn_dead_resume_token_flags_rejection() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-cli-dead-resume-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-dead-resume.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             echo 'No conversation found with session ID: ghost-session' >&2\n\
+             echo '{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"result\":null}'\n\
+             sleep 30\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let outcome = run_cli_turn(
+            sink.clone() as Arc<dyn EventSink>,
+            CliBackend::ClaudeCode,
+            &script.to_string_lossy(),
+            &dir,
+            "hi",
+            None,
+            Vec::new(),
+            CliRunOpts {
+                resume: Some("ghost-session".into()),
+                ..CliRunOpts::default()
+            },
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(outcome.resume_rejected);
+        // The surfaced error tells the user what happened and what to do.
+        let text = outcome.messages[0]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("couldn't resume"), "got: {text}");
+        assert!(text.contains("send your message again"), "got: {text}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1507,6 +2193,7 @@ mod tests {
             CliRunOpts::default(),
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1517,6 +2204,188 @@ mod tests {
         let types = types(&events);
         assert_eq!(types.last().map(String::as_str), Some("agent_end"));
         assert!(types.iter().any(|t| t == "message_update:text_end"));
+    }
+
+    /// A steer that merged into the running turn: its `result` already covers
+    /// the injected message, so after the quiet grace window the turn closes —
+    /// well before the idling child's sleep runs out.
+    #[tokio::test]
+    async fn run_cli_turn_steer_merged_closes_after_grace() {
+        let dir =
+            std::env::temp_dir().join(format!("cetus-cli-steer-merge-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-merged.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"merged\"}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}'\n\
+             echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"merged\"}'\n\
+             sleep 30\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let steer = Arc::new(std::sync::atomic::AtomicUsize::new(1));
+        let started = std::time::Instant::now();
+        let outcome = run_cli_turn(
+            sink.clone() as Arc<dyn EventSink>,
+            CliBackend::ClaudeCode,
+            &script.to_string_lossy(),
+            &dir,
+            "hi",
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+            None,
+            None,
+            Some(steer),
+        )
+        .await
+        .unwrap();
+
+        assert!(!outcome.aborted);
+        assert_eq!(outcome.messages[0]["content"][0]["text"], json!("merged"));
+        let elapsed = started.elapsed();
+        // Held open through the grace window, but nowhere near the child's
+        // 30s idle sleep.
+        assert!(elapsed >= std::time::Duration::from_millis(1900), "{elapsed:?}");
+        assert!(elapsed < std::time::Duration::from_secs(10), "{elapsed:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A fast subagent: its completion notification lands BEFORE the turn's
+    /// `result` (observed on 2.1.201), so `has_pending_tasks` is already false
+    /// when the result arrives. The runner must still hold the close through
+    /// the quiet window — the CLI's continuation turn (the main agent
+    /// digesting the subagent's report) arrives after that result, and killing
+    /// on it would silently discard the subagent's work.
+    #[tokio::test]
+    async fn run_cli_turn_holds_close_for_subagent_continuation() {
+        let dir =
+            std::env::temp_dir().join(format!("cetus-cli-subagent-cont-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-subagent.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tA\",\"name\":\"Agent\",\"input\":{}}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}'\n\
+             echo '{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"bg1\",\"tool_use_id\":\"tA\",\"description\":\"scan\",\"subagent_type\":\"Explore\"}'\n\
+             echo '{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tA\",\"content\":[{\"type\":\"text\",\"text\":\"Async agent launched successfully\"}],\"is_error\":false}]}}'\n\
+             echo '{\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"bg1\",\"tool_use_id\":\"tA\",\"status\":\"completed\",\"summary\":\"found it\"}'\n\
+             echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"launched\"}'\n\
+             sleep 1\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"the subagent found it\"}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}'\n\
+             echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"done\"}'\n\
+             sleep 30\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let started = std::time::Instant::now();
+        let outcome = run_cli_turn(
+            sink.clone() as Arc<dyn EventSink>,
+            CliBackend::ClaudeCode,
+            &script.to_string_lossy(),
+            &dir,
+            "hi",
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(!outcome.aborted);
+        // The continuation turn's text made it into the transcript — the
+        // runner did not kill the child at the first result.
+        let all = serde_json::to_string(&outcome.messages).unwrap();
+        assert!(all.contains("the subagent found it"), "{all}");
+        assert!(all.contains("found it"), "notification summary persisted: {all}");
+        let elapsed = started.elapsed();
+        // Closed after the continuation + one quiet window, not the 30s idle.
+        assert!(elapsed < std::time::Duration::from_secs(10), "{elapsed:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A steer that landed after the model finished: claude starts a NEW turn
+    /// after the first `result`. The pending steer keeps the runner reading —
+    /// the steered turn streams fully and its own `result` closes the run.
+    #[tokio::test]
+    async fn run_cli_turn_steer_new_turn_keeps_streaming() {
+        let dir =
+            std::env::temp_dir().join(format!("cetus-cli-steer-turn-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-steered.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"first\"}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}'\n\
+             echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"first\"}'\n\
+             sleep 1\n\
+             echo '{\"type\":\"system\",\"subtype\":\"status\",\"status\":\"requesting\"}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"steered\"}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}'\n\
+             echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"steered\"}'\n\
+             sleep 30\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let steer = Arc::new(std::sync::atomic::AtomicUsize::new(1));
+        let started = std::time::Instant::now();
+        let outcome = run_cli_turn(
+            sink.clone() as Arc<dyn EventSink>,
+            CliBackend::ClaudeCode,
+            &script.to_string_lossy(),
+            &dir,
+            "hi",
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+            None,
+            None,
+            Some(steer),
+        )
+        .await
+        .unwrap();
+
+        assert!(!outcome.aborted);
+        // Both the pre-steer and the steered turn's text made it out.
+        let all = serde_json::to_string(&outcome.messages).unwrap();
+        assert!(all.contains("first") && all.contains("steered"), "{all}");
+        // Closed on the steered turn's result, not the 30s idle sleep.
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Live smoke test against the real claude binary — run manually with
@@ -1562,6 +2431,7 @@ mod tests {
             },
             Some(Arc::new(tokio::sync::Notify::new())),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1587,6 +2457,19 @@ mod tests {
     }
 
     #[test]
+    fn auth_expiry_stderr_condenses_to_hint() {
+        let codex_dump = r#"2026-07-06T09:00:11Z ERROR codex_models_manager::manager: failed to refresh available models: unexpected status 401 Unauthorized: Your authentication token has been invalidated. Please try signing in again., auth error code: token_invalidated
+2026-07-06T09:00:15Z ERROR codex_login::auth::manager: Failed to refresh token: 401 Unauthorized: { "code": "refresh_token_invalidated" }"#;
+        let hint = auth_expired_hint(CliBackend::Codex, codex_dump).unwrap();
+        assert!(hint.contains("codex login"), "actionable: {hint}");
+        assert!(hint.len() < 200, "short, not a log wall");
+        assert_eq!(auth_expired_hint(CliBackend::Codex, "some unrelated panic"), None);
+        let claude_hint =
+            auth_expired_hint(CliBackend::ClaudeCode, "OAuth token has expired").unwrap();
+        assert!(claude_hint.contains("/login"));
+    }
+
+    #[test]
     fn messages_collect_for_persistence() {
         let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
         tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}"#);
@@ -1609,6 +2492,121 @@ mod tests {
         assert_eq!(msgs[1]["role"], json!("toolResult"));
         assert_eq!(msgs[1]["toolName"], json!("Bash"));
         assert_eq!(msgs[2]["content"][0]["text"], json!("done"));
+    }
+
+    #[test]
+    fn sidechain_lines_are_dropped() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        // A subagent's own lines carry parent_tool_use_id and must never leak
+        // into the main transcript. With no registered task to attach them to
+        // (defensive: task_started missed), snapshots are dropped outright;
+        // sidechain stream_events are always dropped (their block indexes
+        // would collide with the parent's).
+        assert!(tr.on_line(r#"{"type":"stream_event","parent_tool_use_id":"tp","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#).is_empty());
+        assert!(tr.on_line(r#"{"type":"assistant","parent_tool_use_id":"tp","message":{"model":"claude-fable-5","content":[{"type":"text","text":"sub says hi"}]}}"#).is_empty());
+        assert!(tr.on_line(r#"{"type":"user","parent_tool_use_id":"tp","message":{"content":[{"type":"tool_result","tool_use_id":"inner-1","content":"ls output","is_error":false}]}}"#).is_empty());
+        assert!(tr.take_messages().is_empty());
+        assert!(tr.assistant_blocks_empty());
+    }
+
+    #[test]
+    fn sidechain_activity_paints_steps_on_agent_card() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tA","name":"Agent","input":{}}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"bg1","tool_use_id":"tA","description":"scan repo","subagent_type":"Explore"}"#);
+        // The subagent calls a tool → a running step appears on the Agent card.
+        let ev = tr.on_line(r#"{"type":"assistant","parent_tool_use_id":"tA","message":{"content":[{"type":"tool_use","id":"inner-1","name":"Bash","input":{"command":"ls -la","description":"List files"}}]}}"#);
+        let update = ev.iter().find(|e| e["type"] == "tool_execution_update").unwrap();
+        assert_eq!(update["toolCallId"], json!("tA"));
+        let steps = &update["partialResult"]["details"]["subagent"]["steps"];
+        assert_eq!(steps[0]["tool"], json!("Bash"));
+        assert_eq!(steps[0]["detail"], json!("List files"));
+        assert_eq!(steps[0]["done"], json!(false));
+        // Its tool_result settles that step.
+        let ev = tr.on_line(r#"{"type":"user","parent_tool_use_id":"tA","message":{"content":[{"type":"tool_result","tool_use_id":"inner-1","content":"ls output","is_error":false}]}}"#);
+        let update = ev.iter().find(|e| e["type"] == "tool_execution_update").unwrap();
+        assert_eq!(update["partialResult"]["details"]["subagent"]["steps"][0]["done"], json!(true));
+        // task_progress keeps carrying the accumulated steps.
+        let ev = tr.on_line(r#"{"type":"system","subtype":"task_progress","task_id":"bg1","tool_use_id":"tA","description":"Reading main.rs"}"#);
+        assert_eq!(ev[0]["partialResult"]["details"]["subagent"]["steps"][0]["tool"], json!("Bash"));
+        // Nothing leaked into the main transcript.
+        tr.finish(None);
+        assert!(tr.take_messages().iter().all(|m| m["role"] != json!("toolResult")));
+    }
+
+    #[test]
+    fn task_notification_summary_is_the_report() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tA","name":"Agent","input":{}}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"bg1","tool_use_id":"tA","description":"scan repo","subagent_type":"Explore"}"#);
+        tr.on_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tA","content":[{"type":"text","text":"Async agent launched successfully. agentId: abc"}],"is_error":false}]}}"#);
+        tr.on_line(r#"{"type":"assistant","parent_tool_use_id":"tA","message":{"content":[{"type":"tool_use","id":"inner-1","name":"Read","input":{"file_path":"main.rs"}}]}}"#);
+        let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"bg1","tool_use_id":"tA","status":"completed","summary":"Found 3 files: main.rs, a.txt, b.txt"}"#);
+        let end = ev.iter().find(|e| e["type"] == "tool_execution_end").unwrap();
+        assert_eq!(end["result"]["content"][0]["text"], json!("Found 3 files: main.rs, a.txt, b.txt"));
+        assert_eq!(end["result"]["details"]["subagent"]["steps"][0]["tool"], json!("Read"));
+        // The persisted row was rewritten with the report + step trace, so a
+        // reloaded conversation replays the same card.
+        tr.finish(None);
+        let msgs = tr.take_messages();
+        let row = msgs.iter().find(|m| m["role"] == json!("toolResult")).unwrap();
+        assert_eq!(row["content"][0]["text"], json!("Found 3 files: main.rs, a.txt, b.txt"));
+        assert_eq!(row["details"]["subagent"]["type"], json!("Explore"));
+    }
+
+    #[test]
+    fn background_subagent_lifecycle() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        // Main agent calls the Agent tool.
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tA","name":"Agent","input":{}}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        // CLI reports the background task started…
+        tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"bg1","tool_use_id":"tA","description":"scan repo","subagent_type":"Explore"}"#);
+        assert!(tr.has_pending_tasks());
+        // …and immediately answers the tool call with the internal launch ack.
+        let ev = tr.on_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tA","content":[{"type":"text","text":"Async agent launched successfully. agentId: abc (internal ID - do not mention)"}],"is_error":false}]}}"#);
+        let tys = types(&ev);
+        assert!(tys.contains(&"tool_execution_update".to_string()), "{tys:?}");
+        assert!(!tys.contains(&"tool_execution_end".to_string()), "card must stay running: {tys:?}");
+        let update = ev.iter().find(|e| e["type"] == "tool_execution_update").unwrap();
+        let shown = update["partialResult"]["content"][0]["text"].as_str().unwrap();
+        assert!(shown.contains("Explore"), "clean status, not the ack blob: {shown}");
+        assert!(!shown.contains("agentId"), "internal metadata hidden: {shown}");
+        // Progress paints onto the same card.
+        let ev = tr.on_line(r#"{"type":"system","subtype":"task_progress","task_id":"bg1","tool_use_id":"tA","description":"Running ls","subagent_type":"Explore"}"#);
+        assert_eq!(ev[0]["type"], json!("tool_execution_update"));
+        assert_eq!(ev[0]["toolCallId"], json!("tA"));
+        // Intermediate result: the turn must NOT close while bg1 runs.
+        tr.on_line(r#"{"type":"result","subtype":"success","is_error":false}"#);
+        assert!(tr.saw_result && tr.has_pending_tasks());
+        tr.saw_result = false; // what the runner does in this case
+        // Completion settles the card and releases the turn.
+        let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"bg1","tool_use_id":"tA","status":"completed"}"#);
+        let end = ev.iter().find(|e| e["type"] == "tool_execution_end").unwrap();
+        assert_eq!(end["toolCallId"], json!("tA"));
+        assert_eq!(end["isError"], json!(false));
+        assert!(!tr.has_pending_tasks());
+        // The persisted toolResult row carries the final status, not the ack.
+        tr.finish(None);
+        let msgs = tr.take_messages();
+        let row = msgs.iter().find(|m| m["role"] == json!("toolResult")).unwrap();
+        assert_eq!(row["toolName"], json!("Agent"));
+        let text = row["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("completed"), "{text}");
+    }
+
+    #[test]
+    fn sync_subagent_result_ends_task() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tB","name":"Task","input":{}}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"bg2","tool_use_id":"tB","description":"quick check","subagent_type":"Explore"}"#);
+        // A real report (no async-launch ack) settles the card and the task.
+        let ev = tr.on_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tB","content":"the answer is 42","is_error":false}]}}"#);
+        assert!(types(&ev).contains(&"tool_execution_end".to_string()));
+        assert!(!tr.has_pending_tasks());
     }
 
     #[test]

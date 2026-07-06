@@ -66,6 +66,7 @@ import {
   type AppEvent,
   type Automation,
   type AutomationInput,
+  type CliControlRequest,
   type Conversation,
   type ExtensionUIRequest,
   type ModelChoice,
@@ -483,6 +484,21 @@ export default function Home() {
       localStorage.setItem("cetus:lastView", view);
     } catch {}
   }, [view]);
+  // Remember the view we were on before the current one so Ctrl+Tab can toggle
+  // back to it (mirrors "last tab" in browsers/editors). committedViewRef holds
+  // the last-seen view; on each change we shift it into previousViewRef.
+  const previousViewRef = useRef<SidebarView | null>(null);
+  const committedViewRef = useRef<SidebarView>(view);
+  useEffect(() => {
+    if (committedViewRef.current !== view) {
+      previousViewRef.current = committedViewRef.current;
+      committedViewRef.current = view;
+    }
+  }, [view]);
+  const switchToPreviousView = useCallback(() => {
+    const prev = previousViewRef.current;
+    if (prev && prev !== viewRef.current) setView(prev);
+  }, []);
   const [workspaceDocksByChat, setWorkspaceDocksByChat] =
     useState<WorkspaceDocksByChatState>(
       createInitialWorkspaceDocksByChat,
@@ -825,6 +841,9 @@ export default function Home() {
                 evt.conversationId,
                 `pi exited (code ${evt.code ?? "n/a"})`,
               );
+              // The child is gone; any control request it was waiting on can
+              // never be answered, so drop the card.
+              store.clearControlRequest(evt.conversationId);
               // Close out any live run so a trailing agent_end can't double-fire.
               if (r) r.running = false;
               dispatchNotification("task_finished", {
@@ -839,12 +858,35 @@ export default function Home() {
             const cid = evt.conversationId;
             // extension_ui_request → DialogHost; cli_control_request → the
             // CliControlCard in the chat pane. Neither belongs in the reducer.
+            const eventType = evt.event.type as string;
             if (
               evt.event.type !== "extension_ui_request" &&
-              (evt.event.type as string) !== "cli_control_request" &&
+              eventType !== "cli_control_request" &&
               cid
             ) {
               store.piEvent(cid, evt.event);
+            }
+            // A claude-code control request (permission prompt / AskUserQuestion)
+            // is parked in the store — captured here in the app's single
+            // always-mounted listener so it survives conversation switches and
+            // can't be dropped by a per-card listener's async registration. The
+            // card reads it back; agent_end clears any that went unanswered
+            // (the child is gone, so there's nothing left to answer).
+            if (cid && eventType === "cli_control_request") {
+              const req = evt.event as unknown as CliControlRequest;
+              store.pushControlRequest(cid, req);
+              dispatchNotification("awaiting_input", {
+                title: t("cliControl.notifyTitle"),
+                body:
+                  req.toolName === "AskUserQuestion"
+                    ? req.input.questions?.[0]?.question ?? req.toolName
+                    : req.toolName,
+                suppressWhenFocused: true,
+                conversationId: cid,
+              });
+            }
+            if (cid && eventType === "agent_end") {
+              store.clearControlRequest(cid);
             }
             // The agent called request_review → park this conversation in the
             // board's "Needs review" column. pi tools can't write our DB, so the
@@ -1130,10 +1172,15 @@ export default function Home() {
         return;
       const mod = e.metaKey || e.ctrlKey;
       // Esc — abort the current stream. (No mod key; palette owns its own Esc.)
+      // Through onAbort, not a bare api.abort: the local endStream there flags
+      // the run aborted. pi echoes an "aborted" error event that does the same,
+      // but the CLI backends (claude-code / codex) don't — their trailing
+      // agent_end would misread a thinking-only turn as an empty completion
+      // and surface a spurious "model returned an empty response" error.
       if (e.key === "Escape" && !mod && !paletteOpen) {
         if (isStreaming && activeId) {
           e.preventDefault();
-          api.abort(activeId).catch(console.error);
+          onAbort().catch(console.error);
           return;
         }
       }
@@ -1231,6 +1278,9 @@ export default function Home() {
       } else if (shortcut("switchPlugins")) {
         e.preventDefault();
         setView("plugins");
+      } else if (shortcut("switchPreviousView")) {
+        e.preventDefault();
+        switchToPreviousView();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1252,6 +1302,7 @@ export default function Home() {
     keyboardShortcuts,
     defaultWorkspace,
     requestBackendSwitch,
+    switchToPreviousView,
   ]);
 
   function workspaceTitle(kind: WorkspaceTabKind, index: number): string {
@@ -2743,9 +2794,16 @@ export default function Home() {
                 onQueue={(text, atts) => {
                   if (activeId) enqueueMessage(activeId, text, atts);
                 }}
-                onSteerQueued={(id) => {
-                  if (activeId) steerQueued(activeId, id);
-                }}
+                onSteerQueued={
+                  // codex has no live stdin to inject into mid-run — queued
+                  // messages there only deliver as follow-ups (pi steers via
+                  // its RPC, claude-code over the turn's stdin).
+                  conversations.find((c) => c.id === activeId)?.backend === "codex"
+                    ? undefined
+                    : (id) => {
+                        if (activeId) steerQueued(activeId, id);
+                      }
+                }
                 onRemoveQueued={(id) => {
                   if (activeId) removeQueued(activeId, id);
                 }}

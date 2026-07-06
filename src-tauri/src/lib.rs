@@ -117,12 +117,16 @@ pub struct AppState {
 struct CliTurnHandle {
     kill: Arc<tokio::sync::Notify>,
     input: tokio::sync::mpsc::UnboundedSender<String>,
+    /// Steer messages injected into this turn's stdin and not yet settled by
+    /// the runner (see `run_cli_turn`'s steer grace). Bumped before the line
+    /// is sent so the runner can't observe the message without the count.
+    steer_pending: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl AppState {
-    /// Register a CLI-backend turn for `conv_id`, returning its kill switch
-    /// and the stdin-lines receiver for the runner. Errors when a turn is
-    /// already running — one turn per conversation.
+    /// Register a CLI-backend turn for `conv_id`, returning its kill switch,
+    /// the stdin-lines receiver, and the pending-steer counter for the runner.
+    /// Errors when a turn is already running — one turn per conversation.
     #[allow(clippy::type_complexity)]
     pub fn begin_cli_turn(
         &self,
@@ -131,6 +135,7 @@ impl AppState {
         (
             Arc<tokio::sync::Notify>,
             tokio::sync::mpsc::UnboundedReceiver<String>,
+            Arc<std::sync::atomic::AtomicUsize>,
         ),
         String,
     > {
@@ -140,14 +145,16 @@ impl AppState {
         }
         let notify = Arc::new(tokio::sync::Notify::new());
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let steer_pending = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         turns.insert(
             conv_id.to_string(),
             CliTurnHandle {
                 kill: notify.clone(),
                 input: tx,
+                steer_pending: steer_pending.clone(),
             },
         );
-        Ok((notify, rx))
+        Ok((notify, rx, steer_pending))
     }
 
     /// Clear a finished CLI turn's registration.
@@ -160,6 +167,22 @@ impl AppState {
         if let Some(h) = self.cli_turns.lock().unwrap().get(conv_id) {
             h.kill.notify_one();
         }
+    }
+
+    /// Inject a steer user message into a running CLI turn's stdin. Returns
+    /// false when no turn is running (or it just ended) — the caller should
+    /// dispatch a fresh turn instead.
+    pub fn cli_try_steer(&self, conv_id: &str, line: String) -> bool {
+        let turns = self.cli_turns.lock().unwrap();
+        let Some(h) = turns.get(conv_id) else {
+            return false;
+        };
+        // Count first: the runner must never see the message on stdin while
+        // the counter still reads zero (it would close the turn on `result`
+        // with the steer unread).
+        h.steer_pending
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        h.input.send(line).is_ok()
     }
 
     /// Write one line into a running CLI turn's stdin (a control_response

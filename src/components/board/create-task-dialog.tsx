@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Sparkles,
   CornerDownLeft,
@@ -114,12 +114,16 @@ export function CreateTaskDialog({
     }
   }, [open]);
 
-  // Autosize textarea.
-  useEffect(() => {
+  // Autosize textarea. Layout effect so the remeasure happens before paint;
+  // collapsing to "auto" zeroes scrollTop, which makes an overflowing textarea
+  // jump on every IME composition update — restore it afterwards.
+  useLayoutEffect(() => {
     const el = taRef.current;
     if (!el) return;
+    const scrollTop = el.scrollTop;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 320) + "px";
+    el.scrollTop = scrollTop;
   }, [text]);
 
   const addFiles = useCallback(async (files: FileList | File[]) => {

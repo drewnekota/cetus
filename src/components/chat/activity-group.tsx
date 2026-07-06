@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import type { RenderedBlock } from "@/lib/types";
 import { useTranslation } from "@/lib/i18n";
-import { ToolUseCard, summarizeArgs } from "./tool-use-card";
+import { ToolUseCard, summarizeArgs, subagentInfo } from "./tool-use-card";
 import { ThinkingBlock } from "./thinking-block";
 
 type ProcessBlock = Extract<RenderedBlock, { kind: "thinking" | "tool_use" }>;
@@ -89,6 +89,17 @@ function currentAction(steps: ProcessBlock[]): string {
   const active = [...steps].reverse().find((s) => s.streaming === true) ?? steps[steps.length - 1];
   if (!active) return "";
   if (active.kind === "thinking") return "thinking";
+  // A running subagent (claude-code Task/Agent) streams its live status into
+  // the card's result — surface that instead of the frozen launch args, so
+  // the collapsed header tracks what the subagent is doing right now.
+  const sub = subagentInfo(active.result?.details);
+  if (sub) {
+    const content = active.result?.content;
+    const status =
+      Array.isArray(content) && content[0]?.type === "text" ? content[0].text : "";
+    const live = status || sub.description;
+    return live ? `${active.name} ${live}` : active.name || "";
+  }
   const preview = summarizeArgs(active.args);
   return preview ? `${active.name} ${preview}` : active.name || "";
 }

@@ -363,8 +363,13 @@ export function QuickPanel() {
     }
   }
 
+  // Every action-strip control shares one quiet language: borderless ghost
+  // triggers at h-8/13px, hovering to black/5 (white/8 in dark), selected
+  // state black/10 (white/15). The select-trigger overrides on the root
+  // normalize the shared pickers (workspace/model) that carry their own
+  // solid-token hover styles; alpha overlays keep the vibrancy visible.
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground ring-1 ring-[var(--ink)]/[0.04] dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-white/[0.06] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:text-[11px]">
+    <div className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground ring-1 ring-[var(--ink)]/[0.04] dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-white/[0.06] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:border-black/10 [&_kbd]:bg-black/5 [&_kbd]:text-[11px] dark:[&_kbd]:border-white/10 dark:[&_kbd]:bg-white/[0.06]">
       {/* The input owns the whole region above the action strip: the textarea
           fills it so typing wraps and uses the full height, and the screenshot
           chip (when present) tucks in at the bottom of the same region. */}
@@ -397,7 +402,7 @@ export function QuickPanel() {
                 <img
                   src={`data:${screenshot.mimeType};base64,${screenshot.data}`}
                   alt={t("screenshot.alt")}
-                  className="h-14 rounded-md border border-black/10 object-cover dark:border-white/15"
+                  className="h-14 rounded-md border border-black/10 object-cover dark:border-white/10"
                 />
                 <button
                   type="button"
@@ -491,7 +496,7 @@ export function QuickPanel() {
             effort={cliEffort}
             onModelChange={onCliModelChange}
             onEffortChange={onCliEffortChange}
-            className="h-8 rounded-md border border-black/10 bg-black/5 text-[13px] text-foreground dark:border-white/10 dark:bg-white/5"
+            className="h-8 text-[13px] hover:bg-black/5 dark:hover:bg-white/[0.08]"
           />
         )}
         <span className="ml-auto flex items-center gap-1.5 pr-1">
@@ -500,7 +505,7 @@ export function QuickPanel() {
           </Kbd>
           {t("footer.start")}
           <span className="text-muted-foreground/40">·</span>
-          <span className={cn("flex items-center gap-1.5", !hasLastChat && "opacity-30")}>
+          <span className={cn("flex items-center gap-1.5", !hasLastChat && "opacity-35")}>
             <Kbd>⇥</Kbd>
             {t("footer.switch")}
           </span>
@@ -528,7 +533,7 @@ function BackendSelect({
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger
         size="sm"
-        className="gap-1.5 border-black/10 bg-black/5 px-2 text-[13px] shadow-none dark:border-white/10 dark:bg-white/5"
+        className="gap-1.5 border-0 bg-transparent px-2 text-[13px] text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0"
       >
         <TriggerIcon className="size-3.5" />
         <span className="truncate">{current.label}</span>
@@ -574,7 +579,7 @@ function ContextChip({
   return (
     <span
       title={title}
-      className="group/ctx inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-black/10 bg-black/[0.04] py-1 pl-2 pr-1 text-xs text-muted-foreground dark:border-white/10 dark:bg-white/[0.06]"
+      className="group/ctx inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-black/10 bg-black/5 py-1 pl-2 pr-1 text-xs text-muted-foreground dark:border-white/10 dark:bg-white/[0.06]"
     >
       <span className="shrink-0 opacity-70">{icon}</span>
       <span className="truncate">{label}</span>
@@ -607,10 +612,7 @@ function Segmented<T extends string>({
   return (
     <TooltipProvider>
       <div
-        className={cn(
-          "flex items-center rounded-md border border-black/10 bg-black/5 p-0.5 text-[13px] dark:border-white/10 dark:bg-white/5",
-          shaking && "animate-shake",
-        )}
+        className={cn("flex items-center gap-0.5", shaking && "animate-shake")}
         onAnimationEnd={onShakeEnd}
       >
         {options.map((o) => {
@@ -620,10 +622,10 @@ function Segmented<T extends string>({
               type="button"
               onClick={() => !o.disabled && onChange(o.value)}
               className={cn(
-                "rounded px-2.5 py-1 font-medium transition-colors",
+                "flex h-8 items-center rounded-md px-2.5 font-medium transition-colors",
                 value === o.value
                   ? "bg-black/10 text-foreground dark:bg-white/15"
-                  : "text-muted-foreground hover:text-foreground",
+                  : "text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/[0.08]",
                 o.disabled && "pointer-events-none opacity-35",
               )}
             >

@@ -53,6 +53,8 @@ Cetus 把这省下来的钱花在大多数 agent 欠缺的地方：给 agent 更
 
 每个对话都可以选自己的引擎。默认是 **Cetus**（内置的 pi harness）；在输入框的 runtime 选择器里切到 **Claude Code** 或 **Codex**，同一个对话就跑在对应的官方 CLI 上 —— 旁边还有按对话生效的**模型**（Fable / Opus / Sonnet / Haiku · GPT-5.5 系列）和**推理力度**选项。
 
+![Cetus runtime 选择器 —— 每个对话可选 Cetus、Claude Code 或 Codex](docs/screenshot-runtime-picker.png)
+
 CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（PATH 上找），**不需要单独登录**。Cetus 为每条消息跑一次 headless turn（`claude -p --output-format stream-json` / `codex exec --json`），把结构化事件流翻译进同一套聊天 UI（文本、thinking、工具卡片），用 CLI 自己的 session token 跨轮保持上下文，并在每个对话独立的 **git worktree** 里隔离改动。自动化任务同样可以指定 runtime —— 定时job 跑在 Claude Code 上、日常聊天留在 Cetus 上，互不影响。
 
 ### 看板

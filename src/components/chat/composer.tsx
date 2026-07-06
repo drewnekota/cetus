@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from "react";
 import { ArrowUp, Square, Paperclip, X, File, Terminal } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/artifact";
@@ -370,11 +370,16 @@ export function Composer({
     });
   }
 
-  useEffect(() => {
+  // Layout effect so the remeasure happens before paint. Collapsing to "auto"
+  // zeroes scrollTop, which makes an overflowing textarea jump on every IME
+  // composition update — restore it after the height is reapplied.
+  useLayoutEffect(() => {
     const el = taRef.current;
     if (!el) return;
+    const scrollTop = el.scrollTop;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, variant === "hero" ? 320 : 240) + "px";
+    el.scrollTop = scrollTop;
   }, [text, variant]);
 
   useEffect(() => {

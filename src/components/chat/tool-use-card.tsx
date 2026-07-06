@@ -1,11 +1,52 @@
 "use client";
 import { memo, useState } from "react";
-import { ChevronDown, ChevronRight, Wrench, AlertCircle, Loader2, CheckCircle2, CircleSlash } from "lucide-react";
+import { ChevronDown, ChevronRight, Wrench, AlertCircle, Loader2, CheckCircle2, CircleSlash, Bot, Check } from "lucide-react";
 import type { PiContentBlock, RenderedBlock } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 
 type ToolUse = Extract<RenderedBlock, { kind: "tool_use" }>;
+
+interface SubagentStep {
+  tool: string;
+  detail: string;
+  done: boolean;
+}
+
+interface SubagentInfo {
+  type: string;
+  description: string;
+  status: string;
+  steps: SubagentStep[];
+}
+
+/** Structured subagent progress a CLI backend (claude-code Task/Agent tool)
+ *  attaches to the card's result details — the subagent's own tool calls,
+ *  streamed as steps while it works. Null for ordinary tools. */
+export function subagentInfo(details: unknown): SubagentInfo | null {
+  if (!details || typeof details !== "object") return null;
+  const sub = (details as { subagent?: unknown }).subagent;
+  if (!sub || typeof sub !== "object") return null;
+  const s = sub as { type?: unknown; description?: unknown; status?: unknown; steps?: unknown };
+  return {
+    type: typeof s.type === "string" ? s.type : "agent",
+    description: typeof s.description === "string" ? s.description : "",
+    status: typeof s.status === "string" ? s.status : "running",
+    steps: Array.isArray(s.steps)
+      ? s.steps.flatMap((x): SubagentStep[] => {
+          if (!x || typeof x !== "object") return [];
+          const step = x as { tool?: unknown; detail?: unknown; done?: unknown };
+          return [
+            {
+              tool: typeof step.tool === "string" ? step.tool : "tool",
+              detail: typeof step.detail === "string" ? step.detail : "",
+              done: step.done === true,
+            },
+          ];
+        })
+      : [],
+  };
+}
 
 function stringifyArgs(args: unknown): string {
   if (args == null) return "";
@@ -72,7 +113,15 @@ export const ToolUseCard = memo(function ToolUseCard({ block }: { block: ToolUse
   // — the run was aborted or pi died before the tool returned. Show a terminal
   // "interrupted" state instead of a spinner that never resolves.
   const isIncomplete = !isRunning && !isError && block.result == null;
-  const preview = summarizeArgs(block.args);
+  const subagent = subagentInfo(block.result?.details);
+  const preview = subagent
+    ? [subagent.type, subagent.description].filter(Boolean).join(" — ")
+    : summarizeArgs(block.args);
+  // Subagent steps: keep the list glanceable while running — last few steps
+  // inline, the full history behind the expander.
+  const steps = subagent?.steps ?? [];
+  const visibleSteps = open ? steps : steps.slice(-5);
+  const hiddenSteps = steps.length - visibleSteps.length;
 
   return (
     <div>
@@ -85,7 +134,11 @@ export const ToolUseCard = memo(function ToolUseCard({ block }: { block: ToolUse
         ) : (
           <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
         )}
-        <Wrench className="h-3 w-3 shrink-0 text-muted-foreground" />
+        {subagent ? (
+          <Bot className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <Wrench className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
         <span className="shrink-0 font-mono text-xs font-medium">
           {block.name || <span className="italic text-muted-foreground">{t("tool.calling")}</span>}
         </span>
@@ -104,6 +157,28 @@ export const ToolUseCard = memo(function ToolUseCard({ block }: { block: ToolUse
           )}
         </span>
       </button>
+      {steps.length > 0 && (
+        <div className="ml-[3.25rem] space-y-0.5 pb-1 pr-2">
+          {hiddenSteps > 0 && (
+            <div className="text-[10px] text-muted-foreground/70">
+              {t("tool.earlierSteps", { count: hiddenSteps })}
+            </div>
+          )}
+          {visibleSteps.map((s, i) => (
+            <div key={hiddenSteps + i} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              {s.done ? (
+                <Check className="h-2.5 w-2.5 shrink-0 text-success/80" />
+              ) : isRunning ? (
+                <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />
+              ) : (
+                <CircleSlash className="h-2.5 w-2.5 shrink-0" />
+              )}
+              <span className="shrink-0 font-mono">{s.tool}</span>
+              {s.detail && <span className="min-w-0 truncate">{s.detail}</span>}
+            </div>
+          ))}
+        </div>
+      )}
       {open && (
         <div className="space-y-2 px-2 pb-2 pt-1">
           {block.args != null && (

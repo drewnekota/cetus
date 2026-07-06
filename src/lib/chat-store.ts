@@ -18,7 +18,13 @@ import {
   type ChatAction,
   type ChatState,
 } from "./chat-state";
-import type { BashResult, PiEvent, PiMessage, RenderedMessage } from "./types";
+import type {
+  BashResult,
+  CliControlRequest,
+  PiEvent,
+  PiMessage,
+  RenderedMessage,
+} from "./types";
 
 interface ChatsStore {
   chats: Record<string, ChatState>;
@@ -29,6 +35,12 @@ interface ChatsStore {
   streamingIds: Set<string>;
   /** True once we've finished loading the IDB snapshot for the active conv. */
   hydrated: Record<string, boolean>;
+  /** Pending claude-code control requests (permission prompts / AskUserQuestion)
+   *  per conversation, awaiting the user's answer. Captured here — off the
+   *  reducer's message list — by the app's single always-mounted event listener
+   *  so the card survives conversation switches and never races a per-component
+   *  listener's async registration. Cleared when answered or when the turn ends. */
+  controlRequests: Record<string, CliControlRequest[]>;
   ensure: (id: string) => void;
   drop: (id: string) => void;
   reset: (id: string, messages: PiMessage[] | undefined) => void;
@@ -39,6 +51,11 @@ interface ChatsStore {
     files?: { name: string; path: string; mimeType: string; sizeBytes: number }[],
   ) => void;
   piEvent: (id: string, event: PiEvent) => void;
+  /** Queue a pending control request for `id` (dedup by requestId). */
+  pushControlRequest: (id: string, req: CliControlRequest) => void;
+  /** Drop one answered control request; also used to clear all of a
+   *  conversation's pending requests when its turn ends (`requestId` omitted). */
+  clearControlRequest: (id: string, requestId?: string) => void;
   /** Append a "running" breadcrumb for a local `!` bash command. */
   bashStart: (id: string, key: string, command: string, cwd?: string) => void;
   /** Settle a bash breadcrumb (by key) with its captured output. */
@@ -220,6 +237,7 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   chats: {},
   streamingIds: new Set<string>(),
   hydrated: {},
+  controlRequests: {},
   ensure: (id) => {
     flushPiEvents();
     set((s) => {
@@ -244,7 +262,16 @@ export const useChatStore = create<ChatsStore>()((set) => ({
       if (!(id in s.chats)) return s;
       const next = { ...s.chats };
       delete next[id];
-      return { chats: next, streamingIds: withoutStreaming(s.streamingIds, id) };
+      let controlRequests = s.controlRequests;
+      if (id in controlRequests) {
+        controlRequests = { ...controlRequests };
+        delete controlRequests[id];
+      }
+      return {
+        chats: next,
+        streamingIds: withoutStreaming(s.streamingIds, id),
+        controlRequests,
+      };
     });
   },
   reset: (id, messages) => {
@@ -260,6 +287,27 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   piEvent: (id, event) => {
     pendingPiEvents.push({ id, event });
     schedulePiFlush();
+  },
+  pushControlRequest: (id, req) => {
+    set((s) => {
+      const cur = s.controlRequests[id] ?? [];
+      if (cur.some((r) => r.requestId === req.requestId)) return s;
+      return { controlRequests: { ...s.controlRequests, [id]: [...cur, req] } };
+    });
+  },
+  clearControlRequest: (id, requestId) => {
+    set((s) => {
+      const cur = s.controlRequests[id];
+      if (!cur || cur.length === 0) return s;
+      const next = requestId
+        ? cur.filter((r) => r.requestId !== requestId)
+        : [];
+      if (next.length === cur.length) return s;
+      const controlRequests = { ...s.controlRequests };
+      if (next.length === 0) delete controlRequests[id];
+      else controlRequests[id] = next;
+      return { controlRequests };
+    });
   },
   bashStart: (id, key, command, cwd) => {
     flushPiEvents();
@@ -479,6 +527,17 @@ export function useHasMessages(convId: string | null | undefined): boolean {
     const c = convId ? s.chats[convId] : undefined;
     return !!c && c.messages.length > 0;
   });
+}
+
+const EMPTY_CONTROL_REQUESTS: CliControlRequest[] = [];
+
+/** Pending control requests for `convId`, awaiting the user's answer. */
+export function useControlRequests(
+  convId: string | null | undefined,
+): CliControlRequest[] {
+  return useChatStore((s) =>
+    convId ? s.controlRequests[convId] ?? EMPTY_CONTROL_REQUESTS : EMPTY_CONTROL_REQUESTS,
+  );
 }
 
 /** Set of conv ids currently active or awaiting the assistant (for board view

@@ -12,6 +12,7 @@ export type ShortcutId =
   | "switchBoard"
   | "switchAutomations"
   | "switchPlugins"
+  | "switchPreviousView"
   | "runtimeCetus"
   | "runtimeClaudeCode"
   | "runtimeCodex"
@@ -91,6 +92,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: "Switch to plugins",
     description: "Show installed plugins",
     defaultAccelerator: "Cmd+4",
+  },
+  {
+    id: "switchPreviousView",
+    label: "Switch to previous view",
+    description: "Toggle back to the view you were on before",
+    defaultAccelerator: "Ctrl+Tab",
   },
   {
     id: "runtimeCetus",

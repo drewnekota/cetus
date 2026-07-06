@@ -6,70 +6,34 @@
 //   a free-text "Other" input; answers flow back as the tool's `answers` map.
 // - any other tool  → an Allow / Deny approval card showing the tool call.
 //
-// Requests queue per conversation; the turn blocks until each is answered.
-// A turn ending (agent_end for this conversation) clears any stragglers — the
-// child process is gone, so there is nothing left to answer.
+// Pending requests live in the chat store (populated by the app's single
+// always-mounted event listener), keyed by conversation. Reading them from the
+// store — instead of each card owning its own async event subscription — means
+// a request can't be dropped by a listener that hasn't finished registering,
+// and it survives switching conversations away and back (the turn keeps
+// waiting either way). The turn blocks until each is answered; a turn ending
+// (agent_end) clears any stragglers, since the child process is then gone.
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Check, MessageCircleQuestion, ShieldQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api, onAppEvent } from "@/lib/tauri";
-import { dispatchNotification } from "@/lib/notifications";
+import { api } from "@/lib/tauri";
+import { useChatStore, useControlRequests } from "@/lib/chat-store";
 import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { CliAskQuestion, CliControlRequest } from "@/lib/types";
 
 export function CliControlCard({ convId }: { convId: string }) {
   const { t } = useTranslation("chat");
-  const [queue, setQueue] = useState<CliControlRequest[]>([]);
-
-  useEffect(() => {
-    // Conversation switched — pending requests belong to the old view. They
-    // stay answerable by switching back (the turn keeps waiting); this
-    // instance just stops showing them.
-    setQueue([]);
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-    (async () => {
-      const u = await onAppEvent((evt) => {
-        if (evt.type !== "pi_event" || evt.conversationId !== convId) return;
-        const e = evt.event as unknown as
-          | CliControlRequest
-          | { type: string };
-        if (e.type === "cli_control_request") {
-          const req = e as CliControlRequest;
-          setQueue((q) =>
-            q.some((x) => x.requestId === req.requestId) ? q : [...q, req],
-          );
-          dispatchNotification("awaiting_input", {
-            title: t("cliControl.notifyTitle"),
-            body:
-              req.toolName === "AskUserQuestion"
-                ? (req.input.questions?.[0]?.question ?? req.toolName)
-                : req.toolName,
-            suppressWhenFocused: true,
-            conversationId: convId,
-          });
-        } else if (e.type === "agent_end") {
-          setQueue([]);
-        }
-      });
-      if (cancelled) u();
-      else unlisten = u;
-    })();
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [convId]);
-
+  const queue = useControlRequests(convId);
   const current = queue[0] ?? null;
   if (!current) return null;
 
   async function respond(response: unknown) {
     const req = current!;
-    setQueue((q) => q.filter((x) => x.requestId !== req.requestId));
+    // Drop it from the store first so the card advances immediately, then
+    // answer the running turn over stdin.
+    useChatStore.getState().clearControlRequest(convId, req.requestId);
     try {
       await api.cliControlRespond(convId, req.requestId, response);
     } catch (e) {
