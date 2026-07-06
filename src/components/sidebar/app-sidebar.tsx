@@ -236,6 +236,11 @@ export const AppSidebar = memo(function AppSidebar({
                 <span className="translate-y-px font-serif text-sm font-bold italic">
                   Cetus
                 </span>
+                {/* Resources lives at the sidebar's top-right as an icon-only
+                    affordance — it's a monitor, not a nav destination. */}
+                <span className="ml-auto">
+                  <ResourcesPopover />
+                </span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -430,9 +435,6 @@ export const AppSidebar = memo(function AppSidebar({
           with a long conversation list. */}
       <SidebarFooter>
         <SidebarMenu>
-          <SidebarMenuItem>
-            <ResourcesPopover />
-          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton onClick={onOpenSettings} tooltip={t("nav.settings")}>
               <SettingsIcon />

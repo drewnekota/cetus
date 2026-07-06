@@ -7,7 +7,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { SidebarMenuButton } from "@/components/ui/sidebar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useTranslation } from "@/lib/i18n";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -40,12 +44,12 @@ const KIND_DOT: Record<ResourceRow["kind"], string> = {
   other: "bg-muted-foreground/40",
 };
 
-/** Sidebar footer entry that opens a live per-process resource breakdown of
- *  Cetus's own process tree: the app, the pi engine, per-conversation CLI-agent
- *  turns (claude/codex, with the conversation title recovered from the
- *  worktree), and helpers. Polls only while open; the first sample after a
- *  cold start reads 0% CPU (sysinfo needs a delta) and corrects itself on the
- *  quick follow-up tick. */
+/** Icon button in the sidebar header that opens a live per-process resource
+ *  breakdown of Cetus's own process tree: the app, the pi engine,
+ *  per-conversation CLI-agent turns (claude/codex, with the conversation title
+ *  recovered from the worktree), and helpers. Polls only while open; the first
+ *  sample after a cold start reads 0% CPU (sysinfo needs a delta) and corrects
+ *  itself on the quick follow-up tick. */
 export function ResourcesPopover() {
   const { t } = useTranslation("sidebar");
   const [open, setOpen] = useState(false);
@@ -74,13 +78,26 @@ export function ResourcesPopover() {
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <SidebarMenuButton tooltip={t("nav.resources")}>
-          <Activity />
-          <span>{t("nav.resources")}</span>
-        </SidebarMenuButton>
-      </PopoverTrigger>
-      <PopoverContent side="right" align="end" className="w-80 p-0">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors",
+                "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                "data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground",
+              )}
+            >
+              <Activity className="size-3.5" />
+              <span className="sr-only">{t("nav.resources")}</span>
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="right">{t("nav.resources")}</TooltipContent>
+      </Tooltip>
+      <PopoverContent side="right" align="start" className="w-80 p-0">
         <div className="flex items-baseline justify-between border-b border-border px-3 py-2">
           <span className="text-xs font-semibold">{t("resources.title")}</span>
           {snap && (
