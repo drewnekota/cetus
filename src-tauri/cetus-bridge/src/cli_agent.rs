@@ -318,6 +318,22 @@ impl EventTranslator {
         self.assistant_blocks.is_empty()
     }
 
+    /// True when the `result` that just arrived closed a turn that streamed
+    /// nothing at all. Resuming a claude session whose previous turn left a
+    /// background task running makes the CLI flush one bare success `result`
+    /// (enqueueing a task-stopped notification) BEFORE it processes the user
+    /// message we queued over stdin — honoring it would swallow the prompt
+    /// and leave the conversation silently unresponsive. The runner skips
+    /// such results and keeps reading; the real one follows streamed content.
+    pub fn result_is_spurious(&self) -> bool {
+        self.backend == CliBackend::ClaudeCode
+            && self.saw_result
+            && self.result_error.is_none()
+            && !self.opened
+            && self.assistant_blocks.is_empty()
+            && self.messages.is_empty()
+    }
+
     /// Close the in-progress assistant message, if any, into `messages`.
     fn flush_assistant(&mut self) {
         if self.assistant_blocks.is_empty() {
@@ -963,6 +979,7 @@ pub async fn run_cli_turn(
 
     let mut reader = BufReader::new(stdout).lines();
     let mut aborted = false;
+    let mut spurious_results = 0;
     loop {
         // A read error is treated as end-of-stream rather than bubbled: the
         // turn must always close with message_end/agent_end.
@@ -986,7 +1003,16 @@ pub async fn run_cli_turn(
         }
         // Bidirectional mode: `result` ends the turn; the child would idle
         // for more stdin otherwise. Kill it — everything of interest arrived.
+        // Exception: a success result with zero streamed content is claude's
+        // stale-background-task flush on resume, not our turn's outcome (see
+        // `result_is_spurious`). Capped so a genuinely silent turn still
+        // closes instead of spinning on an idle child.
         if tr.saw_result {
+            if spurious_results < 3 && tr.result_is_spurious() {
+                spurious_results += 1;
+                tr.saw_result = false;
+                continue;
+            }
             let _ = child.start_kill();
             break;
         }
@@ -1122,6 +1148,42 @@ mod tests {
         // result flags the turn as complete (bidirectional close signal)
         tr.on_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"done"}"#);
         assert!(tr.saw_result);
+        // …and content streamed, so it's the turn's real outcome.
+        assert!(!tr.result_is_spurious());
+    }
+
+    #[test]
+    fn claude_bare_result_before_any_content_is_spurious() {
+        // Captured from claude 2.1.201: resuming a session whose previous turn
+        // left a background task running flushes a bare success `result`
+        // before the stdin user message is processed. Honoring it would
+        // swallow the prompt.
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"system","subtype":"init","session_id":"sess-1","cwd":"/tmp"}"#);
+        tr.on_line(r#"{"type":"result","subtype":"success","is_error":false}"#);
+        assert!(tr.saw_result);
+        assert!(tr.result_is_spurious());
+
+        // The runner skips it; the real turn then streams and closes normally.
+        tr.saw_result = false;
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant","content":[]}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"300"}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        tr.on_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"300"}"#);
+        assert!(tr.saw_result);
+        assert!(!tr.result_is_spurious());
+    }
+
+    #[test]
+    fn claude_error_result_with_no_content_is_not_spurious() {
+        // A turn that fails before streaming anything (API refusal etc.) must
+        // still close and surface the error, not spin waiting for more.
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom"}"#);
+        assert!(tr.saw_result);
+        assert!(!tr.result_is_spurious());
+        assert_eq!(tr.result_error.as_deref(), Some("boom"));
     }
 
     #[test]
