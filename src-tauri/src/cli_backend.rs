@@ -17,16 +17,23 @@ pub struct CliAgentSettings {
     /// Pass the CLIs' skip-approvals flags (`--dangerously-skip-permissions` /
     /// `--dangerously-bypass-approvals-and-sandbox`). Defaults ON: a headless
     /// turn has no way to answer an interactive prompt, so without it claude
-    /// silently denies every command execution — and turns are already isolated
-    /// in per-conversation git worktrees. The settings page exposes the switch
-    /// for users who prefer the CLIs' own sandboxed modes.
+    /// silently denies every command execution. The settings page exposes the
+    /// switch for users who prefer the CLIs' own sandboxed modes.
     pub bypass_approvals: bool,
+    /// Run each conversation in its own git worktree/branch (the
+    /// Superset/Conductor pattern) instead of the workspace's working tree.
+    /// Defaults OFF: most users expect the agent to edit the checkout they're
+    /// looking at, like running the CLI in a terminal. A conversation that
+    /// already has a worktree keeps it regardless — switching cwd mid-
+    /// conversation would break the CLIs' session resume.
+    pub isolate_in_worktree: bool,
 }
 
 impl Default for CliAgentSettings {
     fn default() -> Self {
         Self {
             bypass_approvals: true,
+            isolate_in_worktree: false,
         }
     }
 }
@@ -257,10 +264,21 @@ pub fn dispatch_turn(
 
     let ws = PathBuf::from(&conv.workspace_dir);
     std::fs::create_dir_all(&ws).ok();
-    // Isolate in a per-conversation worktree when the workspace is a git repo
-    // (the Superset/Conductor pattern); otherwise run in the workspace itself.
+    let settings = load_settings(&state.store);
+    // Run in the workspace itself by default; opt-in setting isolates each
+    // conversation in its own git worktree (the Superset/Conductor pattern).
+    // A worktree that already exists keeps being used either way — moving cwd
+    // mid-conversation would orphan the CLI's resume session.
     let cwd = if cetus_bridge::worktree::is_git_repo(&ws) {
-        cetus_bridge::worktree::ensure_worktree(&ws, &conv.id, None).unwrap_or_else(|_| ws.clone())
+        let existing = cetus_bridge::worktree::worktree_path(&ws, &conv.id);
+        if existing.join(".git").exists() {
+            existing
+        } else if settings.isolate_in_worktree {
+            cetus_bridge::worktree::ensure_worktree(&ws, &conv.id, None)
+                .unwrap_or_else(|_| ws.clone())
+        } else {
+            ws.clone()
+        }
     } else {
         ws.clone()
     };
@@ -317,7 +335,7 @@ pub fn dispatch_turn(
         // Reuse session_file as the CLI resume token (claude session_id /
         // codex thread_id) so a conversation keeps context across turns.
         resume: (!resume_before.is_empty()).then(|| resume_before.clone()),
-        bypass_approvals: load_settings(&state.store).bypass_approvals,
+        bypass_approvals: settings.bypass_approvals,
         images: image_paths,
         image_blocks,
     };

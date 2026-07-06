@@ -550,11 +550,16 @@ async fn fork_cli_conversation(
         .copy_cli_messages(&source.id, &new_id, copy_limit)
         .map_err(err)?;
 
-    // Seed the fork's worktree from the source's branch when one exists, so the
-    // fork continues from the source's file state instead of repo HEAD.
-    // Best-effort: without a source branch the first turn creates one off HEAD.
+    // Seed the fork's worktree from the source's branch when the source runs
+    // isolated, so the fork continues from the source's file state instead of
+    // repo HEAD. A source running directly in the workspace forks a workspace
+    // run — no worktree. Best-effort either way.
     let ws = std::path::PathBuf::from(&source.workspace_dir);
-    if cetus_bridge::worktree::is_git_repo(&ws) {
+    if cetus_bridge::worktree::is_git_repo(&ws)
+        && cetus_bridge::worktree::worktree_path(&ws, &source.id)
+            .join(".git")
+            .exists()
+    {
         let src_branch = cetus_bridge::worktree::branch_name(&source.id);
         let _ = cetus_bridge::worktree::ensure_worktree(&ws, &new_id, Some(&src_branch));
     }

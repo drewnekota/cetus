@@ -435,6 +435,7 @@ function GeneralSection() {
   const [settings, setSettings] = useState<QuickSettings>(DEFAULT_QUICK_SETTINGS);
   const [cliSettings, setCliSettings] = useState<CliAgentSettings>({
     bypassApprovals: true,
+    isolateInWorktree: false,
   });
   const [appVersion, setAppVersion] = useState("");
   const [checkState, setCheckState] = useState<
@@ -545,6 +546,13 @@ function GeneralSection() {
           description={t("general.cliAgents.description")}
           checked={cliSettings.bypassApprovals}
           onCheckedChange={(v) => updateCli({ bypassApprovals: v })}
+        />
+        <ToggleRow
+          id="cli-agents-worktree"
+          label={t("general.cliWorktree.label")}
+          description={t("general.cliWorktree.description")}
+          checked={cliSettings.isolateInWorktree}
+          onCheckedChange={(v) => updateCli({ isolateInWorktree: v })}
         />
         <div className="flex items-center justify-between gap-4 pt-1">
           <div className="min-w-0 space-y-0.5">

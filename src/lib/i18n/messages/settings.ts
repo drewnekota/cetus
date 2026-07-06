@@ -82,7 +82,10 @@ export const settings = {
       "Check for and install updates in the background. Applied the next time you open Cetus.",
     "general.cliAgents.label": "CLI agents: skip permission prompts",
     "general.cliAgents.description":
-      "Let Claude Code / Codex run without approval prompts. Their work stays isolated in per-conversation git worktrees. Off = every tool call asks first — approval cards appear in the chat, like the native apps.",
+      "Let Claude Code / Codex run without approval prompts. Off = every tool call asks first — approval cards appear in the chat, like the native apps.",
+    "general.cliWorktree.label": "CLI agents: isolate in git worktrees",
+    "general.cliWorktree.description":
+      "Run each conversation on its own branch in a separate git worktree, so agents never touch your checked-out files. Off = agents edit the workspace directly, like running the CLI in a terminal. Conversations that already have a worktree keep it.",
     "update.check.label": "Updates",
     "update.check.current": "You're on v{version}.",
     "update.check.button": "Check for updates",
@@ -552,7 +555,10 @@ export const settings = {
     "general.autoUpdate.description": "在后台检查并安装更新，下次打开 Cetus 时生效。",
     "general.cliAgents.label": "CLI 智能体：跳过权限确认",
     "general.cliAgents.description":
-      "让 Claude Code / Codex 无需逐项确认即可执行。它们的改动隔离在每个会话独立的 git worktree 中。关闭后每次工具调用都会先询问——审批卡片会出现在聊天里，与原生应用一致。",
+      "让 Claude Code / Codex 无需逐项确认即可执行。关闭后每次工具调用都会先询问——审批卡片会出现在聊天里，与原生应用一致。",
+    "general.cliWorktree.label": "CLI 智能体：隔离在 git worktree 中",
+    "general.cliWorktree.description":
+      "每个会话在独立的 git worktree 和分支上运行，智能体不会触碰你当前检出的文件。关闭时智能体直接修改工作区，就像在终端里运行 CLI 一样。已有 worktree 的会话会继续使用原有 worktree。",
     "update.check.label": "更新",
     "update.check.current": "当前版本 v{version}。",
     "update.check.button": "检查更新",

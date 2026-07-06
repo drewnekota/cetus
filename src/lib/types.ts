@@ -170,9 +170,11 @@ export interface CliControlRequest {
 
 /** Persisted CLI-agent (claude-code / codex) switches. */
 export interface CliAgentSettings {
-  /** Skip the CLIs' permission prompts (headless turns can't answer them);
-   *  runs stay isolated in per-conversation git worktrees. */
+  /** Skip the CLIs' permission prompts (headless turns can't answer them). */
   bypassApprovals: boolean;
+  /** Run each conversation in its own git worktree/branch instead of the
+   *  workspace's working tree. Off by default. */
+  isolateInWorktree: boolean;
 }
 
 /** What a CLI backend actually runs when no override is set, resolved from
