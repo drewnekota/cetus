@@ -163,9 +163,7 @@ export const AnswerBlock = memo(function AnswerBlock({
         title={t("bubble.revealInFinder", { path: block.path })}
         className={cn(
           "flex max-w-xs items-center gap-2 rounded-lg border px-3 py-2 text-left",
-          isUser
-            ? "border-primary-foreground/20 bg-primary-foreground/10"
-            : "border-border/60 bg-muted/40",
+          isUser ? "border-primary/25 bg-primary/10" : "border-border/60 bg-muted/40",
         )}
       >
         <FileText className="size-4 shrink-0 opacity-70" />

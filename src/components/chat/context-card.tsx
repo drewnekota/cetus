@@ -17,7 +17,7 @@ export function ContextCard({ inner, isUser }: { inner: string; isUser: boolean 
         className={cn(
           "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
           isUser
-            ? "bg-primary-foreground/15 text-primary-foreground/90 hover:bg-primary-foreground/25"
+            ? "bg-primary/15 text-foreground/80 hover:bg-primary/25"
             : "bg-muted/60 text-muted-foreground hover:bg-muted",
         )}
       >
@@ -32,7 +32,7 @@ export function ContextCard({ inner, isUser }: { inner: string; isUser: boolean 
           className={cn(
             "mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-[11px] leading-relaxed",
             isUser
-              ? "bg-primary-foreground/10 text-primary-foreground/85"
+              ? "bg-primary/10 text-foreground/75"
               : "bg-muted/50 text-muted-foreground",
           )}
         >
