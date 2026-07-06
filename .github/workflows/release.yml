@@ -104,13 +104,10 @@ jobs:
           APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
           VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
           DMG="$RUNNER_TEMP/Cetus_${VERSION}_aarch64.dmg"
-          DMG_SRC="$RUNNER_TEMP/dmg-src"
-          rm -rf "$DMG_SRC"
-          mkdir -p "$DMG_SRC"
-          ditto "$APP" "$DMG_SRC/$(basename "$APP")"
-          # The .app inside is already notarized+stapled; we package, then sign and
-          # notarize the dmg container itself so the download is Gatekeeper-clean.
-          hdiutil create -volname "Cetus" -srcfolder "$DMG_SRC" -ov -format UDZO "$DMG"
+          # The .app inside is already notarized+stapled; we package (with the
+          # drag-to-/Applications layout), then sign and notarize the dmg
+          # container itself so the download is Gatekeeper-clean.
+          scripts/package-dmg.sh "$APP" "$DMG"
           scripts/macos-sign.sh "$DMG" --notarize
           echo "DMG=$DMG" >> "$GITHUB_ENV"
 

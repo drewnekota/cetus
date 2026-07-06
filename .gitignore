@@ -51,3 +51,6 @@ scripts/release.env
 evals/general-benchmark/v2/fixtures/**/expected.json
 evals/web-search/mapping.json
 evals/web-search/results.json
+
+# Cetus app runtime state created when running Cetus inside this repo.
+.cetus/

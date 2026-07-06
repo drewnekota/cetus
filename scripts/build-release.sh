@@ -50,8 +50,7 @@ scripts/macos-sign.sh "$APP" "${SIGN_FLAGS[@]}"
 VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
 DMG="src-tauri/target/release/bundle/Cetus_${VERSION}_aarch64.dmg"
 echo "→ Packaging $DMG"
-rm -f "$DMG"
-hdiutil create -volname "Cetus" -srcfolder "$APP" -ov -format UDZO "$DMG" >/dev/null
+scripts/package-dmg.sh "$APP" "$DMG"
 echo "→ Signing the dmg (${SIGN_FLAGS[*]})…"
 scripts/macos-sign.sh "$DMG" "${SIGN_FLAGS[@]}"
 
