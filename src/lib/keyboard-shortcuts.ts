@@ -155,13 +155,13 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: "previousChat",
     label: "Previous chat",
-    description: "Move to the previous recently updated chat",
+    description: "Move to the previous chat in the sidebar",
     defaultAccelerator: "Cmd+Alt+ArrowUp",
   },
   {
     id: "nextChat",
     label: "Next chat",
-    description: "Move to the next recently updated chat",
+    description: "Move to the next chat in the sidebar",
     defaultAccelerator: "Cmd+Alt+ArrowDown",
   },
 ];

@@ -943,7 +943,10 @@ const ConversationRow = memo(function ConversationRow({
   );
 });
 
-function groupByWorkspace(
+/** Sidebar display order: the default "Chat" section first, then folders in
+ *  the user's (drag-reorderable) workspace order, chats within each group in
+ *  list order. Exported so keyboard chat-switching walks this same order. */
+export function groupByWorkspace(
   items: Conversation[],
   workspaceDirs: string[],
   hiddenWorkspaceDirs: string[],

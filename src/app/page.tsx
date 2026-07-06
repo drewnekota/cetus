@@ -12,7 +12,7 @@ import {
 import { ChatPane } from "@/components/chat/chat-pane";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
 import { CommandPalette } from "@/components/command-palette";
-import { AppSidebar } from "@/components/sidebar/app-sidebar";
+import { AppSidebar, groupByWorkspace } from "@/components/sidebar/app-sidebar";
 import type { SidebarView } from "@/components/sidebar/view-toggle";
 import { BoardView } from "@/components/board/board-view";
 import { CreateTaskDialog } from "@/components/board/create-task-dialog";
@@ -562,6 +562,21 @@ export default function Home() {
   activeIdRef.current = activeId;
   viewRef.current = view;
   workspaceDocksByChatRef.current = workspaceDocksByChat;
+  // Chat ids in the sidebar's visual order (workspace groups flattened),
+  // mirrored into a ref so the identity-stable switchChat handler reads the
+  // live order.
+  const orderedChatIds = useMemo(
+    () =>
+      groupByWorkspace(
+        conversations,
+        recentWorkspaces,
+        hiddenWorkspaces,
+        defaultWorkspace,
+      ).flatMap((g) => g.items.map((c) => c.id)),
+    [conversations, recentWorkspaces, hiddenWorkspaces, defaultWorkspace],
+  );
+  const orderedChatIdsRef = useRef<string[]>([]);
+  orderedChatIdsRef.current = orderedChatIds;
 
   // Mirror the live queue + send fn so the flush effect (deps: streaming/active
   // only) never reads stale closures. onSend is a hoisted function declaration.
@@ -1778,12 +1793,15 @@ export default function Home() {
   );
   const switchChat = useCallback(
     (direction: 1 | -1) => {
-      const chats = conversationsRef.current;
-      if (chats.length === 0) return;
-      const activeIndex = chats.findIndex((chat) => chat.id === activeIdRef.current);
+      // Walk the sidebar's visual order (grouped by workspace), not the raw
+      // recency-sorted list — otherwise ⌥⌘↑/↓ jumps across folders in an order
+      // the user can't see.
+      const ids = orderedChatIdsRef.current;
+      if (ids.length === 0) return;
+      const activeIndex = ids.indexOf(activeIdRef.current ?? "");
       const currentIndex = activeIndex >= 0 ? activeIndex : direction > 0 ? -1 : 0;
-      const nextIndex = (currentIndex + direction + chats.length) % chats.length;
-      onSelectChat(chats[nextIndex].id);
+      const nextIndex = (currentIndex + direction + ids.length) % ids.length;
+      onSelectChat(ids[nextIndex]);
     },
     [onSelectChat],
   );
