@@ -463,8 +463,46 @@ fn prune_old_logs(dir: &Path) {
     }
 }
 
+/// GUI apps launched from the Dock/Finder inherit launchd's minimal PATH
+/// (`/usr/bin:/bin:…`), not the user's shell PATH — so bare spawns of user
+/// tools (`claude`, `codex`, `node`, `mcporter`) fail with "No such file or
+/// directory" on a cold GUI launch while working fine when the app is started
+/// from a terminal. Ask the login shell for its PATH once at startup and adopt
+/// it, keeping any entries the current env has that the shell lacks.
+fn adopt_login_shell_path() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    // `-i` matters: PATH exports typically live in .zshrc, which only
+    // interactive shells read (`-l` alone gets .zprofile and misses them).
+    // Rc files are free to echo whatever they like, so bracket the value with
+    // a marker instead of trusting raw stdout.
+    let output = std::process::Command::new(&shell)
+        .args(["-ilc", "printf '__CETUS_PATH__%s__CETUS_PATH__' \"$PATH\""])
+        .output();
+    let Ok(output) = output else { return };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let Some(path) = stdout
+        .split("__CETUS_PATH__")
+        .nth(1)
+        .filter(|p| !p.trim().is_empty())
+    else {
+        return;
+    };
+    let mut merged: Vec<&str> = path.split(':').filter(|d| !d.is_empty()).collect();
+    let current = std::env::var("PATH").unwrap_or_default();
+    for dir in current.split(':') {
+        if !dir.is_empty() && !merged.contains(&dir) {
+            merged.push(dir);
+        }
+    }
+    std::env::set_var("PATH", merged.join(":"));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Must run before anything can spawn a child process (and before threads
+    // exist — `set_var` is not thread-safe).
+    adopt_login_shell_path();
+
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
