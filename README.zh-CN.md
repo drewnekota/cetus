@@ -8,30 +8,6 @@
 
 ---
 
-## 为什么做 Cetus
-
-大多数 AI 助手每次对话都从空白开始。推理能力不错，但它们不知道你在做什么，能做的也基本只是聊聊天。
-
-一个真正有用的 agent 需要三样东西：**context**（了解你的处境）、**intelligence**（推理能力）和 **abilities**（能实际做哪些事）。很长一段时间里，智力是瓶颈。现在不是了 —— 现代模型已经够好，DeepSeek V4.1 又把价格打下来了。这件事改变了什么值得去做。
-
-当 token 便宜一个数量级，很多以前做不起的事就变得可行：
-
-- 持续截取屏幕并做 OCR，以便日后回溯
-- 对同一个任务并行跑 N 次、取最好的结果
-- 定时调度 agent，在你离开时自己干活
-- 让一个 agent 为单次请求编排子 agent
-
-Cetus 把这省下来的钱花在大多数 agent 欠缺的地方：给 agent 更厚的 context，以及更多真正能动手的能力。
-
-### Memory 与 Dreaming
-
-上面三样东西描述的是某一个时刻。让 agent 跨时间真正有用的，是它能不能积累什么。
-
-![Cetus — the agent loop](docs/agent-loop.png)
-
-- **Memory（记忆）** 是 agent 写回给自己的 context —— 下一个 session 从上次停下的地方继续，而不是从零开始。
-- **Dreaming（做梦）** 在你闲着的时候跑：Cetus 回顾最近的对话，把它们整合成持久的笔记，让原始聊天记录沉淀为可以复用的偏好。默认开启。
-
 ## app 里有什么
 
 | | Cetus 现在 |
@@ -121,6 +97,30 @@ CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（P
 - 中断进行中的运行 · 通过 `switch_session` 在多对话间共享同一个 pi RPC 子进程
 - pi 二进制以 Tauri sidecar 形式打包，终端用户无需依赖 PATH
 - **底层 any-model**：pi 支持 30+ 供应商（Anthropic、OpenAI、Google、Bedrock、Ollama、LM Studio、OpenRouter…）及任意 OpenAI 兼容端点；当前 UI 仅暴露 DeepSeek，改 `model-picker.tsx` 里一行即可切换
+
+## 为什么做 Cetus
+
+大多数 AI 助手每次对话都从空白开始。推理能力不错，但它们不知道你在做什么，能做的也基本只是聊聊天。
+
+一个真正有用的 agent 需要三样东西：**context**（了解你的处境）、**intelligence**（推理能力）和 **abilities**（能实际做哪些事）。很长一段时间里，智力是瓶颈。现在不是了 —— 现代模型已经够好，DeepSeek V4.1 又把价格打下来了。这件事改变了什么值得去做。
+
+当 token 便宜一个数量级，很多以前做不起的事就变得可行：
+
+- 持续截取屏幕并做 OCR，以便日后回溯
+- 对同一个任务并行跑 N 次、取最好的结果
+- 定时调度 agent，在你离开时自己干活
+- 让一个 agent 为单次请求编排子 agent
+
+Cetus 把这省下来的钱花在大多数 agent 欠缺的地方：给 agent 更厚的 context，以及更多真正能动手的能力。
+
+### Memory 与 Dreaming
+
+上面三样东西描述的是某一个时刻。让 agent 跨时间真正有用的，是它能不能积累什么。
+
+![Cetus — the agent loop](docs/agent-loop.png)
+
+- **Memory（记忆）** 是 agent 写回给自己的 context —— 下一个 session 从上次停下的地方继续，而不是从零开始。
+- **Dreaming（做梦）** 在你闲着的时候跑：Cetus 回顾最近的对话，把它们整合成持久的笔记，让原始聊天记录沉淀为可以复用的偏好。默认开启。
 
 ## 环境要求
 

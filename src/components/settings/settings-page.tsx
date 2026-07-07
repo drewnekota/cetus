@@ -70,6 +70,7 @@ import { formatElapsed } from "@/lib/format";
 import {
   api,
   onAppEvent,
+  onUpdateDownloadProgress,
   onPiEvent,
   type CaptureSettings,
   type Meeting,
@@ -97,6 +98,7 @@ import type {
   DiscoveredSkill,
   SlashCommand,
   UpdateMeta,
+  UpdateDownloadProgress,
 } from "@/lib/types";
 import {
   DEFAULT_AUTO_ARCHIVE_SETTINGS,
@@ -137,6 +139,35 @@ import {
   PermissionRow,
   usePermissionStatuses,
 } from "./permission-row";
+
+function updateDownloadPercent(progress: UpdateDownloadProgress | null) {
+  if (!progress?.total || progress.total <= 0) return null;
+  return Math.max(
+    0,
+    Math.min(100, Math.round((progress.downloaded / progress.total) * 100)),
+  );
+}
+
+function UpdateProgressBar({ progress }: { progress: UpdateDownloadProgress | null }) {
+  const percent = updateDownloadPercent(progress);
+  return (
+    <div
+      className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={percent ?? undefined}
+    >
+      <div
+        className={cn(
+          "h-full rounded-full bg-primary transition-all duration-300",
+          percent == null && "w-1/2 animate-pulse",
+        )}
+        style={percent == null ? undefined : { width: `${percent}%` }}
+      />
+    </div>
+  );
+}
 
 // cetus is a DeepSeek-only desktop client; keep the key surface minimal.
 // `labelKey` is a settings-namespace i18n key resolved at render (hooks can't
@@ -442,6 +473,8 @@ function GeneralSection() {
     "idle" | "checking" | "upToDate" | "available" | "installing" | "failed"
   >("idle");
   const [pending, setPending] = useState<UpdateMeta | null>(null);
+  const [downloadProgress, setDownloadProgress] =
+    useState<UpdateDownloadProgress | null>(null);
 
   useEffect(() => {
     api.getQuickSettings().then(setSettings).catch(() => {});
@@ -450,6 +483,24 @@ function GeneralSection() {
       .then(({ getVersion }) => getVersion())
       .then(setAppVersion)
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    onUpdateDownloadProgress((progress) => {
+      setDownloadProgress(progress);
+      if (progress.finished) {
+        setTimeout(() => setDownloadProgress(null), 800);
+      }
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   function update(patch: Partial<QuickSettings>) {
@@ -481,15 +532,20 @@ function GeneralSection() {
 
   async function installNow() {
     setCheckState("installing");
+    setDownloadProgress(null);
     try {
       await api.installUpdate();
       setPending(null);
       setCheckState("idle");
+      setDownloadProgress(null);
       toast.success(t("update.installed"));
     } catch {
+      setDownloadProgress(null);
       setCheckState("failed");
     }
   }
+
+  const downloadPercent = updateDownloadPercent(downloadProgress);
 
   return (
     <section>
@@ -560,6 +616,10 @@ function GeneralSection() {
             <p className="text-xs text-muted-foreground">
               {checkState === "checking"
                 ? t("update.check.checking")
+                : checkState === "installing"
+                  ? downloadPercent == null
+                    ? t("update.installing")
+                    : `${t("update.installing")} ${downloadPercent}%`
                 : checkState === "upToDate"
                   ? t("update.check.upToDate")
                   : checkState === "available" && pending
@@ -596,6 +656,11 @@ function GeneralSection() {
             </Button>
           )}
         </div>
+        {checkState === "installing" ? (
+          <div className="mt-2 max-w-md">
+            <UpdateProgressBar progress={downloadProgress} />
+          </div>
+        ) : null}
       </div>
     </section>
   );

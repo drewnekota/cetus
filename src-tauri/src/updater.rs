@@ -25,6 +25,14 @@ pub struct UpdateMeta {
     pub notes: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDownloadProgress {
+    pub downloaded: u64,
+    pub total: Option<u64>,
+    pub finished: bool,
+}
+
 /// Background check at launch.
 ///
 /// - auto on  → download + swap silently (applies on next launch, no nag).
@@ -125,17 +133,67 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     }
     #[cfg(not(debug_assertions))]
     {
+        use std::sync::{
+            atomic::{AtomicU64, Ordering},
+            Arc,
+        };
+        use tauri::Emitter;
         use tauri_plugin_updater::UpdaterExt;
+
         let updater = app.updater().map_err(|e| e.to_string())?;
         let update = updater
             .check()
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "no update available".to_string())?;
+        let downloaded = Arc::new(AtomicU64::new(0));
+        let total = Arc::new(AtomicU64::new(0));
+        let progress_app = app.clone();
+        let progress_downloaded = Arc::clone(&downloaded);
+        let progress_total = Arc::clone(&total);
+        let _ = app.emit_to(
+            "main",
+            "update-download-progress",
+            UpdateDownloadProgress {
+                downloaded: 0,
+                total: None,
+                finished: false,
+            },
+        );
         update
-            .download_and_install(|_, _| {}, || {})
+            .download_and_install(
+                move |chunk_len, content_len| {
+                    let next = progress_downloaded
+                        .fetch_add(chunk_len as u64, Ordering::Relaxed)
+                        + chunk_len as u64;
+                    if let Some(content_len) = content_len {
+                        progress_total.store(content_len, Ordering::Relaxed);
+                    }
+                    let known_total = progress_total.load(Ordering::Relaxed);
+                    let _ = progress_app.emit_to(
+                        "main",
+                        "update-download-progress",
+                        UpdateDownloadProgress {
+                            downloaded: next,
+                            total: (known_total > 0).then_some(known_total),
+                            finished: false,
+                        },
+                    );
+                },
+                || {},
+            )
             .await
             .map_err(|e| e.to_string())?;
+        let total_value = total.load(Ordering::Relaxed);
+        let _ = app.emit_to(
+            "main",
+            "update-download-progress",
+            UpdateDownloadProgress {
+                downloaded: downloaded.load(Ordering::Relaxed),
+                total: (total_value > 0).then_some(total_value),
+                finished: true,
+            },
+        );
         Ok(())
     }
 }

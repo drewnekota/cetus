@@ -92,7 +92,12 @@ export type ChatAction =
     }
   | { type: "pi_event"; event: PiEvent }
   | { type: "set_error"; message: string | null }
-  | { type: "end_stream" }
+  // keepPartial: settle the in-flight assistant turn in place instead of
+  // dropping it — for CLI backends (claude-code / codex), whose runner
+  // persists the partial turn on abort, so the live view must match what
+  // reloads from disk. pi aborts keep the default drop (a partial protocol
+  // message would poison pi's next request).
+  | { type: "end_stream"; keepPartial?: boolean }
   // Local `!` bash-mode command: append a running breadcrumb (bash_start) then
   // settle it with the captured output (bash_done). The key is minted by the
   // caller so the two phases address the same message.
@@ -340,20 +345,31 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // Locally finalize an interrupted run. pi.abort() stops the model but
       // emits no agent_end, so isStreaming would stay stuck true — the
       // persistence cache (skipped mid-stream) never flushes and the run looks
-      // "active" so get_messages stalls on the next reopen. Drop the in-flight
-      // assistant turn entirely: a partial thought/text/tool_call is not a
-      // replayable protocol message, and keeping it can poison the next request.
+      // "active" so get_messages stalls on the next reopen. Default: drop the
+      // in-flight assistant turn entirely — a partial thought/text/tool_call
+      // is not a replayable protocol message, and keeping it can poison pi's
+      // next request. With keepPartial (CLI backends) the turn is kept and
+      // settled instead, matching what the runner persists on abort.
       if (!state.isStreaming && state.activeAssistantIdx == null) return state;
       let messages = state.messages;
       let toolIndex = state.toolIndex;
       if (state.activeAssistantIdx != null && messages[state.activeAssistantIdx]) {
-        const stripped = removeMessageAndReindexTools(
-          messages,
-          toolIndex,
-          state.activeAssistantIdx,
-        );
-        messages = stripped.messages;
-        toolIndex = stripped.toolIndex;
+        if (action.keepPartial) {
+          // CLI backends persist the partial turn on abort — keep it on
+          // screen, just settle the streaming flags so nothing spins forever.
+          messages = [...messages];
+          const m = { ...messages[state.activeAssistantIdx] };
+          m.blocks = m.blocks.map((b) => ({ ...b, streaming: false }));
+          messages[state.activeAssistantIdx] = m;
+        } else {
+          const stripped = removeMessageAndReindexTools(
+            messages,
+            toolIndex,
+            state.activeAssistantIdx,
+          );
+          messages = stripped.messages;
+          toolIndex = stripped.toolIndex;
+        }
       }
       return {
         ...state,

@@ -42,7 +42,13 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
-import { api, onAppEvent, onUpdateAvailable, type Screenshot } from "@/lib/tauri";
+import {
+  api,
+  onAppEvent,
+  onUpdateAvailable,
+  onUpdateDownloadProgress,
+  type Screenshot,
+} from "@/lib/tauri";
 import {
   useChatStore,
   useChatError,
@@ -74,6 +80,7 @@ import {
   type PiMessage,
   type QuickLaunchPayload,
   type BackendId,
+  backendSupportsSteer,
 } from "@/lib/types";
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
 import { loadBackendChoice, saveBackendChoice } from "@/lib/backend-choice";
@@ -358,6 +365,15 @@ export default function Home() {
   const error = useChatError(activeId);
   const isStreaming = useIsStreaming(activeId);
   const hasMessages = useHasMessages(activeId);
+  // Backend serving the active conversation (null for a not-yet-persisted new
+  // chat). Drives steer-capability gating for the follow-up queue.
+  const activeConvBackend = useMemo<BackendId | null>(
+    () =>
+      (conversations.find((c) => c.id === activeId)?.backend as
+        | BackendId
+        | undefined) ?? null,
+    [conversations, activeId],
+  );
   const streamingIds = useStreamingIds();
   const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(
     () => new Set(),
@@ -499,6 +515,43 @@ export default function Home() {
     const prev = previousViewRef.current;
     if (prev && prev !== viewRef.current) setView(prev);
   }, []);
+  // Browser-style page history for ⌘[ / ⌘]. A "page" is the sidebar view plus
+  // whether Settings covers it; every change lands on the stack, and applying
+  // an entry sets navApplyingRef so the recorder effect below doesn't re-push
+  // the state it just restored.
+  const navHistoryRef = useRef<{ view: SidebarView; settings: boolean }[]>([]);
+  const navIndexRef = useRef(0);
+  const navApplyingRef = useRef(false);
+  useEffect(() => {
+    if (navApplyingRef.current) {
+      navApplyingRef.current = false;
+      return;
+    }
+    const hist = navHistoryRef.current;
+    const current = hist[navIndexRef.current];
+    if (current && current.view === view && current.settings === settingsOpen)
+      return;
+    // A new page after going back forks the timeline: drop the forward entries.
+    hist.splice(navIndexRef.current + 1);
+    hist.push({ view, settings: settingsOpen });
+    if (hist.length > 100) hist.splice(0, hist.length - 100);
+    navIndexRef.current = hist.length - 1;
+  }, [view, settingsOpen]);
+  const applyNavEntry = useCallback((entry: { view: SidebarView; settings: boolean }) => {
+    navApplyingRef.current = true;
+    setView(entry.view);
+    setSettingsOpen(entry.settings);
+  }, []);
+  const navigateBack = useCallback(() => {
+    if (navIndexRef.current <= 0) return;
+    navIndexRef.current -= 1;
+    applyNavEntry(navHistoryRef.current[navIndexRef.current]);
+  }, [applyNavEntry]);
+  const navigateForward = useCallback(() => {
+    if (navIndexRef.current >= navHistoryRef.current.length - 1) return;
+    navIndexRef.current += 1;
+    applyNavEntry(navHistoryRef.current[navIndexRef.current]);
+  }, [applyNavEntry]);
   const [workspaceDocksByChat, setWorkspaceDocksByChat] =
     useState<WorkspaceDocksByChatState>(
       createInitialWorkspaceDocksByChat,
@@ -644,8 +697,8 @@ export default function Home() {
     }));
   }
 
-  /** Promote a queued message to a steer: deliver it now (injects into the
-   *  current run at the next tool boundary via send_prompt's "steer"). */
+  /** Promote a queued message to a steer: deliver it now. pi/claude-code inject
+   *  into the current run; codex interrupts the run and resumes the thread. */
   function steerQueued(convId: string, id: string) {
     const item = (queuedRef.current[convId] ?? []).find((m) => m.id === id);
     if (!item) return;
@@ -1121,6 +1174,7 @@ export default function Home() {
   //   ⌘D    — archive current conversation
   //   ⌘,    — open settings
   //   ⌘1…⌘4 — switch sidebar view
+  //   ⌘[/⌘] — go back / forward through the page history (views + settings)
   //   ⌃1…⌃3 — switch the current chat's runtime (Cetus / Claude Code / Codex)
   //   ⌘B    — toggle workspace
   //   ⌘J    — toggle Terminal in the workspace
@@ -1158,6 +1212,16 @@ export default function Home() {
       if (shortcut("commandPalette")) {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+        return;
+      }
+      // ⌘[ / ⌘] — walk the page history (sidebar views + Settings) like a
+      // browser. Handled before the modal guard so Back can close Settings,
+      // but the true dialogs below keep owning the keyboard.
+      if (shortcut("navigateBack") || shortcut("navigateForward")) {
+        if (automationDialogOpen || newTaskOpen || detailId !== null) return;
+        e.preventDefault();
+        if (shortcut("navigateBack")) navigateBack();
+        else navigateForward();
         return;
       }
       // A modal owns the keyboard while open — don't fire app shortcuts (or
@@ -1303,6 +1367,8 @@ export default function Home() {
     defaultWorkspace,
     requestBackendSwitch,
     switchToPreviousView,
+    navigateBack,
+    navigateForward,
   ]);
 
   function workspaceTitle(kind: WorkspaceTabKind, index: number): string {
@@ -1934,14 +2000,33 @@ export default function Home() {
         duration: Infinity,
         action: {
           label: tt("settings", "update.toast.install"),
-          onClick: () => {
+          onClick: async () => {
             const id = toast.loading(tt("settings", "update.installing"));
-            api
-              .installUpdate()
-              .then(() =>
-                toast.success(tt("settings", "update.installed"), { id }),
-              )
-              .catch(() => toast.error(tt("settings", "update.failed"), { id }));
+            let unlistenProgress: (() => void) | undefined;
+            try {
+              unlistenProgress = await onUpdateDownloadProgress((progress) => {
+                const percent =
+                  progress.total && progress.total > 0
+                    ? Math.max(
+                        0,
+                        Math.min(
+                          100,
+                          Math.round((progress.downloaded / progress.total) * 100),
+                        ),
+                      )
+                    : null;
+                toast.loading(tt("settings", "update.installing"), {
+                  id,
+                  description: percent == null ? undefined : `${percent}%`,
+                });
+              });
+              await api.installUpdate();
+              toast.success(tt("settings", "update.installed"), { id });
+            } catch {
+              toast.error(tt("settings", "update.failed"), { id });
+            } finally {
+              unlistenProgress?.();
+            }
           },
         },
         cancel: {
@@ -2037,6 +2122,15 @@ export default function Home() {
     openTerminalWithCommand(command);
   }
 
+  /** True when `id` runs on a CLI backend (claude-code / codex). Their runner
+   *  persists a stopped turn's partial messages, so an abort keeps what
+   *  streamed on screen instead of dropping the in-flight turn (pi's
+   *  semantics — see end_stream's keepPartial). */
+  function isCliConv(id: string | null): boolean {
+    const b = conversationsRef.current.find((c) => c.id === id)?.backend;
+    return b === "claude-code" || b === "codex";
+  }
+
   async function onAbort() {
     if (!activeId) return;
     // Bailing out of the run: drop anything parked for it rather than
@@ -2046,7 +2140,7 @@ export default function Home() {
     // flips isStreaming false → the write-through cache flushes the rendered turn
     // and the run no longer looks "active" (which would stall get_messages on the
     // next reopen and leave only the user bubble).
-    chatStore.getState().endStream(activeId);
+    chatStore.getState().endStream(activeId, isCliConv(activeId));
     await api.abort(activeId);
   }
 
@@ -2118,9 +2212,9 @@ export default function Home() {
       if (target && target !== activeId) await onSelect(target);
     }
     if (!target) {
-      // Honor the repo chosen in the launcher; fall back to the main window's
-      // current workspace, then the backend default.
-      const c = await api.newConversation(p.workspaceDir ?? workspaceDir ?? undefined);
+      // Honor the repo chosen in the launcher. A null workspaceDir means the
+      // launcher's visible "Chat" default, not the main window's current repo.
+      const c = await api.newConversation(p.workspaceDir ?? undefined);
       target = c.id;
       // Coding-agent runtime chosen in the launcher (Cetus / Claude Code /
       // Codex). Applied to fresh conversations only — reusing "last" keeps
@@ -2335,7 +2429,7 @@ export default function Home() {
 
   async function onDetailAbort() {
     if (!detailId) return;
-    chatStore.getState().endStream(detailId);
+    chatStore.getState().endStream(detailId, isCliConv(detailId));
     await api.abort(detailId);
   }
 
@@ -2795,10 +2889,10 @@ export default function Home() {
                   if (activeId) enqueueMessage(activeId, text, atts);
                 }}
                 onSteerQueued={
-                  // codex has no live stdin to inject into mid-run — queued
-                  // messages there only deliver as follow-ups (pi steers via
-                  // its RPC, claude-code over the turn's stdin).
-                  conversations.find((c) => c.id === activeId)?.backend === "codex"
+                  // pi steers via RPC, claude-code over stdin, and codex uses
+                  // Codex-app-style interrupt + resume. Hide this only for any
+                  // future backend that lacks a running-turn steer path.
+                  activeConvBackend && !backendSupportsSteer(activeConvBackend)
                     ? undefined
                     : (id) => {
                         if (activeId) steerQueued(activeId, id);

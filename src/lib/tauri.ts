@@ -35,6 +35,7 @@ import type {
   QuickScreenshot,
   QuickSettings,
   ReviewState,
+  UpdateDownloadProgress,
   UpdateMeta,
   VoiceInsertMode,
   VoicePermissions,
@@ -492,6 +493,15 @@ export async function onUpdateAvailable(
   handler: (u: UpdateMeta) => void,
 ): Promise<UnlistenFn> {
   return listen<UpdateMeta>("update-available", (e) => handler(e.payload));
+}
+
+/** Fired while a native app update is downloading. */
+export async function onUpdateDownloadProgress(
+  handler: (p: UpdateDownloadProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<UpdateDownloadProgress>("update-download-progress", (e) =>
+    handler(e.payload),
+  );
 }
 
 export async function onPiEvent(handler: (e: PiEvent) => void): Promise<UnlistenFn> {

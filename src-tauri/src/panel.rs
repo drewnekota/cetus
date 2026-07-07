@@ -977,6 +977,74 @@ pub fn prevent_app_nap() {
     }
 }
 
+/// Install a one-shot observer that runs `cb` on the main thread whenever the
+/// display layout changes — a monitor is connected/disconnected, resolution or
+/// arrangement changes (`NSApplicationDidChangeScreenParametersNotification`).
+///
+/// Needed because [`park`] computes the sliver origin against the layout at
+/// park time: the launcher body hangs off an edge that borders no display
+/// *then*. Plug in a monitor on that side later and the "dead space" the body
+/// hangs into is suddenly a live screen — the parked launcher pops up on the
+/// new display, fully visible but inert. The callback re-parks against the
+/// fresh layout.
+///
+/// The observer (and its copied block) is intentionally leaked — it lives for
+/// the whole process and is never removed.
+pub fn install_screen_change_observer<F: Fn() + 'static>(cb: F) {
+    static INSTALLED: OnceLock<()> = OnceLock::new();
+    if INSTALLED.set(()).is_err() {
+        return; // already installed
+    }
+    unsafe {
+        let Some(center_cls) = AnyClass::get(c"NSNotificationCenter") else {
+            return;
+        };
+        let center: *mut AnyObject = msg_send![center_cls, defaultCenter];
+        let Some(str_cls) = AnyClass::get(c"NSString") else {
+            return;
+        };
+        let name_c = c"NSApplicationDidChangeScreenParametersNotification";
+        let name: *mut AnyObject = msg_send![str_cls, stringWithUTF8String: name_c.as_ptr()];
+        let block = RcBlock::new(move |_note: *mut AnyObject| {
+            cb();
+        });
+        let null: *mut AnyObject = std::ptr::null_mut();
+        // queue: nil → the block runs on the posting thread; screen-parameter
+        // notifications post on the main thread, where AppKit is safe.
+        let token: *mut AnyObject = msg_send![
+            center,
+            addObserverForName: name,
+            object: null,
+            queue: null,
+            usingBlock: &*block,
+        ];
+        let _: *mut AnyObject = msg_send![token, retain];
+        std::mem::forget(block);
+    }
+}
+
+/// Whether `ns_window` lives on the currently active Space. `isOnActiveSpace`
+/// answers for ordered-out windows too ("would ordering it in land it on the
+/// active Space?"), so pair it with a visibility check when the question is
+/// "can the user actually see this window right now".
+///
+/// A window that is visible but on ANOTHER Space is the blind spot both the
+/// summon toggle and the activation observer used to have: `isVisible` says
+/// YES (it is ordered in — just on a desktop the user isn't looking at), so
+/// "visible" checks alone mistake it for on-screen, and the summon hotkey
+/// would *hide* the app instead of jumping to it.
+pub fn is_on_active_space(ns_window: *mut c_void) -> bool {
+    if ns_window.is_null() {
+        return false;
+    }
+    let obj = ns_window as *mut AnyObject;
+    unsafe {
+        let window: &AnyObject = &*obj;
+        let on: Bool = msg_send![window, isOnActiveSpace];
+        on.as_bool()
+    }
+}
+
 /// Whether cetus is the frontmost (active) application. Used by the summon
 /// hotkey to decide between bringing the app forward and hiding it.
 pub fn app_is_active() -> bool {

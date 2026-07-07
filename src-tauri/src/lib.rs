@@ -121,6 +121,31 @@ struct CliTurnHandle {
     /// the runner (see `run_cli_turn`'s steer grace). Bumped before the line
     /// is sent so the runner can't observe the message without the count.
     steer_pending: Arc<std::sync::atomic::AtomicUsize>,
+    /// Fired (notify_one — the permit survives a fire-before-wait race) by
+    /// `end_cli_turn` once the turn fully settled: outcome persisted,
+    /// registration cleared. The codex steer path waits on this before
+    /// redispatching so the interrupted turn's partial messages and resume
+    /// token are on disk first.
+    done: Arc<tokio::sync::Notify>,
+    /// Set true the instant the runner emits this turn's `agent_end` (via the
+    /// dispatch's ClosingSink), BEFORE that event reaches the frontend. Past
+    /// this point the child no longer reads stdin, so a steer would vanish into
+    /// a dead pipe. The frontend flushes its follow-up queue exactly on
+    /// `agent_end`, and that flush lands here while the turn is still registered
+    /// (unregistration trails persistence) — the flag routes it to a fresh
+    /// resuming turn instead of a lost steer.
+    closing: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Outcome of trying to steer a prompt into a running CLI turn.
+pub enum CliSteer {
+    /// Injected into a live turn's stdin.
+    Steered,
+    /// The turn is wrapping up (past `agent_end`): wait on the settlement
+    /// signal, then redispatch the prompt as a fresh turn resuming the thread.
+    Closing(Arc<tokio::sync::Notify>),
+    /// No turn is running — dispatch a fresh turn directly.
+    Idle,
 }
 
 impl AppState {
@@ -136,6 +161,7 @@ impl AppState {
             Arc<tokio::sync::Notify>,
             tokio::sync::mpsc::UnboundedReceiver<String>,
             Arc<std::sync::atomic::AtomicUsize>,
+            Arc<std::sync::atomic::AtomicBool>,
         ),
         String,
     > {
@@ -146,20 +172,26 @@ impl AppState {
         let notify = Arc::new(tokio::sync::Notify::new());
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let steer_pending = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let closing = Arc::new(std::sync::atomic::AtomicBool::new(false));
         turns.insert(
             conv_id.to_string(),
             CliTurnHandle {
                 kill: notify.clone(),
                 input: tx,
                 steer_pending: steer_pending.clone(),
+                done: Arc::new(tokio::sync::Notify::new()),
+                closing: closing.clone(),
             },
         );
-        Ok((notify, rx, steer_pending))
+        Ok((notify, rx, steer_pending, closing))
     }
 
-    /// Clear a finished CLI turn's registration.
+    /// Clear a finished CLI turn's registration and wake anyone waiting on
+    /// its settlement (`cli_interrupt_turn`).
     pub fn end_cli_turn(&self, conv_id: &str) {
-        self.cli_turns.lock().unwrap().remove(conv_id);
+        if let Some(h) = self.cli_turns.lock().unwrap().remove(conv_id) {
+            h.done.notify_one();
+        }
     }
 
     /// Fire the kill switch of a running CLI turn. No-op when idle.
@@ -169,20 +201,44 @@ impl AppState {
         }
     }
 
-    /// Inject a steer user message into a running CLI turn's stdin. Returns
-    /// false when no turn is running (or it just ended) — the caller should
-    /// dispatch a fresh turn instead.
-    pub fn cli_try_steer(&self, conv_id: &str, line: String) -> bool {
+    /// Kill a running CLI turn and hand back its settlement signal (fired by
+    /// `end_cli_turn` after the outcome persisted). None when no turn is
+    /// running — the caller should dispatch normally instead.
+    pub fn cli_interrupt_turn(&self, conv_id: &str) -> Option<Arc<tokio::sync::Notify>> {
+        let turns = self.cli_turns.lock().unwrap();
+        let h = turns.get(conv_id)?;
+        h.kill.notify_one();
+        Some(h.done.clone())
+    }
+
+    /// Try to inject a steer user message into a running CLI turn's stdin.
+    ///  - `Idle`: no turn is running — dispatch a fresh turn.
+    ///  - `Closing`: the turn already emitted `agent_end` (its stdin is dead) —
+    ///    the caller should wait on the returned settlement signal, then
+    ///    redispatch the prompt as a fresh resuming turn. This catches the
+    ///    follow-up queue's flush, which fires on exactly that `agent_end` while
+    ///    the turn is still registered (unregistration trails persistence).
+    ///  - `Steered`: injected into a live turn.
+    pub fn cli_steer(&self, conv_id: &str, line: String) -> CliSteer {
         let turns = self.cli_turns.lock().unwrap();
         let Some(h) = turns.get(conv_id) else {
-            return false;
+            return CliSteer::Idle;
         };
+        if h.closing.load(std::sync::atomic::Ordering::SeqCst) {
+            return CliSteer::Closing(h.done.clone());
+        }
         // Count first: the runner must never see the message on stdin while
         // the counter still reads zero (it would close the turn on `result`
         // with the steer unread).
         h.steer_pending
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        h.input.send(line).is_ok()
+        if h.input.send(line).is_ok() {
+            CliSteer::Steered
+        } else {
+            // Receiver gone (child exited between the closing check and the
+            // send) — treat as closing so the prompt still lands.
+            CliSteer::Closing(h.done.clone())
+        }
     }
 
     /// Write one line into a running CLI turn's stdin (a control_response
@@ -871,13 +927,45 @@ pub fn run() {
             {
                 let app_active = app.handle().clone();
                 crate::panel::install_app_active_observer(move || {
-                    // Only act when the window isn't already on screen — parked
-                    // off-screen by a ⌘W close, or hidden ⌘H-style by the summon
-                    // hotkey. A normal activation of an already-showing cetus must
-                    // not disturb it.
-                    if !main_is_parked()
+                    // Only act when the user would otherwise be left staring at
+                    // an active cetus with no window: parked off-screen by a ⌘W
+                    // close, hidden ⌘H-style by the summon hotkey, ordered out
+                    // (e.g. the launcher's push-back on a hidden app), or
+                    // visible-but-on-another-Space. Plain activation orders
+                    // nothing front, so macOS won't switch to the window's
+                    // Space on its own — without this the menu bar flips to
+                    // "Cetus" and nothing appears, which reads as "the app hid
+                    // itself". A normal activation of an already-showing cetus
+                    // must not disturb it.
+                    let main_showing = app_active
+                        .get_webview_window("main")
+                        .map(|w| {
+                            w.is_visible().unwrap_or(false)
+                                && w.ns_window()
+                                    .map(|p| crate::panel::is_on_active_space(p))
+                                    .unwrap_or(true)
+                        })
+                        .unwrap_or(true);
+                    if main_showing
+                        && !main_is_parked()
                         && !MAIN_HOTKEY_HIDDEN.load(std::sync::atomic::Ordering::Relaxed)
                     {
+                        return;
+                    }
+                    // The activation may have come through another regular
+                    // cetus window (the browser / annotation windows are
+                    // normal, activating NSWindows). If one of those is
+                    // showing on the active Space, the user is working in it —
+                    // don't yank them to the main window's Space.
+                    let other_window_showing =
+                        app_active.webview_windows().into_iter().any(|(label, w)| {
+                            !matches!(label.as_str(), "main" | "quick" | "voice" | "meeting")
+                                && w.is_visible().unwrap_or(false)
+                                && w.ns_window()
+                                    .map(|p| crate::panel::is_on_active_space(p))
+                                    .unwrap_or(false)
+                        });
+                    if other_window_showing {
                         return;
                     }
                     // A launcher gesture momentarily activates cetus before its
@@ -892,6 +980,11 @@ pub fn run() {
                         last > 0 && store::now_ms() - last < 1500
                     };
                     if !recent_launch {
+                        tracing::debug!(
+                            "app-active observer: summoning main (parked={}, hotkey_hidden={}, main_showing={main_showing})",
+                            main_is_parked(),
+                            MAIN_HOTKEY_HIDDEN.load(std::sync::atomic::Ordering::Relaxed),
+                        );
                         focus_main(&app_active);
                     }
                 });
@@ -1037,6 +1130,39 @@ pub fn run() {
                         // first gesture warms it; every dismiss after that parks
                         // it warm. Only the first open per launch may flash.
                     }
+                }
+                // Re-park the launcher whenever the display layout changes.
+                // The parked sliver's origin was computed against the OLD
+                // layout: its body hangs off an edge that bordered no display
+                // at park time, so a monitor plugged in on that side later
+                // turns the "dead space" into a live screen and the whole
+                // launcher pops up there, visible but inert. Recompute the
+                // sliver against the fresh layout. Skip while the launcher is
+                // genuinely open (shown), and skip a window that isn't ordered
+                // in yet (never opened / mid-recapture) — park's
+                // orderFrontRegardless would show it.
+                {
+                    let app_handle = app.handle().clone();
+                    panel::install_screen_change_observer(move || {
+                        let state = app_handle.state::<AppState>();
+                        if state
+                            .quick
+                            .shown
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            return;
+                        }
+                        if let Some(w) = app_handle.get_webview_window("quick") {
+                            if w.is_visible().unwrap_or(false) {
+                                if let Ok(ptr) = w.ns_window() {
+                                    tracing::debug!(
+                                        "screen layout changed: re-parking quick launcher"
+                                    );
+                                    panel::park(ptr);
+                                }
+                            }
+                        }
+                    });
                 }
                 // The dictation HUD: a never-key panel so the app being dictated
                 // into keeps focus and the injected keystrokes land there. No
@@ -1615,12 +1741,20 @@ fn toggle_main(app: &AppHandle) {
             // window parks it off-screen WITHOUT deactivating the app, so
             // right after a ⌘W cetus is often still the active app with nothing
             // on screen — the is-active check alone would hide_app and the
-            // summon press would look eaten. Only hide when the window is
-            // genuinely showing (not parked AND visible); otherwise summon.
+            // summon press would look eaten. And "visible" alone is not enough
+            // either: a window on ANOTHER Space is still `isVisible`, so the
+            // press meant to jump to it would hide the app instead. Only hide
+            // when the user can actually see the window (not parked, visible,
+            // on the active Space); otherwise summon.
             let showing = !main_is_parked()
                 && app
                     .get_webview_window("main")
-                    .and_then(|w| w.is_visible().ok())
+                    .map(|w| {
+                        w.is_visible().unwrap_or(false)
+                            && w.ns_window()
+                                .map(|p| crate::panel::is_on_active_space(p))
+                                .unwrap_or(true)
+                    })
                     .unwrap_or(false);
             if crate::panel::app_is_active() && showing {
                 crate::panel::hide_app();

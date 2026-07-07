@@ -473,7 +473,7 @@ impl EventTranslator {
     /// PiEvents to emit after the process exits. `error` surfaces a failure as a
     /// visible assistant text block so a crashed turn isn't a blank bubble.
     pub fn finish(&mut self, error: Option<&str>) -> Vec<Value> {
-        let mut out = Vec::new();
+        let mut out = self.close_live_blocks();
         if let Some(msg) = error {
             out.extend(self.emit_text(&format!("⚠️ agent error: {msg}")));
         }
@@ -487,6 +487,68 @@ impl EventTranslator {
         }
         out.push(json!({ "type": "agent_end" }));
         self.finished = true;
+        out
+    }
+
+    /// Close any content blocks still streaming (their `content_block_stop`
+    /// never arrived — the turn was killed mid-delta). On a normal turn end
+    /// every block is already closed and this is a no-op; on an abort it
+    /// settles each open block with whatever accumulated, so the partial
+    /// text/thinking survives in the UI and the persisted transcript instead
+    /// of vanishing with the live buffers.
+    fn close_live_blocks(&mut self) -> Vec<Value> {
+        let mut open: Vec<u64> = self
+            .live_blocks
+            .iter()
+            .filter(|(_, b)| !b.closed)
+            .map(|(k, _)| *k)
+            .collect();
+        open.sort_by_key(|k| self.live_blocks[k].our_index);
+        let mut out = Vec::new();
+        for k in open {
+            let b = self.live_blocks.get_mut(&k).expect("open block exists");
+            b.closed = true;
+            let our_index = b.our_index;
+            let buffer = std::mem::take(&mut b.buffer);
+            match b.kind {
+                LiveKind::Text => {
+                    if buffer.is_empty() {
+                        continue;
+                    }
+                    self.assistant_blocks
+                        .push(json!({ "type": "text", "text": buffer }));
+                    out.push(am(json!({
+                        "type": "text_end",
+                        "contentIndex": our_index,
+                        "content": buffer,
+                    })));
+                }
+                LiveKind::Thinking => {
+                    if buffer.is_empty() {
+                        continue;
+                    }
+                    self.assistant_blocks
+                        .push(json!({ "type": "thinking", "thinking": buffer }));
+                    out.push(am(json!({
+                        "type": "thinking_end",
+                        "contentIndex": our_index,
+                        "content": buffer,
+                    })));
+                }
+                LiveKind::ToolUse => {
+                    let (id, name) = b.tool.clone().unwrap_or_default();
+                    let args: Value = serde_json::from_str(&buffer).unwrap_or(json!({}));
+                    self.assistant_blocks.push(json!({
+                        "type": "toolCall", "id": id, "name": name, "arguments": args,
+                    }));
+                    out.push(am(json!({
+                        "type": "toolcall_end",
+                        "contentIndex": our_index,
+                        "toolCall": { "id": id, "name": name, "arguments": args },
+                    })));
+                }
+            }
+        }
         out
     }
 
@@ -1742,6 +1804,27 @@ mod tests {
         assert!(tr.saw_result);
         assert!(!tr.result_is_spurious());
         assert_eq!(tr.result_error.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn finish_flushes_blocks_still_streaming_on_abort() {
+        // A turn killed mid-delta (Stop / codex-style steer interrupt) never
+        // sees the open block's content_block_stop — finish() must settle it
+        // so the partial text survives on screen and in the transcript.
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant","content":[]}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial answ"}}}"#);
+
+        let ev = tr.finish(None);
+        assert_eq!(
+            types(&ev),
+            vec!["message_update:text_end", "message_end", "agent_end"]
+        );
+        assert_eq!(ev[0]["assistantMessageEvent"]["content"], json!("partial answ"));
+        let messages = tr.take_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["content"][0]["text"], json!("partial answ"));
     }
 
     #[test]

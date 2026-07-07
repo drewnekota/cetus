@@ -13,6 +13,8 @@ export type ShortcutId =
   | "switchAutomations"
   | "switchPlugins"
   | "switchPreviousView"
+  | "navigateBack"
+  | "navigateForward"
   | "runtimeCetus"
   | "runtimeClaudeCode"
   | "runtimeCodex"
@@ -98,6 +100,18 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: "Switch to previous view",
     description: "Toggle back to the view you were on before",
     defaultAccelerator: "Ctrl+Tab",
+  },
+  {
+    id: "navigateBack",
+    label: "Go back",
+    description: "Go back to the previous page (views and settings)",
+    defaultAccelerator: "Cmd+BracketLeft",
+  },
+  {
+    id: "navigateForward",
+    label: "Go forward",
+    description: "Go forward to the next page after going back",
+    defaultAccelerator: "Cmd+BracketRight",
   },
   {
     id: "runtimeCetus",

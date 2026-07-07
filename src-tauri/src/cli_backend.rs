@@ -259,41 +259,63 @@ pub fn dispatch_turn(
     let backend = cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend)
         .ok_or_else(|| format!("not a CLI backend: {}", conv.backend))?;
     let state = handle.state::<AppState>();
-    let sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
-        std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(handle.clone()));
 
     // Steer: a prompt sent while a claude turn is mid-run is injected into
     // that turn over stdin (a bidirectional stream-json user message — the
     // same steering the interactive CLI does on mid-run input) instead of
     // failing "already running". The runner keeps the turn open through the
-    // injection (see run_cli_turn's steer grace). codex has no live stdin, so
-    // its runs keep the one-turn-at-a-time error and the UI's follow-up queue.
+    // injection (see run_cli_turn's steer grace). codex has no live stdin —
+    // its steer below interrupts the turn and resumes the thread instead.
     if backend == cetus_bridge::cli_agent::CliBackend::ClaudeCode {
         let blocks: Vec<(String, String)> = images
             .iter()
             .map(|img| (img.mime_type.clone(), img.data.clone()))
             .collect();
         let line = cetus_bridge::cli_agent::claude_user_message_line(message, &blocks);
-        if state.cli_try_steer(&conv.id, line) {
-            let mut content = vec![serde_json::json!({ "type": "text", "text": message })];
-            for img in &images {
-                content.push(serde_json::json!({
-                    "type": "image", "data": img.data, "mimeType": img.mime_type,
-                }));
+        match state.cli_steer(&conv.id, line) {
+            crate::CliSteer::Steered => {
+                let mut content = vec![serde_json::json!({ "type": "text", "text": message })];
+                for img in &images {
+                    content.push(serde_json::json!({
+                        "type": "image", "data": img.data, "mimeType": img.mime_type,
+                    }));
+                }
+                state
+                    .store
+                    .append_cli_message(
+                        &conv.id,
+                        &serde_json::json!({ "role": "user", "content": content }),
+                        None,
+                        now_ms(),
+                    )
+                    .ok();
+                return Ok(());
             }
-            state
-                .store
-                .append_cli_message(
-                    &conv.id,
-                    &serde_json::json!({ "role": "user", "content": content }),
-                    None,
-                    now_ms(),
-                )
-                .ok();
+            // The turn already closed (its stdin is dead) — the follow-up queue
+            // flushed on `agent_end` before the turn unregistered. Resume it as
+            // a fresh turn once it settles, so the prompt isn't lost to a dead
+            // pipe.
+            crate::CliSteer::Closing(done) => {
+                redispatch_after_settle(handle, conv.id.clone(), message.to_string(), images, done);
+                return Ok(());
+            }
+            // No running turn: fall through to a normal dispatch.
+            crate::CliSteer::Idle => {}
+        }
+    }
+
+    // Steer, codex flavor: `codex exec` is one-shot (no live stdin to inject
+    // into), so a prompt sent mid-run interrupts the turn — the same move as
+    // Esc + a new message in the codex TUI. The kill makes the runner close
+    // the turn with whatever streamed (persisted as partial messages, kept on
+    // screen); once it settles we redispatch this prompt as a fresh turn that
+    // resumes the same thread, so the model sees its interrupted work.
+    if backend == cetus_bridge::cli_agent::CliBackend::Codex {
+        if let Some(done) = state.cli_interrupt_turn(&conv.id) {
+            redispatch_after_settle(handle, conv.id.clone(), message.to_string(), images, done);
             return Ok(());
         }
-        // No running turn (or it ended between check and send): fall through
-        // to a normal dispatch.
+        // Idle: fall through to a normal dispatch.
     }
 
     let ws = PathBuf::from(&conv.workspace_dir);
@@ -321,7 +343,16 @@ pub fn dispatch_turn(
     // stdin channel control responses ride in on. Registered before the user
     // message persists so a rejected double-send doesn't strand a transcript
     // row that never ran.
-    let (kill, input_rx, steer_pending) = state.begin_cli_turn(&conv.id)?;
+    let (kill, input_rx, steer_pending, closing) = state.begin_cli_turn(&conv.id)?;
+    // Wrap the event sink so it flips `closing` true the instant this turn's
+    // `agent_end` passes through — BEFORE that event reaches the frontend, so a
+    // follow-up flushed on `agent_end` (see cli_steer) never races ahead of the
+    // flag and lands in the dead-turn steer path.
+    let sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
+        std::sync::Arc::new(ClosingSink {
+            inner: std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(handle.clone())),
+            closing,
+        });
 
     // Image attachments: claude takes them inline on the stdin user message
     // (native content blocks); codex ingests file paths via `-i`.
@@ -424,6 +455,77 @@ pub fn dispatch_turn(
         st.end_cli_turn(&conv_id);
     });
     Ok(())
+}
+
+/// Event sink that trips `closing` the instant a turn's `agent_end` flows
+/// through, then forwards the event unchanged. Because the flag is set before
+/// `inner.emit`, the frontend can only observe `agent_end` after the flag is
+/// visible — so a follow-up the frontend flushes on that event reads the turn
+/// as `Closing` (dead stdin) rather than steering into it.
+struct ClosingSink {
+    inner: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink>,
+    closing: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl cetus_bridge::pi_rpc::EventSink for ClosingSink {
+    fn emit(&self, event: cetus_bridge::bridge::RuntimeEvent) {
+        if let cetus_bridge::bridge::RuntimeEvent::Protocol { event: ev, .. } = &event {
+            if ev.get("type").and_then(|t| t.as_str()) == Some("agent_end") {
+                self.closing
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        self.inner.emit(event);
+    }
+}
+
+/// Redispatch `message` as a fresh turn once the currently-closing turn has
+/// fully settled (`done` fired by `end_cli_turn`, so its partial messages and
+/// resume token are on disk). Shared by the codex steer (interrupt + resume)
+/// and the claude follow-up that flushed on `agent_end` after the turn stopped
+/// reading stdin — both need a settled session to resume from.
+fn redispatch_after_settle(
+    handle: &AppHandle,
+    conv_id: String,
+    message: String,
+    images: Vec<crate::commands::ImageAttachment>,
+    done: std::sync::Arc<tokio::sync::Notify>,
+) {
+    let handle = handle.clone();
+    tokio::spawn(async move {
+        use cetus_bridge::pi_rpc::EventSink;
+        let fail = |handle: &AppHandle, conv_id: String, msg: String| {
+            tracing::error!("cli steer redispatch failed: {msg}");
+            let sink = crate::tauri_bridge::TauriEventSink::new(handle.clone());
+            sink.emit(cetus_bridge::bridge::RuntimeEvent::Error {
+                conversation_id: Some(conv_id),
+                message: msg,
+            });
+        };
+        // Bounded wait: a wedged child that never settles must not re-enter
+        // dispatch (which would interrupt/redispatch again — a loop).
+        let settled = tokio::time::timeout(std::time::Duration::from_secs(15), done.notified())
+            .await
+            .is_ok();
+        if !settled {
+            fail(
+                &handle,
+                conv_id,
+                "the running turn didn't stop; message not delivered — try again".into(),
+            );
+            return;
+        }
+        let state = handle.state::<AppState>();
+        // Re-read the row: the settled turn persisted its resume token
+        // (session_file) on the way out, and the redispatch must resume from it.
+        let conv = match state.store.get(&conv_id) {
+            Ok(Some(c)) => c,
+            _ => return,
+        };
+        if let Err(e) = dispatch_turn(&handle, &conv, &message, images) {
+            fail(&handle, conv_id, format!("steer redispatch failed: {e}"));
+        }
+    });
 }
 
 /// Concatenated text of a PiMessage's content — the retry path returns this as

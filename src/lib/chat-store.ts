@@ -62,8 +62,10 @@ interface ChatsStore {
   bashDone: (id: string, key: string, result: BashResult) => void;
   setError: (id: string, message: string | null) => void;
   /** Locally end an interrupted run (abort emits no agent_end). Flips
-   *  isStreaming false so the write-through cache flushes the rendered turn. */
-  endStream: (id: string) => void;
+   *  isStreaming false so the write-through cache flushes the rendered turn.
+   *  keepPartial keeps the in-flight assistant turn (settled) instead of
+   *  dropping it — for CLI backends, which persist the partial on abort. */
+  endStream: (id: string, keepPartial?: boolean) => void;
   /** Hydrate from IDB cache without going through the reducer (already-rendered). */
   hydrate: (id: string, messages: RenderedMessage[]) => void;
   /** Copy the settled rendered view from one conversation id to another. */
@@ -321,9 +323,9 @@ export const useChatStore = create<ChatsStore>()((set) => ({
     flushPiEvents();
     set((s) => step(s, id, { type: "set_error", message }));
   },
-  endStream: (id) => {
+  endStream: (id, keepPartial) => {
     flushPiEvents();
-    set((s) => step(s, id, { type: "end_stream" }));
+    set((s) => step(s, id, { type: "end_stream", keepPartial }));
   },
   hydrate: (id, messages) => {
     flushPiEvents();

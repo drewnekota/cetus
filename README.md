@@ -8,30 +8,6 @@ A desktop agent for macOS, built on DeepSeek V4.1. It watches your screen, remem
 
 ---
 
-## Why Cetus
-
-Most AI assistants treat every conversation as a blank slate. They can reason well, but they don't know what you're working on, and they can't do much beyond chat.
-
-A useful agent needs three things: **context** (what it knows about your situation), **intelligence** (how well it reasons), and **abilities** (what it can actually do). For a while, intelligence was the hard part. It's not anymore — modern models are good, and DeepSeek V4.1 made them cheap. That changes what's worth building.
-
-When tokens cost an order of magnitude less, things that didn't make sense before become practical:
-
-- Running continuous screen capture and OCR for recall
-- Spinning up N parallel attempts on the same task and keeping the best
-- Scheduling agents that work while you're away
-- Letting one agent orchestrate sub-agents for a single request
-
-Cetus spends those savings on the parts most agents skimp on: giving the agent richer context about your situation and more ways to actually do things.
-
-### Memory and Dreaming
-
-The three factors describe a single moment. What makes an agent useful over time is whether it accumulates anything.
-
-![Cetus — the agent loop](docs/agent-loop.png)
-
-- **Memory** is context the agent writes back to itself — so the next session picks up where the last one left off instead of starting from scratch.
-- **Dreaming** runs while you're idle: Cetus reflects on recent conversations and consolidates them into durable notes, turning raw history into preferences that persist. On by default.
-
 ## What's in the app
 
 | | Cetus today |
@@ -121,6 +97,30 @@ Each capability is opt-in. **Computer & Browser control** lets the agent drive y
 - Abort in-flight runs · one pi RPC subprocess shared across conversations via `switch_session`
 - pi binary bundled as a Tauri sidecar — no PATH dependency for end users
 - **Any model under the hood**: pi supports 30+ providers (Anthropic, OpenAI, Google, Bedrock, Ollama, LM Studio, OpenRouter, …) and any OpenAI-compatible endpoint; the current UI is DeepSeek-only, swap models with one line in `model-picker.tsx`
+
+## Why Cetus
+
+Most AI assistants treat every conversation as a blank slate. They can reason well, but they don't know what you're working on, and they can't do much beyond chat.
+
+A useful agent needs three things: **context** (what it knows about your situation), **intelligence** (how well it reasons), and **abilities** (what it can actually do). For a while, intelligence was the hard part. It's not anymore — modern models are good, and DeepSeek V4.1 made them cheap. That changes what's worth building.
+
+When tokens cost an order of magnitude less, things that didn't make sense before become practical:
+
+- Running continuous screen capture and OCR for recall
+- Spinning up N parallel attempts on the same task and keeping the best
+- Scheduling agents that work while you're away
+- Letting one agent orchestrate sub-agents for a single request
+
+Cetus spends those savings on the parts most agents skimp on: giving the agent richer context about your situation and more ways to actually do things.
+
+### Memory and Dreaming
+
+The three factors describe a single moment. What makes an agent useful over time is whether it accumulates anything.
+
+![Cetus — the agent loop](docs/agent-loop.png)
+
+- **Memory** is context the agent writes back to itself — so the next session picks up where the last one left off instead of starting from scratch.
+- **Dreaming** runs while you're idle: Cetus reflects on recent conversations and consolidates them into durable notes, turning raw history into preferences that persist. On by default.
 
 ## Requirements
 
