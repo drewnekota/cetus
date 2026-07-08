@@ -26,7 +26,7 @@ export const board = {
     // Create-task dialog
     "create.srTitle": "Create a new task",
     "create.newTask": "New task",
-    "create.placeholder": "Describe your task. ⌘↵ to create.",
+    "create.placeholder": "Describe your task.",
     "create.imageOverLimit": "{name} is over 8MB",
     "create.pastedImageName": "(pasted)",
     "create.attachImage": "Attach image",
@@ -70,7 +70,7 @@ export const board = {
 
     "create.srTitle": "创建新任务",
     "create.newTask": "新建任务",
-    "create.placeholder": "描述你的任务。按 ⌘↵ 创建。",
+    "create.placeholder": "描述你的任务。",
     "create.imageOverLimit": "{name} 超过 8MB",
     "create.pastedImageName": "（粘贴）",
     "create.attachImage": "添加图片",
@@ -112,7 +112,7 @@ export const board = {
 
     "create.srTitle": "新しいタスクを作成",
     "create.newTask": "新規タスク",
-    "create.placeholder": "タスクを入力してください。⌘↵ で作成します。",
+    "create.placeholder": "タスクを入力してください。",
     "create.imageOverLimit": "{name} は 8MB を超えています",
     "create.pastedImageName": "（貼り付け）",
     "create.attachImage": "画像を添付",
@@ -154,7 +154,7 @@ export const board = {
 
     "create.srTitle": "새 작업 만들기",
     "create.newTask": "새 작업",
-    "create.placeholder": "작업을 설명하세요. ⌘↵ 로 생성합니다.",
+    "create.placeholder": "작업을 설명하세요.",
     "create.imageOverLimit": "{name} 이(가) 8MB를 초과합니다",
     "create.pastedImageName": "(붙여넣음)",
     "create.attachImage": "이미지 첨부",
@@ -196,7 +196,7 @@ export const board = {
 
     "create.srTitle": "Crear una nueva tarea",
     "create.newTask": "Nueva tarea",
-    "create.placeholder": "Describe tu tarea. ⌘↵ para crear.",
+    "create.placeholder": "Describe tu tarea.",
     "create.imageOverLimit": "{name} supera los 8 MB",
     "create.pastedImageName": "(pegado)",
     "create.attachImage": "Adjuntar imagen",
@@ -238,7 +238,7 @@ export const board = {
 
     "create.srTitle": "Criar uma nova tarefa",
     "create.newTask": "Nova tarefa",
-    "create.placeholder": "Descreva sua tarefa. ⌘↵ para criar.",
+    "create.placeholder": "Descreva sua tarefa.",
     "create.imageOverLimit": "{name} ultrapassa 8 MB",
     "create.pastedImageName": "(colado)",
     "create.attachImage": "Anexar imagem",
@@ -280,7 +280,7 @@ export const board = {
 
     "create.srTitle": "Créer une nouvelle tâche",
     "create.newTask": "Nouvelle tâche",
-    "create.placeholder": "Décrivez votre tâche. ⌘↵ pour créer.",
+    "create.placeholder": "Décrivez votre tâche.",
     "create.imageOverLimit": "{name} dépasse 8 Mo",
     "create.pastedImageName": "(collé)",
     "create.attachImage": "Joindre une image",
@@ -322,7 +322,7 @@ export const board = {
 
     "create.srTitle": "Neue Aufgabe erstellen",
     "create.newTask": "Neue Aufgabe",
-    "create.placeholder": "Beschreibe deine Aufgabe. ⌘↵ zum Erstellen.",
+    "create.placeholder": "Beschreibe deine Aufgabe.",
     "create.imageOverLimit": "{name} überschreitet 8 MB",
     "create.pastedImageName": "(eingefügt)",
     "create.attachImage": "Bild anhängen",
@@ -364,7 +364,7 @@ export const board = {
 
     "create.srTitle": "Crea una nuova attività",
     "create.newTask": "Nuova attività",
-    "create.placeholder": "Descrivi la tua attività. ⌘↵ per creare.",
+    "create.placeholder": "Descrivi la tua attività.",
     "create.imageOverLimit": "{name} supera gli 8 MB",
     "create.pastedImageName": "(incollato)",
     "create.attachImage": "Allega immagine",
@@ -406,7 +406,7 @@ export const board = {
 
     "create.srTitle": "Создать новую задачу",
     "create.newTask": "Новая задача",
-    "create.placeholder": "Опишите вашу задачу. ⌘↵ для создания.",
+    "create.placeholder": "Опишите вашу задачу.",
     "create.imageOverLimit": "{name} превышает 8 МБ",
     "create.pastedImageName": "(вставлено)",
     "create.attachImage": "Прикрепить изображение",

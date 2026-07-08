@@ -8,6 +8,7 @@
 // Reducer logic stays in chat-state.ts; this is just the React glue plus an
 // IndexedDB write-through cache for happy-path hydration on cold start.
 
+import { useMemo } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { get as idbGet, set as idbSet } from "idb-keyval";
@@ -23,6 +24,7 @@ import type {
   CliControlRequest,
   PiEvent,
   PiMessage,
+  RenderedBlock,
   RenderedMessage,
 } from "./types";
 
@@ -548,6 +550,70 @@ export function useControlRequests(
  *  streaming token. */
 export function useStreamingIds(): Set<string> {
   return useChatStore((s) => s.streamingIds);
+}
+
+/** A background subagent (claude-code Task/Agent tool) still running in the
+ *  current turn. Surfaced above the composer so the user knows *why* the run
+ *  is held open after the main reply already landed. */
+export interface RunningSubagent {
+  /** The originating Agent tool_use block id. */
+  id: string;
+  /** subagent_type, e.g. "general-purpose", "Explore". */
+  type: string;
+  /** The task description the agent was launched with. */
+  description: string;
+}
+
+const EMPTY_SUBAGENTS: RunningSubagent[] = [];
+
+/** Read a tool_use block's attached subagent progress, returning it only while
+ *  the subagent is still running. Mirrors the fields subagentInfo() reads in
+ *  tool-use-card, kept here so the store doesn't depend on a component. */
+function readRunningSubagent(block: RenderedBlock): RunningSubagent | null {
+  if (block.kind !== "tool_use") return null;
+  const details = block.result?.details;
+  if (!details || typeof details !== "object") return null;
+  const sub = (details as { subagent?: unknown }).subagent;
+  if (!sub || typeof sub !== "object") return null;
+  const s = sub as { type?: unknown; description?: unknown; status?: unknown };
+  if (s.status !== "running") return null;
+  return {
+    id: block.id,
+    type: typeof s.type === "string" ? s.type : "agent",
+    description: typeof s.description === "string" ? s.description : "",
+  };
+}
+
+/** Background subagents still running in the active turn (claude-code
+ *  run_in_background Agent/Task). The selector returns a signature string so the
+ *  strip only re-renders when the *set* changes — not on every streaming token —
+ *  and useMemo re-inflates the array off that signature. Scans backwards from
+ *  the end to the turn's user boundary, so it's robust to whether the main
+ *  assistant slot has already settled while the turn is held open. */
+export function useRunningSubagents(
+  convId: string | null | undefined,
+): RunningSubagent[] {
+  const sig = useChatStore((s) => {
+    const c = convId ? s.chats[convId] : undefined;
+    if (!c || !c.isStreaming) return "";
+    const found: RunningSubagent[] = [];
+    for (let i = c.messages.length - 1; i >= 0; i--) {
+      const m = c.messages[i];
+      if (m.role === "user") break; // turn boundary — stop at the prompt
+      for (const b of m.blocks) {
+        const sub = readRunningSubagent(b);
+        if (sub) found.push(sub);
+      }
+    }
+    // A JSON signature keeps the selector's return primitive: identical sets
+    // compare equal (no re-render churn per token), and useMemo re-inflates the
+    // array only when the string changes. Collision-proof over free-form text.
+    return found.length ? JSON.stringify(found) : "";
+  });
+  return useMemo(
+    () => (sig ? (JSON.parse(sig) as RunningSubagent[]) : EMPTY_SUBAGENTS),
+    [sig],
+  );
 }
 
 // ---------- IndexedDB write-through cache --------------------------------

@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
 import { ModelPicker } from "@/components/chat/model-picker";
-import { BackendPicker } from "@/components/chat/backend-picker";
+import { BackendPicker, nextBackend } from "@/components/chat/backend-picker";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { SlashMenu, type SlashItem } from "@/components/chat/slash-menu";
 import { cn } from "@/lib/utils";
@@ -124,6 +124,9 @@ interface Props {
   /** Keyboard runtime-switch request (token-keyed), applied by the
    *  BackendPicker exactly once per token. */
   backendSwitch?: { token: number; backend: BackendId } | null;
+  /** Request cycling to a specific runtime (Tab in the composer). Routes back
+   *  through the parent's token machinery so BackendPicker applies it. */
+  onRequestBackendSwitch?: (backend: BackendId) => void;
 }
 
 /** Claude Code built-in slash commands that work headless (verified against
@@ -202,6 +205,7 @@ export function Composer({
   pendingCliEffort,
   onPendingTuningChange,
   backendSwitch,
+  onRequestBackendSwitch,
 }: Props) {
   const { t, locale } = useTranslation("chat");
   // A random hero placeholder, re-rolled per new chat (focusToken bumps) so the
@@ -352,6 +356,26 @@ export function Composer({
     setSlashOpen(true);
   }
 
+  /** Insert text at the current caret (replacing any selection), then restore
+   *  the caret after the inserted run. Used by paste when we've hijacked the
+   *  event to strip out image files but still want the accompanying text. */
+  function insertTextAtCaret(insert: string) {
+    const el = taRef.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + insert + text.slice(end);
+    const pos = start + insert.length;
+    updateText(next);
+    slashSuppress.current = false;
+    requestAnimationFrame(() => {
+      const node = taRef.current;
+      if (!node) return;
+      node.focus({ preventScroll: true });
+      node.setSelectionRange(pos, pos);
+      syncSlash();
+    });
+  }
+
   /** Replace the `/<token>` with the picked item: a command expands to its
    *  prompt; a skill inserts its `/name ` token verbatim. */
   function applySlash(item: SlashItem) {
@@ -365,7 +389,7 @@ export function Composer({
     requestAnimationFrame(() => {
       const node = taRef.current;
       if (!node) return;
-      node.focus();
+      node.focus({ preventScroll: true });
       node.setSelectionRange(pos, pos);
     });
   }
@@ -383,7 +407,11 @@ export function Composer({
   }, [text, variant]);
 
   useEffect(() => {
-    if (focusToken !== undefined && !disabled) taRef.current?.focus();
+    // preventScroll: after a send/steer the textarea often doesn't have focus
+    // yet (e.g. the user clicked "Steer now"), so this is a real focus change.
+    // Without preventScroll the browser scrolls the focused textarea into view,
+    // which yanks the message list — the steer-jumps-to-top bug.
+    if (focusToken !== undefined && !disabled) taRef.current?.focus({ preventScroll: true });
   }, [focusToken, disabled]);
 
   useEffect(() => {
@@ -400,7 +428,7 @@ export function Composer({
     requestAnimationFrame(() => {
       const node = taRef.current;
       if (!node || disabled) return;
-      node.focus();
+      node.focus({ preventScroll: true });
       const pos = node.value.length;
       node.setSelectionRange(pos, pos);
     });
@@ -434,7 +462,7 @@ export function Composer({
       e.preventDefault();
       slashSuppress.current = false;
       requestAnimationFrame(() => {
-        el.focus();
+        el.focus({ preventScroll: true });
       });
     };
 
@@ -656,10 +684,15 @@ export function Composer({
               if (f) files.push(f);
             }
           }
-          if (files.length) {
-            e.preventDefault();
-            addFiles(files);
-          }
+          // No files → let the browser paste text normally.
+          if (!files.length) return;
+          // Mixed paste (image + text): hijack the event so the images become
+          // attachments, but don't drop the accompanying text — insert it at
+          // the caret ourselves since preventDefault cancels the native paste.
+          e.preventDefault();
+          addFiles(files);
+          const pastedText = e.clipboardData?.getData("text/plain") ?? "";
+          if (pastedText) insertTextAtCaret(pastedText);
         }}
         onKeyDown={(e) => {
           const composing = e.nativeEvent.isComposing || e.keyCode === 229;
@@ -688,6 +721,24 @@ export function Composer({
               closeSlash();
               return;
             }
+          }
+          // Tab cycles the runtime (Cetus → Claude Code → Codex), matching the
+          // quick launcher and the task dialog. The slash menu above already
+          // consumed Tab when open, so here it's free to repurpose. Only a bare
+          // Tab, though — Ctrl/Cmd+Tab must fall through to the window handler
+          // (Ctrl+Tab = switch to previous view) instead of being swallowed here.
+          if (
+            e.key === "Tab" &&
+            !e.shiftKey &&
+            !e.ctrlKey &&
+            !e.metaKey &&
+            !e.altKey &&
+            !composing &&
+            onRequestBackendSwitch
+          ) {
+            e.preventDefault();
+            onRequestBackendSwitch(nextBackend(backend));
+            return;
           }
           // Don't intercept Enter while an IME is composing — Chinese / Japanese
           // / Korean users press Enter to commit candidates, and a naive check

@@ -243,7 +243,12 @@ function InputBody({
         onChange={(e) => setText(e.target.value)}
         placeholder={placeholder}
         onKeyDown={(e) => {
-          if (e.key === "Enter") onSubmit(text);
+          // Don't submit while an IME is composing — CJK users press Enter to
+          // commit a candidate (`keyCode === 229` is the WebView fallback for
+          // when `isComposing` is already cleared during commit).
+          if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+            onSubmit(text);
+          }
           if (e.key === "Escape") onCancel();
         }}
         className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"

@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Folder, MessageSquare, X, Inbox, PanelBottom, PanelRight } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChatPane } from "@/components/chat/chat-pane";
-import type { ComposerAttachment } from "@/components/chat/composer";
+import { useRuntimeShortcuts } from "@/components/chat/backend-picker";
+import type { ComposerAttachment, QueuedMessage } from "@/components/chat/composer";
 import {
   WorkspacePanel,
   createTerminalViewState,
@@ -23,7 +24,7 @@ import { formatTimestamp } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
 import { workspaceName } from "@/lib/paths";
 import { useShallow } from "zustand/react/shallow";
-import type { Conversation, ModelChoice } from "@/lib/types";
+import type { BackendId, Conversation, ModelChoice } from "@/lib/types";
 
 interface Props {
   /** Conversation row used to seed the header (title / workspace / timestamps). */
@@ -43,6 +44,17 @@ interface Props {
   onAbort: () => void;
   onForkMessage?: (messageKey: string, messageIndex: number) => void;
   focusToken: number;
+  /** Roll back + rerun the last turn (Regenerate action + error-row Retry). */
+  onRetry?: () => void;
+  retrying?: boolean;
+  /** Follow-up queue for this conversation (typed while the agent is mid-run). */
+  queued?: QueuedMessage[];
+  onQueue?: (text: string, attachments: ComposerAttachment[]) => void;
+  onSteerQueued?: (id: string) => void;
+  onRemoveQueued?: (id: string) => void;
+  /** Ultra Code state + toggle, forwarded to the composer. */
+  ultra?: boolean;
+  onUltraToggle?: () => void;
 }
 
 export function SessionDetailDialog({
@@ -60,11 +72,34 @@ export function SessionDetailDialog({
   onAbort,
   onForkMessage,
   focusToken,
+  onRetry,
+  retrying,
+  queued,
+  onQueue,
+  onSteerQueued,
+  onRemoveQueued,
+  ultra,
+  onUltraToggle,
 }: Props) {
   const { t } = useTranslation("board");
   const { t: tc } = useTranslation("chat");
   const convId = conversation?.id ?? null;
   const isStreaming = useIsStreaming(convId);
+
+  // ⌃1/⌃2/⌃3 + Tab runtime switching for the open conversation. page.tsx's
+  // global handler is modal-guarded while this dialog is up, so the dialog owns
+  // its own token machinery; the docked Composer's BackendPicker applies each
+  // token once against the conversation's backend.
+  const backendSwitchToken = useRef(0);
+  const [backendSwitch, setBackendSwitch] = useState<{
+    token: number;
+    backend: BackendId;
+  } | null>(null);
+  const requestBackendSwitch = useCallback((backend: BackendId) => {
+    backendSwitchToken.current += 1;
+    setBackendSwitch({ token: backendSwitchToken.current, backend });
+  }, []);
+  useRuntimeShortcuts(requestBackendSwitch, open);
   const hasChatEntry = useChatStore((s) =>
     convId ? convId in s.chats : false,
   );
@@ -378,7 +413,18 @@ export function SessionDetailDialog({
                 onSend={onSend}
                 onBash={openTerminalWithCommand}
                 onAbort={onAbort}
+                onRegenerate={retrying ? undefined : onRetry}
+                onRetry={onRetry}
+                retrying={retrying}
                 onForkMessage={onForkMessage}
+                queued={queued}
+                onQueue={onQueue}
+                onSteerQueued={onSteerQueued}
+                onRemoveQueued={onRemoveQueued}
+                ultra={ultra}
+                onUltraToggle={onUltraToggle}
+                backendSwitch={backendSwitch}
+                onRequestBackendSwitch={requestBackendSwitch}
                 focusToken={focusToken}
                 disabled={!conversation}
               />

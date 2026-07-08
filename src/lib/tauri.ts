@@ -400,6 +400,8 @@ export const api = {
    *  newer one ships). */
   ignoreUpdateVersion: (version: string) =>
     invoke<void>("ignore_update_version", { version }),
+  /** Relaunch the app to apply an already-downloaded update. */
+  relaunchApp: () => invoke<void>("relaunch_app"),
   /** Hide panel, capture screen, restore panel. For the in-panel toggle. */
   quickRecaptureScreenshot: () =>
     invoke<QuickScreenshot | null>("quick_recapture_screenshot"),
@@ -493,6 +495,15 @@ export async function onUpdateAvailable(
   handler: (u: UpdateMeta) => void,
 ): Promise<UnlistenFn> {
   return listen<UpdateMeta>("update-available", (e) => handler(e.payload));
+}
+
+/** Fired once an update has finished downloading + installing (silently at
+ *  startup, or via a manual install) — drives the sidebar's "Restart to
+ *  update" button. The swap is already on disk; only a relaunch remains. */
+export async function onUpdateReady(
+  handler: (u: UpdateMeta) => void,
+): Promise<UnlistenFn> {
+  return listen<UpdateMeta>("update-ready", (e) => handler(e.payload));
 }
 
 /** Fired while a native app update is downloading. */

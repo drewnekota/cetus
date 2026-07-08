@@ -76,17 +76,23 @@ export const chat = {
     "cliControl.allow": "Allow",
     "cliControl.deny": "Deny",
     "cliControl.submit": "Submit",
+    "cliControl.next": "Next",
+    "cliControl.back": "Back",
     "cliControl.otherPlaceholder": "Other — type your own answer…",
     "cliControl.denyMessage": "The user denied this action.",
     "cliControl.notifyTitle": "The agent needs your input",
     "pane.worktree.tooltip":
       "This agent's changes land on an isolated worktree branch. Click to open the folder:\n{path}",
+    "pane.backgroundAgents.title": "{count} background agent(s) running",
+    "pane.backgroundAgents.more": " +{count} more",
     "pane.retrying": "Retrying…",
     "pane.loadEarlier": "Load earlier messages",
+    "pane.scrollToBottom": "Scroll to bottom",
     "quote.addToChat": "Add to chat",
 
     // Message bubble
     "bubble.attachment": "attachment",
+    "bubble.expandImage": "Click to enlarge",
     "bubble.revealInFinder": "{path} — reveal in Finder",
     "bubble.copy": "Copy",
     "bubble.copied": "Copied",
@@ -237,15 +243,19 @@ export const chat = {
     "cliControl.allow": "允许",
     "cliControl.deny": "拒绝",
     "cliControl.submit": "提交",
+    "cliControl.next": "下一步",
+    "cliControl.back": "上一步",
     "cliControl.otherPlaceholder": "其他——输入你自己的回答…",
     "cliControl.denyMessage": "The user denied this action.",
     "cliControl.notifyTitle": "智能体需要你的输入",
     "pane.worktree.tooltip": "该智能体的改动落在独立的 worktree 分支上。点击打开文件夹：\n{path}",
     "pane.retrying": "重试中…",
     "pane.loadEarlier": "加载更早的消息",
+    "pane.scrollToBottom": "滚动到底部",
     "quote.addToChat": "添加到对话",
 
     "bubble.attachment": "附件",
+    "bubble.expandImage": "点击放大",
     "bubble.revealInFinder": "{path} — 在访达中显示",
     "bubble.copy": "复制",
     "bubble.copied": "已复制",
@@ -339,6 +349,7 @@ export const chat = {
     "quote.addToChat": "チャットに追加",
 
     "bubble.attachment": "添付ファイル",
+    "bubble.expandImage": "クリックで拡大",
     "bubble.revealInFinder": "{path} — Finder で表示",
     "bubble.copy": "コピー",
     "bubble.copied": "コピーしました",
@@ -428,6 +439,7 @@ export const chat = {
     "quote.addToChat": "채팅에 추가",
 
     "bubble.attachment": "첨부 파일",
+    "bubble.expandImage": "클릭하여 확대",
     "bubble.revealInFinder": "{path} — Finder에서 보기",
     "bubble.copy": "복사",
     "bubble.copied": "복사됨",
@@ -517,6 +529,7 @@ export const chat = {
     "quote.addToChat": "Añadir al chat",
 
     "bubble.attachment": "adjunto",
+    "bubble.expandImage": "Haz clic para ampliar",
     "bubble.revealInFinder": "{path} — mostrar en Finder",
     "bubble.copy": "Copiar",
     "bubble.copied": "Copiado",
@@ -607,6 +620,7 @@ export const chat = {
     "quote.addToChat": "Adicionar ao chat",
 
     "bubble.attachment": "anexo",
+    "bubble.expandImage": "Clique para ampliar",
     "bubble.revealInFinder": "{path} — mostrar no Finder",
     "bubble.copy": "Copiar",
     "bubble.copied": "Copiado",
@@ -697,6 +711,7 @@ export const chat = {
     "quote.addToChat": "Ajouter au chat",
 
     "bubble.attachment": "pièce jointe",
+    "bubble.expandImage": "Cliquez pour agrandir",
     "bubble.revealInFinder": "{path} — afficher dans le Finder",
     "bubble.copy": "Copier",
     "bubble.copied": "Copié",
@@ -787,6 +802,7 @@ export const chat = {
     "quote.addToChat": "Zum Chat hinzufügen",
 
     "bubble.attachment": "Anhang",
+    "bubble.expandImage": "Zum Vergrößern klicken",
     "bubble.revealInFinder": "{path} — im Finder anzeigen",
     "bubble.copy": "Kopieren",
     "bubble.copied": "Kopiert",
@@ -877,6 +893,7 @@ export const chat = {
     "quote.addToChat": "Aggiungi alla chat",
 
     "bubble.attachment": "allegato",
+    "bubble.expandImage": "Clicca per ingrandire",
     "bubble.revealInFinder": "{path} — mostra nel Finder",
     "bubble.copy": "Copia",
     "bubble.copied": "Copiato",
@@ -967,6 +984,7 @@ export const chat = {
     "quote.addToChat": "Добавить в чат",
 
     "bubble.attachment": "вложение",
+    "bubble.expandImage": "Нажмите, чтобы увеличить",
     "bubble.revealInFinder": "{path} — показать в Finder",
     "bubble.copy": "Копировать",
     "bubble.copied": "Скопировано",

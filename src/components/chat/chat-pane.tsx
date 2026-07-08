@@ -14,7 +14,7 @@ import { AssistantGroup } from "@/components/chat/assistant-turn";
 import { AgentControlCard } from "@/components/chat/agent-control-card";
 import { CliControlCard } from "@/components/chat/cli-control-card";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
-import { AlertTriangle, ArrowUp, GitBranch, MessageCircle, RotateCw, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Bot, GitBranch, Loader2, MessageCircle, RotateCw, X } from "lucide-react";
 import {
   Composer,
   type ComposerAttachment,
@@ -22,13 +22,13 @@ import {
   type QueuedMessage,
 } from "@/components/chat/composer";
 import {
-  getTurnPreview,
   useAwaitingAssistant,
   useChatError,
   useHasMessages,
   useIsStreaming,
   useMessageKeys,
   useMessageRoles,
+  useRunningSubagents,
   useUserTurnKeys,
 } from "@/lib/chat-store";
 import { useTranslation } from "@/lib/i18n";
@@ -84,6 +84,8 @@ interface Props {
   onPendingTuningChange?: (model: string, effort: string) => void;
   /** Keyboard runtime-switch request (token-keyed), forwarded to the Composer. */
   backendSwitch?: { token: number; backend: BackendId } | null;
+  /** Tab-to-cycle-runtime request, forwarded to the Composer. */
+  onRequestBackendSwitch?: (backend: BackendId) => void;
 }
 
 /** The shared "chat experience" body — messages list + composer with
@@ -121,6 +123,7 @@ export function ChatPane({
   pendingCliEffort,
   onPendingTuningChange,
   backendSwitch,
+  onRequestBackendSwitch,
 }: Props) {
   const { locale } = useTranslation("chat");
   const hasMessages = useHasMessages(convId);
@@ -175,6 +178,7 @@ export function ChatPane({
             pendingCliEffort={pendingCliEffort}
             onPendingTuningChange={onPendingTuningChange}
             backendSwitch={backendSwitch}
+            onRequestBackendSwitch={onRequestBackendSwitch}
           />
         </div>
       </div>
@@ -195,9 +199,11 @@ export function ChatPane({
           scrollRef={scrollRef}
         />
         <TurnNavigator convId={convId} scrollRef={scrollRef} />
+        <ScrollToBottomButton scrollRef={scrollRef} />
       </div>
       <div className="relative z-10 bg-background px-4 pb-3 pt-2">
         <div className="mx-auto max-w-3xl space-y-2">
+          {convId ? <BackgroundAgentsBar convId={convId} /> : null}
           {convId ? <WorktreeChip convId={convId} isStreaming={isStreaming} /> : null}
           {convId ? <CliControlCard convId={convId} /> : null}
           {convId ? <AgentControlCard conversationId={convId} /> : null}
@@ -226,9 +232,40 @@ export function ChatPane({
             onUltraToggle={onUltraToggle}
             quoteRequest={quoteRequest}
             backendSwitch={backendSwitch}
+            onRequestBackendSwitch={onRequestBackendSwitch}
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Awareness strip for background subagents (claude-code run_in_background
+ *  Agent/Task, e.g. an UltraCode workflow) still running after the main reply
+ *  landed. Without it the composer just says "Agent is running…" with no hint of
+ *  *what* — the run is held open waiting on these to report back. Renders
+ *  nothing when none are active. */
+function BackgroundAgentsBar({ convId }: { convId: string }) {
+  const { t } = useTranslation("chat");
+  const agents = useRunningSubagents(convId);
+  if (agents.length === 0) return null;
+  // Prefer the human task description; fall back to the agent type.
+  const labels = agents.map((a) => a.description || a.type).filter(Boolean);
+  const shown = labels.slice(0, 3).join(", ");
+  const extra = labels.length - Math.min(labels.length, 3);
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-[#d97757]/30 bg-[#d97757]/5 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+      <Bot className="size-3.5 shrink-0 text-[#d97757]" />
+      <Loader2 className="size-3 shrink-0 animate-spin text-[#d97757]" />
+      <span className="shrink-0 font-medium text-foreground">
+        {t("pane.backgroundAgents.title", { count: agents.length })}
+      </span>
+      {shown ? (
+        <span className="truncate">
+          {shown}
+          {extra > 0 ? t("pane.backgroundAgents.more", { count: extra }) : ""}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -444,6 +481,52 @@ function MessageList({
     return () => ro.disconnect();
   }, []);
 
+  // Remember each turn's real laid-out height and feed it back as its own
+  // content-visibility placeholder size. Without this every off-screen turn
+  // collapses to the fixed 200px estimate below — so scrolling past a tall turn
+  // constantly changes scrollHeight, jerking the scrollbar and fighting the
+  // browser's scroll anchoring (the "jumping" while reading a long chat). The
+  // `containIntrinsicSize: auto` keyword is meant to remember this automatically,
+  // but WKWebView (the macOS webview) doesn't honor it, so we lock the measured
+  // height in ourselves. Kept OFF React's `style` prop on purpose: the list
+  // re-renders on every new turn / stream tick and would otherwise clobber the
+  // measured value back to 200px each time.
+  const [turnSizer] = useState(() =>
+    typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver((entries) => {
+          for (const entry of entries) {
+            const el = entry.target as HTMLElement;
+            const h = Math.round(
+              entry.borderBoxSize?.[0]?.blockSize ?? el.offsetHeight,
+            );
+            if (h <= 0) continue;
+            const next = String(h);
+            // Guard against re-setting the same value (locking the size of a
+            // skipped turn changes its box, which re-fires the observer).
+            if (el.dataset.cis === next) continue;
+            el.dataset.cis = next;
+            el.style.containIntrinsicSize = `auto ${h}px`;
+          }
+        }),
+  );
+  useEffect(() => () => turnSizer?.disconnect(), [turnSizer]);
+  const measureTurn = useCallback(
+    (el: HTMLDivElement | null) => {
+      if (!el || !turnSizer) return;
+      // Seed an estimate before the observer's first callback so a turn that
+      // starts off-screen never momentarily collapses to zero height.
+      if (!el.style.containIntrinsicSize) {
+        el.style.containIntrinsicSize = "auto 200px";
+      }
+      turnSizer.observe(el);
+      // React 19 cleanup ref: unobserve when this specific turn unmounts
+      // (conversation switch / rollback) so the observer never retains it.
+      return () => turnSizer.unobserve(el);
+    },
+    [turnSizer],
+  );
+
   return (
     <div
       ref={scrollRef}
@@ -451,7 +534,7 @@ function MessageList({
       data-testid="message-list"
     >
       <QuoteSelectionToolbar containerRef={contentRef} scrollRef={scrollRef} onQuote={onQuote} />
-      <div ref={contentRef} className="mx-auto max-w-3xl px-6 py-4">
+      <div ref={contentRef} data-message-content className="mx-auto max-w-3xl px-6 py-4">
         {hiddenCount > 0 && (
           <div className="flex justify-center pb-3">
             <button
@@ -507,16 +590,15 @@ function MessageList({
           // subscriptions and activity-group expand state survive (a windowing
           // virtualizer would lose both). The streaming tail (last group) is left
           // always-painted so live token growth + stick-to-bottom stay exact.
+          // `containIntrinsicSize` is owned imperatively by measureTurn (above),
+          // not set here, so the real measured height survives re-renders.
           return (
             <div
               key={g.kind === "assistant" ? g.keys[0] : g.key}
+              ref={measureTurn}
               // Tag user turns so the turn navigator can scroll to / track them.
               data-turn-key={g.kind === "single" ? g.key : undefined}
-              style={
-                isLast
-                  ? undefined
-                  : { contentVisibility: "auto", containIntrinsicSize: "auto 200px" }
-              }
+              style={isLast ? undefined : { contentVisibility: "auto" }}
             >
               {node}
             </div>
@@ -535,11 +617,9 @@ function MessageList({
  *  per user turn. Ticks are evenly spaced and clustered together, vertically
  *  centered in the viewport (not spread across the full scroll height). The
  *  active tick (turn nearest the top of the viewport) brightens as you
- *  scroll; hovering a tick ripples outward to its neighbors and reveals a
- *  preview popover (prompt + reply snippet); click scrolls that turn to the
- *  top. Lives in the otherwise-empty left margin (content is centered
- *  max-w-3xl), and is pointer-transparent except on the ticks themselves so
- *  it never fights text selection. */
+ *  scroll; click scrolls that turn to the top. Lives in the otherwise-empty
+ *  left margin (content is centered max-w-3xl), and is pointer-transparent
+ *  except on the ticks themselves so it never fights text selection. */
 function TurnNavigator({
   convId,
   scrollRef,
@@ -549,7 +629,6 @@ function TurnNavigator({
 }) {
   const turnKeys = useUserTurnKeys(convId);
   const [active, setActive] = useState(0);
-  const [hover, setHover] = useState<number | null>(null);
 
   const findNode = useCallback(
     (key: string) =>
@@ -605,44 +684,25 @@ function TurnNavigator({
 
   return (
     <div className="pointer-events-none absolute inset-y-0 left-0 z-20 hidden w-12 sm:flex sm:flex-col sm:items-start sm:justify-center">
-      <div className="flex flex-col items-start gap-0.5">
+      <div className="flex flex-col items-start gap-0">
         {turnKeys.map((key, i) => {
           const isActive = i === active;
-          // Idle: every tick is the same small width, only color marks the
-          // active one. Wave/ripple effect: while hovering, ticks near the
-          // hovered one widen and brighten too, tapering off with distance,
-          // like a dock magnification effect.
-          const dist = hover === null ? null : Math.abs(i - hover);
-          const width =
-            dist === 0 ? "w-5" : dist === 1 ? "w-4" : dist === 2 ? "w-3" : "w-2.5";
-          const color =
-            dist === 0
-              ? "bg-foreground"
-              : dist === 1
-                ? "bg-foreground/70"
-                : dist === 2
-                  ? "bg-foreground/50"
-                  : isActive
-                    ? "bg-foreground/60"
-                    : "bg-muted-foreground/40";
           return (
-            <div
-              key={key}
-              className="pointer-events-auto relative flex items-center"
-              onMouseEnter={() => setHover(i)}
-              onMouseLeave={() => setHover((h) => (h === i ? null : h))}
-            >
+            <div key={key} className="pointer-events-auto relative flex items-center">
               <button
                 type="button"
                 aria-label={`Jump to message ${i + 1}`}
                 onClick={() => scrollToTurn(key)}
-                className="flex h-3 items-center pl-3 pr-2"
+                className="group flex h-1.5 items-center pl-3 pr-2"
               >
                 <span
-                  className={`block h-0.5 rounded-full transition-all duration-150 ${width} ${color}`}
+                  className={`block h-0.5 w-2.5 origin-left rounded-full transition-[background-color,transform] duration-100 group-hover:scale-x-[2] ${
+                    isActive
+                      ? "bg-foreground/60 group-hover:bg-foreground"
+                      : "bg-muted-foreground/40 group-hover:bg-foreground"
+                  }`}
                 />
               </button>
-              {hover === i && <TurnPreview convId={convId} turnKey={key} />}
             </div>
           );
         })}
@@ -651,27 +711,65 @@ function TurnNavigator({
   );
 }
 
-function TurnPreview({
-  convId,
-  turnKey,
+/** "Message elevator": a floating button that appears when the reader has
+ *  scrolled up away from the bottom of the conversation, and jumps them back
+ *  down in one click. Lives outside the scroll container (as a sibling overlay)
+ *  so it stays pinned to the viewport instead of scrolling with the messages.
+ *  Tracks distance-from-bottom on scroll and whenever the content grows (a
+ *  streaming reply lengthening the list), matching the message list's own
+ *  32px stick-to-bottom deadzone. */
+function ScrollToBottomButton({
+  scrollRef,
 }: {
-  convId: string | null;
-  turnKey: string;
+  scrollRef: RefObject<HTMLDivElement | null>;
 }) {
-  const { prompt, reply } = useMemo(
-    () => getTurnPreview(convId, turnKey),
-    [convId, turnKey],
-  );
-  if (!prompt && !reply) return null;
+  const { t } = useTranslation("chat");
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      // Show the moment you're off the bottom — hidden only inside the same
+      // 32px deadzone the list uses to re-stick, so it doesn't flicker while
+      // streaming re-pins the tail.
+      setShow(distance > 32);
+    };
+    el.addEventListener("scroll", update, { passive: true });
+    // Content growth (streaming tokens, new turns) changes distance-from-bottom
+    // without a scroll event — observe the messages wrapper so the button shows
+    // up when the tail grows below the fold.
+    const content = el.querySelector<HTMLElement>("[data-message-content]");
+    const ro = content ? new ResizeObserver(update) : null;
+    if (content && ro) ro.observe(content);
+    update();
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro?.disconnect();
+    };
+  }, [scrollRef]);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [scrollRef]);
+
   return (
-    <div className="pointer-events-none absolute left-9 top-1/2 w-72 -translate-y-1/2 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.08)]">
-      {prompt && (
-        <p className="line-clamp-2 text-xs font-medium text-foreground">{prompt}</p>
-      )}
-      {reply && (
-        <p className="mt-1.5 line-clamp-3 text-xs text-muted-foreground">{reply}</p>
-      )}
-    </div>
+    <button
+      type="button"
+      aria-label={t("pane.scrollToBottom")}
+      title={t("pane.scrollToBottom")}
+      onClick={scrollToBottom}
+      className={`absolute bottom-4 left-1/2 z-30 flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] transition-all duration-150 hover:bg-muted ${
+        show
+          ? "pointer-events-auto translate-y-0 opacity-100"
+          : "pointer-events-none translate-y-2 opacity-0"
+      }`}
+    >
+      <ArrowDown className="size-4" />
+    </button>
   );
 }
 

@@ -68,7 +68,21 @@ pub async fn startup_check(app: AppHandle, auto: bool) {
         let v = update.version.clone();
         tracing::info!("cetus: update {v} available — installing in background");
         match update.download_and_install(|_, _| {}, || {}).await {
-            Ok(_) => tracing::info!("cetus: update {v} installed; applies on next launch"),
+            Ok(_) => {
+                tracing::info!("cetus: update {v} installed; applies on next launch");
+                // Surface a persistent "Restart to update" affordance in the
+                // sidebar so the user can apply it now instead of waiting for a
+                // stray relaunch.
+                let _ = app.emit_to(
+                    "main",
+                    "update-ready",
+                    UpdateMeta {
+                        version: update.version.clone(),
+                        current_version: update.current_version.clone(),
+                        notes: update.body.clone(),
+                    },
+                );
+            }
             Err(e) => tracing::warn!("cetus: update install failed: {e}"),
         }
         return;
@@ -194,8 +208,27 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
                 finished: true,
             },
         );
+        // Same "Restart to update" signal as the silent auto path, so a manual
+        // install from Settings / the toast also lights up the sidebar button.
+        let _ = app.emit_to(
+            "main",
+            "update-ready",
+            UpdateMeta {
+                version: update.version.clone(),
+                current_version: update.current_version.clone(),
+                notes: update.body.clone(),
+            },
+        );
         Ok(())
     }
+}
+
+/// Relaunch the app to apply a downloaded update. The updater swaps the bundle
+/// in place, so a plain restart boots the new version. Drives the sidebar's
+/// "Restart to update" button.
+#[tauri::command]
+pub fn relaunch_app(app: AppHandle) {
+    app.restart();
 }
 
 /// Remember a version the user dismissed so the passive toast won't nag again

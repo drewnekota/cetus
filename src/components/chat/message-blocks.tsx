@@ -24,6 +24,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 
@@ -128,6 +133,41 @@ export function TextBlock({
   );
 }
 
+/** An attached image. Renders as a capped thumbnail that opens a full-size,
+ *  zoomable view in a dialog on click. */
+function ImageBlock({ dataUrl, name }: { dataUrl: string; name?: string }) {
+  const { t } = useTranslation("chat");
+  const [open, setOpen] = useState(false);
+  const label = name ?? t("bubble.attachment");
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={t("bubble.expandImage")}
+        className="block cursor-zoom-in overflow-hidden rounded-lg border border-border/40 transition-opacity hover:opacity-90"
+      >
+        <img
+          src={dataUrl}
+          alt={label}
+          className="max-h-72 object-contain"
+        />
+      </button>
+      <DialogContent
+        className="grid max-h-[90vh] max-w-[90vw] place-items-center border-none bg-transparent p-0 ring-0 sm:max-w-[90vw]"
+        showCloseButton={false}
+      >
+        <DialogTitle className="sr-only">{label}</DialogTitle>
+        <img
+          src={dataUrl}
+          alt={label}
+          className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-xl"
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Renders a non-process block — the things that are part of the *answer*
  *  (text, images, file chips, rich artifacts) rather than the tool/thinking
  *  activity. `thinking` / `tool_use` blocks are handled by the activity group,
@@ -147,14 +187,7 @@ export const AnswerBlock = memo(function AnswerBlock({
   if (block.kind === "text")
     return <TextBlock text={block.text} streaming={block.streaming} isUser={isUser} />;
   if (block.kind === "image")
-    return (
-      <img
-        src={block.dataUrl}
-        alt={block.name ?? t("bubble.attachment")}
-        title={block.name}
-        className="max-h-72 rounded-lg border border-border/40 object-contain"
-      />
-    );
+    return <ImageBlock dataUrl={block.dataUrl} name={block.name} />;
   if (block.kind === "file")
     return (
       <button

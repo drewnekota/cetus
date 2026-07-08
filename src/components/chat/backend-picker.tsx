@@ -35,6 +35,14 @@ export const BACKENDS: { id: BackendId; label: string; icon: LucideIcon }[] = [
   { id: "codex", label: "Codex", icon: SquareTerminal },
 ];
 
+/** The next runtime in picker order, wrapping around. Bound to Tab across the
+ *  new-chat surfaces (composer, quick launcher, task dialog) so one key cycles
+ *  Cetus → Claude Code → Codex → Cetus. */
+export function nextBackend(current: BackendId): BackendId {
+  const i = BACKENDS.findIndex((b) => b.id === current);
+  return BACKENDS[(i + 1) % BACKENDS.length].id;
+}
+
 /** The user-editable shortcut bound to each runtime (⌃1/⌃2/⌃3 by default). */
 export const RUNTIME_SHORTCUT_IDS: Record<BackendId, ShortcutId> = {
   pi: "runtimeCetus",

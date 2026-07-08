@@ -67,8 +67,10 @@ export function CliControlCard({ convId }: { convId: string }) {
   );
 }
 
-/** AskUserQuestion: one section per question. Single-select answers by click;
- *  multi-select toggles + submit. A free-text input covers "Other". */
+/** AskUserQuestion: a one-question-at-a-time stepper (the 1-2-3 TUI flow), so a
+ *  multi-question prompt never grows past the viewport. Single-select answers by
+ *  click; multi-select toggles + Next. A free-text input covers "Other". The
+ *  question body scrolls when a single question has many long options. */
 function AskQuestionCard({
   request,
   onSubmit,
@@ -84,6 +86,7 @@ function AskQuestionCard({
   // Per-question selection state: label set (multi) or single label + other.
   const [picked, setPicked] = useState<Record<number, Set<string>>>({});
   const [other, setOther] = useState<Record<number, string>>({});
+  const [step, setStep] = useState(0);
 
   function answerFor(i: number, q: CliAskQuestion): string {
     const free = (other[i] ?? "").trim();
@@ -91,7 +94,24 @@ function AskQuestionCard({
     if (free) return sel.length && q.multiSelect ? [...sel, free].join(", ") : free;
     return sel.join(", ");
   }
-  const complete = questions.every((q, i) => answerFor(i, q).length > 0);
+
+  const q = questions[step];
+  const isLast = step === questions.length - 1;
+  const stepAnswered = q ? answerFor(step, q).length > 0 : false;
+
+  function submit() {
+    const answers: Record<string, string> = {};
+    questions.forEach((qq, i) => {
+      answers[qq.question] = answerFor(i, qq);
+    });
+    onSubmit(answers);
+  }
+
+  // Advance to the next question, or submit when the last one is answered.
+  function advance() {
+    if (isLast) submit();
+    else setStep((s) => Math.min(s + 1, questions.length - 1));
+  }
 
   function toggle(i: number, q: CliAskQuestion, label: string) {
     setPicked((p) => {
@@ -105,97 +125,118 @@ function AskQuestionCard({
       }
       return { ...p, [i]: cur };
     });
-    // Single question, single choice, no pending free text → answer instantly,
-    // matching the native one-click flow.
-    if (!q.multiSelect && questions.length === 1 && !(other[i] ?? "").trim()) {
-      onSubmit({ [q.question]: label });
+    // Single-select with no pending free text → jump ahead instantly, matching
+    // the native one-click flow (submits directly on the final question).
+    if (!q.multiSelect && !(other[i] ?? "").trim()) {
+      if (isLast) {
+        const answers: Record<string, string> = {};
+        questions.forEach((qq, idx) => {
+          answers[qq.question] = idx === i ? label : answerFor(idx, qq);
+        });
+        onSubmit(answers);
+      } else {
+        setStep((s) => Math.min(s + 1, questions.length - 1));
+      }
     }
   }
 
-  function submit() {
-    const answers: Record<string, string> = {};
-    questions.forEach((q, i) => {
-      answers[q.question] = answerFor(i, q);
-    });
-    onSubmit(answers);
-  }
+  if (!q) return null;
 
   return (
     <div className="rounded-xl border border-[#d97757]/50 bg-card p-3 shadow-sm">
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[#d97757]">
-        <MessageCircleQuestion className="size-3.5" />
-        {t("cliControl.questionTitle")}
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-[#d97757]">
+        <span className="flex items-center gap-1.5">
+          <MessageCircleQuestion className="size-3.5" />
+          {t("cliControl.questionTitle")}
+        </span>
+        {questions.length > 1 && (
+          <span className="text-[11px] tabular-nums text-muted-foreground">
+            {step + 1} / {questions.length}
+          </span>
+        )}
       </div>
-      <div className="space-y-3">
-        {questions.map((q, i) => (
-          <div key={i} className="space-y-1.5">
-            <div className="flex items-baseline gap-2">
-              {q.header && (
-                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {q.header}
-                </span>
-              )}
-              <span className="text-sm font-medium">{q.question}</span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {q.options.map((o) => {
-                const on = picked[i]?.has(o.label) ?? false;
-                return (
-                  <button
-                    key={o.label}
-                    type="button"
-                    onClick={() => toggle(i, q, o.label)}
-                    title={o.description}
+      <div className="max-h-[min(50vh,22rem)] space-y-1.5 overflow-y-auto">
+        <div className="flex items-baseline gap-2">
+          {q.header && (
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {q.header}
+            </span>
+          )}
+          <span className="text-sm font-medium">{q.question}</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {q.options.map((o) => {
+            const on = picked[step]?.has(o.label) ?? false;
+            return (
+              <button
+                key={o.label}
+                type="button"
+                onClick={() => toggle(step, q, o.label)}
+                title={o.description}
+                className={cn(
+                  "flex max-w-full items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors",
+                  on
+                    ? "border-[#d97757] bg-[#d97757]/10 text-foreground"
+                    : "border-border hover:border-[#d97757]/50 hover:bg-muted",
+                )}
+              >
+                {q.multiSelect && (
+                  <span
                     className={cn(
-                      "flex max-w-full items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors",
-                      on
-                        ? "border-[#d97757] bg-[#d97757]/10 text-foreground"
-                        : "border-border hover:border-[#d97757]/50 hover:bg-muted",
+                      "flex size-3.5 shrink-0 items-center justify-center rounded border",
+                      on ? "border-[#d97757] bg-[#d97757] text-white" : "border-border",
                     )}
                   >
-                    {q.multiSelect && (
-                      <span
-                        className={cn(
-                          "flex size-3.5 shrink-0 items-center justify-center rounded border",
-                          on ? "border-[#d97757] bg-[#d97757] text-white" : "border-border",
-                        )}
-                      >
-                        {on && <Check className="size-2.5" />}
-                      </span>
-                    )}
-                    <span className="min-w-0">
-                      <span className="font-medium">{o.label}</span>
-                      {o.description && (
-                        <span className="block truncate text-[11px] text-muted-foreground">
-                          {o.description}
-                        </span>
-                      )}
+                    {on && <Check className="size-2.5" />}
+                  </span>
+                )}
+                <span className="min-w-0">
+                  <span className="font-medium">{o.label}</span>
+                  {o.description && (
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {o.description}
                     </span>
-                  </button>
-                );
-              })}
-            </div>
-            <input
-              type="text"
-              value={other[i] ?? ""}
-              onChange={(e) => setOther((m) => ({ ...m, [i]: e.target.value }))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing && complete) submit();
-              }}
-              placeholder={t("cliControl.otherPlaceholder")}
-              className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/60 focus-visible:border-[#d97757]/60"
-            />
-          </div>
-        ))}
-      </div>
-      {(questions.length > 1 || questions.some((q) => q.multiSelect) ||
-        Object.values(other).some((v) => v.trim())) && (
-        <div className="mt-2 flex justify-end">
-          <Button size="sm" className="h-7 text-xs" disabled={!complete} onClick={submit}>
-            {t("cliControl.submit")}
-          </Button>
+                  )}
+                </span>
+              </button>
+            );
+          })}
         </div>
-      )}
+        <input
+          type="text"
+          value={other[step] ?? ""}
+          onChange={(e) => setOther((m) => ({ ...m, [step]: e.target.value }))}
+          onKeyDown={(e) => {
+            // Don't submit while an IME is composing — CJK users press Enter to
+            // commit a candidate. `isComposing` is the spec; `keyCode === 229`
+            // is the legacy fallback for WebViews that drop it during commit.
+            const composing = e.nativeEvent.isComposing || e.keyCode === 229;
+            if (e.key === "Enter" && !composing && stepAnswered) advance();
+          }}
+          placeholder={t("cliControl.otherPlaceholder")}
+          className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/60 focus-visible:border-[#d97757]/60"
+        />
+      </div>
+      <div className="mt-2 flex items-center justify-end gap-2">
+        {step > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => setStep((s) => Math.max(s - 1, 0))}
+          >
+            {t("cliControl.back")}
+          </Button>
+        )}
+        <Button
+          size="sm"
+          className="h-7 text-xs"
+          disabled={!stepAnswered}
+          onClick={advance}
+        >
+          {isLast ? t("cliControl.submit") : t("cliControl.next")}
+        </Button>
+      </div>
     </div>
   );
 }

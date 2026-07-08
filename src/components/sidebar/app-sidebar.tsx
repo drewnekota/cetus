@@ -21,6 +21,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   PlusCircle,
+  RefreshCw,
   Settings as SettingsIcon,
   SquarePen,
   X,
@@ -97,6 +98,10 @@ interface Props {
   onReorderWorkspaces: (dirs: string[]) => void;
   onArchive: (c: Conversation) => void;
   onOpenSettings: () => void;
+  /** Version of a downloaded-but-not-yet-applied update, or null. When set, a
+   *  "Restart to update" button appears above Settings. */
+  updateReadyVersion?: string | null;
+  onRestartToUpdate?: () => void;
 }
 
 export const AppSidebar = memo(function AppSidebar({
@@ -119,6 +124,8 @@ export const AppSidebar = memo(function AppSidebar({
   onReorderWorkspaces,
   onArchive,
   onOpenSettings,
+  updateReadyVersion,
+  onRestartToUpdate,
 }: Props) {
   const { t } = useTranslation("sidebar");
   const shortcuts = useKeyboardShortcuts();
@@ -257,18 +264,25 @@ export const AppSidebar = memo(function AppSidebar({
             they stay put while the conversation / workspace list scrolls. */}
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton
-              tooltip={newLabel}
-              onClick={() => onNew()}
-              // Plain nav row (no standalone fill) so it sits flush with the
-              // other sidebar actions; the hover/active states come from the
-              // default SidebarMenuButton treatment.
-              className="min-w-8"
-            >
-              <PlusCircle />
-              <span>{newLabel}</span>
-              <Kbd className="ml-auto border-transparent">{shortcutLabels.newChat}</Kbd>
-            </SidebarMenuButton>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <SidebarMenuButton
+                  onClick={() => onNew()}
+                  // Plain nav row (no standalone fill) so it sits flush with the
+                  // other sidebar actions; the hover/active states come from the
+                  // default SidebarMenuButton treatment.
+                  className="min-w-8"
+                >
+                  <PlusCircle />
+                  <span>{newLabel}</span>
+                  <Kbd className="ml-auto border-transparent">{shortcutLabels.newChat}</Kbd>
+                </SidebarMenuButton>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <span>New chat</span>
+                <Kbd>opt+cmd+n</Kbd>
+              </TooltipContent>
+            </Tooltip>
           </SidebarMenuItem>
           {/* Automations is its own destination (a scheduled-prompt feature),
               not a layout of the conversations — so it lives as a nav row here
@@ -435,6 +449,22 @@ export const AppSidebar = memo(function AppSidebar({
           with a long conversation list. */}
       <SidebarFooter>
         <SidebarMenu>
+          {/* Appears only once an update is downloaded and waiting — a one-click
+              relaunch to apply it, pinned right above Settings. */}
+          {updateReadyVersion && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={onRestartToUpdate}
+                tooltip={t("update.restart.tooltip", {
+                  version: updateReadyVersion,
+                })}
+                className="bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary active:bg-primary/15 active:text-primary"
+              >
+                <RefreshCw />
+                <span>{t("update.restart.label")}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
           <SidebarMenuItem>
             <SidebarMenuButton onClick={onOpenSettings} tooltip={t("nav.settings")}>
               <SettingsIcon />
@@ -887,7 +917,7 @@ const ConversationRow = memo(function ConversationRow({
         // the menu-item group hover instead so it persists while the cursor is
         // anywhere in the row, including over the archive action.
         className={cn(
-          "relative pr-10",
+          "relative pr-12",
           !active &&
             "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
         )}
@@ -899,7 +929,7 @@ const ConversationRow = memo(function ConversationRow({
         <span
           title={streaming ? t("conversation.inProgress") : formatFullDateTime(conversation.updatedAt)}
           className={cn(
-            "absolute right-2 flex w-7 shrink-0 items-center justify-center text-[11px] tabular-nums text-muted-foreground/70 transition-opacity",
+            "absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center text-[11px] tabular-nums text-muted-foreground/70 transition-opacity",
             "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
             active && "text-sidebar-accent-foreground/70",
           )}

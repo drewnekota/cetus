@@ -292,7 +292,15 @@ export function BrowserView({ state, onStateChange, onAnnotate, visible = true }
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setHighlightedSuggestion((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
-    } else if (e.key === "Enter" && suggestionsOpen && highlightedSuggestion >= 0) {
+    } else if (
+      e.key === "Enter" &&
+      // Don't hijack Enter while an IME is composing — CJK users press it to
+      // commit a candidate, not to pick the highlighted suggestion.
+      !e.nativeEvent.isComposing &&
+      e.keyCode !== 229 &&
+      suggestionsOpen &&
+      highlightedSuggestion >= 0
+    ) {
       e.preventDefault();
       const suggestion = suggestions[highlightedSuggestion];
       if (suggestion) selectSuggestion(suggestion);

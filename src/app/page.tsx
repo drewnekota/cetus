@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { PanelBottom, PanelRight } from "lucide-react";
+import { Inbox, PanelBottom, PanelRight } from "lucide-react";
 import {
   Composer,
   type ComposerAttachment,
@@ -33,6 +33,7 @@ import {
   type BrowserViewState,
 } from "@/components/browser/browser-view";
 import { SessionDetailDialog } from "@/components/board/session-detail-dialog";
+import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
 import { REVIEW_TOOL_NAME } from "@/lib/review";
 import { DialogHost } from "@/components/extension-ui/dialog-host";
 import { ZoomHud } from "@/components/zoom-hud";
@@ -47,6 +48,7 @@ import {
   onAppEvent,
   onUpdateAvailable,
   onUpdateDownloadProgress,
+  onUpdateReady,
   type Screenshot,
 } from "@/lib/tauri";
 import {
@@ -365,6 +367,10 @@ export default function Home() {
   const error = useChatError(activeId);
   const isStreaming = useIsStreaming(activeId);
   const hasMessages = useHasMessages(activeId);
+  // Aggregated artifacts gallery for the active chat — parity with the board
+  // detail dialog's Artifacts button (opens the same ArtifactsDialog).
+  const activeHasArtifacts = useHasArtifacts(activeId);
+  const [chatArtifactsOpen, setChatArtifactsOpen] = useState(false);
   // Backend serving the active conversation (null for a not-yet-persisted new
   // chat). Drives steer-capability gating for the follow-up queue.
   const activeConvBackend = useMemo<BackendId | null>(
@@ -515,11 +521,12 @@ export default function Home() {
     const prev = previousViewRef.current;
     if (prev && prev !== viewRef.current) setView(prev);
   }, []);
-  // Browser-style page history for ⌘[ / ⌘]. A "page" is the sidebar view plus
-  // whether Settings covers it; every change lands on the stack, and applying
-  // an entry sets navApplyingRef so the recorder effect below doesn't re-push
-  // the state it just restored.
-  const navHistoryRef = useRef<{ view: SidebarView; settings: boolean }[]>([]);
+  // Browser-style page history for ⌘[ / ⌘]. A "page" is the sidebar view, the
+  // active chat within it, plus whether Settings covers it; every change lands
+  // on the stack, and applying an entry sets navApplyingRef so the recorder
+  // effect below doesn't re-push the state it just restored.
+  type NavEntry = { view: SidebarView; activeId: string | null; settings: boolean };
+  const navHistoryRef = useRef<NavEntry[]>([]);
   const navIndexRef = useRef(0);
   const navApplyingRef = useRef(false);
   useEffect(() => {
@@ -529,17 +536,26 @@ export default function Home() {
     }
     const hist = navHistoryRef.current;
     const current = hist[navIndexRef.current];
-    if (current && current.view === view && current.settings === settingsOpen)
+    // A chat is only a distinct page inside the chat view; elsewhere the active
+    // chat is incidental, so collapse it to null to avoid spurious entries.
+    const entryActiveId = view === "chat" ? activeId : null;
+    if (
+      current &&
+      current.view === view &&
+      current.activeId === entryActiveId &&
+      current.settings === settingsOpen
+    )
       return;
     // A new page after going back forks the timeline: drop the forward entries.
     hist.splice(navIndexRef.current + 1);
-    hist.push({ view, settings: settingsOpen });
+    hist.push({ view, activeId: entryActiveId, settings: settingsOpen });
     if (hist.length > 100) hist.splice(0, hist.length - 100);
     navIndexRef.current = hist.length - 1;
-  }, [view, settingsOpen]);
-  const applyNavEntry = useCallback((entry: { view: SidebarView; settings: boolean }) => {
+  }, [view, activeId, settingsOpen]);
+  const applyNavEntry = useCallback((entry: NavEntry) => {
     navApplyingRef.current = true;
     setView(entry.view);
+    if (entry.view === "chat") setActiveId(entry.activeId);
     setSettingsOpen(entry.settings);
   }, []);
   const navigateBack = useCallback(() => {
@@ -673,6 +689,42 @@ export default function Home() {
     setQueued((cur) => ({ ...cur, [activeId]: rest }));
     void onSendRef.current(next.text, next.attachments);
   }, [isStreaming, activeId]);
+
+  // Same follow-up flush, but for the board detail dialog's conversation. The
+  // queue is keyed by conversation id (shared with the main chat), so this only
+  // owns delivery when the detail conversation differs from the chat's active
+  // one — otherwise the effect above already handles it (guarded below to avoid
+  // a double send when the same chat is open in both surfaces).
+  const detailStreaming = useIsStreaming(detailId);
+  const prevDetailRunRef = useRef<{ id: string | null; streaming: boolean }>({
+    id: null,
+    streaming: false,
+  });
+  const onDetailSendRef = useRef<typeof onDetailSend>(
+    undefined as unknown as typeof onDetailSend,
+  );
+  onDetailSendRef.current = onDetailSend; // onDetailSend is hoisted
+  useEffect(() => {
+    const prev = prevDetailRunRef.current;
+    prevDetailRunRef.current = { id: detailId, streaming: detailStreaming };
+    if (prev.id !== detailId) return; // conversation switch, not a run boundary
+    if (!(prev.streaming && !detailStreaming) || !detailId) return; // true→false
+    if (detailId === activeIdRef.current) return; // main flush owns this one
+    const q = queuedRef.current[detailId];
+    if (!q || q.length === 0) return;
+    const [next, ...rest] = q;
+    setQueued((cur) => ({ ...cur, [detailId]: rest }));
+    void onDetailSendRef.current(next.text, next.attachments);
+  }, [detailStreaming, detailId]);
+
+  // Backend serving the detail-dialog conversation, for steer-capability gating.
+  const detailConvBackend = useMemo<BackendId | null>(
+    () =>
+      (conversations.find((c) => c.id === detailId)?.backend as
+        | BackendId
+        | undefined) ?? null,
+    [conversations, detailId],
+  );
 
   /** Park a message in the follow-up queue (typed while the agent is mid-run). */
   function enqueueMessage(
@@ -2045,6 +2097,28 @@ export default function Home() {
       unlisten?.();
     };
   }, []);
+  // A downloaded-but-not-yet-applied update. Set when the backend reports the
+  // swap is on disk (silent auto-install, or a manual install); drives the
+  // sidebar's persistent "Restart to update" button.
+  const [updateReadyVersion, setUpdateReadyVersion] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    onUpdateReady((u) => setUpdateReadyVersion(u.version)).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+  const onRestartToUpdate = useCallback(() => {
+    api.relaunchApp().catch(console.error);
+  }, []);
+
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const onOpenDetail = useCallback((id: string) => setDetailId(id), []);
 
@@ -2148,8 +2222,19 @@ export default function Home() {
    *  failed/empty turn can't poison future sends), then resubmit the last user
    *  message. Drives both the header "Retry" button (on error) and the
    *  per-message "Regenerate" action on the final assistant turn. */
-  async function onRetry() {
-    const id = activeId;
+  function onRetry() {
+    return retryConversation(activeId, onSend);
+  }
+
+  /** ChatGPT-style "regenerate" for an arbitrary conversation: roll the last
+   *  turn out of history (so a failed/empty turn can't poison future sends),
+   *  then resubmit the last user message through `send` (onSend for the main
+   *  chat, onDetailSend for the board detail dialog — each re-adds the user
+   *  bubble on its own surface). */
+  async function retryConversation(
+    id: string | null,
+    send: (text: string, attachments?: ComposerAttachment[]) => Promise<void>,
+  ) {
     if (!id || retryingRef.current) return;
     retryingRef.current = true;
     setRetrying(true);
@@ -2174,7 +2259,7 @@ export default function Home() {
         chatStore.getState().reset(id, []); // drop the stranded bubble + error
       }
       chatStore.getState().setError(id, null);
-      await onSend(text); // re-adds the user bubble + reruns the turn
+      await send(text); // re-adds the user bubble + reruns the turn
     } catch (e) {
       console.error("[retry] error", e);
       chatStore.getState().setError(id, String(e));
@@ -2306,19 +2391,17 @@ export default function Home() {
   async function onCreateTask(
     text: string,
     attachments: ComposerAttachment[],
-    backend: BackendId = "pi",
-    cliModel = "",
-    cliEffort = "",
   ) {
     const c = await api.newConversation(workspaceDir ?? undefined);
     const id = c.id;
-    // Runtime chosen in the dialog — applied before the first prompt goes out
-    // so it already routes through Claude Code / Codex.
-    if (backend !== "pi") {
+    // Runtime chosen in the dialog — the shared pending state (same one the chat
+    // hero + quick launcher use). Applied before the first prompt goes out so it
+    // already routes through Claude Code / Codex.
+    if (pendingBackend !== "pi") {
       try {
-        await api.setConversationBackend(id, backend);
-        if (cliModel || cliEffort) {
-          await api.setConversationCliModel(id, cliModel, cliEffort);
+        await api.setConversationBackend(id, pendingBackend);
+        if (pendingCliModel || pendingCliEffort) {
+          await api.setConversationCliModel(id, pendingCliModel, pendingCliEffort);
         }
       } catch (e) {
         console.error("[create-task] set backend failed", e);
@@ -2429,8 +2512,27 @@ export default function Home() {
 
   async function onDetailAbort() {
     if (!detailId) return;
+    // Bailing out: drop anything parked for this conversation rather than
+    // auto-delivering the queue after the abort lands (mirrors onAbort).
+    setQueued((q) => ({ ...q, [detailId]: [] }));
     chatStore.getState().endStream(detailId, isCliConv(detailId));
     await api.abort(detailId);
+  }
+
+  /** Roll back + rerun the last turn from the detail dialog. */
+  function onDetailRetry() {
+    return retryConversation(detailId, onDetailSend);
+  }
+
+  /** Promote a queued follow-up to an immediate send from the detail dialog.
+   *  Routes through onDetailSend so the delivery lands on `detailId` (not the
+   *  main chat's activeId). */
+  function steerQueuedDetail(id: string) {
+    if (!detailId) return;
+    const item = (queuedRef.current[detailId] ?? []).find((m) => m.id === id);
+    if (!item) return;
+    removeQueued(detailId, id);
+    void onDetailSend(item.text, item.attachments);
   }
 
   async function onDetailModelChange(next: ModelChoice) {
@@ -2737,6 +2839,30 @@ export default function Home() {
           if (c) onFork(c, messageKey, messageIndex);
         }}
         focusToken={detailFocusToken}
+        onRetry={onDetailRetry}
+        retrying={retrying}
+        queued={detailId ? queued[detailId] : undefined}
+        onQueue={(text, atts) => {
+          if (detailId) enqueueMessage(detailId, text, atts);
+        }}
+        onSteerQueued={
+          detailConvBackend && !backendSupportsSteer(detailConvBackend)
+            ? undefined
+            : (id) => steerQueuedDetail(id)
+        }
+        onRemoveQueued={(id) => {
+          if (detailId) removeQueued(detailId, id);
+        }}
+        ultra={ultraEnabled}
+        onUltraToggle={onUltraToggle}
+      />
+      <ArtifactsDialog
+        convId={activeId}
+        title={conversations.find((c) => c.id === activeId)?.title}
+        // Gate on chat view + a live artifact set so switching away (or a
+        // conversation with no artifacts) can't leave a stale gallery open.
+        open={view === "chat" && chatArtifactsOpen && activeHasArtifacts}
+        onOpenChange={setChatArtifactsOpen}
       />
       <CreateTaskDialog
         open={newTaskOpen}
@@ -2746,6 +2872,13 @@ export default function Home() {
         workspaceDir={workspaceDir}
         defaultWorkspace={defaultWorkspace}
         onWorkspaceChange={onWorkspaceChange}
+        ultra={ultraEnabled}
+        onUltraToggle={onUltraToggle}
+        pendingBackend={pendingBackend}
+        onPendingBackendChange={setPendingBackend}
+        pendingCliModel={pendingCliModel}
+        pendingCliEffort={pendingCliEffort}
+        onPendingTuningChange={onPendingTuningChange}
         onSubmit={onCreateTask}
       />
       <AutomationDialog
@@ -2792,6 +2925,8 @@ export default function Home() {
         onReorderWorkspaces={onReorderWorkspaces}
         onArchive={onArchive}
         onOpenSettings={openSettings}
+        updateReadyVersion={updateReadyVersion}
+        onRestartToUpdate={onRestartToUpdate}
       />
       {/* Opaque card, no backdrop-filter: the shell root paints solid bg-sidebar,
           so a translucent+blurred card only re-blurred a flat color — at the cost
@@ -2812,6 +2947,18 @@ export default function Home() {
                 (e.g. an attachment write failing on the very first send). */}
               {error && !hasMessages && (
                 <span className="text-destructive">{error}</span>
+              )}
+              {view === "chat" && activeHasArtifacts && (
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  title={tt("board", "session.toggleArtifacts")}
+                  aria-label={tt("board", "session.toggleArtifacts")}
+                  onClick={() => setChatArtifactsOpen((v) => !v)}
+                >
+                  <Inbox className="size-3.5" />
+                </Button>
               )}
               <Button
                 type="button"
@@ -2911,6 +3058,7 @@ export default function Home() {
                 pendingCliEffort={pendingCliEffort}
                 onPendingTuningChange={onPendingTuningChange}
                 backendSwitch={backendSwitch}
+                onRequestBackendSwitch={requestBackendSwitch}
               />
             ) : (
               <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
@@ -2942,6 +3090,7 @@ export default function Home() {
                     pendingCliEffort={pendingCliEffort}
                     onPendingTuningChange={onPendingTuningChange}
                     backendSwitch={backendSwitch}
+                    onRequestBackendSwitch={requestBackendSwitch}
                   />
                 </div>
               </div>

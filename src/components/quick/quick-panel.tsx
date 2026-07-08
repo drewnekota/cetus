@@ -9,6 +9,7 @@ import { ModelPicker } from "@/components/chat/model-picker";
 import {
   BACKENDS,
   CliTuningMenu,
+  nextBackend,
   RuntimeShortcutHint,
   useRuntimeShortcuts,
 } from "@/components/chat/backend-picker";
@@ -84,7 +85,6 @@ export function QuickPanel() {
   const [submitting, setSubmitting] = useState(false);
   // Whether any non-archived chat exists — gates the "Last" session option.
   const [hasLastChat, setHasLastChat] = useState(true);
-  const [segmentShaking, setSegmentShaking] = useState(false);
 
   const taRef = useRef<HTMLTextAreaElement>(null);
   // Mirrors for the mount-once blur listener (which closes over stale state).
@@ -345,14 +345,12 @@ export function QuickPanel() {
       api.quickDismiss().catch(() => {});
       return;
     }
-    // Tab toggles the session mode (new ⇄ last) without leaving the input.
-    if (e.key === "Tab") {
+    // Tab cycles the runtime (Cetus → Claude Code → Codex), matching the main
+    // composer and the task dialog. Bare Tab only — a modifier keeps its
+    // default meaning rather than being repurposed here.
+    if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
-      if (!hasLastChat) {
-        setSegmentShaking(true);
-        return;
-      }
-      setSessionMode((m) => (m === "new" ? "last" : "new"));
+      onBackendChange(nextBackend(backend));
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
@@ -469,8 +467,6 @@ export function QuickPanel() {
               disabledTooltip: t("session.last.empty"),
             },
           ]}
-          shaking={segmentShaking}
-          onShakeEnd={() => setSegmentShaking(false)}
         />
         <WorkspacePicker
           workspaceDir={workspaceDir}
@@ -600,21 +596,14 @@ function Segmented<T extends string>({
   value,
   onChange,
   options,
-  shaking,
-  onShakeEnd,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: { value: T; label: string; disabled?: boolean; disabledTooltip?: string }[];
-  shaking?: boolean;
-  onShakeEnd?: () => void;
 }) {
   return (
     <TooltipProvider>
-      <div
-        className={cn("flex items-center gap-0.5", shaking && "animate-shake")}
-        onAnimationEnd={onShakeEnd}
-      >
+      <div className="flex items-center gap-0.5">
         {options.map((o) => {
           const btn = (
             <button
