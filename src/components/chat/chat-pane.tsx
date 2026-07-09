@@ -313,6 +313,10 @@ function WorktreeChip({
 // Deadzone (px from the true bottom) within which the list counts as "at the
 // bottom" — drives stick-to-bottom follow and hides the scroll-to-bottom button.
 const STICKY_BOTTOM_PX = 32;
+// The elevator is intentionally less eager than sticky-bottom follow: a small
+// nudge away from the latest message should not summon a floating control.
+const SCROLL_TO_BOTTOM_BUTTON_MIN_PX = 360;
+const SCROLL_TO_BOTTOM_BUTTON_VIEWPORT_RATIO = 0.5;
 // Extra rows Virtuoso keeps mounted above/below the viewport. A generous margin
 // means fast scrolls and expander toggles rarely hit an unmounted turn, and the
 // off-screen markdown parse is spread out instead of hitching on entry.
@@ -393,6 +397,7 @@ function MessageList({
   // re-run once the node exists.
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const atBottomRef = useRef(true);
   // Topmost visible group index (from Virtuoso's rangeChanged) — drives the turn
   // navigator's active tick with no getBoundingClientRect scanning.
@@ -476,6 +481,35 @@ function MessageList({
       if (frame != null) cancelAnimationFrame(frame);
     };
   }, [isStreaming, scroller]);
+
+  useEffect(() => {
+    if (!scroller) return;
+
+    let frame: number | null = null;
+    const updateVisibility = () => {
+      frame = null;
+      const distanceFromBottom =
+        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      const threshold = Math.max(
+        SCROLL_TO_BOTTOM_BUTTON_MIN_PX,
+        scroller.clientHeight * SCROLL_TO_BOTTOM_BUTTON_VIEWPORT_RATIO,
+      );
+      setShowScrollToBottom(distanceFromBottom > threshold);
+    };
+    const scheduleUpdate = () => {
+      if (frame != null) return;
+      frame = requestAnimationFrame(updateVisibility);
+    };
+
+    updateVisibility();
+    scroller.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      scroller.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      if (frame != null) cancelAnimationFrame(frame);
+    };
+  }, [scroller, groups.length]);
 
   const itemContent = useCallback(
     (index: number, g: MessageGroup) => {
@@ -573,7 +607,7 @@ function MessageList({
         topIndex={topIndex}
         virtuosoRef={virtuosoRef}
       />
-      <ScrollToBottomButton atBottom={atBottom} virtuosoRef={virtuosoRef} />
+      <ScrollToBottomButton show={showScrollToBottom} virtuosoRef={virtuosoRef} />
     </div>
   );
 }
@@ -685,17 +719,16 @@ function TurnPreview({
  *  scrolled up away from the bottom of the conversation, and jumps them back
  *  down in one click. Lives outside the scroll container (as a sibling overlay)
  *  so it stays pinned to the viewport instead of scrolling with the messages.
- *  Visibility is driven by Virtuoso's atBottom state (which already tracks the
- *  32px deadzone via atBottomThreshold), so there's no scroll listener here. */
+ *  Visibility is deliberately stricter than Virtuoso's atBottom state so short
+ *  reading nudges do not summon a floating control. */
 function ScrollToBottomButton({
-  atBottom,
+  show,
   virtuosoRef,
 }: {
-  atBottom: boolean;
+  show: boolean;
   virtuosoRef: RefObject<VirtuosoHandle | null>;
 }) {
   const { t } = useTranslation("chat");
-  const show = !atBottom;
 
   const scrollToBottom = useCallback(() => {
     virtuosoRef.current?.scrollToIndex({
