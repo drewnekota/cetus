@@ -2,6 +2,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -392,9 +393,15 @@ function MessageList({
   // re-run once the node exists.
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
+  const atBottomRef = useRef(true);
   // Topmost visible group index (from Virtuoso's rangeChanged) — drives the turn
   // navigator's active tick with no getBoundingClientRect scanning.
   const [topIndex, setTopIndex] = useState(0);
+  const pendingInitialBottomRef = useRef<string | null>(null);
+  const setAtBottomState = useCallback((next: boolean) => {
+    atBottomRef.current = next;
+    setAtBottom(next);
+  }, []);
 
   // User turns paired with their index in the group list, for the navigator's
   // scroll-to-turn (Virtuoso scrollToIndex) and active-tick math.
@@ -418,6 +425,57 @@ function MessageList({
     }
     prevLastKeyRef.current = lastKey;
   }, [keys, roles]);
+
+  useLayoutEffect(() => {
+    pendingInitialBottomRef.current = convId;
+  }, [convId]);
+
+  useEffect(() => {
+    if (!convId || pendingInitialBottomRef.current !== convId || groups.length === 0) {
+      return;
+    }
+    pendingInitialBottomRef.current = null;
+
+    const snap = () => {
+      virtuosoRef.current?.scrollToIndex({
+        index: "LAST",
+        align: "end",
+        behavior: "auto",
+      });
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+      atBottomRef.current = true;
+    };
+
+    snap();
+    const frame = requestAnimationFrame(() => {
+      snap();
+      requestAnimationFrame(snap);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [convId, groups.length, scroller]);
+
+  useEffect(() => {
+    if (!scroller || !isStreaming) return;
+    const content = scroller.firstElementChild;
+    if (!content) return;
+
+    let frame: number | null = null;
+    const scrollIfPinned = () => {
+      if (!atBottomRef.current) return;
+      if (frame != null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        if (atBottomRef.current) scroller.scrollTop = scroller.scrollHeight;
+      });
+    };
+
+    const ro = new ResizeObserver(scrollIfPinned);
+    ro.observe(content);
+    return () => {
+      ro.disconnect();
+      if (frame != null) cancelAnimationFrame(frame);
+    };
+  }, [isStreaming, scroller]);
 
   const itemContent = useCallback(
     (index: number, g: MessageGroup) => {
@@ -503,10 +561,9 @@ function MessageList({
         // the bare index defaults to top-align, which strands a long final reply
         // "scrolled to its own top", i.e. slightly above the real bottom).
         initialTopMostItemIndex={{ index: Math.max(0, groups.length - 1), align: "end" }}
-        alignToBottom
         followOutput={(isAtBottom) => (isAtBottom ? "auto" : false)}
         atBottomThreshold={STICKY_BOTTOM_PX}
-        atBottomStateChange={setAtBottom}
+        atBottomStateChange={setAtBottomState}
         rangeChanged={(range) => setTopIndex(range.startIndex)}
         increaseViewportBy={OVERSCAN_PX}
       />
