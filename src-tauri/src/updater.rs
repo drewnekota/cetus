@@ -24,9 +24,9 @@ const READY_KEY: &str = "updater_ready_version";
 #[cfg(not(debug_assertions))]
 const LAST_CHECK_KEY: &str = "updater_last_check_secs";
 #[cfg(not(debug_assertions))]
-const FOCUS_CHECK_MIN_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const FOCUS_CHECK_MIN_INTERVAL: Duration = Duration::from_secs(5 * 60);
 #[cfg(not(debug_assertions))]
-const PERIODIC_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+const PERIODIC_CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -162,7 +162,20 @@ async fn check_once(app: AppHandle, auto: bool) {
                     },
                 );
             }
-            Err(e) => tracing::warn!("cetus: update install failed: {e}"),
+            Err(e) => {
+                tracing::warn!("cetus: update install failed: {e}");
+                // Do not fail silently. A network/signature/transient install
+                // error should still leave the user with a visible manual path.
+                let _ = app.emit_to(
+                    "main",
+                    "update-available",
+                    UpdateMeta {
+                        version: update.version.clone(),
+                        current_version: update.current_version.clone(),
+                        notes: update.body.clone(),
+                    },
+                );
+            }
         }
         return;
     }

@@ -928,6 +928,7 @@ pub fn run() {
             {
                 let app_active = app.handle().clone();
                 crate::panel::install_app_active_observer(move || {
+                    updater::check_after_focus(app_active.clone());
                     // Only act when the user would otherwise be left staring at
                     // an active cetus with no window: parked off-screen by a ⌘W
                     // close, hidden ⌘H-style by the summon hotkey, ordered out
