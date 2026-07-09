@@ -97,8 +97,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: "switchPreviousView",
-    label: "Switch to previous view",
-    description: "Toggle back to the view you were on before",
+    label: "Switch to previous page",
+    description: "Toggle back to the page you were on before",
     defaultAccelerator: "Ctrl+Tab",
   },
   {

@@ -203,6 +203,14 @@
   html.dark {
     color-scheme: dark;
   }
+  /* Text selection reads as a brand-tinted highlighter mark rather than the
+     browser's pale blue. Mixing brand into `transparent` keeps it translucent
+     so it layers over any surface, and the foreground stays at full ink so
+     selected text stays legible. */
+  ::selection {
+    background-color: color-mix(in oklab, var(--brand) 32%, transparent);
+    color: var(--foreground);
+  }
   html.theme-repaint [data-chat-composer],
   html.theme-repaint [data-slot="textarea"],
   html.theme-repaint [data-slot="input"] {

@@ -448,6 +448,17 @@ function MessageList({
     el.scrollTop = anchor.top + (el.scrollHeight - anchor.height);
   }, [safeFirstShown]);
 
+  // Opening a conversation should land at the newest message. The component is
+  // never remounted on switch, so re-arm auto-follow and snap to the bottom
+  // whenever convId changes — otherwise a scrolled-up position carried over from
+  // the previous conversation leaves stickToBottomRef false and the new one
+  // renders pinned to the top.
+  useLayoutEffect(() => {
+    stickToBottomRef.current = true;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [convId]);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -462,8 +473,14 @@ function MessageList({
   // Scroll on add/remove (keys array reference changes).
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || !stickToBottomRef.current) return;
+    if (!el) return;
+    // A fresh user turn means the user just sent — snap to the bottom and
+    // re-arm auto-follow even if they'd scrolled up reading older context, so
+    // their new message (and the reply that follows) is always in view.
+    if (roles[roles.length - 1] === "user") stickToBottomRef.current = true;
+    if (!stickToBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keys]);
 
   // Stick to bottom whenever the content actually grows — token deltas mutate
@@ -495,6 +512,7 @@ function MessageList({
     typeof ResizeObserver === "undefined"
       ? null
       : new ResizeObserver((entries) => {
+          const scroller = scrollRef.current;
           for (const entry of entries) {
             const el = entry.target as HTMLElement;
             const h = Math.round(
@@ -505,8 +523,33 @@ function MessageList({
             // Guard against re-setting the same value (locking the size of a
             // skipped turn changes its box, which re-fires the observer).
             if (el.dataset.cis === next) continue;
+            const prev = el.dataset.cis ? Number(el.dataset.cis) : 0;
             el.dataset.cis = next;
             el.style.containIntrinsicSize = `auto ${h}px`;
+            // Scroll-position compensation. A turn that starts off-screen holds
+            // the 200px estimate below until it scrolls into view, then jumps to
+            // its (usually much taller) real height. When that turn is above the
+            // reading position, its growth shoves everything below it down —
+            // and WKWebView has no scroll anchoring to absorb it, so the fixed
+            // scrollTop then shows earlier content: scrolling up a little snaps
+            // the whole list toward the top. Counter it by shifting scrollTop by
+            // the same delta so the visible content stays pinned. (prev === 0 is
+            // the initial seed pass — nothing to correct yet.)
+            //
+            // Only compensate turns that sit ENTIRELY above the fold. A turn
+            // straddling the top edge — the one you're scrolling *into* — is
+            // being read; correcting its growth would push it back down as fast
+            // as you scroll up, so a reflowing turn (KaTeX finishing its layout
+            // across several resize passes) would fight every upward scroll and
+            // feel like it can't scroll past. content-visibility renders a turn
+            // within a margin before it's visible, so the fully-above ones still
+            // get corrected here in time to prevent the jump.
+            if (scroller && prev > 0) {
+              const scrollerTop = scroller.getBoundingClientRect().top;
+              if (el.getBoundingClientRect().bottom <= scrollerTop) {
+                scroller.scrollTop += h - prev;
+              }
+            }
           }
         }),
   );
@@ -515,9 +558,12 @@ function MessageList({
     (el: HTMLDivElement | null) => {
       if (!el || !turnSizer) return;
       // Seed an estimate before the observer's first callback so a turn that
-      // starts off-screen never momentarily collapses to zero height.
+      // starts off-screen never momentarily collapses to zero height. Record it
+      // as the known height too, so the observer treats the eventual 200px→real
+      // correction as a delta to compensate for (rather than a first-seen size).
       if (!el.style.containIntrinsicSize) {
         el.style.containIntrinsicSize = "auto 200px";
+        el.dataset.cis = "200";
       }
       turnSizer.observe(el);
       // React 19 cleanup ref: unobserve when this specific turn unmounts
@@ -784,7 +830,7 @@ function QuoteSelectionToolbar({
 }) {
   const { t } = useTranslation("chat");
   const [selection, setSelection] = useState<{
-    text: string;
+    range: Range;
     left: number;
     top: number;
   } | null>(null);
@@ -818,7 +864,7 @@ function QuoteSelectionToolbar({
     }
 
     setSelection({
-      text,
+      range: range.cloneRange(),
       left: Math.round(rect.left + rect.width / 2),
       top: Math.round(Math.max(8, rect.top - 8)),
     });
@@ -859,7 +905,7 @@ function QuoteSelectionToolbar({
       <button
         type="button"
         onClick={() => {
-          onQuote(selection.text);
+          onQuote(serializeSelection(selection.range));
           window.getSelection()?.removeAllRanges();
           setSelection(null);
         }}
@@ -871,6 +917,40 @@ function QuoteSelectionToolbar({
     </div>,
     document.body,
   );
+}
+
+// Turn a live selection Range into plain text suitable for a `>` blockquote.
+//
+// `Selection.toString()` is unusable on rendered markdown that contains KaTeX:
+// each math atom is its own inline-block span, so the serializer emits a newline
+// after every character (turning `$0**$` into `0\n*\n*`), and the hidden MathML
+// mirror gets duplicated alongside the visible render. Instead we clone the
+// selected DOM, swap every `.katex` node back to its LaTeX source (pulled from
+// the MathML `annotation`), then read `innerText` — which collapses the render
+// noise while still honoring real block boundaries (paragraphs, list items).
+function serializeSelection(range: Range): string {
+  const container = document.createElement("div");
+  container.appendChild(range.cloneContents());
+
+  container.querySelectorAll(".katex").forEach((el) => {
+    const tex = el
+      .querySelector('annotation[encoding="application/x-tex"]')
+      ?.textContent?.trim();
+    const display = !!el.closest(".katex-display");
+    const replacement = tex
+      ? `${display ? "$$" : "$"}${tex}${display ? "$$" : "$"}`
+      : (el.textContent ?? "");
+    el.replaceWith(document.createTextNode(replacement));
+  });
+
+  // `innerText` needs layout, so the node must be attached and rendered. Keep it
+  // offscreen and preserve line breaks, then remove it synchronously.
+  container.style.cssText =
+    "position:fixed;left:-99999px;top:0;white-space:pre-wrap;";
+  document.body.appendChild(container);
+  const text = container.innerText;
+  container.remove();
+  return text.trim();
 }
 
 function selectionAnchorRect(range: Range): DOMRect {

@@ -77,7 +77,6 @@ import {
   type MeetingSettings,
   type MeetingStatus,
 } from "@/lib/tauri";
-import { toast } from "sonner";
 import type {
   AutoArchiveSettings,
   Conversation,
@@ -470,7 +469,7 @@ function GeneralSection() {
   });
   const [appVersion, setAppVersion] = useState("");
   const [checkState, setCheckState] = useState<
-    "idle" | "checking" | "upToDate" | "available" | "installing" | "failed"
+    "idle" | "checking" | "upToDate" | "available" | "installing" | "ready" | "failed"
   >("idle");
   const [pending, setPending] = useState<UpdateMeta | null>(null);
   const [downloadProgress, setDownloadProgress] =
@@ -536,13 +535,18 @@ function GeneralSection() {
     try {
       await api.installUpdate();
       setPending(null);
-      setCheckState("idle");
       setDownloadProgress(null);
-      toast.success(t("update.installed"));
+      // Swap is on disk. Surface a Restart button so the user can apply it now
+      // instead of waiting for the next launch.
+      setCheckState("ready");
     } catch {
       setDownloadProgress(null);
       setCheckState("failed");
     }
+  }
+
+  function restartNow() {
+    api.relaunchApp().catch(() => {});
   }
 
   const downloadPercent = updateDownloadPercent(downloadProgress);
@@ -620,18 +624,25 @@ function GeneralSection() {
                   ? downloadPercent == null
                     ? t("update.installing")
                     : `${t("update.installing")} ${downloadPercent}%`
-                : checkState === "upToDate"
-                  ? t("update.check.upToDate")
-                  : checkState === "available" && pending
-                    ? t("update.check.available", { version: pending.version })
-                    : checkState === "failed"
-                      ? t("update.failed")
-                      : appVersion
-                        ? t("update.check.current", { version: appVersion })
-                        : ""}
+                : checkState === "ready"
+                  ? t("update.installed")
+                  : checkState === "upToDate"
+                    ? t("update.check.upToDate")
+                    : checkState === "available" && pending
+                      ? t("update.check.available", { version: pending.version })
+                      : checkState === "failed"
+                        ? t("update.failed")
+                        : appVersion
+                          ? t("update.check.current", { version: appVersion })
+                          : ""}
             </p>
           </div>
-          {checkState === "available" || checkState === "installing" ? (
+          {checkState === "ready" ? (
+            <Button size="sm" className="shrink-0 gap-1.5" onClick={restartNow}>
+              <RotateCw className="size-3.5" />
+              {t("update.check.restart")}
+            </Button>
+          ) : checkState === "available" || checkState === "installing" ? (
             <Button
               size="sm"
               className="shrink-0"

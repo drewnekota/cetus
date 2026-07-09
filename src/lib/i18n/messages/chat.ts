@@ -7,6 +7,8 @@ export const chat = {
     // Slash menu (commands + skills)
     "slash.commands": "Commands",
     "slash.skills": "Skills",
+    // @-mention menu (goal, …)
+    "mention.title": "Mentions",
     // Composer
     "composer.dropFiles": "Drop files to attach",
     "composer.removeAttachment": "Remove {name}",
@@ -178,6 +180,7 @@ export const chat = {
     "artifacts.emptySuffix": ".",
   },
   zh: {
+    "mention.title": "提及",
     "composer.dropFiles": "拖放文件以添加附件",
     "composer.removeAttachment": "移除 {name}",
     "composer.fileTooLarge": "{name} 超过 {limit}MB，已跳过。",

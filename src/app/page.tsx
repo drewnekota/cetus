@@ -506,26 +506,35 @@ export default function Home() {
       localStorage.setItem("cetus:lastView", view);
     } catch {}
   }, [view]);
-  // Remember the view we were on before the current one so Ctrl+Tab can toggle
-  // back to it (mirrors "last tab" in browsers/editors). committedViewRef holds
-  // the last-seen view; on each change we shift it into previousViewRef.
-  const previousViewRef = useRef<SidebarView | null>(null);
-  const committedViewRef = useRef<SidebarView>(view);
-  useEffect(() => {
-    if (committedViewRef.current !== view) {
-      previousViewRef.current = committedViewRef.current;
-      committedViewRef.current = view;
-    }
-  }, [view]);
-  const switchToPreviousView = useCallback(() => {
-    const prev = previousViewRef.current;
-    if (prev && prev !== viewRef.current) setView(prev);
-  }, []);
   // Browser-style page history for ⌘[ / ⌘]. A "page" is the sidebar view, the
   // active chat within it, plus whether Settings covers it; every change lands
   // on the stack, and applying an entry sets navApplyingRef so the recorder
   // effect below doesn't re-push the state it just restored.
   type NavEntry = { view: SidebarView; activeId: string | null; settings: boolean };
+  const currentNavEntry = useCallback(
+    (): NavEntry => ({
+      view,
+      // A chat is only a distinct page inside the chat view; elsewhere the
+      // active chat is incidental, so collapse it to null to avoid spurious
+      // page switches.
+      activeId: view === "chat" ? activeId : null,
+      settings: settingsOpen,
+    }),
+    [view, activeId, settingsOpen],
+  );
+  const sameNavEntry = (a: NavEntry | null | undefined, b: NavEntry) =>
+    !!a && a.view === b.view && a.activeId === b.activeId && a.settings === b.settings;
+  // Ctrl+Tab is MRU page switching: it toggles the last complete page, not just
+  // the last sidebar view. That makes separate chats and Settings participate.
+  const previousPageRef = useRef<NavEntry | null>(null);
+  const committedPageRef = useRef<NavEntry>(currentNavEntry());
+  useEffect(() => {
+    const next = currentNavEntry();
+    if (!sameNavEntry(committedPageRef.current, next)) {
+      previousPageRef.current = committedPageRef.current;
+      committedPageRef.current = next;
+    }
+  }, [currentNavEntry]);
   const navHistoryRef = useRef<NavEntry[]>([]);
   const navIndexRef = useRef(0);
   const navApplyingRef = useRef(false);
@@ -536,28 +545,25 @@ export default function Home() {
     }
     const hist = navHistoryRef.current;
     const current = hist[navIndexRef.current];
-    // A chat is only a distinct page inside the chat view; elsewhere the active
-    // chat is incidental, so collapse it to null to avoid spurious entries.
-    const entryActiveId = view === "chat" ? activeId : null;
-    if (
-      current &&
-      current.view === view &&
-      current.activeId === entryActiveId &&
-      current.settings === settingsOpen
-    )
+    const entry = currentNavEntry();
+    if (sameNavEntry(current, entry))
       return;
     // A new page after going back forks the timeline: drop the forward entries.
     hist.splice(navIndexRef.current + 1);
-    hist.push({ view, activeId: entryActiveId, settings: settingsOpen });
+    hist.push(entry);
     if (hist.length > 100) hist.splice(0, hist.length - 100);
     navIndexRef.current = hist.length - 1;
-  }, [view, activeId, settingsOpen]);
+  }, [currentNavEntry]);
   const applyNavEntry = useCallback((entry: NavEntry) => {
     navApplyingRef.current = true;
     setView(entry.view);
     if (entry.view === "chat") setActiveId(entry.activeId);
     setSettingsOpen(entry.settings);
   }, []);
+  const switchToPreviousPage = useCallback(() => {
+    const prev = previousPageRef.current;
+    if (prev && !sameNavEntry(committedPageRef.current, prev)) applyNavEntry(prev);
+  }, [applyNavEntry]);
   const navigateBack = useCallback(() => {
     if (navIndexRef.current <= 0) return;
     navIndexRef.current -= 1;
@@ -663,59 +669,49 @@ export default function Home() {
   const orderedChatIdsRef = useRef<string[]>([]);
   orderedChatIdsRef.current = orderedChatIds;
 
-  // Mirror the live queue + send fn so the flush effect (deps: streaming/active
+  // Mirror the live queue + send fn so the flush effect (deps: streaming sig
   // only) never reads stale closures. onSend is a hoisted function declaration.
   const queuedRef = useRef(queued);
   queuedRef.current = queued;
   const onSendRef = useRef<typeof onSend>(undefined as unknown as typeof onSend);
   onSendRef.current = onSend; // onSend is hoisted (function declaration)
-
-  // Deliver the next queued follow-up when the active conversation's run ends.
-  // Fires only on a same-conversation streaming true→false transition, so a
-  // conversation switch doesn't spuriously flush. One per transition → the next
-  // item waits for the turn it just started to finish (sequential, in order).
-  const prevRunRef = useRef<{ id: string | null; streaming: boolean }>({
-    id: null,
-    streaming: false,
-  });
-  useEffect(() => {
-    const prev = prevRunRef.current;
-    prevRunRef.current = { id: activeId, streaming: isStreaming };
-    if (prev.id !== activeId) return; // conversation switch, not a run boundary
-    if (!(prev.streaming && !isStreaming) || !activeId) return; // only true→false
-    const q = queuedRef.current[activeId];
-    if (!q || q.length === 0) return;
-    const [next, ...rest] = q;
-    setQueued((cur) => ({ ...cur, [activeId]: rest }));
-    void onSendRef.current(next.text, next.attachments);
-  }, [isStreaming, activeId]);
-
-  // Same follow-up flush, but for the board detail dialog's conversation. The
-  // queue is keyed by conversation id (shared with the main chat), so this only
-  // owns delivery when the detail conversation differs from the chat's active
-  // one — otherwise the effect above already handles it (guarded below to avoid
-  // a double send when the same chat is open in both surfaces).
-  const detailStreaming = useIsStreaming(detailId);
-  const prevDetailRunRef = useRef<{ id: string | null; streaming: boolean }>({
-    id: null,
-    streaming: false,
-  });
-  const onDetailSendRef = useRef<typeof onDetailSend>(
-    undefined as unknown as typeof onDetailSend,
+  const deliverQueuedRef = useRef<typeof deliverQueued>(
+    undefined as unknown as typeof deliverQueued,
   );
-  onDetailSendRef.current = onDetailSend; // onDetailSend is hoisted
+  deliverQueuedRef.current = deliverQueued; // hoisted function declaration
+
+  // Comma-joined ids of every conversation whose run is live. Object.is over the
+  // string means this only re-renders when the *set* of streaming runs changes,
+  // and the flush effect below re-runs on exactly those boundaries.
+  const streamingSig = useChatStore((s) => {
+    let sig = "";
+    for (const id in s.chats) if (s.chats[id]?.isStreaming) sig += `${id},`;
+    return sig;
+  });
+
+  // Deliver the next queued follow-up whenever ANY conversation's run ends —
+  // active chat, detail dialog, or a background run the user has navigated away
+  // from. Keying off the store (not the active/detail conversation) is what lets
+  // a queue survive a chat switch: the old per-surface effects only observed the
+  // mounted conversation, so a run that finished in the background stranded its
+  // queue. One flush per true→false transition → items go out sequentially, each
+  // waiting for the turn it just started to finish.
+  const prevStreamingRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const prev = prevDetailRunRef.current;
-    prevDetailRunRef.current = { id: detailId, streaming: detailStreaming };
-    if (prev.id !== detailId) return; // conversation switch, not a run boundary
-    if (!(prev.streaming && !detailStreaming) || !detailId) return; // true→false
-    if (detailId === activeIdRef.current) return; // main flush owns this one
-    const q = queuedRef.current[detailId];
-    if (!q || q.length === 0) return;
-    const [next, ...rest] = q;
-    setQueued((cur) => ({ ...cur, [detailId]: rest }));
-    void onDetailSendRef.current(next.text, next.attachments);
-  }, [detailStreaming, detailId]);
+    const current = new Set(
+      streamingSig ? streamingSig.split(",").filter(Boolean) : [],
+    );
+    const prev = prevStreamingRef.current;
+    prevStreamingRef.current = current;
+    for (const id of prev) {
+      if (current.has(id)) continue; // still running — not a run boundary
+      const q = queuedRef.current[id];
+      if (!q || q.length === 0) continue;
+      const [next, ...rest] = q;
+      setQueued((cur) => ({ ...cur, [id]: rest }));
+      void deliverQueuedRef.current(id, next.text, next.attachments);
+    }
+  }, [streamingSig]);
 
   // Backend serving the detail-dialog conversation, for steer-capability gating.
   const detailConvBackend = useMemo<BackendId | null>(
@@ -1227,6 +1223,7 @@ export default function Home() {
   //   ⌘,    — open settings
   //   ⌘1…⌘4 — switch sidebar view
   //   ⌘[/⌘] — go back / forward through the page history (views + settings)
+  //   ⌃⇥    — switch to the most recently used page (including chats/settings)
   //   ⌃1…⌃3 — switch the current chat's runtime (Cetus / Claude Code / Codex)
   //   ⌘B    — toggle workspace
   //   ⌘J    — toggle Terminal in the workspace
@@ -1274,6 +1271,14 @@ export default function Home() {
         e.preventDefault();
         if (shortcut("navigateBack")) navigateBack();
         else navigateForward();
+        return;
+      }
+      // Ctrl+Tab — MRU page switch. It needs to run before the Settings guard
+      // so Settings can toggle back to the page that opened it.
+      if (shortcut("switchPreviousView")) {
+        if (automationDialogOpen || newTaskOpen || detailId !== null) return;
+        e.preventDefault();
+        switchToPreviousPage();
         return;
       }
       // A modal owns the keyboard while open — don't fire app shortcuts (or
@@ -1394,9 +1399,6 @@ export default function Home() {
       } else if (shortcut("switchPlugins")) {
         e.preventDefault();
         setView("plugins");
-      } else if (shortcut("switchPreviousView")) {
-        e.preventDefault();
-        switchToPreviousView();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1418,7 +1420,7 @@ export default function Home() {
     keyboardShortcuts,
     defaultWorkspace,
     requestBackendSwitch,
-    switchToPreviousView,
+    switchToPreviousPage,
     navigateBack,
     navigateForward,
   ]);
@@ -2485,6 +2487,34 @@ export default function Home() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailId]);
+
+  /** Deliver a queued follow-up to `convId`, regardless of which surface (if
+   *  any) currently has it open. Mirrors the core of onSend/onDetailSend without
+   *  the surface-specific focus handling, so the store-driven flush can send to
+   *  a background conversation the user has navigated away from. */
+  async function deliverQueued(
+    convId: string,
+    text: string,
+    attachments: ComposerAttachment[] = [],
+  ) {
+    maybeClearReview(convId);
+    const store = chatStore.getState();
+    store.ensure(convId);
+    let out: Outgoing;
+    try {
+      out = await prepareOutgoing(convId, text, attachments);
+    } catch (e) {
+      chatStore.getState().setError(convId, `attachment failed: ${e}`);
+      return;
+    }
+    store.userSent(convId, text, out.localImages, out.savedFiles);
+    try {
+      await api.sendPrompt(convId, out.piMessage, out.piImages);
+    } catch (e) {
+      chatStore.getState().setError(convId, String(e));
+    }
+    refreshList().catch(() => {});
+  }
 
   async function onDetailSend(text: string, attachments: ComposerAttachment[] = []) {
     if (!detailId) return;

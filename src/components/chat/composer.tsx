@@ -8,6 +8,8 @@ import { ModelPicker } from "@/components/chat/model-picker";
 import { BackendPicker, nextBackend } from "@/components/chat/backend-picker";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { SlashMenu, type SlashItem } from "@/components/chat/slash-menu";
+import { MentionMenu } from "@/components/chat/mention-menu";
+import { MENTIONS, expandGoalDirective } from "@/lib/goal";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
@@ -33,6 +35,26 @@ function detectSlashToken(
   if (i < 0 || value[i] !== "/") return null;
   const before = i > 0 ? value[i - 1] : "";
   if (before && !/\s/.test(before)) return null; // `/` must start a word
+  return { start: i, query: value.slice(i + 1, caret) };
+}
+
+/** Same walk-back as {@link detectSlashToken} but for an open `@<token>`: an `@`
+ *  at line start or after whitespace, with no whitespace up to the caret. Powers
+ *  the `@`-mention menu (`@goal`). */
+function detectMentionToken(
+  value: string,
+  caret: number,
+): { start: number; query: string } | null {
+  let i = caret - 1;
+  while (i >= 0) {
+    const ch = value[i];
+    if (ch === "@") break;
+    if (/\s/.test(ch)) return null; // hit whitespace before an `@` → not a token
+    i--;
+  }
+  if (i < 0 || value[i] !== "@") return null;
+  const before = i > 0 ? value[i - 1] : "";
+  if (before && !/\s/.test(before)) return null; // `@` must start a word (not an email)
   return { start: i, query: value.slice(i + 1, caret) };
 }
 
@@ -265,6 +287,13 @@ export function Composer({
   // Set when the user dismisses with Esc; cleared on the next edit so the menu
   // stays closed for the current token but a later `/` reopens it.
   const slashSuppress = useRef(false);
+
+  // ---- @-mention menu (goal, …) -------------------------------------------
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionStart, setMentionStart] = useState(0);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionActive, setMentionActive] = useState(0);
+  const mentionSuppress = useRef(false);
   const withFocusHint = useCallback(
     (base: string) => {
       const trimmed = base.trimEnd();
@@ -333,6 +362,20 @@ export function Composer({
     setSlashOpen(false);
   }
 
+  const mentionItems = useMemo(() => {
+    const q = mentionQuery.toLowerCase();
+    return MENTIONS.filter(
+      (it) => it.name.toLowerCase().includes(q) || it.description.toLowerCase().includes(q),
+    );
+  }, [mentionQuery]);
+
+  const mentionVisible = mentionOpen && mentionItems.length > 0;
+  const mentionIdx = Math.min(mentionActive, mentionItems.length - 1);
+
+  function closeMention() {
+    setMentionOpen(false);
+  }
+
   /** Recompute the open token from the live textarea state. No-ops when the
    *  token is unchanged so arrow-nav doesn't reset the highlighted row. */
   function syncSlash() {
@@ -367,12 +410,14 @@ export function Composer({
     const pos = start + insert.length;
     updateText(next);
     slashSuppress.current = false;
+    mentionSuppress.current = false;
     requestAnimationFrame(() => {
       const node = taRef.current;
       if (!node) return;
       node.focus({ preventScroll: true });
       node.setSelectionRange(pos, pos);
       syncSlash();
+      syncMention();
     });
   }
 
@@ -386,6 +431,46 @@ export function Composer({
     const pos = slashStart + insert.length;
     updateText(next);
     closeSlash();
+    requestAnimationFrame(() => {
+      const node = taRef.current;
+      if (!node) return;
+      node.focus({ preventScroll: true });
+      node.setSelectionRange(pos, pos);
+    });
+  }
+
+  /** Mirror of {@link syncSlash} for the `@`-mention token. */
+  function syncMention() {
+    if (mentionSuppress.current) return;
+    // In bash mode `@` is just a shell character (paths, git refs), not a trigger.
+    if (bashMode) {
+      if (mentionOpen) setMentionOpen(false);
+      return;
+    }
+    const el = taRef.current;
+    if (!el) return;
+    const detected = detectMentionToken(el.value, el.selectionStart ?? 0);
+    if (!detected) {
+      if (mentionOpen) setMentionOpen(false);
+      return;
+    }
+    if (mentionOpen && detected.start === mentionStart && detected.query === mentionQuery) return;
+    setMentionStart(detected.start);
+    setMentionQuery(detected.query);
+    setMentionActive(0);
+    setMentionOpen(true);
+  }
+
+  /** Replace the `@<token>` with the picked mention's `@name ` token. The token
+   *  is expanded into its full directive at send time (see {@link expandGoalDirective}). */
+  function applyMention(item: (typeof MENTIONS)[number]) {
+    const el = taRef.current;
+    const caret = el?.selectionStart ?? text.length;
+    const insert = `@${item.name} `;
+    const next = text.slice(0, mentionStart) + insert + text.slice(caret);
+    const pos = mentionStart + insert.length;
+    updateText(next);
+    closeMention();
     requestAnimationFrame(() => {
       const node = taRef.current;
       if (!node) return;
@@ -461,6 +546,7 @@ export function Composer({
 
       e.preventDefault();
       slashSuppress.current = false;
+      mentionSuppress.current = false;
       requestAnimationFrame(() => {
         el.focus({ preventScroll: true });
       });
@@ -539,14 +625,17 @@ export function Composer({
       setAttachError(null);
       return;
     }
-    const t = text.trim();
-    if ((!t && attachments.length === 0)) return;
+    // Expand any `@goal` token into its full directive before sending. Empty
+    // when the user typed only `@goal` with no objective — treated as no message.
+    const outgoing = expandGoalDirective(text.trim());
+    if (!outgoing && attachments.length === 0) return;
     // Mid-run: park the message in the follow-up queue instead of sending. The
     // user can still promote it to a steer from the queue UI. Falls back to a
     // direct send (immediate steer) when no queue handler is wired.
-    if (streaming && onQueue) onQueue(t, attachments);
-    else onSend(t, attachments);
+    if (streaming && onQueue) onQueue(outgoing, attachments);
+    else onSend(outgoing, attachments);
     closeSlash();
+    closeMention();
     // Drop refs to revoke after send completes — onSend may consume async.
     setAttachments((prev) => {
       prev.forEach((a) => a.type === "image" && URL.revokeObjectURL(a.previewUrl));
@@ -618,6 +707,15 @@ export function Composer({
         />
       )}
 
+      {mentionVisible && !slashVisible && (
+        <MentionMenu
+          items={mentionItems}
+          activeIndex={mentionIdx}
+          onSelect={applyMention}
+          onHover={setMentionActive}
+        />
+      )}
+
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-1.5 pb-1.5 pt-1">
           {attachments.map((a, i) => (
@@ -666,15 +764,21 @@ export function Composer({
         value={text}
         onChange={(e) => {
           slashSuppress.current = false; // a fresh edit re-arms the menu
+          mentionSuppress.current = false;
           updateText(e.target.value);
           syncSlash();
+          syncMention();
         }}
-        onClick={syncSlash}
+        onClick={() => {
+          syncSlash();
+          syncMention();
+        }}
         onKeyUp={(e) => {
           // Re-detect on caret moves (arrows/home/end/click); typing is already
-          // covered by onChange. Skip keys the slash-nav handler consumes.
+          // covered by onChange. Skip keys the slash/mention-nav handler consumes.
           if (["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) return;
           syncSlash();
+          syncMention();
         }}
         onPaste={(e) => {
           const files: File[] = [];
@@ -719,6 +823,32 @@ export function Composer({
               e.stopPropagation();
               slashSuppress.current = true;
               closeSlash();
+              return;
+            }
+          }
+          // The @-mention menu owns the same nav keys when it's open (and the
+          // slash menu isn't — they're mutually exclusive per caret token).
+          if (mentionVisible && !slashVisible && !composing) {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setMentionActive((i) => (i + 1) % mentionItems.length);
+              return;
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setMentionActive((i) => (i - 1 + mentionItems.length) % mentionItems.length);
+              return;
+            }
+            if (e.key === "Enter" || e.key === "Tab") {
+              e.preventDefault();
+              applyMention(mentionItems[mentionIdx]);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              mentionSuppress.current = true;
+              closeMention();
               return;
             }
           }
