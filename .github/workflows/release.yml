@@ -158,20 +158,21 @@ jobs:
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
           echo "MANIFEST=$RUNNER_TEMP/latest.json" >> "$GITHUB_ENV"
 
-      # Created as a DRAFT so it's invisible to the in-app updater until you
-      # hit "Publish release" in the GitHub UI. GitHub's
-      # releases/latest/download/latest.json only resolves to published,
-      # non-prerelease releases — so a draft lets you download the dmg, test the
-      # exact build that will ship, and only then go live to users. Not happy?
-      # Delete the draft + tag, fix, re-tag.
-      - name: Create draft GitHub Release
+      - name: Create published GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          generate_release_notes: true
-          files: |
-            ${{ env.DMG }}
-            ${{ env.TARBALL }}
-            ${{ env.MANIFEST }}
-          fail_on_unmatched_files: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes
+          fi
+          gh release create "$TAG" \
+            "$DMG" \
+            "$TARBALL" \
+            "$MANIFEST" \
+            --title "$TAG" \
+            --generate-notes \
+            --latest \
+            --verify-tag
