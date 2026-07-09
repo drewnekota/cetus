@@ -1,6 +1,6 @@
 {
   "name": "cetus",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "description": "Key of the Twilight — an affordable desktop agent, made possible by DeepSeek V4. Built on pi; perceives (screen context), remembers (memory), and acts (tools, automations, parallel runs).",
   "private": true,
   "packageManager": "pnpm@10.27.0",
@@ -37,6 +37,7 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-markdown": "^10.1.0",
+    "react-virtuoso": "^4.18.10",
     "rehype-katex": "^7.0.1",
     "remark-cjk-friendly": "^2.0.1",
     "remark-gfm": "^4.0.1",

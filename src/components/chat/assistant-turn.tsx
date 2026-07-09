@@ -126,7 +126,12 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork }: Props) {
         <div className="flex w-full max-w-full flex-col gap-2">
           {segments.map((seg, i) =>
             seg.type === "activity" ? (
-              <ActivityGroup key={i} steps={seg.steps} durationMs={seg.durationMs} />
+              <ActivityGroup
+                key={i}
+                id={`${convId ?? ""}:${keys[0]}:a${i}`}
+                steps={seg.steps}
+                durationMs={seg.durationMs}
+              />
             ) : (
               <AnswerBlock key={i} block={seg.block} isUser={false} />
             ),

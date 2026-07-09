@@ -3,7 +3,7 @@
 // out of message-bubble.tsx so both a single bubble (user / custom) and a
 // grouped assistant turn (assistant-turn.tsx) render text, attachments, and the
 // hover toolbar identically.
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -32,28 +32,90 @@ import {
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 
-/** Assistant markdown is expensive to parse (remark-gfm + remark-math +
- *  rehype-katex). Memoizing on the source string means a bubble only re-parses
- *  when its own text actually changes — so a sibling re-render (e.g. a new
- *  message added to the list) doesn't reparse every prior bubble. */
-const AssistantMarkdown = memo(function AssistantMarkdown({ text }: { text: string }) {
+const PROSE_CLASS = cn(
+  "prose prose-sm dark:prose-invert max-w-none",
+  // Tighten default prose spacing so chat bubbles don't blow up.
+  "prose-p:my-2 prose-pre:my-2 prose-ul:my-2 prose-ol:my-2 prose-headings:my-3",
+  "prose-code:rounded prose-code:bg-secondary prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:before:content-none prose-code:after:content-none",
+  "prose-pre:bg-secondary prose-pre:text-foreground",
+  // Tables: prose-sm shrinks th/td to ~12px and prose-code drops another 15%.
+  // Keep cell text at the bubble's base size and stop nested code from shrinking further.
+  "prose-th:text-sm prose-th:py-2 prose-td:text-sm prose-td:py-2",
+  "[&_td_code]:text-[0.95em] [&_th_code]:text-[0.95em]",
+);
+
+/** One parse of a markdown fragment. Memoized on the source string so an
+ *  unchanged fragment (e.g. the frozen prefix of a streaming reply, or a prior
+ *  bubble when a new message is appended) is never re-parsed — parsing is the
+ *  expensive part (remark-gfm + remark-math + rehype-katex). */
+const RawMarkdown = memo(function RawMarkdown({ text }: { text: string }) {
   return (
-    <div
-      className={cn(
-        "prose prose-sm dark:prose-invert max-w-none",
-        // Tighten default prose spacing so chat bubbles don't blow up.
-        "prose-p:my-2 prose-pre:my-2 prose-ul:my-2 prose-ol:my-2 prose-headings:my-3",
-        "prose-code:rounded prose-code:bg-secondary prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:before:content-none prose-code:after:content-none",
-        "prose-pre:bg-secondary prose-pre:text-foreground",
-        // Tables: prose-sm shrinks th/td to ~12px and prose-code drops another 15%.
-        // Keep cell text at the bubble's base size and stop nested code from shrinking further.
-        "prose-th:text-sm prose-th:py-2 prose-td:text-sm prose-td:py-2",
-        "[&_td_code]:text-[0.95em] [&_th_code]:text-[0.95em]"
+    <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath, remarkCjkFriendly]} rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]} components={markdownComponents}>
+      {normalizeMath(text)}
+    </ReactMarkdown>
+  );
+});
+
+// A block start that a mid-stream split must not cut adjacent to: list item,
+// blockquote, or table row. Cutting there would momentarily break the construct
+// (restart list numbering, split a table) until the next token arrives.
+const UNSAFE_BLOCK = /^\s{0,3}([-*+]|\d+[.)]|>|\|)/;
+
+/** Character offset where the streaming tail should begin: just past the last
+ *  block boundary (blank line) that is *safe* to freeze a prefix at — outside
+ *  any code fence, and with neither the block above nor the line below being a
+ *  list / table / blockquote line. Returns -1 when there is no safe cut, so the
+ *  caller renders the whole text as one tree. A settled message always renders
+ *  un-split (see TextBlock), so a transient imperfect cut self-heals. */
+function safeStreamSplit(text: string): number {
+  const lines = text.split("\n");
+  const lineStart: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineStart.push(offset);
+    offset += line.length + 1;
+  }
+  let cut = -1;
+  let inFence = false;
+  for (let i = 1; i < lines.length - 1; i++) {
+    if (/^\s{0,3}(```|~~~)/.test(lines[i])) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || lines[i].trim() !== "") continue; // only blank lines outside fences
+    const prev = lines[i - 1];
+    const next = lines[i + 1];
+    if (prev.trim() === "" || next.trim() === "") continue; // need real content both sides
+    if (UNSAFE_BLOCK.test(prev) || UNSAFE_BLOCK.test(next)) continue;
+    cut = lineStart[i + 1];
+  }
+  // Only worth splitting when the frozen head is non-trivial.
+  return cut < 64 ? -1 : cut;
+}
+
+/** Assistant markdown. While streaming, freeze the settled prefix as its own
+ *  memoized parse and only re-parse the growing tail — so a long reply stops
+ *  re-parsing its whole body on every throttle tick (the dominant streaming jank
+ *  source). Settled messages render as a single tree, so the final output is
+ *  always exact. */
+const AssistantMarkdown = memo(function AssistantMarkdown({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming?: boolean;
+}) {
+  const cut = useMemo(() => (streaming ? safeStreamSplit(text) : -1), [text, streaming]);
+  return (
+    <div className={PROSE_CLASS}>
+      {cut > 0 ? (
+        <>
+          <RawMarkdown text={text.slice(0, cut)} />
+          <RawMarkdown text={text.slice(cut)} />
+        </>
+      ) : (
+        <RawMarkdown text={text} />
       )}
-    >
-      <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath, remarkCjkFriendly]} rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]} components={markdownComponents}>
-        {normalizeMath(text)}
-      </ReactMarkdown>
     </div>
   );
 });
@@ -124,7 +186,7 @@ export function TextBlock({
           <LinkifiedText text={text} />
         </div>
       ) : (
-        <AssistantMarkdown text={throttled} />
+        <AssistantMarkdown text={throttled} streaming={streaming} />
       )}
       {streaming && (
         <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-current align-middle opacity-70" />

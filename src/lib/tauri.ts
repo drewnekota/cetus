@@ -194,6 +194,11 @@ export const api = {
    *  prompt can reference it for the read_document tool. */
   saveAttachment: (id: string, name: string, data: string) =>
     invoke<string>("save_attachment", { id, name, data }),
+  /** Absolute paths of any files on the clipboard (a Finder file copy). Empty on
+   *  a non-file clipboard or off macOS. Used to reference a too-large paste by
+   *  its real path instead of inlining its bytes. */
+  readClipboardFilePaths: () =>
+    invoke<string[]>("read_clipboard_file_paths"),
   piPing: () => invoke<boolean>("pi_ping"),
   defaultWorkspace: () => invoke<string>("default_workspace"),
   pickWorkspaceDir: () => invoke<string | null>("pick_workspace_dir"),

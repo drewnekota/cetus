@@ -247,6 +247,66 @@ pub(crate) fn copy_selection_via_clipboard() -> Option<String> {
     }
 }
 
+/// Absolute filesystem paths of any `public.file-url` items on the general
+/// pasteboard — i.e. a file copied in Finder. Empty when the clipboard holds no
+/// file URLs (raw image/text). Each URL is percent-decoded to a real path via
+/// NSURL. Read-only: never mutates the pasteboard.
+#[cfg(target_os = "macos")]
+pub(crate) fn clipboard_file_paths() -> Vec<String> {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+
+    let mut out: Vec<String> = Vec::new();
+    unsafe {
+        let (Some(pb_cls), Some(url_cls)) =
+            (AnyClass::get(c"NSPasteboard"), AnyClass::get(c"NSURL"))
+        else {
+            return out;
+        };
+        let pb: *mut AnyObject = msg_send![pb_cls, generalPasteboard];
+        if pb.is_null() {
+            return out;
+        }
+        let items: *mut AnyObject = msg_send![pb, pasteboardItems];
+        if items.is_null() {
+            return out;
+        }
+        let count: isize = msg_send![items, count];
+        let ty = ns_string("public.file-url");
+        for i in 0..count {
+            let item: *mut AnyObject = msg_send![items, objectAtIndex: i];
+            if item.is_null() {
+                continue;
+            }
+            let s: *mut AnyObject = msg_send![item, stringForType: ty];
+            if s.is_null() {
+                continue;
+            }
+            // `public.file-url` is a percent-encoded `file://` string; round-trip
+            // through NSURL so `path` hands back the decoded filesystem path.
+            let url: *mut AnyObject = msg_send![url_cls, URLWithString: s];
+            if url.is_null() {
+                continue;
+            }
+            let path_obj: *mut AnyObject = msg_send![url, path];
+            if path_obj.is_null() {
+                continue;
+            }
+            let c: *const c_char = msg_send![path_obj, UTF8String];
+            if c.is_null() {
+                continue;
+            }
+            let p = CStr::from_ptr(c).to_string_lossy().into_owned();
+            if !p.is_empty() {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
 #[cfg(target_os = "macos")]
 unsafe fn ns_string(s: &str) -> *mut objc2::runtime::AnyObject {
     use objc2::msg_send;

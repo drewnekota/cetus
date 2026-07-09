@@ -1,19 +1,21 @@
 "use client";
-import { memo, useState } from "react";
+import { memo } from "react";
 import { ChevronDown, ChevronRight, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
+import { useDisclosure } from "@/lib/disclosure";
 
 /** One compact "thinking" step in the activity timeline. Borderless row that
  *  expands to reveal the raw chain-of-thought. Matches the tool-step styling so
- *  the two read as a single timeline. */
-export const ThinkingBlock = memo(function ThinkingBlock({ text, streaming }: { text: string; streaming?: boolean }) {
+ *  the two read as a single timeline. `id` persists the expanded state across
+ *  the virtualized list unmounting this turn. */
+export const ThinkingBlock = memo(function ThinkingBlock({ id, text, streaming }: { id?: string; text: string; streaming?: boolean }) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(false);
+  const [open, toggle] = useDisclosure(id);
   return (
     <div>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
       >
         {open ? (

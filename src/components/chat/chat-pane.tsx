@@ -2,13 +2,13 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
 import { AgentControlCard } from "@/components/chat/agent-control-card";
@@ -30,7 +30,6 @@ import {
   useMessageKeys,
   useMessageRoles,
   useRunningSubagents,
-  useUserTurnKeys,
 } from "@/lib/chat-store";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeadline } from "@/lib/chat-flavor";
@@ -143,9 +142,6 @@ export function ChatPane({
     quoteIdRef.current += 1;
     setQuoteRequest({ id: quoteIdRef.current, text });
   }, []);
-  // Lifted out of MessageList so the turn navigator (sibling overlay) can drive
-  // the same scroll container — scroll-to-turn and active-turn tracking.
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   if (!hasMessages) {
     return (
@@ -188,20 +184,15 @@ export function ChatPane({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <MessageList
-          convId={convId}
-          isStreaming={isStreaming}
-          onRegenerate={onRegenerate}
-          onRetry={onRetry}
-          onForkMessage={onForkMessage}
-          retrying={retrying}
-          onQuote={addQuote}
-          scrollRef={scrollRef}
-        />
-        <TurnNavigator convId={convId} scrollRef={scrollRef} />
-        <ScrollToBottomButton scrollRef={scrollRef} />
-      </div>
+      <MessageList
+        convId={convId}
+        isStreaming={isStreaming}
+        onRegenerate={onRegenerate}
+        onRetry={onRetry}
+        onForkMessage={onForkMessage}
+        retrying={retrying}
+        onQuote={addQuote}
+      />
       <div className="relative z-10 bg-background px-4 pb-3 pt-2">
         <div className="mx-auto max-w-3xl space-y-2">
           {convId ? <BackgroundAgentsBar convId={convId} /> : null}
@@ -318,12 +309,13 @@ function WorktreeChip({
   );
 }
 
-// Turns mounted on first open of a conversation. Anything older is deferred
-// behind a "Load earlier" button so a long history doesn't parse + lay out in
-// one shot. A turn = one user message or one merged assistant loop.
-const INITIAL_WINDOW = 40;
-// Additional turns revealed per "Load earlier" click.
-const LOAD_STEP = 40;
+// Deadzone (px from the true bottom) within which the list counts as "at the
+// bottom" — drives stick-to-bottom follow and hides the scroll-to-bottom button.
+const STICKY_BOTTOM_PX = 32;
+// Extra rows Virtuoso keeps mounted above/below the viewport. A generous margin
+// means fast scrolls and expander toggles rarely hit an unmounted turn, and the
+// off-screen markdown parse is spread out instead of hitching on entry.
+const OVERSCAN_PX = 800;
 
 type MessageGroup =
   | { kind: "assistant"; keys: string[] }
@@ -366,7 +358,6 @@ function MessageList({
   onForkMessage,
   retrying,
   onQuote,
-  scrollRef,
 }: {
   convId: string | null;
   isStreaming: boolean;
@@ -375,332 +366,163 @@ function MessageList({
   onForkMessage?: (messageKey: string, messageIndex: number) => void;
   retrying?: boolean;
   onQuote: (text: string) => void;
-  scrollRef: RefObject<HTMLDivElement | null>;
 }) {
-  const { t } = useTranslation("chat");
   const keys = useMessageKeys(convId);
   const roles = useMessageRoles(convId);
   // Merge consecutive assistant (+tool) messages into one group so the whole
   // agent loop reads as a single turn — one ASSISTANT header, one activity
   // timeline — instead of a header + tool cards per round.
   const groups = useMemo(() => buildGroups(keys, roles), [keys, roles]);
-
-  // Windowing: a very long conversation otherwise mounts every turn at once —
-  // each AssistantGroup runs a full markdown/KaTeX parse on mount and builds a
-  // huge DOM, so opening a long chat hitches. We mount only the turns from
-  // `firstShown` onward and reveal older ones on demand. Unlike a virtualizer
-  // this never unmounts what's already shown (preserving per-message
-  // subscriptions + activity-group expand state, same as the content-visibility
-  // approach below) — it only defers turns that were never on screen.
-  //
-  // `firstShown` is an ABSOLUTE index, not a count-from-end, so appending a new
-  // turn (user send / new agent reply) never slides the window and never
-  // unmounts a turn you're scrolled up reading — it only grows the tail.
-  const [firstShown, setFirstShown] = useState(0);
-  // Re-anchor to the tail on conversation switch and on the first load of a
-  // conversation's messages (groups 0 → N). Adjusting state during render
-  // (guarded by a ref) is React's sanctioned pattern here: it restarts the
-  // render with the corrected value before committing, so a long history never
-  // momentarily mounts in full. After load, appends leave `firstShown` put.
-  const windowInitRef = useRef<{ conv: string | null; loaded: boolean }>({
-    conv: null,
-    loaded: false,
-  });
-  if (
-    windowInitRef.current.conv !== convId ||
-    (!windowInitRef.current.loaded && groups.length > 0)
-  ) {
-    windowInitRef.current = { conv: convId, loaded: groups.length > 0 };
-    setFirstShown(Math.max(0, groups.length - INITIAL_WINDOW));
-  }
-  // Clamp in case a rollback (regenerate) shrank the list past the window.
-  const safeFirstShown = Math.min(firstShown, Math.max(0, groups.length - 1));
-  const hiddenCount = safeFirstShown;
-  const visibleGroups = useMemo(
-    () => (hiddenCount > 0 ? groups.slice(hiddenCount) : groups),
-    [groups, hiddenCount],
-  );
-
   const awaiting = useAwaitingAssistant(convId);
   // When the turn errored, the inline MessageError row owns the Retry action —
   // don't also put a Regenerate on the trailing user bubble (avoid two buttons).
   const hasError = !!useChatError(convId);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const stickToBottomRef = useRef(true);
-  // Every scrollTop we write ourselves (pin-to-bottom, height-correction
-  // compensation, load-earlier anchor restore) fires a `scroll` event a frame
-  // later — by which time content-visibility turns may have grown past the 200px
-  // estimate, so `onScroll` would read distance-from-bottom > 32 and wrongly flip
-  // follow OFF, stranding a freshly-opened chat in the middle. Record the exact
-  // scrollTop we set so `onScroll` can tell our own writes from a real user
-  // scroll and only the latter changes the follow state.
-  const programmaticTopRef = useRef<number | null>(null);
-  const markProgrammaticScroll = useCallback((el: HTMLDivElement) => {
-    programmaticTopRef.current = el.scrollTop;
-  }, []);
-  // Set just before a "Load earlier" reveal so we can restore the reading
-  // position after the prepended turns grow the scroll height (otherwise the
-  // viewport jumps as content is added above).
-  const anchorRef = useRef<{ height: number; top: number } | null>(null);
 
-  const loadEarlier = useCallback(() => {
-    const el = scrollRef.current;
-    if (el) anchorRef.current = { height: el.scrollHeight, top: el.scrollTop };
-    setFirstShown((f) => Math.max(0, f - LOAD_STEP));
-  }, []);
+  // react-virtuoso owns the scroll container and does the hard parts natively:
+  // it measures each variable-height turn and corrects scroll in the SAME frame
+  // a turn grows (image/KaTeX/streaming), so content above the fold never shoves
+  // the viewport — that shove is exactly the jank the old hand-rolled
+  // ResizeObserver compensation fought (and lost). It also only mounts the
+  // visible window (+overscan), so a long history no longer parses every turn's
+  // markdown up front — retiring the content-visibility windowing this file
+  // used to hand-roll.
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // The real scroll DOM node Virtuoso hands back — needed only by the quote
+  // toolbar (selection root + scroll-to-dismiss). Held in state so its effects
+  // re-run once the node exists.
+  const [scroller, setScroller] = useState<HTMLElement | null>(null);
+  const [atBottom, setAtBottom] = useState(true);
+  // Topmost visible group index (from Virtuoso's rangeChanged) — drives the turn
+  // navigator's active tick with no getBoundingClientRect scanning.
+  const [topIndex, setTopIndex] = useState(0);
 
-  // Keep the previously-top turn pinned in place after a reveal. Runs before
-  // paint so there's no visible jump. Only fires when an anchor was armed by
-  // loadEarlier — the conversation-switch reset leaves it null.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    const anchor = anchorRef.current;
-    if (!el || !anchor) return;
-    anchorRef.current = null;
-    el.scrollTop = anchor.top + (el.scrollHeight - anchor.height);
-    markProgrammaticScroll(el);
-  }, [safeFirstShown, markProgrammaticScroll]);
-
-  // Opening a conversation should land at the newest message. The component is
-  // never remounted on switch, so re-arm auto-follow and snap to the bottom
-  // whenever convId changes — otherwise a scrolled-up position carried over from
-  // the previous conversation leaves stickToBottomRef false and the new one
-  // renders pinned to the top.
-  useLayoutEffect(() => {
-    stickToBottomRef.current = true;
-    const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-      markProgrammaticScroll(el);
-    }
-  }, [convId, markProgrammaticScroll]);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      // Ignore the scroll events our own scrollTop writes emit (they land a frame
-      // late, after content-visibility turns have grown, so their distance read
-      // is stale and would falsely drop follow). Keep ignoring while the position
-      // still matches what we pinned — a real user scroll moves it elsewhere.
-      if (
-        programmaticTopRef.current !== null &&
-        Math.abs(el.scrollTop - programmaticTopRef.current) < 1
-      ) {
-        return;
-      }
-      programmaticTopRef.current = null;
-      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      stickToBottomRef.current = distance < 32;
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, []);
-
-  // Scroll on add/remove (keys array reference changes).
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // A fresh user turn means the user just sent — snap to the bottom and
-    // re-arm auto-follow even if they'd scrolled up reading older context, so
-    // their new message (and the reply that follows) is always in view.
-    if (roles[roles.length - 1] === "user") stickToBottomRef.current = true;
-    if (!stickToBottomRef.current) return;
-    el.scrollTop = el.scrollHeight;
-    markProgrammaticScroll(el);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keys]);
-
-  // Stick to bottom whenever the content actually grows — token deltas mutate
-  // the tail bubble's height without changing `keys`. A ResizeObserver fires
-  // only on real layout changes, so we no longer reflow every animation frame
-  // for the whole stream (the old rAF loop was a continuous jank source).
-  useEffect(() => {
-    const el = scrollRef.current;
-    const content = contentRef.current;
-    if (!el || !content) return;
-    const ro = new ResizeObserver(() => {
-      if (stickToBottomRef.current) {
-        el.scrollTop = el.scrollHeight;
-        markProgrammaticScroll(el);
-      }
+  // User turns paired with their index in the group list, for the navigator's
+  // scroll-to-turn (Virtuoso scrollToIndex) and active-tick math.
+  const userTurns = useMemo(() => {
+    const out: { key: string; index: number }[] = [];
+    groups.forEach((g, i) => {
+      if (g.kind !== "single") return;
+      if (roles[keys.indexOf(g.key)] === "user") out.push({ key: g.key, index: i });
     });
-    ro.observe(content);
-    return () => ro.disconnect();
-  }, []);
+    return out;
+  }, [groups, keys, roles]);
 
-  // Remember each turn's real laid-out height and feed it back as its own
-  // content-visibility placeholder size. Without this every off-screen turn
-  // collapses to the fixed 200px estimate below — so scrolling past a tall turn
-  // constantly changes scrollHeight, jerking the scrollbar and fighting the
-  // browser's scroll anchoring (the "jumping" while reading a long chat). The
-  // `containIntrinsicSize: auto` keyword is meant to remember this automatically,
-  // but WKWebView (the macOS webview) doesn't honor it, so we lock the measured
-  // height in ourselves. Kept OFF React's `style` prop on purpose: the list
-  // re-renders on every new turn / stream tick and would otherwise clobber the
-  // measured value back to 200px each time.
-  const [turnSizer] = useState(() =>
-    typeof ResizeObserver === "undefined"
-      ? null
-      : new ResizeObserver((entries) => {
-          const scroller = scrollRef.current;
-          for (const entry of entries) {
-            const el = entry.target as HTMLElement;
-            const h = Math.round(
-              entry.borderBoxSize?.[0]?.blockSize ?? el.offsetHeight,
-            );
-            if (h <= 0) continue;
-            const next = String(h);
-            // Guard against re-setting the same value (locking the size of a
-            // skipped turn changes its box, which re-fires the observer).
-            if (el.dataset.cis === next) continue;
-            const prev = el.dataset.cis ? Number(el.dataset.cis) : 0;
-            el.dataset.cis = next;
-            el.style.containIntrinsicSize = `auto ${h}px`;
-            // Scroll-position compensation. A turn that starts off-screen holds
-            // the 200px estimate below until it scrolls into view, then jumps to
-            // its (usually much taller) real height. When that turn is above the
-            // reading position, its growth shoves everything below it down —
-            // and WKWebView has no scroll anchoring to absorb it, so the fixed
-            // scrollTop then shows earlier content: scrolling up a little snaps
-            // the whole list toward the top. Counter it by shifting scrollTop by
-            // the same delta so the visible content stays pinned. (prev === 0 is
-            // the initial seed pass — nothing to correct yet.)
-            //
-            // Only compensate turns that sit ENTIRELY above the fold. A turn
-            // straddling the top edge — the one you're scrolling *into* — is
-            // being read; correcting its growth would push it back down as fast
-            // as you scroll up, so a reflowing turn (KaTeX finishing its layout
-            // across several resize passes) would fight every upward scroll and
-            // feel like it can't scroll past. content-visibility renders a turn
-            // within a margin before it's visible, so the fully-above ones still
-            // get corrected here in time to prevent the jump.
-            if (scroller && prev > 0) {
-              if (stickToBottomRef.current) {
-                // Following the tail: a turn jumping from the 200px estimate to
-                // its real height (usually taller) grows the list; snap straight
-                // to the true bottom so the newest message stays in view. Doing
-                // the per-turn delta shift below instead would leave us pinned to
-                // the *estimated* bottom — short of the real one — which is the
-                // "opens a chat scrolled to the middle" bug.
-                scroller.scrollTop = scroller.scrollHeight;
-                programmaticTopRef.current = scroller.scrollTop;
-              } else {
-                const scrollerTop = scroller.getBoundingClientRect().top;
-                if (el.getBoundingClientRect().bottom <= scrollerTop) {
-                  scroller.scrollTop += h - prev;
-                  programmaticTopRef.current = scroller.scrollTop;
-                }
-              }
+  // Snap to the newest message when the user sends (even if scrolled up reading);
+  // followOutput then keeps the streaming reply pinned as long as we stay at the
+  // bottom. Keyed on the last message key so it fires once per send, not per token.
+  const prevLastKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const lastKey = keys[keys.length - 1] ?? null;
+    if (lastKey !== prevLastKeyRef.current && roles[roles.length - 1] === "user") {
+      virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end" });
+    }
+    prevLastKeyRef.current = lastKey;
+  }, [keys, roles]);
+
+  const itemContent = useCallback(
+    (index: number, g: MessageGroup) => {
+      const isLast = index === groups.length - 1;
+      const messageIndex =
+        g.kind === "assistant"
+          ? keys.indexOf(g.keys[g.keys.length - 1])
+          : keys.indexOf(g.key);
+      const forkMessageKey =
+        g.kind === "assistant" ? g.keys[g.keys.length - 1] : g.key;
+      const node =
+        g.kind === "assistant" ? (
+          <AssistantGroup
+            convId={convId}
+            keys={g.keys}
+            onRegenerate={onRegenerate && !isStreaming && isLast ? onRegenerate : undefined}
+            onFork={
+              onForkMessage && messageIndex >= 0
+                ? () => onForkMessage(forkMessageKey, messageIndex)
+                : undefined
             }
-          }
-        }),
-  );
-  useEffect(() => () => turnSizer?.disconnect(), [turnSizer]);
-  const measureTurn = useCallback(
-    (el: HTMLDivElement | null) => {
-      if (!el || !turnSizer) return;
-      // Seed an estimate before the observer's first callback so a turn that
-      // starts off-screen never momentarily collapses to zero height. Record it
-      // as the known height too, so the observer treats the eventual 200px→real
-      // correction as a delta to compensate for (rather than a first-seen size).
-      if (!el.style.containIntrinsicSize) {
-        el.style.containIntrinsicSize = "auto 200px";
-        el.dataset.cis = "200";
-      }
-      turnSizer.observe(el);
-      // React 19 cleanup ref: unobserve when this specific turn unmounts
-      // (conversation switch / rollback) so the observer never retains it.
-      return () => turnSizer.unobserve(el);
+          />
+        ) : (
+          <MessageBubble
+            convId={convId}
+            messageKey={g.key}
+            // A trailing user bubble means the agent was interrupted before it
+            // replied (no assistant group followed). Offer Regenerate there too —
+            // retryLastTurn already handles a user-only tail.
+            onRegenerate={
+              onRegenerate && isLast && !isStreaming && !awaiting && !hasError
+                ? onRegenerate
+                : undefined
+            }
+            onFork={
+              onForkMessage && messageIndex >= 0
+                ? () => onForkMessage(forkMessageKey, messageIndex)
+                : undefined
+            }
+          />
+        );
+      // Center each turn on the reading column. Virtuoso measures this wrapper.
+      return <div className="mx-auto max-w-3xl px-6">{node}</div>;
     },
-    [turnSizer],
+    [groups.length, keys, convId, onRegenerate, isStreaming, onForkMessage, awaiting, hasError],
   );
 
-  return (
-    <div
-      ref={scrollRef}
-      className="scrollbar-slim relative min-h-0 flex-1 overscroll-contain overflow-y-auto bg-background"
-      data-testid="message-list"
-    >
-      <QuoteSelectionToolbar containerRef={contentRef} scrollRef={scrollRef} onQuote={onQuote} />
-      <div ref={contentRef} data-message-content className="mx-auto max-w-3xl px-6 py-4">
-        {hiddenCount > 0 && (
-          <div className="flex justify-center pb-3">
-            <button
-              type="button"
-              onClick={loadEarlier}
-              className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              {t("pane.loadEarlier")}
-            </button>
-          </div>
-        )}
-        {visibleGroups.map((g, gi) => {
-          const isLast = gi === visibleGroups.length - 1;
-          const messageIndex =
-            g.kind === "assistant"
-              ? keys.indexOf(g.keys[g.keys.length - 1])
-              : keys.indexOf(g.key);
-          const forkMessageKey =
-            g.kind === "assistant" ? g.keys[g.keys.length - 1] : g.key;
-          const node =
-            g.kind === "assistant" ? (
-              <AssistantGroup
-                convId={convId}
-                keys={g.keys}
-                onRegenerate={onRegenerate && !isStreaming && isLast ? onRegenerate : undefined}
-                onFork={
-                  onForkMessage && messageIndex >= 0
-                    ? () => onForkMessage(forkMessageKey, messageIndex)
-                    : undefined
-                }
-              />
-            ) : (
-              <MessageBubble
-                convId={convId}
-                messageKey={g.key}
-                // A trailing user bubble means the agent was interrupted before
-                // it replied (no assistant group followed). Offer Regenerate
-                // there too — retryLastTurn already handles a user-only tail.
-                onRegenerate={
-                  onRegenerate && isLast && !isStreaming && !awaiting && !hasError
-                    ? onRegenerate
-                    : undefined
-                }
-                onFork={
-                  onForkMessage && messageIndex >= 0
-                    ? () => onForkMessage(forkMessageKey, messageIndex)
-                    : undefined
-                }
-              />
-            );
-          // content-visibility lets the browser skip layout + paint for turns
-          // scrolled out of view WITHOUT unmounting them — so per-message store
-          // subscriptions and activity-group expand state survive (a windowing
-          // virtualizer would lose both). The streaming tail (last group) is left
-          // always-painted so live token growth + stick-to-bottom stay exact.
-          // `containIntrinsicSize` is owned imperatively by measureTurn (above),
-          // not set here, so the real measured height survives re-renders.
-          return (
-            <div
-              key={g.kind === "assistant" ? g.keys[0] : g.key}
-              ref={measureTurn}
-              // Tag user turns so the turn navigator can scroll to / track them.
-              data-turn-key={g.kind === "single" ? g.key : undefined}
-              style={isLast ? undefined : { contentVisibility: "auto" }}
-            >
-              {node}
-            </div>
-          );
-        })}
+  // The list tail: the between-send shimmer and the inline error row, rendered
+  // after the last turn so they ride stick-to-bottom.
+  // No idle padding here: any non-zero Footer height sits below the last turn
+  // inside the scroll area, so "align last turn to bottom" on open would leave
+  // that gap and land slightly above the true bottom. The shimmer / error rows
+  // carry their own py when present; a settled list has a zero-height footer.
+  const Footer = useCallback(
+    () => (
+      <div className="mx-auto max-w-3xl px-6">
         {awaiting && <ThinkingPlaceholder />}
         {!isStreaming && !awaiting && (
           <MessageError convId={convId} onRetry={onRetry} retrying={retrying} />
         )}
       </div>
+    ),
+    [awaiting, isStreaming, convId, onRetry, retrying],
+  );
+
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <QuoteSelectionToolbar scroller={scroller} onQuote={onQuote} />
+      <Virtuoso
+        // Remount on conversation switch so the new chat lands at its own bottom
+        // (initialTopMostItemIndex only applies at mount), with no scroll
+        // position carried over from the previous conversation.
+        key={convId ?? "new"}
+        ref={virtuosoRef}
+        scrollerRef={(el) => setScroller((el as HTMLElement) ?? null)}
+        data={groups}
+        data-testid="message-list"
+        className="scrollbar-slim min-h-0 flex-1 overscroll-contain bg-background"
+        computeItemKey={(_i, g) => (g.kind === "assistant" ? g.keys[0] : g.key)}
+        itemContent={itemContent}
+        components={{ Header: TopSpacer, Footer }}
+        // Align the LAST turn to the viewport's BOTTOM on open (not its top —
+        // the bare index defaults to top-align, which strands a long final reply
+        // "scrolled to its own top", i.e. slightly above the real bottom).
+        initialTopMostItemIndex={{ index: Math.max(0, groups.length - 1), align: "end" }}
+        alignToBottom
+        followOutput={(isAtBottom) => (isAtBottom ? "auto" : false)}
+        atBottomThreshold={STICKY_BOTTOM_PX}
+        atBottomStateChange={setAtBottom}
+        rangeChanged={(range) => setTopIndex(range.startIndex)}
+        increaseViewportBy={OVERSCAN_PX}
+      />
+      <TurnNavigator
+        convId={convId}
+        userTurns={userTurns}
+        topIndex={topIndex}
+        virtuosoRef={virtuosoRef}
+      />
+      <ScrollToBottomButton atBottom={atBottom} virtuosoRef={virtuosoRef} />
     </div>
   );
 }
+
+/** Small breathing room above the first turn (Virtuoso Header slot). */
+const TopSpacer = () => <div className="h-4" />;
 
 /** Codex-style turn navigator: a thin gutter of ticks down the left edge, one
  *  per user turn. Ticks are evenly spaced and clustered together, vertically
@@ -712,75 +534,39 @@ function MessageList({
  *  it never fights text selection. */
 function TurnNavigator({
   convId,
-  scrollRef,
+  userTurns,
+  topIndex,
+  virtuosoRef,
 }: {
   convId: string | null;
-  scrollRef: RefObject<HTMLDivElement | null>;
+  /** User turns paired with their index in the virtualized group list. */
+  userTurns: { key: string; index: number }[];
+  /** Topmost visible group index, published by the list's rangeChanged. */
+  topIndex: number;
+  virtuosoRef: RefObject<VirtuosoHandle | null>;
 }) {
-  const turnKeys = useUserTurnKeys(convId);
-  const [active, setActive] = useState(0);
   const [hover, setHover] = useState<number | null>(null);
 
-  const findNode = useCallback(
-    (key: string) =>
-      scrollRef.current?.querySelector<HTMLElement>(
-        `[data-turn-key="${CSS.escape(key)}"]`,
-      ) ?? null,
-    [scrollRef],
-  );
+  // Active tick = the last user turn at or above the top of the viewport.
+  const active = useMemo(() => {
+    let next = 0;
+    for (let i = 0; i < userTurns.length; i++) {
+      if (userTurns[i].index <= topIndex) next = i;
+      else break;
+    }
+    return next;
+  }, [userTurns, topIndex]);
 
-  // Track which turn sits at the top of the viewport so the matching tick
-  // brightens. rAF-throttled to stay off the scroll hot path.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || turnKeys.length === 0) return;
-    let raf = 0;
-    const update = () => {
-      raf = 0;
-      const top = el.getBoundingClientRect().top;
-      let next = 0;
-      for (let i = 0; i < turnKeys.length; i++) {
-        const node = findNode(turnKeys[i]);
-        if (!node) continue;
-        // The last turn whose top has scrolled above the fold is active.
-        if (node.getBoundingClientRect().top - top <= 8) next = i;
-        else break;
-      }
-      setActive(next);
-    };
-    const onScroll = () => {
-      if (!raf) raf = requestAnimationFrame(update);
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    update();
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [scrollRef, turnKeys, findNode]);
-
-  const scrollToTurn = useCallback(
-    (key: string) => {
-      const el = scrollRef.current;
-      const node = findNode(key);
-      if (!el || !node) return;
-      const delta =
-        node.getBoundingClientRect().top - el.getBoundingClientRect().top;
-      el.scrollTo({ top: el.scrollTop + delta - 12, behavior: "smooth" });
-    },
-    [scrollRef, findNode],
-  );
-
-  if (turnKeys.length < 2) return null;
+  if (userTurns.length < 2) return null;
 
   return (
     <div className="pointer-events-none absolute inset-y-0 left-0 z-20 hidden w-12 sm:flex sm:flex-col sm:items-start sm:justify-center">
       <div className="flex flex-col items-start gap-0">
-        {turnKeys.map((key, i) => {
+        {userTurns.map((turn, i) => {
           const isActive = i === active;
           return (
             <div
-              key={key}
+              key={turn.key}
               className="pointer-events-auto relative flex items-center"
               onMouseEnter={() => setHover(i)}
               onMouseLeave={() => setHover((h) => (h === i ? null : h))}
@@ -788,7 +574,13 @@ function TurnNavigator({
               <button
                 type="button"
                 aria-label={`Jump to message ${i + 1}`}
-                onClick={() => scrollToTurn(key)}
+                onClick={() =>
+                  virtuosoRef.current?.scrollToIndex({
+                    index: turn.index,
+                    align: "start",
+                    behavior: "smooth",
+                  })
+                }
                 className="group flex h-1.5 items-center pl-3 pr-2"
               >
                 <span
@@ -799,7 +591,7 @@ function TurnNavigator({
                   }`}
                 />
               </button>
-              {hover === i && <TurnPreview convId={convId} turnKey={key} />}
+              {hover === i && <TurnPreview convId={convId} turnKey={turn.key} />}
             </div>
           );
         })}
@@ -836,46 +628,25 @@ function TurnPreview({
  *  scrolled up away from the bottom of the conversation, and jumps them back
  *  down in one click. Lives outside the scroll container (as a sibling overlay)
  *  so it stays pinned to the viewport instead of scrolling with the messages.
- *  Tracks distance-from-bottom on scroll and whenever the content grows (a
- *  streaming reply lengthening the list), matching the message list's own
- *  32px stick-to-bottom deadzone. */
+ *  Visibility is driven by Virtuoso's atBottom state (which already tracks the
+ *  32px deadzone via atBottomThreshold), so there's no scroll listener here. */
 function ScrollToBottomButton({
-  scrollRef,
+  atBottom,
+  virtuosoRef,
 }: {
-  scrollRef: RefObject<HTMLDivElement | null>;
+  atBottom: boolean;
+  virtuosoRef: RefObject<VirtuosoHandle | null>;
 }) {
   const { t } = useTranslation("chat");
-  const [show, setShow] = useState(false);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const update = () => {
-      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      // Show the moment you're off the bottom — hidden only inside the same
-      // 32px deadzone the list uses to re-stick, so it doesn't flicker while
-      // streaming re-pins the tail.
-      setShow(distance > 32);
-    };
-    el.addEventListener("scroll", update, { passive: true });
-    // Content growth (streaming tokens, new turns) changes distance-from-bottom
-    // without a scroll event — observe the messages wrapper so the button shows
-    // up when the tail grows below the fold.
-    const content = el.querySelector<HTMLElement>("[data-message-content]");
-    const ro = content ? new ResizeObserver(update) : null;
-    if (content && ro) ro.observe(content);
-    update();
-    return () => {
-      el.removeEventListener("scroll", update);
-      ro?.disconnect();
-    };
-  }, [scrollRef]);
+  const show = !atBottom;
 
   const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [scrollRef]);
+    virtuosoRef.current?.scrollToIndex({
+      index: "LAST",
+      align: "end",
+      behavior: "smooth",
+    });
+  }, [virtuosoRef]);
 
   return (
     <button
@@ -895,12 +666,11 @@ function ScrollToBottomButton({
 }
 
 function QuoteSelectionToolbar({
-  containerRef,
-  scrollRef,
+  scroller,
   onQuote,
 }: {
-  containerRef: RefObject<HTMLDivElement | null>;
-  scrollRef: RefObject<HTMLDivElement | null>;
+  /** The Virtuoso scroll element: selection root + scroll-to-dismiss source. */
+  scroller: HTMLElement | null;
   onQuote: (text: string) => void;
 }) {
   const { t } = useTranslation("chat");
@@ -911,16 +681,16 @@ function QuoteSelectionToolbar({
   } | null>(null);
 
   const clearSelection = useCallback(() => {
-    const root = containerRef.current;
+    const root = scroller;
     const sel = window.getSelection();
     if (root && sel && selectionBelongsToRoot(root, sel)) {
       sel.removeAllRanges();
     }
     setSelection(null);
-  }, [containerRef]);
+  }, [scroller]);
 
   const readSelection = useCallback(() => {
-    const root = containerRef.current;
+    const root = scroller;
     const sel = window.getSelection();
     if (!root || !sel || sel.rangeCount === 0 || sel.isCollapsed) {
       setSelection(null);
@@ -952,14 +722,14 @@ function QuoteSelectionToolbar({
       left: Math.round(rect.left + rect.width / 2),
       top: Math.round(Math.max(8, rect.top - 8)),
     });
-  }, [containerRef]);
+  }, [scroller]);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
       if (target?.closest("[data-quote-selection-toolbar]")) return;
 
-      const root = containerRef.current;
+      const root = scroller;
       const sel = window.getSelection();
       if (!root || !sel || !selectionBelongsToRoot(root, sel)) return;
 
@@ -979,16 +749,16 @@ function QuoteSelectionToolbar({
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("keydown", onKeyDown);
-    scrollRef.current?.addEventListener("scroll", onScroll, { passive: true });
+    scroller?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("selectionchange", onSelectionChange);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("keydown", onKeyDown);
-      scrollRef.current?.removeEventListener("scroll", onScroll);
+      scroller?.removeEventListener("scroll", onScroll);
     };
-  }, [clearSelection, containerRef, readSelection, scrollRef]);
+  }, [clearSelection, readSelection, scroller]);
 
   if (!selection) return null;
 

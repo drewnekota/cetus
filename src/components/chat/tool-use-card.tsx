@@ -1,9 +1,10 @@
 "use client";
-import { memo, useState } from "react";
+import { memo } from "react";
 import { ChevronDown, ChevronRight, Wrench, AlertCircle, Loader2, CheckCircle2, CircleSlash, Bot, Check } from "lucide-react";
 import type { PiContentBlock, RenderedBlock } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
+import { useDisclosure } from "@/lib/disclosure";
 
 type ToolUse = Extract<RenderedBlock, { kind: "tool_use" }>;
 
@@ -104,9 +105,9 @@ function flattenResultContent(content: PiContentBlock[] | undefined): string {
  *  expands to show args + result. Borderless on purpose — it lives inside the
  *  activity group's bordered panel. Memoized on `block`: a settled tool keeps
  *  its ref while a sibling streams, so it stops re-rendering once done. */
-export const ToolUseCard = memo(function ToolUseCard({ block }: { block: ToolUse }) {
+export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: string; block: ToolUse }) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(false);
+  const [open, toggle] = useDisclosure(id);
   const isError = block.result?.isError;
   const isRunning = block.streaming === true;
   // A settled (non-streaming) tool call that never got a result was interrupted
@@ -126,7 +127,7 @@ export const ToolUseCard = memo(function ToolUseCard({ block }: { block: ToolUse
   return (
     <div>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         className="flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-muted/60"
       >
         {open ? (

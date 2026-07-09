@@ -1,8 +1,8 @@
 "use client";
-import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import type { RenderedBlock } from "@/lib/types";
 import { useTranslation } from "@/lib/i18n";
+import { useDisclosure } from "@/lib/disclosure";
 import { ToolUseCard, summarizeArgs, subagentInfo } from "./tool-use-card";
 import { ThinkingBlock } from "./thinking-block";
 
@@ -14,14 +14,18 @@ type ProcessBlock = Extract<RenderedBlock, { kind: "thinking" | "tool_use" }>;
  *  doesn't grow a card per step); once settled it shows a "Worked for Xs · N
  *  steps" summary that expands to the full timeline. */
 export function ActivityGroup({
+  id,
   steps,
   durationMs,
 }: {
+  /** Stable id (conversation + turn + segment) so the expanded state and the
+   *  per-step expanders survive the virtualized list unmounting this turn. */
+  id?: string;
   steps: ProcessBlock[];
   durationMs: number;
 }) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(false);
+  const [open, toggle] = useDisclosure(id);
 
   const running = steps.some((s) => s.streaming === true);
   const hasError = steps.some((s) => s.kind === "tool_use" && s.result?.isError);
@@ -34,7 +38,7 @@ export function ActivityGroup({
   return (
     <div className="w-full rounded-md border border-border/60 bg-muted/30">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         {open ? (
@@ -71,9 +75,9 @@ export function ActivityGroup({
         <div className="space-y-0.5 border-t border-border/40 px-1.5 py-1.5">
           {steps.map((s, i) =>
             s.kind === "thinking" ? (
-              <ThinkingBlock key={i} text={s.text} streaming={s.streaming} />
+              <ThinkingBlock key={i} id={id ? `${id}:s${i}` : undefined} text={s.text} streaming={s.streaming} />
             ) : (
-              <ToolUseCard key={i} block={s} />
+              <ToolUseCard key={i} id={id ? `${id}:s${i}` : undefined} block={s} />
             ),
           )}
         </div>

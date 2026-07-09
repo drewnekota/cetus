@@ -1344,6 +1344,22 @@ pub async fn save_attachment(
     Ok(dest.to_string_lossy().into_owned())
 }
 
+/// Absolute paths of any file URLs currently on the general pasteboard. When the
+/// user copies a file in Finder, its real path lands here — the composer uses it
+/// to reference a too-large paste by path instead of inlining its bytes. Returns
+/// an empty list on non-file clipboards (raw image/text) and off macOS.
+#[tauri::command]
+pub async fn read_clipboard_file_paths() -> CmdResult<Vec<String>> {
+    #[cfg(target_os = "macos")]
+    {
+        Ok(crate::text_input::clipboard_file_paths())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(Vec::new())
+    }
+}
+
 /// Strip path separators and control chars so a filename can't escape its dir.
 fn sanitize_segment(s: &str) -> String {
     s.chars()

@@ -564,19 +564,28 @@ export function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function addFiles(files: FileList | File[]) {
+  /** Add dropped/pasted/picked files as attachments. `pathHints` maps a file's
+   *  name to its real on-disk path (from a Finder copy); when a file is too big
+   *  to inline, we reference that path in the message instead of skipping it —
+   *  graceful degradation matching how a terminal agent takes a pasted path. */
+  async function addFiles(files: FileList | File[], pathHints?: Map<string, string>) {
     setAttachError(null);
     const next: ComposerAttachment[] = [];
+    const referenced: string[] = [];
+    let tooLarge: string | null = null;
     for (const f of Array.from(files)) {
       const isImage = f.type.startsWith("image/");
       const limit = isImage ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
       if (f.size > limit) {
-        setAttachError(
-          t("composer.fileTooLarge", {
+        const realPath = pathHints?.get(f.name);
+        if (realPath) {
+          referenced.push(realPath);
+        } else {
+          tooLarge = t("composer.fileTooLarge", {
             name: f.name || t("composer.unnamedFile"),
             limit: Math.round(limit / 1024 / 1024),
-          }),
-        );
+          });
+        }
         continue;
       }
       try {
@@ -603,6 +612,20 @@ export function Composer({
       }
     }
     if (next.length) setAttachments((prev) => [...prev, ...next]);
+    if (referenced.length) insertPaths(referenced);
+    // Only surface the size error when nothing salvaged the file by path.
+    if (tooLarge) setAttachError(tooLarge);
+  }
+
+  /** Drop one or more absolute paths into the composer at the caret, each on its
+   *  own line and separated from surrounding text, so the agent can read the
+   *  files from disk without us inlining their bytes. */
+  function insertPaths(paths: string[]) {
+    const el = taRef.current;
+    const caret = el?.selectionStart ?? text.length;
+    const before = text.slice(0, caret);
+    const needsLead = before.length > 0 && !/\s$/.test(before);
+    insertTextAtCaret((needsLead ? "\n" : "") + paths.join("\n") + " ");
   }
 
   function removeAttachment(i: number) {
@@ -794,7 +817,21 @@ export function Composer({
           // attachments, but don't drop the accompanying text — insert it at
           // the caret ourselves since preventDefault cancels the native paste.
           e.preventDefault();
-          addFiles(files);
+          // A Finder file copy carries the real path on the pasteboard; resolve
+          // it first so addFiles can reference a too-large file by path instead
+          // of skipping it. Best-effort — falls back to the byte path on any
+          // failure or off macOS.
+          api
+            .readClipboardFilePaths()
+            .then((paths) => {
+              const hints = new Map<string, string>();
+              for (const p of paths) {
+                const base = p.split("/").pop();
+                if (base) hints.set(base, p);
+              }
+              return addFiles(files, hints);
+            })
+            .catch(() => addFiles(files));
           const pastedText = e.clipboardData?.getData("text/plain") ?? "";
           if (pastedText) insertTextAtCaret(pastedText);
         }}
