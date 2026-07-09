@@ -24,9 +24,9 @@ const READY_KEY: &str = "updater_ready_version";
 #[cfg(not(debug_assertions))]
 const LAST_CHECK_KEY: &str = "updater_last_check_secs";
 #[cfg(not(debug_assertions))]
-const FOCUS_CHECK_MIN_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const FOCUS_CHECK_MIN_INTERVAL: Duration = Duration::from_secs(15 * 60);
 #[cfg(not(debug_assertions))]
-const PERIODIC_CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const PERIODIC_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
