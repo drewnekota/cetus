@@ -427,6 +427,17 @@ function MessageList({
   const hasError = !!useChatError(convId);
   const contentRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  // Every scrollTop we write ourselves (pin-to-bottom, height-correction
+  // compensation, load-earlier anchor restore) fires a `scroll` event a frame
+  // later — by which time content-visibility turns may have grown past the 200px
+  // estimate, so `onScroll` would read distance-from-bottom > 32 and wrongly flip
+  // follow OFF, stranding a freshly-opened chat in the middle. Record the exact
+  // scrollTop we set so `onScroll` can tell our own writes from a real user
+  // scroll and only the latter changes the follow state.
+  const programmaticTopRef = useRef<number | null>(null);
+  const markProgrammaticScroll = useCallback((el: HTMLDivElement) => {
+    programmaticTopRef.current = el.scrollTop;
+  }, []);
   // Set just before a "Load earlier" reveal so we can restore the reading
   // position after the prepended turns grow the scroll height (otherwise the
   // viewport jumps as content is added above).
@@ -447,7 +458,8 @@ function MessageList({
     if (!el || !anchor) return;
     anchorRef.current = null;
     el.scrollTop = anchor.top + (el.scrollHeight - anchor.height);
-  }, [safeFirstShown]);
+    markProgrammaticScroll(el);
+  }, [safeFirstShown, markProgrammaticScroll]);
 
   // Opening a conversation should land at the newest message. The component is
   // never remounted on switch, so re-arm auto-follow and snap to the bottom
@@ -457,13 +469,27 @@ function MessageList({
   useLayoutEffect(() => {
     stickToBottomRef.current = true;
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [convId]);
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+      markProgrammaticScroll(el);
+    }
+  }, [convId, markProgrammaticScroll]);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
+      // Ignore the scroll events our own scrollTop writes emit (they land a frame
+      // late, after content-visibility turns have grown, so their distance read
+      // is stale and would falsely drop follow). Keep ignoring while the position
+      // still matches what we pinned — a real user scroll moves it elsewhere.
+      if (
+        programmaticTopRef.current !== null &&
+        Math.abs(el.scrollTop - programmaticTopRef.current) < 1
+      ) {
+        return;
+      }
+      programmaticTopRef.current = null;
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       stickToBottomRef.current = distance < 32;
     };
@@ -481,6 +507,7 @@ function MessageList({
     if (roles[roles.length - 1] === "user") stickToBottomRef.current = true;
     if (!stickToBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
+    markProgrammaticScroll(el);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keys]);
 
@@ -493,7 +520,10 @@ function MessageList({
     const content = contentRef.current;
     if (!el || !content) return;
     const ro = new ResizeObserver(() => {
-      if (stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+      if (stickToBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+        markProgrammaticScroll(el);
+      }
     });
     ro.observe(content);
     return () => ro.disconnect();
@@ -546,9 +576,21 @@ function MessageList({
             // within a margin before it's visible, so the fully-above ones still
             // get corrected here in time to prevent the jump.
             if (scroller && prev > 0) {
-              const scrollerTop = scroller.getBoundingClientRect().top;
-              if (el.getBoundingClientRect().bottom <= scrollerTop) {
-                scroller.scrollTop += h - prev;
+              if (stickToBottomRef.current) {
+                // Following the tail: a turn jumping from the 200px estimate to
+                // its real height (usually taller) grows the list; snap straight
+                // to the true bottom so the newest message stays in view. Doing
+                // the per-turn delta shift below instead would leave us pinned to
+                // the *estimated* bottom — short of the real one — which is the
+                // "opens a chat scrolled to the middle" bug.
+                scroller.scrollTop = scroller.scrollHeight;
+                programmaticTopRef.current = scroller.scrollTop;
+              } else {
+                const scrollerTop = scroller.getBoundingClientRect().top;
+                if (el.getBoundingClientRect().bottom <= scrollerTop) {
+                  scroller.scrollTop += h - prev;
+                  programmaticTopRef.current = scroller.scrollTop;
+                }
               }
             }
           }
