@@ -22,6 +22,7 @@ import {
   type QueuedMessage,
 } from "@/components/chat/composer";
 import {
+  getTurnPreview,
   useAwaitingAssistant,
   useChatError,
   useHasMessages,
@@ -663,9 +664,10 @@ function MessageList({
  *  per user turn. Ticks are evenly spaced and clustered together, vertically
  *  centered in the viewport (not spread across the full scroll height). The
  *  active tick (turn nearest the top of the viewport) brightens as you
- *  scroll; click scrolls that turn to the top. Lives in the otherwise-empty
- *  left margin (content is centered max-w-3xl), and is pointer-transparent
- *  except on the ticks themselves so it never fights text selection. */
+ *  scroll; hovering a tick reveals a preview popover; click scrolls that turn
+ *  to the top. Lives in the otherwise-empty left margin (content is centered
+ *  max-w-3xl), and is pointer-transparent except on the ticks themselves so
+ *  it never fights text selection. */
 function TurnNavigator({
   convId,
   scrollRef,
@@ -675,6 +677,7 @@ function TurnNavigator({
 }) {
   const turnKeys = useUserTurnKeys(convId);
   const [active, setActive] = useState(0);
+  const [hover, setHover] = useState<number | null>(null);
 
   const findNode = useCallback(
     (key: string) =>
@@ -734,7 +737,12 @@ function TurnNavigator({
         {turnKeys.map((key, i) => {
           const isActive = i === active;
           return (
-            <div key={key} className="pointer-events-auto relative flex items-center">
+            <div
+              key={key}
+              className="pointer-events-auto relative flex items-center"
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover((h) => (h === i ? null : h))}
+            >
               <button
                 type="button"
                 aria-label={`Jump to message ${i + 1}`}
@@ -749,10 +757,35 @@ function TurnNavigator({
                   }`}
                 />
               </button>
+              {hover === i && <TurnPreview convId={convId} turnKey={key} />}
             </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function TurnPreview({
+  convId,
+  turnKey,
+}: {
+  convId: string | null;
+  turnKey: string;
+}) {
+  const { prompt, reply } = useMemo(
+    () => getTurnPreview(convId, turnKey),
+    [convId, turnKey],
+  );
+  if (!prompt && !reply) return null;
+  return (
+    <div className="pointer-events-none absolute left-9 top-1/2 w-72 -translate-y-1/2 rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-[0_6px_18px_rgba(0,0,0,0.08),0_1px_3px_rgba(0,0,0,0.06)]">
+      {prompt && (
+        <p className="line-clamp-2 text-xs font-medium text-foreground">{prompt}</p>
+      )}
+      {reply && (
+        <p className="mt-1.5 line-clamp-3 text-xs text-muted-foreground">{reply}</p>
+      )}
     </div>
   );
 }
@@ -835,6 +868,15 @@ function QuoteSelectionToolbar({
     top: number;
   } | null>(null);
 
+  const clearSelection = useCallback(() => {
+    const root = containerRef.current;
+    const sel = window.getSelection();
+    if (root && sel && selectionBelongsToRoot(root, sel)) {
+      sel.removeAllRanges();
+    }
+    setSelection(null);
+  }, [containerRef]);
+
   const readSelection = useCallback(() => {
     const root = containerRef.current;
     const sel = window.getSelection();
@@ -871,22 +913,40 @@ function QuoteSelectionToolbar({
   }, [containerRef]);
 
   useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("[data-quote-selection-toolbar]")) return;
+
+      const root = containerRef.current;
+      const sel = window.getSelection();
+      if (!root || !sel || !selectionBelongsToRoot(root, sel)) return;
+
+      sel.removeAllRanges();
+      setSelection(null);
+    };
     const onPointerUp = () => window.setTimeout(readSelection, 0);
     const onKeyUp = () => readSelection();
     const onSelectionChange = () => readSelection();
-    const onScroll = () => setSelection(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clearSelection();
+    };
+    const onScroll = () => clearSelection();
 
+    document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("selectionchange", onSelectionChange);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("keydown", onKeyDown);
     scrollRef.current?.addEventListener("scroll", onScroll, { passive: true });
     return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("selectionchange", onSelectionChange);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("keydown", onKeyDown);
       scrollRef.current?.removeEventListener("scroll", onScroll);
     };
-  }, [readSelection, scrollRef]);
+  }, [clearSelection, containerRef, readSelection, scrollRef]);
 
   if (!selection) return null;
 
@@ -898,6 +958,7 @@ function QuoteSelectionToolbar({
   // containing block so `fixed` is viewport-relative again.
   return createPortal(
     <div
+      data-quote-selection-toolbar
       className="fixed z-50 -translate-x-1/2 -translate-y-full rounded-full border border-border bg-popover px-1 py-0.5 text-popover-foreground shadow-[0_4px_14px_rgba(0,0,0,0.10),0_1px_2px_rgba(0,0,0,0.06)]"
       style={{ left: selection.left, top: selection.top }}
       onMouseDown={(e) => e.preventDefault()}
@@ -917,6 +978,16 @@ function QuoteSelectionToolbar({
     </div>,
     document.body,
   );
+}
+
+function selectionBelongsToRoot(root: HTMLElement, sel: Selection): boolean {
+  for (let i = 0; i < sel.rangeCount; i++) {
+    const range = sel.getRangeAt(i);
+    const ancestor = range.commonAncestorContainer;
+    const node = ancestor.nodeType === Node.ELEMENT_NODE ? ancestor : ancestor.parentNode;
+    if (node && root.contains(node)) return true;
+  }
+  return false;
 }
 
 // Turn a live selection Range into plain text suitable for a `>` blockquote.
