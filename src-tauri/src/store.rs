@@ -682,6 +682,12 @@ impl Store {
         Ok(())
     }
 
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     // ---- automations ------------------------------------------------------
 
     pub fn insert_automation(&self, a: &Automation) -> Result<()> {
@@ -1329,10 +1335,8 @@ mod tests {
     use serde_json::json;
 
     fn temp_store() -> (Store, PathBuf) {
-        let path = std::env::temp_dir().join(format!(
-            "cetus-store-test-{}.db",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("cetus-store-test-{}.db", uuid::Uuid::new_v4()));
         (Store::open(&path).unwrap(), path)
     }
 

@@ -71,6 +71,7 @@ import {
   api,
   onAppEvent,
   onUpdateDownloadProgress,
+  onUpdateReady,
   onPiEvent,
   type CaptureSettings,
   type Meeting,
@@ -478,6 +479,12 @@ function GeneralSection() {
   useEffect(() => {
     api.getQuickSettings().then(setSettings).catch(() => {});
     api.getCliAgentSettings().then(setCliSettings).catch(() => {});
+    api
+      .pendingUpdateVersion()
+      .then((version) => {
+        if (version) setCheckState("ready");
+      })
+      .catch(() => {});
     import("@tauri-apps/api/app")
       .then(({ getVersion }) => getVersion())
       .then(setAppVersion)
@@ -493,6 +500,19 @@ function GeneralSection() {
         setTimeout(() => setDownloadProgress(null), 800);
       }
     }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    onUpdateReady(() => setCheckState("ready")).then((u) => {
       if (cancelled) u();
       else unlisten = u;
     });

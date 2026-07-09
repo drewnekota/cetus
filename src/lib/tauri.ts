@@ -400,6 +400,8 @@ export const api = {
    *  newer one ships). */
   ignoreUpdateVersion: (version: string) =>
     invoke<void>("ignore_update_version", { version }),
+  /** Version of an already-downloaded update waiting for relaunch, if any. */
+  pendingUpdateVersion: () => invoke<string | null>("pending_update_version"),
   /** Relaunch the app to apply an already-downloaded update. */
   relaunchApp: () => invoke<void>("relaunch_app"),
   /** Hide panel, capture screen, restore panel. For the in-panel toggle. */

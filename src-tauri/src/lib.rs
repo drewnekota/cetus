@@ -37,6 +37,7 @@ mod plugins;
 mod prompts;
 mod provider;
 mod quick;
+mod resources;
 mod run_engine;
 mod scheduler;
 mod secrets;
@@ -44,7 +45,6 @@ mod skill_review;
 mod skill_tool;
 mod skills;
 mod slash_commands;
-mod resources;
 mod store;
 mod tauri_bridge;
 #[cfg(target_os = "macos")]
@@ -913,6 +913,7 @@ pub fn run() {
                                 }
                             }
                         });
+                        updater::check_after_focus(app_handle.clone());
                     }
                     _ => {}
                 });
@@ -1201,6 +1202,7 @@ pub fn run() {
                     updater_handle,
                     quick_settings.auto_update,
                 ));
+                updater::spawn_periodic_checks(app.handle().clone());
             }
             Ok(())
         })
@@ -1353,6 +1355,7 @@ pub fn run() {
         updater::check_for_update,
         updater::install_update,
         updater::ignore_update_version,
+        updater::pending_update_version,
         updater::relaunch_app,
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,
@@ -1495,6 +1498,7 @@ pub fn run() {
         updater::check_for_update,
         updater::install_update,
         updater::ignore_update_version,
+        updater::pending_update_version,
         updater::relaunch_app,
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,

@@ -2108,6 +2108,12 @@ export default function Home() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
+    api
+      .pendingUpdateVersion()
+      .then((version) => {
+        if (!cancelled && version) setUpdateReadyVersion(version);
+      })
+      .catch(() => {});
     onUpdateReady((u) => setUpdateReadyVersion(u.version)).then((u) => {
       if (cancelled) u();
       else unlisten = u;
