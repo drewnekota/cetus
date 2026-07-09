@@ -766,6 +766,7 @@ function QuoteSelectionToolbar({
   const { t } = useTranslation("chat");
   const [selection, setSelection] = useState<{
     range: Range;
+    text: string;
     left: number;
     top: number;
   } | null>(null);
@@ -807,10 +808,26 @@ function QuoteSelectionToolbar({
       return;
     }
 
-    setSelection({
-      range: range.cloneRange(),
-      left: Math.round(rect.left + rect.width / 2),
-      top: Math.round(Math.max(8, rect.top - 8)),
+    const left = Math.round(rect.left + rect.width / 2);
+    const top = Math.round(Math.max(8, rect.top - 8));
+
+    setSelection((prev) => {
+      if (
+        prev &&
+        prev.text === text &&
+        prev.left === left &&
+        prev.top === top &&
+        sameRangeBoundaries(prev.range, range)
+      ) {
+        return prev;
+      }
+
+      return {
+        range: range.cloneRange(),
+        text,
+        left,
+        top,
+      };
     });
   }, [scroller]);
 
@@ -861,7 +878,7 @@ function QuoteSelectionToolbar({
   return createPortal(
     <div
       data-quote-selection-toolbar
-      className="fixed z-50 -translate-x-1/2 -translate-y-full rounded-full border border-border bg-popover px-1 py-0.5 text-popover-foreground shadow-[0_4px_14px_rgba(0,0,0,0.10),0_1px_2px_rgba(0,0,0,0.06)]"
+      className="fixed z-50 -translate-x-1/2 -translate-y-full select-none rounded-full border border-border bg-popover px-1 py-0.5 text-popover-foreground shadow-[0_4px_14px_rgba(0,0,0,0.10),0_1px_2px_rgba(0,0,0,0.06)]"
       style={{ left: selection.left, top: selection.top }}
       onMouseDown={(e) => e.preventDefault()}
     >
@@ -879,6 +896,15 @@ function QuoteSelectionToolbar({
       </button>
     </div>,
     document.body,
+  );
+}
+
+function sameRangeBoundaries(a: Range, b: Range): boolean {
+  return (
+    a.startContainer === b.startContainer &&
+    a.startOffset === b.startOffset &&
+    a.endContainer === b.endContainer &&
+    a.endOffset === b.endOffset
   );
 }
 
