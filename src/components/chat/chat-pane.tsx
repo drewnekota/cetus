@@ -2,7 +2,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -16,7 +15,7 @@ import { AssistantGroup } from "@/components/chat/assistant-turn";
 import { AgentControlCard } from "@/components/chat/agent-control-card";
 import { CliControlCard } from "@/components/chat/cli-control-card";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
-import { AlertTriangle, ArrowDown, ArrowUp, Bot, GitBranch, Loader2, MessageCircle, RotateCw, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Bot, GitBranch, Loader2, MessageCircle, Pencil, RotateCw, X } from "lucide-react";
 import {
   Composer,
   type ComposerAttachment,
@@ -65,6 +64,7 @@ interface Props {
   queued?: QueuedMessage[];
   onQueue?: (text: string, attachments: ComposerAttachment[]) => void;
   onSteerQueued?: (id: string) => void;
+  onEditQueued?: (id: string, text: string) => void;
   onRemoveQueued?: (id: string) => void;
   /** Ultra Code state + toggle, forwarded to the composer. */
   ultra?: boolean;
@@ -112,6 +112,7 @@ export function ChatPane({
   queued,
   onQueue,
   onSteerQueued,
+  onEditQueued,
   onRemoveQueued,
   ultra,
   onUltraToggle,
@@ -206,6 +207,7 @@ export function ChatPane({
           <QueuedMessages
             items={queued ?? []}
             onSteer={onSteerQueued}
+            onEdit={onEditQueued}
             onRemove={onRemoveQueued}
           />
           <Composer
@@ -320,14 +322,16 @@ const STICKY_BOTTOM_PX = 32;
 // nudge away from the latest message should not summon a floating control.
 const SCROLL_TO_BOTTOM_BUTTON_MIN_PX = 360;
 const SCROLL_TO_BOTTOM_BUTTON_VIEWPORT_RATIO = 0.5;
-// Extra rows Virtuoso keeps mounted above/below the viewport. A generous margin
-// means fast scrolls and expander toggles rarely hit an unmounted turn, and the
-// off-screen markdown parse is spread out instead of hitching on entry.
-const OVERSCAN_PX = 800;
-// Per-frame increment for the post-open overscan ramp (see the ramp effect in
-// MessageList). Small enough that one step never mounts more than a sliver of
-// turns in a single commit, even when individual turns are enormous.
-const OVERSCAN_STEP_PX = 200;
+// Extra rows Virtuoso keeps mounted above/below the viewport: NONE, on purpose.
+// Any positive overscan lets a single height correction during the open-at-end
+// seek (or a streaming growth spurt) mount whole extra turns in the same
+// commit; on conversations with huge turns those corrections chain into 50+
+// nested sync updates and React kills the tree ("Maximum update depth
+// exceeded" — the v0.3.14–v0.3.16 crash family). Every crashing configuration
+// observed had overscan > 0; zero overscan opened the same conversations
+// cleanly every time. The cost is an occasional blank flash on fast scroll —
+// cheap next to an unrenderable conversation.
+const OVERSCAN_PX = 0;
 
 type MessageGroup =
   | { kind: "assistant"; keys: string[] }
@@ -405,19 +409,24 @@ function MessageList({
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  // Starts at zero for the open-at-bottom settle (see the settle effect below);
-  // unlocked to OVERSCAN_PX once the initial position holds still, and reset to
-  // zero on every conversation switch.
-  const [overscan, setOverscan] = useState(0);
   const atBottomRef = useRef(true);
   // Topmost visible group index (from Virtuoso's rangeChanged) — drives the turn
   // navigator's active tick with no getBoundingClientRect scanning.
   const [topIndex, setTopIndex] = useState(0);
-  const pendingInitialBottomRef = useRef<string | null>(null);
+  const pendingInitialBottomRef = useRef<string | null>(convId);
   const setAtBottomState = useCallback((next: boolean) => {
     atBottomRef.current = next;
     setAtBottom(next);
   }, []);
+
+  // Re-arm the open settle DURING render on conversation switch (not in an
+  // effect): the keyed Virtuoso remounts — and starts its initial end seek —
+  // before any parent effect would run.
+  const [renderedConvId, setRenderedConvId] = useState(convId);
+  if (renderedConvId !== convId) {
+    setRenderedConvId(convId);
+    pendingInitialBottomRef.current = convId;
+  }
 
   // User turns paired with their index in the group list, for the navigator's
   // scroll-to-turn (Virtuoso scrollToIndex) and active-tick math.
@@ -449,22 +458,13 @@ function MessageList({
     prevLastKeyRef.current = lastKey;
   }, [keys, roles]);
 
-  useLayoutEffect(() => {
-    pendingInitialBottomRef.current = convId;
-    // Every conversation open restarts the zero-overscan mount + ramp cycle.
-    setOverscan(0);
-  }, [convId]);
 
-  // Overscan ramp. Opening at the end of a long conversation is the hard case:
-  // Virtuoso seeks the last item while huge turns are still being measured, and
-  // with a generous overscan every height correction (re)mounts a whole window
-  // of turns in the same commit — each remount schedules more sync updates, and
-  // enough consecutive corrections trip React's update-depth limit and unmount
-  // the entire app (the v0.3.14 crash-on-open). With ZERO overscan the same
-  // open settles cleanly at the true bottom, so: mount at zero, wait a few
-  // frames for the landing to hold still, then ramp the overscan up in small
-  // per-frame steps — each step mounts at most a sliver of extra turns, and the
-  // frame boundary between steps keeps React's nested-update counter at rest.
+  // Open settle. The initial end seek runs on estimated turn heights; once the
+  // landing holds still for a few frames, correct the residual offset exactly
+  // once through Virtuoso's own API. Everything is rAF-paced and read-only in
+  // between — no scroller.scrollTop writes, no overscan changes — because any
+  // extra mounting pressure during this window is what used to chain into the
+  // update-depth crash on conversations with huge turns.
   useEffect(() => {
     if (!scroller || !convId || pendingInitialBottomRef.current !== convId || groups.length === 0) {
       return;
@@ -472,7 +472,7 @@ function MessageList({
 
     let prevDist = Number.NaN;
     let stable = 0;
-    let budget = 120; // safety cap (~2s at 60fps); bailing out just leaves less overscan
+    let budget = 120; // safety cap (~2s at 60fps)
     let frame = requestAnimationFrame(function step() {
       if (--budget <= 0) return;
       if (stable < 3) {
@@ -484,28 +484,31 @@ function MessageList({
         frame = requestAnimationFrame(step);
         return;
       }
-      setOverscan((prev) => {
-        const next = Math.min(prev + OVERSCAN_STEP_PX, OVERSCAN_PX);
-        if (next >= OVERSCAN_PX) {
-          pendingInitialBottomRef.current = null; // ramp complete for this open
-        } else {
-          frame = requestAnimationFrame(step);
-        }
-        return next;
-      });
+      pendingInitialBottomRef.current = null; // settled — this open is done
+      // Only correct when meaningfully off; a settled-at-bottom open (or a user
+      // who already scrolled away on purpose) needs no seek at all.
+      if (prevDist > 1 && atBottomRef.current) {
+        virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" });
+      }
     });
     return () => cancelAnimationFrame(frame);
   }, [convId, groups.length, scroller]);
 
+  // Streaming follow. Virtuoso's followOutput only reacts to NEW items; a
+  // streaming reply grows an EXISTING item, so without help the view strands
+  // slightly above the growing tail. Watch the item list itself — its height
+  // tracks the content (the previously-observed viewport wrapper is height:100%
+  // and never fires) — and, while the reader is pinned to the bottom, chase the
+  // growth one rAF-paced write per frame.
   useEffect(() => {
     if (!scroller || !isStreaming) return;
-    const content = scroller.firstElementChild;
+    const content = scroller.querySelector('[data-testid="virtuoso-item-list"]');
     if (!content) return;
 
     let frame: number | null = null;
     const scrollIfPinned = () => {
       if (!atBottomRef.current) return;
-      if (frame != null) cancelAnimationFrame(frame);
+      if (frame != null) return;
       frame = requestAnimationFrame(() => {
         frame = null;
         if (atBottomRef.current) scroller.scrollTop = scroller.scrollHeight;
@@ -633,12 +636,15 @@ function MessageList({
         // the bare index defaults to top-align, which strands a long final reply
         // "scrolled to its own top", i.e. slightly above the real bottom).
         initialTopMostItemIndex={{ index: Math.max(0, groups.length - 1), align: "end" }}
-        alignToBottom
+        // Do not use alignToBottom: it pins a short/new conversation to the
+        // bottom of the empty viewport. The initial index already opens an
+        // overflowing history at its newest turn, while short chats keep the
+        // normal top-down IM layout.
         followOutput={(isAtBottom) => (isAtBottom ? "auto" : false)}
         atBottomThreshold={STICKY_BOTTOM_PX}
         atBottomStateChange={setAtBottomState}
         rangeChanged={(range) => setTopIndex(range.startIndex)}
-        increaseViewportBy={overscan}
+        increaseViewportBy={OVERSCAN_PX}
       />
       <TurnNavigator
         convId={convId}
@@ -1086,57 +1092,156 @@ function MessageError({
 /** The follow-up queue rendered just above the composer: messages the user
  *  typed while the agent was mid-run. Each waits for the run to end (then it's
  *  delivered as a new turn), or the user can "Steer now" to inject it into the
- *  current run immediately. */
+ *  current run immediately, or edit it in place while it waits. */
 function QueuedMessages({
   items,
   onSteer,
+  onEdit,
   onRemove,
 }: {
   items: QueuedMessage[];
   onSteer?: (id: string) => void;
+  onEdit?: (id: string, text: string) => void;
   onRemove?: (id: string) => void;
 }) {
-  const { t } = useTranslation("chat");
   if (items.length === 0) return null;
   return (
     <div className="flex flex-col gap-1">
-      {items.map((m) => {
-        const label =
-          m.text.trim() ||
-          (m.attachments.length
-            ? t("pane.attachmentCount", { count: m.attachments.length })
-            : t("pane.emptyMessage"));
-        return (
-          <div
-            key={m.id}
-            className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/40 px-2.5 py-1.5 text-xs"
+      {items.map((m) => (
+        <QueuedMessageRow
+          key={m.id}
+          item={m}
+          onSteer={onSteer}
+          onEdit={onEdit}
+          onRemove={onRemove}
+        />
+      ))}
+    </div>
+  );
+}
+
+function QueuedMessageRow({
+  item,
+  onSteer,
+  onEdit,
+  onRemove,
+}: {
+  item: QueuedMessage;
+  onSteer?: (id: string) => void;
+  onEdit?: (id: string, text: string) => void;
+  onRemove?: (id: string) => void;
+}) {
+  const { t } = useTranslation("chat");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.text);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // If the item auto-delivers or gets steered away mid-edit the row unmounts,
+  // so no stale-edit cleanup is needed; local state dies with it.
+  function startEdit() {
+    setDraft(item.text);
+    setEditing(true);
+  }
+  function saveEdit() {
+    setEditing(false);
+    if (draft !== item.text) onEdit?.(item.id, draft);
+  }
+  function cancelEdit() {
+    setEditing(false);
+    setDraft(item.text);
+  }
+
+  useEffect(() => {
+    if (!editing) return;
+    const el = textareaRef.current;
+    if (el) {
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }, [editing]);
+
+  const label =
+    item.text.trim() ||
+    (item.attachments.length
+      ? t("pane.attachmentCount", { count: item.attachments.length })
+      : t("pane.emptyMessage"));
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1.5 rounded-lg border border-dashed border-border bg-muted/40 px-2.5 py-1.5 text-xs">
+        <textarea
+          ref={textareaRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              saveEdit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelEdit();
+            }
+          }}
+          rows={Math.min(6, Math.max(1, draft.split("\n").length))}
+          className="w-full resize-none bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
+          placeholder={t("pane.emptyMessage")}
+        />
+        <div className="flex items-center justify-end gap-1">
+          <button
+            type="button"
+            onClick={cancelEdit}
+            className="rounded-md px-1.5 py-0.5 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              {t("pane.queued")}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-foreground/80">{label}</span>
-            {onSteer && (
-              <button
-                type="button"
-                onClick={() => onSteer(m.id)}
-                title={t("pane.steerTooltip")}
-                className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-primary transition-colors hover:bg-primary/10"
-              >
-                <ArrowUp className="size-3" />
-                {t("pane.steerNow")}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => onRemove?.(m.id)}
-              aria-label={t("pane.removeFromQueue")}
-              className="shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <X className="size-3.5" />
-            </button>
-          </div>
-        );
-      })}
+            {t("pane.cancelEdit")}
+          </button>
+          <button
+            type="button"
+            onClick={saveEdit}
+            className="rounded-md px-1.5 py-0.5 font-medium text-primary transition-colors hover:bg-primary/10"
+          >
+            {t("pane.saveEdit")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/40 px-2.5 py-1.5 text-xs">
+      <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {t("pane.queued")}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-foreground/80">{label}</span>
+      {onEdit && (
+        <button
+          type="button"
+          onClick={startEdit}
+          title={t("pane.editQueued")}
+          aria-label={t("pane.editQueued")}
+          className="shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <Pencil className="size-3" />
+        </button>
+      )}
+      {onSteer && (
+        <button
+          type="button"
+          onClick={() => onSteer(item.id)}
+          title={t("pane.steerTooltip")}
+          className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-primary transition-colors hover:bg-primary/10"
+        >
+          <ArrowUp className="size-3" />
+          {t("pane.steerNow")}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => onRemove?.(item.id)}
+        aria-label={t("pane.removeFromQueue")}
+        className="shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <X className="size-3.5" />
+      </button>
     </div>
   );
 }

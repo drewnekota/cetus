@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Gauge, Sparkles, Zap } from "lucide-react";
+import { Braces, Gauge, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { DsModel, ModelChoice, ReasoningLevel } from "@/lib/types";
 import {
@@ -63,7 +63,7 @@ const PRESETS: {
     id: "ultra",
     labelKey: "model.ultra",
     hintKey: "model.ultraHint",
-    icon: Sparkles,
+    icon: Braces,
     model: "pro",
     reasoning: "think_max",
     ultra: true,

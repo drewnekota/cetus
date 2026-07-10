@@ -13,7 +13,6 @@ import {
   Monitor,
   Plus,
   Settings,
-  Sparkles,
 } from "lucide-react";
 import {
   Command,
@@ -435,10 +434,7 @@ export function CommandPalette({
           </CommandList>
 
           <div className="flex items-center justify-between border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
-            <span className="flex items-center gap-1.5 font-serif text-xs italic">
-              <Sparkles className="size-3" />
-              cetus
-            </span>
+            <span className="text-xs font-semibold text-foreground/80">cetus</span>
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1">
                 <Kbd>↑</Kbd>

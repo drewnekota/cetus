@@ -1,6 +1,5 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -104,8 +103,7 @@ export function CreateTaskDialog({
 
         {/* Breadcrumb header + Create-more toggle */}
         <div className="flex items-center gap-2 border-b border-border px-5 py-3">
-          <div className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-0.5 text-xs font-semibold text-foreground">
-            <Sparkles className="size-3" />
+          <div className="rounded-md bg-muted px-2 py-0.5 text-xs font-semibold text-foreground">
             cetus
           </div>
           <span className="text-xs text-muted-foreground">›</span>

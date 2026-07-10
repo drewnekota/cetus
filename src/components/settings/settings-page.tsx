@@ -1,4 +1,6 @@
 "use client";
+/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4
+ * genre: modern-minimal · macrostructure: Workbench · designed-as-app */
 // Full-window settings screen. Renders over the whole app (sidebar included)
 // as a dedicated page rather than a modal dialog, with a left section rail and
 // a scrollable content pane. Opened from the sidebar, the command palette, or
@@ -9,12 +11,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownComponents } from "@/lib/markdown";
 import {
-  Archive,
   ArchiveRestore,
   ArrowLeft,
   AudioLines,
-  Bell,
-  Brain,
   Check,
   ChevronDown,
   Copy,
@@ -22,22 +21,13 @@ import {
   FileText,
   FolderOpen,
   KeyRound,
-  Keyboard,
   Mic,
   Monitor,
-  Moon,
   Pencil,
   Plus,
   RotateCw,
-  ServerCog,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  SquareSlash,
   Trash2,
-  Type,
   X,
-  Zap,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -160,10 +150,10 @@ function UpdateProgressBar({ progress }: { progress: UpdateDownloadProgress | nu
     >
       <div
         className={cn(
-          "h-full rounded-full bg-primary transition-all duration-300",
+          "h-full origin-left rounded-full bg-primary transition-transform duration-300 motion-reduce:transition-none",
           percent == null && "w-1/2 animate-pulse",
         )}
-        style={percent == null ? undefined : { width: `${percent}%` }}
+        style={percent == null ? undefined : { transform: `scaleX(${percent / 100})` }}
       />
     </div>
   );
@@ -212,7 +202,6 @@ type Section = {
   // i18n key (settings namespace), resolved at render. The section id doubles
   // as the key suffix: `nav.<id>`.
   labelKey: string;
-  icon: React.ComponentType<{ className?: string }>;
 };
 
 // The rail is grouped into a few labelled clusters so a dozen flat entries
@@ -222,37 +211,37 @@ const SECTION_GROUPS: { labelKey: string; sections: Section[] }[] = [
   {
     labelKey: "group.general",
     sections: [
-      { id: "general", labelKey: "nav.general", icon: SlidersHorizontal },
-      { id: "appearance", labelKey: "nav.appearance", icon: Type },
-      { id: "keyboard-shortcuts", labelKey: "nav.keyboard-shortcuts", icon: Keyboard },
-      { id: "notifications", labelKey: "nav.notifications", icon: Bell },
-      { id: "permissions", labelKey: "nav.permissions", icon: ShieldCheck },
+      { id: "general", labelKey: "nav.general" },
+      { id: "appearance", labelKey: "nav.appearance" },
+      { id: "keyboard-shortcuts", labelKey: "nav.keyboard-shortcuts" },
+      { id: "notifications", labelKey: "nav.notifications" },
+      { id: "permissions", labelKey: "nav.permissions" },
     ],
   },
   {
     labelKey: "group.intelligence",
     sections: [
-      { id: "api-keys", labelKey: "nav.api-keys", icon: KeyRound },
-      { id: "memory", labelKey: "nav.memory", icon: Brain },
-      { id: "dreaming", labelKey: "nav.dreaming", icon: Moon },
-      { id: "skills", labelKey: "nav.skills", icon: Sparkles },
-      { id: "slash-commands", labelKey: "nav.slash-commands", icon: SquareSlash },
-      { id: "connectors", labelKey: "nav.connectors", icon: ServerCog },
+      { id: "api-keys", labelKey: "nav.api-keys" },
+      { id: "memory", labelKey: "nav.memory" },
+      { id: "dreaming", labelKey: "nav.dreaming" },
+      { id: "skills", labelKey: "nav.skills" },
+      { id: "slash-commands", labelKey: "nav.slash-commands" },
+      { id: "connectors", labelKey: "nav.connectors" },
     ],
   },
   {
     labelKey: "group.inputCapture",
     sections: [
-      { id: "launcher", labelKey: "nav.launcher", icon: Zap },
-      { id: "voice", labelKey: "nav.voice", icon: Mic },
-      { id: "screen", labelKey: "nav.screen", icon: Monitor },
-      { id: "meetings", labelKey: "nav.meetings", icon: AudioLines },
+      { id: "launcher", labelKey: "nav.launcher" },
+      { id: "voice", labelKey: "nav.voice" },
+      { id: "screen", labelKey: "nav.screen" },
+      { id: "meetings", labelKey: "nav.meetings" },
     ],
   },
   {
     labelKey: "group.data",
     sections: [
-      { id: "archived", labelKey: "nav.archived", icon: Archive },
+      { id: "archived", labelKey: "nav.archived" },
     ],
   },
 ];
@@ -341,7 +330,7 @@ export const SettingsPage = memo(function SettingsPage({
           <ArrowLeft className="size-4" />
           {tc("action.back")}
         </Button>
-        <span className="font-serif text-base font-semibold italic">
+        <span className="text-sm font-semibold">
           {t("page.title")}
         </span>
       </header>
@@ -349,11 +338,10 @@ export const SettingsPage = memo(function SettingsPage({
         <nav className="scrollbar-slim w-52 shrink-0 overflow-y-auto border-r border-border bg-muted/20 p-2">
           {SECTION_GROUPS.map((group) => (
             <div key={group.labelKey} className="mb-3 last:mb-0">
-              <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground">
                 {t(group.labelKey)}
               </div>
               {group.sections.map((s) => {
-                const Icon = s.icon;
                 const active = section === s.id;
                 return (
                   <button
@@ -362,13 +350,12 @@ export const SettingsPage = memo(function SettingsPage({
                     type="button"
                     onClick={() => setSection(s.id)}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      "flex w-full items-center rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors motion-reduce:transition-none",
                       active
                         ? "bg-accent text-accent-foreground"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
                     )}
                   >
-                    <Icon className="size-3.5 shrink-0" />
                     {t(s.labelKey)}
                   </button>
                 );
@@ -377,7 +364,7 @@ export const SettingsPage = memo(function SettingsPage({
           ))}
         </nav>
         <main className="scrollbar-slim min-w-0 flex-1 overflow-y-auto bg-muted/10">
-          <div className="mx-auto w-full max-w-5xl px-6 py-8">
+          <div className="mx-auto w-full max-w-3xl px-6 py-8">
             {section === "general" ? (
               <GeneralSection />
             ) : section === "api-keys" ? (
@@ -429,15 +416,17 @@ export const SettingsPage = memo(function SettingsPage({
  *  (the heading already shows its own "Loading…" label). */
 function SettingsRowsSkeleton({ rows = 3 }: { rows?: number }) {
   return (
-    <SettingsCardGrid className="mt-3">
+    <SettingsList className="mt-3">
       {Array.from({ length: rows }).map((_, i) => (
-        <Skeleton key={i} className="h-14 w-full rounded-lg" />
+        <div key={i} className="px-4 py-3">
+          <Skeleton className="h-9 w-full rounded-md" />
+        </div>
       ))}
-    </SettingsCardGrid>
+    </SettingsList>
   );
 }
 
-function SettingsCardGrid({
+function SettingsList({
   children,
   className,
 }: {
@@ -445,7 +434,12 @@ function SettingsCardGrid({
   className?: string;
 }) {
   return (
-    <div className={cn("grid min-w-0 gap-3 lg:grid-cols-2", className)}>
+    <div
+      className={cn(
+        "min-w-0 divide-y divide-border overflow-hidden rounded-lg border border-border bg-card",
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -1058,7 +1052,7 @@ function NotificationsSection() {
       )}
 
       <div className="mt-6">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <h3 className="text-xs font-medium text-muted-foreground">
           {t("notifications.notifyAbout")}
         </h3>
         <div
@@ -1083,7 +1077,7 @@ function NotificationsSection() {
       </div>
 
       <div className="mt-6">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <h3 className="text-xs font-medium text-muted-foreground">
           {t("notifications.behavior")}
         </h3>
         <div
@@ -2912,7 +2906,7 @@ function MemorySection({ open }: { open: boolean }) {
           !masterOn && "opacity-60",
         )}
       >
-        <Label htmlFor="memory-add" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <Label htmlFor="memory-add" className="text-xs font-medium text-muted-foreground">
           {t("memory.add.label")}
         </Label>
         <Textarea
@@ -2949,7 +2943,7 @@ function MemorySection({ open }: { open: boolean }) {
 
       {/* Existing memories */}
       <div className="mt-6 flex items-center justify-between gap-4">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <h3 className="text-xs font-medium text-muted-foreground">
           {store === null
             ? t("memory.loading")
             : sorted.length === 0
@@ -2990,7 +2984,7 @@ function MemorySection({ open }: { open: boolean }) {
 
       {store === null && <SettingsRowsSkeleton />}
       {sorted.length > 0 && (
-        <SettingsCardGrid className="mt-3">
+        <SettingsList className="mt-3">
           {sorted.map((m) => (
             <MemoryRow
               key={m.id}
@@ -3000,7 +2994,7 @@ function MemorySection({ open }: { open: boolean }) {
               onDelete={removeRow}
             />
           ))}
-        </SettingsCardGrid>
+        </SettingsList>
       )}
 
       {error && <div className="mt-4 text-xs text-destructive">{error}</div>}
@@ -3092,7 +3086,7 @@ function MemoryRow({
   return (
     <div
       className={cn(
-        "group min-w-0 overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5",
+        "group min-w-0 px-4 py-3",
         !entry.enabled && "opacity-50",
       )}
     >
@@ -3343,7 +3337,7 @@ function SkillsSection({ open }: { open: boolean }) {
       )}
 
       <div className="mt-6">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <h3 className="text-xs font-medium text-muted-foreground">
           {store === null
             ? t("skills.loading")
             : sorted.length === 0
@@ -3355,7 +3349,7 @@ function SkillsSection({ open }: { open: boolean }) {
 
         {store === null && <SettingsRowsSkeleton />}
         {sorted.length > 0 && (
-          <SettingsCardGrid className="mt-3">
+          <SettingsList className="mt-3">
             {sorted.map((s) => (
               <SkillRow
                 key={s.id}
@@ -3365,7 +3359,7 @@ function SkillsSection({ open }: { open: boolean }) {
                 onDelete={removeRow}
               />
             ))}
-          </SettingsCardGrid>
+          </SettingsList>
         )}
       </div>
 
@@ -3472,7 +3466,7 @@ function DiscoveredSkillsSection({ open }: { open: boolean }) {
       </div>
 
       <div className="mt-4">
-        <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <h4 className="text-xs font-medium text-muted-foreground">
           {skills === null
             ? t("skills.loading")
             : skills.length === 1
@@ -3533,11 +3527,11 @@ function DiscoveredSkillGroup({
           </span>
         )}
       </div>
-      <SettingsCardGrid>
+      <SettingsList>
         {skills.map((s) => (
           <DiscoveredSkillRow key={s.id} skill={s} onReveal={onReveal} />
         ))}
-      </SettingsCardGrid>
+      </SettingsList>
     </div>
   );
 }
@@ -3569,9 +3563,8 @@ function DiscoveredSkillRow({
   }
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex items-start gap-3 px-3 py-2.5">
-        <Sparkles className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+    <div className="min-w-0 bg-card">
+      <div className="flex items-start gap-3 px-4 py-3">
         <button
           type="button"
           onClick={toggleExpand}
@@ -3622,7 +3615,7 @@ function DiscoveredSkillRow({
       </div>
 
       {expanded && (
-        <div className="border-t border-border px-3 py-3">
+        <div className="border-t border-border bg-muted/20 px-4 py-3">
           <div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <FileText className="size-3" />
             <span className="truncate font-mono">{skill.path}</span>
@@ -3672,12 +3665,11 @@ function SkillRow({
   return (
     <div
       className={cn(
-        "group min-w-0 overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5",
+        "group min-w-0 px-4 py-3",
         !entry.enabled && "opacity-50",
       )}
     >
       <div className="flex min-w-0 items-start gap-3">
-        <Sparkles className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1 space-y-1">
           <p className="truncate text-sm font-medium">{entry.name}</p>
           {entry.description && (
@@ -3793,7 +3785,7 @@ function SkillEditor({
 
   return (
     <div className="mt-4 space-y-2 rounded-lg border border-border bg-muted/30 p-3">
-      <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <Label className="text-xs font-medium text-muted-foreground">
         {t("skills.editor.title")}
       </Label>
       <Input
@@ -3901,7 +3893,7 @@ function SlashCommandsSection({ open }: { open: boolean }) {
       )}
 
       <div className="mt-6">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <h3 className="text-xs font-medium text-muted-foreground">
           {commands === null
             ? t("slashCmd.loading")
             : sorted.length === 0
@@ -3913,7 +3905,7 @@ function SlashCommandsSection({ open }: { open: boolean }) {
 
         {commands === null && <SettingsRowsSkeleton />}
         {sorted.length > 0 && (
-          <SettingsCardGrid className="mt-3">
+          <SettingsList className="mt-3">
             {sorted.map((c) => (
               <SlashCommandRow
                 key={c.id}
@@ -3922,7 +3914,7 @@ function SlashCommandsSection({ open }: { open: boolean }) {
                 onDelete={removeRow}
               />
             ))}
-          </SettingsCardGrid>
+          </SettingsList>
         )}
       </div>
 
@@ -3944,9 +3936,8 @@ function SlashCommandRow({
   const { t: tc } = useTranslation("common");
   const [confirming, setConfirming] = useState(false);
   return (
-    <div className="group min-w-0 overflow-hidden rounded-lg border border-border bg-card px-3 py-2.5">
+    <div className="group min-w-0 px-4 py-3">
       <div className="flex min-w-0 items-start gap-3">
-        <SquareSlash className="mt-0.5 size-4 shrink-0 text-primary" />
         <div className="min-w-0 flex-1 space-y-1">
           <p className="truncate text-sm font-medium">/{command.name}</p>
           {command.description && (
@@ -4044,7 +4035,7 @@ function SlashCommandEditor({
 
   return (
     <div className="mt-4 space-y-2 rounded-lg border border-border bg-muted/30 p-3">
-      <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <Label className="text-xs font-medium text-muted-foreground">
         {command ? t("slashCmd.editor.editTitle") : t("slashCmd.editor.newTitle")}
       </Label>
       <div className="flex items-center gap-1.5 rounded-md border border-border bg-background pl-2.5">
@@ -4151,7 +4142,7 @@ function ConnectorsSection({ open }: { open: boolean }) {
       />
 
       <div className="mt-6 flex items-center justify-between gap-4">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <h3 className="text-xs font-medium text-muted-foreground">
           {list === null
             ? t("connectors.loading")
             : connectors.length === 0
@@ -4187,12 +4178,13 @@ function ConnectorsSection({ open }: { open: boolean }) {
 
       {list === null && <SettingsRowsSkeleton />}
       {connectors.length > 0 && (
-        <SettingsCardGrid className="mt-3">
+        <SettingsList className="mt-3">
           {connectors.map((c) =>
             editing === c.id ? (
               <ConnectorEditor
                 key={c.id}
                 initial={c}
+                embedded
                 onCancel={() => setEditing(null)}
                 onSaved={async () => {
                   setEditing(null);
@@ -4210,7 +4202,7 @@ function ConnectorsSection({ open }: { open: boolean }) {
               />
             ),
           )}
-        </SettingsCardGrid>
+        </SettingsList>
       )}
 
       <DiscoveredMcpCard open={open} onError={setError} />
@@ -4385,12 +4377,11 @@ function ConnectorRow({
   return (
     <div
       className={cn(
-        "min-w-0 overflow-hidden rounded-lg border border-border bg-card",
+        "min-w-0 bg-card",
         !connector.enabled && "opacity-50",
       )}
     >
-      <div className="flex items-start gap-3 px-3 py-2.5">
-        <ServerCog className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <div className="flex items-start gap-3 px-4 py-3">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <p className="truncate text-sm font-medium">{connector.name}</p>
@@ -4725,11 +4716,13 @@ function KeyValueRows({
 
 function ConnectorEditor({
   initial,
+  embedded = false,
   onCancel,
   onSaved,
   onError,
 }: {
   initial: McpConnector | null;
+  embedded?: boolean;
   onCancel: () => void;
   onSaved: () => void;
   onError: (e: string) => void;
@@ -4810,7 +4803,12 @@ function ConnectorEditor({
   }
 
   return (
-    <div className="mt-3 space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+    <div
+      className={cn(
+        "space-y-3 bg-muted/30 p-4",
+        !embedded && "mt-3 rounded-lg border border-border",
+      )}
+    >
       <div className="space-y-1.5">
         <Label className="text-xs font-medium">{t("connectors.editor.name")}</Label>
         <Input

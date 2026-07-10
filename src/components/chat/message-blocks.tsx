@@ -19,12 +19,6 @@ import { ContextCard } from "./context-card";
 import { isArtifactDetails, formatBytes } from "@/lib/artifact";
 import { formatTimeHM, formatFullDateTime } from "@/lib/format";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
   Dialog,
   DialogContent,
   DialogTitle,
@@ -362,19 +356,17 @@ export function MessageActions({
   );
 }
 
-/** The hover timestamp: shows clock time (HH:mm) inline, and the full date down
- *  to the second in a tooltip when you hover the time itself. */
+/** Shows clock time inline and the full date in the browser tooltip. Keep this
+ *  node ref-free: virtualized histories detach many timestamps in one commit,
+ *  and a compound Radix trigger ref can synchronously enqueue an update for
+ *  every detach, eventually tripping React's nested-update guard. */
 function MessageTimestamp({ ts }: { ts: number }) {
   return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="cursor-default px-1 text-[11px] tabular-nums text-muted-foreground/70 transition-colors hover:text-foreground">
-            {formatTimeHM(ts)}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{formatFullDateTime(ts)}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <span
+      title={formatFullDateTime(ts)}
+      className="cursor-default px-1 text-[11px] tabular-nums text-muted-foreground/70 transition-colors hover:text-foreground"
+    >
+      {formatTimeHM(ts)}
+    </span>
   );
 }

@@ -745,6 +745,14 @@ export default function Home() {
     }));
   }
 
+  /** Rewrite a queued message's text in place (attachments are kept as-is). */
+  function editQueued(convId: string, id: string, text: string) {
+    setQueued((q) => ({
+      ...q,
+      [convId]: (q[convId] ?? []).map((m) => (m.id === id ? { ...m, text } : m)),
+    }));
+  }
+
   /** Promote a queued message to a steer: deliver it now. pi/claude-code inject
    *  into the current run; codex interrupts the run and resumes the thread. */
   function steerQueued(convId: string, id: string) {
@@ -885,6 +893,10 @@ export default function Home() {
             if (!r || !r.running) break;
             r.running = false;
             if (r.outcome === "aborted") break; // user aborted — stay quiet
+            // A queued follow-up is about to auto-deliver (the flush effect
+            // consumes the queue after this handler), so the conversation isn't
+            // really done — stay quiet and let the final run notify.
+            if ((queuedRef.current[cid]?.length ?? 0) > 0) break;
             // One notification for any finished run (interactive reply, board
             // task, or automation — they're all just chats); the body carries
             // success vs error.
@@ -2886,6 +2898,9 @@ export default function Home() {
             ? undefined
             : (id) => steerQueuedDetail(id)
         }
+        onEditQueued={(id, text) => {
+          if (detailId) editQueued(detailId, id, text);
+        }}
         onRemoveQueued={(id) => {
           if (detailId) removeQueued(detailId, id);
         }}
@@ -3081,6 +3096,9 @@ export default function Home() {
                         if (activeId) steerQueued(activeId, id);
                       }
                 }
+                onEditQueued={(id, text) => {
+                  if (activeId) editQueued(activeId, id, text);
+                }}
                 onRemoveQueued={(id) => {
                   if (activeId) removeQueued(activeId, id);
                 }}
