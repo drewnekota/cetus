@@ -161,6 +161,8 @@ pub struct AutomationInput {
     pub name: String,
     pub prompt: String,
     pub workspace_dir: Option<String>,
+    /// Missing (e.g. a control-socket caller) → the app's standard default.
+    #[serde(default)]
     pub model: ModelChoice,
     pub schedule: AutomationSchedule,
     #[serde(default = "default_true")]

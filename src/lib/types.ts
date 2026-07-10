@@ -795,6 +795,8 @@ export type AppEvent =
   | { type: "conversation_updated"; conversation: Conversation }
   // An automation's state advanced (next-run computed, toggled, run recorded).
   | { type: "automation_updated"; automation: Automation }
+  // An automation was deleted out-of-band (e.g. via the control socket).
+  | { type: "automation_deleted"; id: string }
   // An automation fired and minted a conversation.
   | { type: "automation_fired"; automation: Automation; conversation: Conversation }
   // Agent memory changed out-of-band — the dreaming pass consolidated recent

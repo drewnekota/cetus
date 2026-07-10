@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from "react";
-import { ArrowUp, Square, Paperclip, X, File, Terminal } from "lucide-react";
+import { ArrowUp, Square, Paperclip, X, File, Terminal, Radar } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
 import { api } from "@/lib/tauri";
+import { composeWithAmbient } from "@/lib/quick-context";
 import { readDraft, writeDraft } from "@/lib/draft-store";
 import type { BackendId, ModelChoice } from "@/lib/types";
 
@@ -266,6 +267,37 @@ export function Composer({
   // model picker) hide when a CLI backend serves this conversation — the CLIs
   // run their own default models, so the picker would be a no-op there.
   const [backend, setBackend] = useState<BackendId>("pi");
+  // Ambient rolling context (Littlebird-like collector). The chip only shows
+  // when the collector is enabled in Settings; the per-composer toggle decides
+  // whether each send leads with a `<context source="cetus-ambient">` fence.
+  const [ambientAvailable, setAmbientAvailable] = useState(false);
+  const [ambientOn, setAmbientOn] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.localStorage.getItem("cetus.ambient-inject") === "1",
+  );
+  useEffect(() => {
+    let live = true;
+    const check = () =>
+      api
+        .ambientStats()
+        .then((st) => live && setAmbientAvailable(st.enabled))
+        .catch(() => {});
+    check();
+    // Re-check when the window regains focus so flipping the collector on in
+    // Settings shows the chip without a reload.
+    window.addEventListener("focus", check);
+    return () => {
+      live = false;
+      window.removeEventListener("focus", check);
+    };
+  }, []);
+  const toggleAmbient = () => {
+    setAmbientOn((v) => {
+      window.localStorage.setItem("cetus.ambient-inject", v ? "0" : "1");
+      return !v;
+    });
+  };
   const rootRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -636,7 +668,7 @@ export function Composer({
     });
   }
 
-  function submit() {
+  async function submit() {
     if (disabled) return;
     // Terminal mode: hand the command to the right-side Terminal surface and
     // bypass the agent entirely. An empty command (`!` alone) is a no-op.
@@ -650,8 +682,19 @@ export function Composer({
     }
     // Expand any `@goal` token into its full directive before sending. Empty
     // when the user typed only `@goal` with no objective — treated as no message.
-    const outgoing = expandGoalDirective(text.trim());
+    let outgoing = expandGoalDirective(text.trim());
     if (!outgoing && attachments.length === 0) return;
+    // Lead with the rolling ambient-context fence when the chip is on. Captured
+    // at compose time — "what I was looking at when I wrote this" — so a queued
+    // message keeps the context of its writing moment. Best-effort: a failed
+    // fetch sends the bare prompt.
+    if (ambientOn && ambientAvailable && outgoing) {
+      try {
+        outgoing = composeWithAmbient(outgoing, await api.ambientRecentSummary());
+      } catch {
+        // bare prompt
+      }
+    }
     // Mid-run: park the message in the follow-up queue instead of sending. The
     // user can still promote it to a steer from the queue UI. Falls back to a
     // direct send (immediate steer) when no queue handler is wired.
@@ -672,6 +715,8 @@ export function Composer({
     <div
       ref={rootRef}
       data-chat-composer
+      data-streaming={streaming && !bashMode ? "true" : undefined}
+      data-backend={backend}
       onDragOver={(e) => {
         // Hijack drag enter only when files are involved — text-from-textarea
         // drags would otherwise highlight the drop zone too.
@@ -707,9 +752,11 @@ export function Composer({
         // runtime the next message runs on: Claude Code gets Anthropic's
         // clay orange, Codex a teal. Bash mode's tint wins while active.
         !bashMode &&
+          !streaming &&
           backend === "claude-code" &&
           "border-[#d97757]/60 ring-1 ring-[#d97757]/30 dark:border-[#d97757]/50",
         !bashMode &&
+          !streaming &&
           backend === "codex" &&
           "border-[#10a37f]/60 ring-1 ring-[#10a37f]/30 dark:border-[#10a37f]/50",
         variant === "hero" ? "bg-card p-2" : "bg-card p-1.5",
@@ -997,6 +1044,24 @@ export function Composer({
               lockUltra={streaming}
               disabled={disabled}
             />
+          )}
+          {ambientAvailable && (
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              onClick={toggleAmbient}
+              disabled={disabled}
+              title={t(ambientOn ? "composer.ambientOn" : "composer.ambientOff")}
+              aria-pressed={ambientOn}
+            >
+              <Radar
+                className={cn(
+                  "size-3",
+                  ambientOn ? "text-primary" : "text-muted-foreground",
+                )}
+              />
+            </Button>
           )}
         </div>
         {bashMode ? (

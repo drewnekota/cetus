@@ -105,6 +105,8 @@
   --info: var(--skill);
   --info-foreground: var(--surface);
   --skill-foreground: var(--surface);
+  --runtime-claude: #d97757;
+  --runtime-codex: #10a37f;
 
   --chart-1: var(--brand);
   --chart-2: var(--skill);
@@ -159,6 +161,8 @@
   --info: var(--skill);
   --info-foreground: var(--surface);
   --skill-foreground: var(--surface);
+  --runtime-claude: #d97757;
+  --runtime-codex: #10a37f;
 
   --chart-1: var(--brand);
   --chart-2: var(--skill);
@@ -284,4 +288,53 @@
   -webkit-background-clip: text;
   color: transparent;
   animation: shimmer-text 2s linear infinite;
+}
+
+/* Hallmark · component: composer running state · genre: modern-minimal
+ * Motion is the status cue: one restrained highlight circles the frame while
+ * the agent is working, then the normal runtime border returns when it stops. */
+@property --composer-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes composer-border-spin {
+  to {
+    --composer-border-angle: 360deg;
+  }
+}
+
+[data-chat-composer][data-streaming="true"] {
+  --composer-runner: var(--primary);
+  border-width: 2px;
+  border-color: transparent;
+  background:
+    linear-gradient(var(--card), var(--card)) padding-box,
+    conic-gradient(
+        from var(--composer-border-angle),
+        transparent 0% 62%,
+        color-mix(in oklab, var(--composer-runner) 22%, transparent) 74%,
+        var(--composer-runner) 88%,
+        color-mix(in oklab, var(--composer-runner) 28%, transparent) 95%,
+        transparent 100%
+      )
+      border-box;
+  animation: composer-border-spin 4s linear infinite;
+}
+
+[data-chat-composer][data-streaming="true"][data-backend="claude-code"] {
+  --composer-runner: var(--runtime-claude);
+}
+
+[data-chat-composer][data-streaming="true"][data-backend="codex"] {
+  --composer-runner: var(--runtime-codex);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-chat-composer][data-streaming="true"] {
+    border-color: color-mix(in oklab, var(--composer-runner) 60%, transparent);
+    background: var(--card);
+    animation: none;
+  }
 }

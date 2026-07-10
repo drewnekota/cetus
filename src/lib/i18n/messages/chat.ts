@@ -21,6 +21,10 @@ export const chat = {
     "composer.placeholderDocked": "Message the agent. ⏎ send, ⇧⏎ newline.",
     "composer.focusShortcutHint": "Press / to focus.",
     "composer.attachFile": "Attach file",
+    "composer.ambientOn":
+      "Ambient context on — recent activity is attached to each message",
+    "composer.ambientOff":
+      "Ambient context off — click to attach recent activity to messages",
     "composer.abort": "Abort",
     "composer.send": "Send",
     "composer.bashHint": "Terminal mode — opens Terminal and runs this command",
@@ -107,6 +111,7 @@ export const chat = {
     "bubble.copied": "Copied",
     "bubble.regenerate": "Regenerate",
     "bubble.fork": "Fork",
+    "bubble.runtimeSwitch": "Runtime switched:",
 
     // Model picker
     "model.daily": "Daily",
@@ -198,6 +203,8 @@ export const chat = {
     "composer.placeholderDocked": "给智能体发消息。⏎ 发送，⇧⏎ 换行。",
     "composer.focusShortcutHint": "未聚焦时，按 / 可直接输入。",
     "composer.attachFile": "添加文件",
+    "composer.ambientOn": "环境上下文已开——每条消息附带最近屏幕活动",
+    "composer.ambientOff": "环境上下文已关——点击为消息附带最近屏幕活动",
     "composer.abort": "中止",
     "composer.send": "发送",
     "composer.bashHint": "Terminal 模式——打开终端并运行这条命令",
@@ -278,6 +285,7 @@ export const chat = {
     "bubble.copied": "已复制",
     "bubble.regenerate": "重新生成",
     "bubble.fork": "Fork 分支",
+    "bubble.runtimeSwitch": "运行时已切换：",
 
     "model.daily": "日常",
     "model.dailyHint": "DeepSeek V4 Pro · 低思考——日常速度，最少思维链",
@@ -375,6 +383,7 @@ export const chat = {
     "bubble.copied": "コピーしました",
     "bubble.regenerate": "再生成",
     "bubble.fork": "フォーク",
+    "bubble.runtimeSwitch": "ランタイムを切替:",
 
     "model.daily": "デイリー",
     "model.dailyHint":
@@ -468,6 +477,7 @@ export const chat = {
     "bubble.copied": "복사됨",
     "bubble.regenerate": "다시 생성",
     "bubble.fork": "포크",
+    "bubble.runtimeSwitch": "런타임 전환:",
 
     "model.daily": "데일리",
     "model.dailyHint":
@@ -561,6 +571,7 @@ export const chat = {
     "bubble.copied": "Copiado",
     "bubble.regenerate": "Regenerar",
     "bubble.fork": "Bifurcar",
+    "bubble.runtimeSwitch": "Runtime cambiado:",
 
     "model.daily": "Diario",
     "model.dailyHint":
@@ -655,6 +666,7 @@ export const chat = {
     "bubble.copied": "Copiado",
     "bubble.regenerate": "Regenerar",
     "bubble.fork": "Bifurcar",
+    "bubble.runtimeSwitch": "Runtime alterado:",
 
     "model.daily": "Diário",
     "model.dailyHint":
@@ -749,6 +761,7 @@ export const chat = {
     "bubble.copied": "Copié",
     "bubble.regenerate": "Régénérer",
     "bubble.fork": "Dupliquer",
+    "bubble.runtimeSwitch": "Runtime changé :",
 
     "model.daily": "Quotidien",
     "model.dailyHint":
@@ -843,6 +856,7 @@ export const chat = {
     "bubble.copied": "Kopiert",
     "bubble.regenerate": "Neu generieren",
     "bubble.fork": "Forken",
+    "bubble.runtimeSwitch": "Runtime gewechselt:",
 
     "model.daily": "Täglich",
     "model.dailyHint":
@@ -937,6 +951,7 @@ export const chat = {
     "bubble.copied": "Copiato",
     "bubble.regenerate": "Rigenera",
     "bubble.fork": "Biforca",
+    "bubble.runtimeSwitch": "Runtime cambiato:",
 
     "model.daily": "Quotidiano",
     "model.dailyHint":
@@ -1031,6 +1046,7 @@ export const chat = {
     "bubble.copied": "Скопировано",
     "bubble.regenerate": "Сгенерировать заново",
     "bubble.fork": "Форк",
+    "bubble.runtimeSwitch": "Среда выполнения переключена:",
 
     "model.daily": "Повседневный",
     "model.dailyHint":

@@ -15,6 +15,7 @@ import {
 import { useTranslation } from "@/lib/i18n";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { ClaudeCodeIcon, CodexIcon } from "@/components/brand-icons";
 
 /** Mirrors `resources::ResourceRow` / `ResourcesSnapshot` on the Rust side. */
 interface ResourceRow {
@@ -118,9 +119,18 @@ export function ResourcesPopover() {
                 key={r.pid}
                 className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent"
               >
-                <span
-                  className={cn("size-1.5 shrink-0 rounded-full", KIND_DOT[r.kind])}
-                />
+                {r.label === "Claude Code" ? (
+                  <ClaudeCodeIcon className="size-3.5 shrink-0 rounded-[2px]" />
+                ) : r.label === "Codex" ? (
+                  <CodexIcon className="size-3.5 shrink-0 rounded-[2px]" />
+                ) : (
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      KIND_DOT[r.kind],
+                    )}
+                  />
+                )}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{r.label}</span>
                   {(r.conversationTitle || r.processCount > 1) && (

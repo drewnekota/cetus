@@ -118,6 +118,7 @@ function AutomationCard({
 }) {
   const { t } = useTranslation("automation");
   const a = automation;
+  const backend = BACKENDS.find((b) => b.id === a.backend);
   return (
     <div
       className={cn(
@@ -143,7 +144,10 @@ function AutomationCard({
             </span>
             {a.backend && a.backend !== "pi" && (
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-medium text-foreground/80">
-                {BACKENDS.find((b) => b.id === a.backend)?.label ?? a.backend}
+                {backend && (
+                  <backend.icon className="size-3 shrink-0 rounded-[2px]" />
+                )}
+                {backend?.label ?? a.backend}
               </span>
             )}
             {a.enabled ? (

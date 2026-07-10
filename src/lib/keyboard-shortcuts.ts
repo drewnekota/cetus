@@ -26,7 +26,8 @@ export type ShortcutId =
   | "previousWorkspaceTab"
   | "nextWorkspaceTab"
   | "previousChat"
-  | "nextChat";
+  | "nextChat"
+  | "lastChat";
 
 export interface ShortcutDefinition {
   id: ShortcutId;
@@ -184,6 +185,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: "Next chat",
     description: "Move to the next chat in the sidebar",
     defaultAccelerator: "Cmd+Alt+ArrowDown",
+  },
+  {
+    id: "lastChat",
+    label: "Last chat",
+    description: "Open the last chat in the sidebar",
+    defaultAccelerator: "Cmd+9",
   },
 ];
 

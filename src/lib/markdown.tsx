@@ -14,12 +14,24 @@ import { invoke } from "@tauri-apps/api/core";
 export const KATEX_OPTIONS = { strict: "ignore" as const, throwOnError: false };
 
 /**
+ * Shared remark-math options. Single-dollar math is OFF: chat text routinely
+ * contains currency ("$1", "-$0.10"), and remark-math pairs those bare `$`
+ * signs into one giant inline "formula" spanning whole sentences — which KaTeX
+ * then renders as an unwrappable nowrap span that forces a horizontal
+ * scrollbar. Real math still works: models emit `\( … \)` / `\[ … \]`, which
+ * normalizeMath rewrites to the double-dollar form below.
+ */
+export const REMARK_MATH_OPTIONS = { singleDollarTextMath: false };
+
+/**
  * Models emit math in LaTeX delimiters (`\[ … \]` for display, `\( … \)` for
- * inline), but remark-math only understands `$$ … $$` / `$ … $`. Worse, raw
+ * inline), but remark-math only understands dollar delimiters. Worse, raw
  * markdown treats `\[` as an *escaped* bracket, so untouched output renders as
- * literal `[ … ]` with bare TeX inside. Rewrite the delimiters to dollar form
- * so remark-math + KaTeX can pick them up — but skip fenced/inline code so a
- * literal `\(` in a code sample isn't mangled.
+ * literal `[ … ]` with bare TeX inside. Rewrite the delimiters to the
+ * double-dollar form (single-dollar parsing is disabled — see
+ * REMARK_MATH_OPTIONS; inline `$$ … $$` is still inline math to remark-math)
+ * so KaTeX can pick them up — but skip fenced/inline code so a literal `\(`
+ * in a code sample isn't mangled.
  */
 export function normalizeMath(text: string): string {
   // Odd indices are the captured code spans/blocks; leave those untouched.
@@ -30,7 +42,7 @@ export function normalizeMath(text: string): string {
         ? part
         : part
             .replace(/\\\[([\s\S]+?)\\\]/g, (_, body) => `$$${body}$$`)
-            .replace(/\\\(([\s\S]+?)\\\)/g, (_, body) => `$${body}$`),
+            .replace(/\\\(([\s\S]+?)\\\)/g, (_, body) => `$$${body}$$`),
     )
     .join("");
 }

@@ -299,6 +299,26 @@ export const settings = {
     "screen.frames.one": "{count} frame captured · macOS asks for Screen Recording permission the first time capture runs.",
     "screen.frames.other": "{count} frames captured · macOS asks for Screen Recording permission the first time capture runs.",
 
+    // --- Ambient text context (accessibility collector) --------------------
+    "ambient.title": "Ambient context",
+    "ambient.description":
+      "Keep a rolling, text-only memory of what you're looking at by reading the frontmost app's accessibility tree — window titles, visible text, browser URLs. No screenshots, no keystrokes, never password fields. Everything stays on your Mac.",
+    "ambient.enable.label": "Enable ambient context",
+    "ambient.enable.description":
+      "Off by default. When on, chats can attach a summary of your recent activity via the composer's radar toggle.",
+    "ambient.retention.label": "Keep history for",
+    "ambient.retention.description":
+      "Older entries are deleted automatically. Set 0 to keep forever.",
+    "ambient.retention.unit": "days",
+    "ambient.excluded.label": "Excluded apps",
+    "ambient.excluded.description":
+      "Comma-separated app names or bundle ids. Nothing is read while one of these is frontmost (e.g. 1Password, banking apps).",
+    "ambient.clear": "Delete all history",
+    "ambient.entries.one":
+      "{count} entry stored · reading window text uses the Accessibility permission.",
+    "ambient.entries.other":
+      "{count} entries stored · reading window text uses the Accessibility permission.",
+
     // --- Computer & Browser control ---------------------------------------
     "agentControl.title": "Computer & Browser control",
     "agentControl.description":
@@ -810,6 +830,22 @@ export const settings = {
       "以逗号分隔的应用名称或 bundle id。这些应用处于最前台时会跳过采集（如 1Password、信息）。",
     "screen.frames.one": "已采集 {count} 张画面 · 首次采集时 macOS 会请求屏幕录制权限。",
     "screen.frames.other": "已采集 {count} 张画面 · 首次采集时 macOS 会请求屏幕录制权限。",
+
+    "ambient.title": "环境上下文",
+    "ambient.description":
+      "通过读取前台应用的辅助功能树（窗口标题、可见文字、浏览器网址）维护一份滚动的纯文本活动记忆。不截屏、不记录按键、绝不读取密码框。数据只留在本机。",
+    "ambient.enable.label": "启用环境上下文",
+    "ambient.enable.description":
+      "默认关闭。开启后，对话可通过输入框的雷达开关附带最近活动摘要。",
+    "ambient.retention.label": "历史保留时长",
+    "ambient.retention.description": "较早的记录会自动删除。设为 0 则永久保留。",
+    "ambient.retention.unit": "天",
+    "ambient.excluded.label": "排除的应用",
+    "ambient.excluded.description":
+      "以逗号分隔的应用名称或 bundle id。这些应用处于最前台时不读取任何内容（如 1Password、银行类应用）。",
+    "ambient.clear": "删除全部历史",
+    "ambient.entries.one": "已存储 {count} 条记录 · 读取窗口文字使用辅助功能权限。",
+    "ambient.entries.other": "已存储 {count} 条记录 · 读取窗口文字使用辅助功能权限。",
 
     "agentControl.title": "电脑与浏览器控制",
     "agentControl.description":

@@ -76,6 +76,32 @@ export interface Screenshot {
   ocrText: string | null;
 }
 
+// --- Ambient text context (Littlebird-like AX collector) types --------------
+
+export interface AmbientSettings {
+  enabled: boolean;
+  intervalSeconds: number;
+  excludedApps: string[];
+  retentionDays: number;
+}
+
+export interface AmbientStats {
+  enabled: boolean;
+  count: number;
+}
+
+export interface AmbientEntry {
+  id: string;
+  ts: number;
+  appName: string | null;
+  bundleId: string | null;
+  windowTitle: string | null;
+  url: string | null;
+  pageTitle: string | null;
+  text: string;
+  textHash: number | null;
+}
+
 // --- Meeting memory (ambient audio transcription) types --------------------
 
 export interface MeetingSettings {
@@ -462,6 +488,33 @@ export const api = {
       limit: limit ?? null,
       beforeTs: beforeTs ?? null,
     }),
+
+  // Ambient text context (Littlebird-like AX collector) ---------------------
+  getAmbientSettings: () => invoke<AmbientSettings>("get_ambient_settings"),
+  setAmbientSettings: (settings: AmbientSettings) =>
+    invoke<void>("set_ambient_settings", { settings }),
+  ambientStats: () => invoke<AmbientStats>("ambient_stats"),
+  recentAmbientContext: (limit?: number, beforeTs?: number) =>
+    invoke<AmbientEntry[]>("recent_ambient_context", {
+      limit: limit ?? null,
+      beforeTs: beforeTs ?? null,
+    }),
+  searchAmbientContext: (
+    query: string,
+    sinceTs?: number,
+    limit?: number,
+    beforeTs?: number,
+  ) =>
+    invoke<AmbientEntry[]>("search_ambient_context", {
+      query,
+      sinceTs: sinceTs ?? null,
+      limit: limit ?? null,
+      beforeTs: beforeTs ?? null,
+    }),
+  clearAmbientHistory: () => invoke<void>("clear_ambient_history"),
+  /** Inner text of the `<context source="cetus-ambient">` fence, or null when
+   *  the collector is off / the rolling window is empty. */
+  ambientRecentSummary: () => invoke<string | null>("ambient_recent_summary"),
 
   // Meeting memory (ambient audio transcription) ----------------------------
   getMeetingSettings: () => invoke<MeetingSettings>("get_meeting_settings"),

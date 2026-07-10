@@ -1,6 +1,8 @@
 "use client";
+import { ArrowLeftRight } from "lucide-react";
 import type { RenderedBlock, RenderedMessage } from "@/lib/types";
 import { useMessage } from "@/lib/chat-store";
+import { BACKENDS } from "./backend-picker";
 import { VisionCard } from "./vision-card";
 import { BashCard } from "./bash-card";
 import { AnswerBlock, MessageActions } from "./message-blocks";
@@ -64,6 +66,16 @@ function MessageBubbleView({
   // vision_describe breadcrumb shows what the vision model saw on the user's
   // behalf, so align it left with the assistant.
   if (message.role === "custom") {
+    // The runtime-switch audit marker renders as a full-width divider, not a
+    // card — it separates "what ran on the old runtime" from what follows.
+    const runtimeSwitch = message.blocks.find(
+      (b) => b.kind === "custom" && b.customType === "runtime_switch",
+    );
+    if (runtimeSwitch && runtimeSwitch.kind === "custom") {
+      return (
+        <RuntimeSwitchDivider text={runtimeSwitch.text} details={runtimeSwitch.details} />
+      );
+    }
     return (
       <div className="flex w-full justify-start py-2">
         <div className="flex w-full max-w-[88%] flex-col gap-2 items-start">
@@ -110,6 +122,33 @@ function MessageBubbleView({
           onFork={onFork}
         />
       </div>
+    </div>
+  );
+}
+
+/** Display label for a backend id carried by a runtime_switch marker. */
+function backendLabel(id: unknown): string | null {
+  if (typeof id !== "string" || !id) return null;
+  return BACKENDS.find((b) => b.id === id)?.label ?? id;
+}
+
+/** The runtime-switch audit marker: a centered divider ("Codex → Claude Code")
+ *  making the provider change explicit in the transcript — context above ran on
+ *  the old runtime, everything below runs on the new one. */
+function RuntimeSwitchDivider({ text, details }: { text: string; details?: unknown }) {
+  const { t } = useTranslation("chat");
+  const d = (details ?? {}) as { from?: unknown; to?: unknown };
+  const from = backendLabel(d.from);
+  const to = backendLabel(d.to);
+  const label = from && to ? `${from} → ${to}` : text;
+  return (
+    <div className="flex w-full items-center gap-3 py-3" data-testid="runtime-switch">
+      <div className="h-px flex-1 bg-border/60" />
+      <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <ArrowLeftRight className="size-3 opacity-70" />
+        {t("bubble.runtimeSwitch")} {label}
+      </span>
+      <div className="h-px flex-1 bg-border/60" />
     </div>
   );
 }

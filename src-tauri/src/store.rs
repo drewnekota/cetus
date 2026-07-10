@@ -82,6 +82,23 @@ pub struct Screenshot {
     pub ocr_text: Option<String>,
 }
 
+/// One observed ambient-context change: structured text read off the frontmost
+/// app's accessibility tree (window title + visible text + browser URL). Text
+/// only — the pixel-based sibling is [`Screenshot`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AxContextEntry {
+    pub id: String,
+    pub ts: i64,
+    pub app_name: Option<String>,
+    pub bundle_id: Option<String>,
+    pub window_title: Option<String>,
+    pub url: Option<String>,
+    pub page_title: Option<String>,
+    pub text: String,
+    pub text_hash: Option<i64>,
+}
+
 /// One recorded meeting (ambient-audio transcription session). Transcript text
 /// lives in `meeting_segments`; this is the session header the UI lists.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +277,27 @@ impl Store {
                 created_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_cli_msgs_conv ON cli_messages (conversation_id, id);
+
+            -- Littlebird-like rolling ambient context: structured text read off
+            -- the frontmost app's AX tree (no pixels, no keystrokes). One row per
+            -- observed change; heavy dedup happens before insert. Additive like
+            -- app_settings so it survives a conversations-table reset.
+            CREATE TABLE IF NOT EXISTS ax_context (
+                id TEXT PRIMARY KEY,
+                ts INTEGER NOT NULL,
+                app_name TEXT,
+                bundle_id TEXT,
+                window_title TEXT,
+                url TEXT,
+                page_title TEXT,
+                text TEXT NOT NULL DEFAULT '',
+                text_hash INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_axctx_ts ON ax_context (ts DESC);
+            -- FTS over the visible text + titles, same trigger-free pattern as
+            -- screenshots_fts.
+            CREATE VIRTUAL TABLE IF NOT EXISTS ax_context_fts
+                USING fts5(id UNINDEXED, text);
             "#,
         )?;
         // Additive column for automation-minted conversations. A DB created
@@ -298,6 +336,17 @@ impl Store {
             "conversations",
             "cli_effort",
             "TEXT NOT NULL DEFAULT ''",
+        )?;
+        // Per-runtime resume-token stash (JSON map: backend id → session_file
+        // value). session_file only holds the ACTIVE runtime's token; switching
+        // backends stashes the old one here and restores the new one, so a
+        // conversation can hop claude-code → codex → back and still resume each
+        // runtime's own session. Additive; pre-existing rows start empty.
+        ensure_column(
+            &conn,
+            "conversations",
+            "resume_tokens",
+            "TEXT NOT NULL DEFAULT '{}'",
         )?;
         // Coding-agent backend for automations (pi | claude-code | codex) and
         // the CLI model override their fired conversations inherit. Additive.
@@ -426,15 +475,59 @@ impl Store {
         Ok(())
     }
 
-    /// Switch which coding-agent backend serves a conversation
-    /// ("pi" | "claude-code" | "codex").
-    pub fn set_backend(&self, id: &str, backend: &str, ts: i64) -> Result<()> {
+    /// Switch a conversation's backend AND swap its resume token: the current
+    /// session_file (the active runtime's resume token — claude session_id /
+    /// codex thread_id / pi session jsonl path) is stashed in `resume_tokens`
+    /// under the old backend id, and the new backend's stashed token (if any)
+    /// is restored into session_file. Without the swap the next turn would run
+    /// e.g. `claude --resume <codex-thread-id>` — a guaranteed resume failure
+    /// that also destroys the old runtime's token.
+    ///
+    /// Returns the previous backend id when a switch actually happened, None
+    /// when the conversation is missing or already on `new_backend`.
+    pub fn switch_backend(&self, id: &str, new_backend: &str, ts: i64) -> Result<Option<String>> {
         let conn = self.conn.lock().unwrap();
+        let row: Option<(String, String, String)> = conn
+            .query_row(
+                "SELECT backend, session_file, resume_tokens FROM conversations WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((old_backend, session_file, tokens_raw)) = row else {
+            return Ok(None);
+        };
+        if old_backend == new_backend {
+            return Ok(None);
+        }
+        let mut tokens: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&tokens_raw).unwrap_or_default();
+        if session_file.is_empty() {
+            tokens.remove(&old_backend);
+        } else {
+            tokens.insert(
+                old_backend.clone(),
+                serde_json::Value::String(session_file),
+            );
+        }
+        let restored = tokens
+            .get(new_backend)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         conn.execute(
-            "UPDATE conversations SET backend = ?1, updated_at = ?2 WHERE id = ?3",
-            params![backend, ts, id],
+            "UPDATE conversations
+             SET backend = ?1, session_file = ?2, resume_tokens = ?3, updated_at = ?4
+             WHERE id = ?5",
+            params![
+                new_backend,
+                restored,
+                serde_json::Value::Object(tokens).to_string(),
+                ts,
+                id
+            ],
         )?;
-        Ok(())
+        Ok(Some(old_backend))
     }
 
     /// Set the CLI backend's model + reasoning-effort overrides for a
@@ -1024,6 +1117,159 @@ impl Store {
         Ok(paths)
     }
 
+    // ---- ax_context (rolling ambient text context) -------------------------
+
+    /// Insert one observed change, indexing its text in FTS in the same
+    /// transaction (same crash-consistency rationale as `set_screenshot_ocr`).
+    pub fn insert_ax_context(&self, e: &AxContextEntry) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO ax_context
+                (id, ts, app_name, bundle_id, window_title, url, page_title, text, text_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                e.id,
+                e.ts,
+                e.app_name,
+                e.bundle_id,
+                e.window_title,
+                e.url,
+                e.page_title,
+                e.text,
+                e.text_hash,
+            ],
+        )?;
+        // Index titles alongside the body so a search for a page/window name hits.
+        let fts_text = format!(
+            "{} {} {} {}",
+            e.window_title.as_deref().unwrap_or(""),
+            e.page_title.as_deref().unwrap_or(""),
+            e.url.as_deref().unwrap_or(""),
+            e.text
+        );
+        tx.execute(
+            "INSERT INTO ax_context_fts (id, text) VALUES (?1, ?2)",
+            params![e.id, fts_text.trim()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Newest entries first. `before_ts` is the keyset-pagination cursor
+    /// (exclusive upper bound on ts), mirroring `recent_screenshots`.
+    pub fn recent_ax_context(
+        &self,
+        limit: u32,
+        before_ts: Option<i64>,
+    ) -> Result<Vec<AxContextEntry>> {
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, app_name, bundle_id, window_title, url, page_title, text, text_hash
+             FROM ax_context WHERE ts < ?2 ORDER BY ts DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(
+            params![limit, before_ts.unwrap_or(i64::MAX)],
+            row_to_ax_context,
+        )?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Entries observed at or after `since_ts`, oldest first (chronological — the
+    /// shape the "recent activity" summary wants). Bounded by `limit` newest.
+    pub fn ax_context_since(&self, since_ts: i64, limit: u32) -> Result<Vec<AxContextEntry>> {
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, app_name, bundle_id, window_title, url, page_title, text, text_hash
+             FROM (SELECT * FROM ax_context WHERE ts >= ?1 ORDER BY ts DESC LIMIT ?2)
+             ORDER BY ts ASC",
+        )?;
+        let rows = stmt.query_map(params![since_ts, limit], row_to_ax_context)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Full-text search over ambient entries, newest first. Empty query falls
+    /// back to recent, mirroring `search_screenshots`.
+    pub fn search_ax_context(
+        &self,
+        query: &str,
+        since_ts: i64,
+        limit: u32,
+        before_ts: Option<i64>,
+    ) -> Result<Vec<AxContextEntry>> {
+        let match_expr = fts_match_expr(query);
+        if match_expr.is_empty() {
+            let recent = self.recent_ax_context(limit, before_ts)?;
+            return Ok(recent.into_iter().filter(|e| e.ts >= since_ts).collect());
+        }
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.ts, c.app_name, c.bundle_id, c.window_title, c.url, c.page_title, c.text, c.text_hash
+             FROM ax_context c JOIN ax_context_fts ON ax_context_fts.id = c.id
+             WHERE ax_context_fts MATCH ?1 AND c.ts >= ?2 AND c.ts < ?4
+             ORDER BY c.ts DESC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            params![match_expr, since_ts, limit, before_ts.unwrap_or(i64::MAX)],
+            row_to_ax_context,
+        )?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn ax_context_count(&self) -> Result<i64> {
+        let conn = self.read_conn.lock().unwrap();
+        Ok(conn.query_row("SELECT COUNT(*) FROM ax_context", [], |r| r.get(0))?)
+    }
+
+    /// Delete entries older than `before_ts`. Row + FTS in one transaction; the
+    /// same post-prune compaction as screenshots since this stream also grows
+    /// unbounded when the collector runs all day.
+    pub fn prune_ax_context(&self, before_ts: i64) -> Result<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let n;
+        {
+            let tx = conn.transaction()?;
+            tx.execute(
+                "DELETE FROM ax_context_fts WHERE id IN
+                    (SELECT id FROM ax_context WHERE ts < ?1)",
+                params![before_ts],
+            )?;
+            n = tx.execute("DELETE FROM ax_context WHERE ts < ?1", params![before_ts])?;
+            tx.commit()?;
+        }
+        if n > 0 {
+            let _ = conn.execute_batch(
+                "INSERT INTO ax_context_fts(ax_context_fts) VALUES('optimize');
+                 PRAGMA incremental_vacuum;
+                 PRAGMA wal_checkpoint(TRUNCATE);",
+            );
+        }
+        Ok(n)
+    }
+
+    /// The "delete my history" button: drop everything at once.
+    pub fn clear_ax_context(&self) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM ax_context_fts", [])?;
+        tx.execute("DELETE FROM ax_context", [])?;
+        tx.commit()?;
+        let _ = conn.execute_batch("PRAGMA incremental_vacuum; PRAGMA wal_checkpoint(TRUNCATE);");
+        Ok(())
+    }
+
     // ---- meetings (ambient audio transcription) ----------------------------
 
     pub fn insert_meeting(&self, id: &str, started_ts: i64, app_name: Option<&str>) -> Result<()> {
@@ -1181,6 +1427,20 @@ fn row_to_screenshot(r: &rusqlite::Row<'_>) -> rusqlite::Result<Screenshot> {
         bytes: r.get(6)?,
         ocr_text: r.get(7)?,
         thumb_path: r.get(8)?,
+    })
+}
+
+fn row_to_ax_context(r: &rusqlite::Row<'_>) -> rusqlite::Result<AxContextEntry> {
+    Ok(AxContextEntry {
+        id: r.get(0)?,
+        ts: r.get(1)?,
+        app_name: r.get(2)?,
+        bundle_id: r.get(3)?,
+        window_title: r.get(4)?,
+        url: r.get(5)?,
+        page_title: r.get(6)?,
+        text: r.get(7)?,
+        text_hash: r.get(8)?,
     })
 }
 
@@ -1388,6 +1648,62 @@ mod tests {
 
         store.delete_cli_messages("c1").unwrap();
         assert!(store.list_cli_messages("c1").unwrap().is_empty());
+
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn switch_backend_stashes_and_restores_resume_tokens() {
+        let (store, path) = temp_store();
+        let conv = Conversation {
+            id: "c1".into(),
+            title: String::new(),
+            session_file: String::new(),
+            workspace_dir: "/tmp".into(),
+            model: Default::default(),
+            created_at: 1,
+            updated_at: 1,
+            archived_at: None,
+            source_automation_id: None,
+            parallel_group_id: None,
+            solution_index: None,
+            review_state: "none".into(),
+            backend: "codex".into(),
+            cli_model: String::new(),
+            cli_effort: String::new(),
+        };
+        store.insert(&conv).unwrap();
+        store.set_session_file("c1", "codex-thread-1").unwrap();
+
+        // codex → claude: the codex token is stashed, claude starts blank.
+        assert_eq!(
+            store.switch_backend("c1", "claude-code", 2).unwrap(),
+            Some("codex".to_string())
+        );
+        let c = store.get("c1").unwrap().unwrap();
+        assert_eq!(c.backend, "claude-code");
+        assert_eq!(c.session_file, "");
+
+        // Claude runs a turn and persists its own token.
+        store.set_session_file("c1", "claude-sess-1").unwrap();
+
+        // claude → codex: claude's token is stashed, codex's restored.
+        assert_eq!(
+            store.switch_backend("c1", "codex", 3).unwrap(),
+            Some("claude-code".to_string())
+        );
+        let c = store.get("c1").unwrap().unwrap();
+        assert_eq!(c.session_file, "codex-thread-1");
+
+        // Back again: claude's token round-trips too.
+        store.switch_backend("c1", "claude-code", 4).unwrap();
+        let c = store.get("c1").unwrap().unwrap();
+        assert_eq!(c.session_file, "claude-sess-1");
+
+        // Same backend / missing conversation: no-op.
+        assert_eq!(store.switch_backend("c1", "claude-code", 5).unwrap(), None);
+        assert_eq!(store.switch_backend("nope", "codex", 5).unwrap(), None);
 
         drop(store);
         let _ = std::fs::remove_file(&path);

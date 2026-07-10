@@ -33,6 +33,9 @@ pub enum AppEvent {
     AutomationUpdated {
         automation: crate::automation::Automation,
     },
+    /// An automation was deleted out-of-band (e.g. via the control socket).
+    /// The frontend drops it from its list.
+    AutomationDeleted { id: String },
     /// An automation fired and minted a conversation. The frontend merges the
     /// updated automation and adds the fresh conversation to its lists.
     AutomationFired {

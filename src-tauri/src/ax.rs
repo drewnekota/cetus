@@ -197,7 +197,7 @@ pub fn fetch_browser_url(bundle: &str) -> Option<(String, String)> {
 /// Frontmost application's (localized name, bundle id, pid) via NSWorkspace
 /// (no special permission required).
 #[cfg(target_os = "macos")]
-fn frontmost_identity() -> Option<(String, String, i32)> {
+pub(crate) fn frontmost_identity() -> Option<(String, String, i32)> {
     use objc2::msg_send;
     use objc2::runtime::{AnyClass, AnyObject};
     unsafe {
@@ -283,6 +283,175 @@ fn focused_selected_text(pid: i32) -> Option<String> {
             Some(text)
         }
     }
+}
+
+// ---- ambient collector reads (title + bounded visible text) ----------------
+//
+// Everything below is sized for a *resident* caller (ambient.rs): each AX
+// attribute read is one synchronous IPC round-trip into the target app, so the
+// walk is bounded four ways — node count, depth, collected chars, and wall
+// clock — and the caps, not the tree, set the worst case. The cheap probe
+// (`focused_window_title`, 2 reads) runs every tick; the full walk runs only
+// when the cheap probe saw a change.
+
+/// Node/depth/wall-clock bounds for [`visible_text`]. ~300 nodes × 2–3 reads is
+/// tens of ms against a healthy app; the budget cuts off a busy/hung one.
+#[cfg(target_os = "macos")]
+const WALK_MAX_NODES: usize = 300;
+#[cfg(target_os = "macos")]
+const WALK_MAX_DEPTH: usize = 12;
+#[cfg(target_os = "macos")]
+const WALK_BUDGET_MS: u128 = 150;
+
+/// Title of `pid`'s focused window (falls back to the main window). Two AX
+/// reads — cheap enough to poll. None when AX is untrusted or the app exposes
+/// no window.
+#[cfg(target_os = "macos")]
+pub fn focused_window_title(pid: i32) -> Option<String> {
+    use accessibility_sys::{AXIsProcessTrusted, AXUIElementCreateApplication};
+    use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    if !unsafe { AXIsProcessTrusted() } || pid <= 0 {
+        return None;
+    }
+    unsafe {
+        let app = AXUIElementCreateApplication(pid);
+        if app.is_null() {
+            return None;
+        }
+        let app_owner = CFType::wrap_under_create_rule(app as CFTypeRef);
+        let app_ref = app_owner.as_CFTypeRef() as accessibility_sys::AXUIElementRef;
+        let win = copy_attr(app_ref, "AXFocusedWindow")
+            .or_else(|| copy_attr(app_ref, "AXMainWindow"))?;
+        let win_ref = win.as_CFTypeRef() as accessibility_sys::AXUIElementRef;
+        attr_string(win_ref, "AXTitle").filter(|t| !t.trim().is_empty())
+    }
+}
+
+/// Bounded depth-first collection of the visible structured text under `pid`'s
+/// focused (or main) window. Reads text-bearing roles only; secure text fields
+/// (`AXSecureTextField` subrole) are never read NOR descended into. Returns
+/// None when AX is untrusted, there is no window, or nothing textual surfaced.
+#[cfg(target_os = "macos")]
+pub fn visible_text(pid: i32, max_chars: usize) -> Option<String> {
+    use accessibility_sys::{AXIsProcessTrusted, AXUIElementCreateApplication, AXUIElementRef};
+    use core_foundation::array::CFArray;
+    use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    use std::time::Instant;
+
+    if !unsafe { AXIsProcessTrusted() } || pid <= 0 {
+        return None;
+    }
+    let started = Instant::now();
+    unsafe {
+        let app = AXUIElementCreateApplication(pid);
+        if app.is_null() {
+            return None;
+        }
+        let app_owner = CFType::wrap_under_create_rule(app as CFTypeRef);
+        let app_ref = app_owner.as_CFTypeRef() as AXUIElementRef;
+        let win = copy_attr(app_ref, "AXFocusedWindow")
+            .or_else(|| copy_attr(app_ref, "AXMainWindow"))?;
+
+        let mut out: Vec<String> = Vec::new();
+        let mut chars = 0usize;
+        let mut visited = 0usize;
+        // Owned CFTypes keep the elements alive while they sit in the stack.
+        let mut stack: Vec<(CFType, usize)> = vec![(win, 0)];
+
+        while let Some((el_owner, depth)) = stack.pop() {
+            if visited >= WALK_MAX_NODES
+                || chars >= max_chars
+                || started.elapsed().as_millis() > WALK_BUDGET_MS
+            {
+                break;
+            }
+            visited += 1;
+            let el = el_owner.as_CFTypeRef() as AXUIElementRef;
+
+            let role = attr_string(el, "AXRole").unwrap_or_default();
+            // Secure fields: skip the value AND the subtree — never surface even
+            // fragments of a password UI.
+            if matches!(role.as_str(), "AXTextField" | "AXTextArea" | "AXComboBox") {
+                let sub = attr_string(el, "AXSubrole").unwrap_or_default();
+                if sub == "AXSecureTextField" {
+                    continue;
+                }
+            }
+            let text = match role.as_str() {
+                "AXStaticText" | "AXHeading" => attr_string(el, "AXValue")
+                    .or_else(|| attr_string(el, "AXTitle")),
+                "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField" => {
+                    attr_string(el, "AXValue")
+                }
+                "AXLink" => attr_string(el, "AXTitle"),
+                _ => None,
+            };
+            if let Some(t) = text {
+                let t = t.trim();
+                // Drop empties and immediate repeats (labels duplicated across
+                // subtrees are the dominant noise).
+                if !t.is_empty() && out.last().map(String::as_str) != Some(t) {
+                    chars += t.chars().count() + 1;
+                    out.push(t.to_string());
+                }
+            }
+
+            if depth >= WALK_MAX_DEPTH {
+                continue;
+            }
+            if let Some(children) = copy_attr(el, "AXChildren") {
+                if children.instance_of::<CFArray<CFType>>() {
+                    let arr: CFArray<CFType> = CFArray::wrap_under_get_rule(
+                        children.as_CFTypeRef() as core_foundation::array::CFArrayRef,
+                    );
+                    // Reverse so the DFS pops children in on-screen order (the
+                    // CFArray iterator is forward-only, so collect first).
+                    let items: Vec<CFType> = arr.iter().map(|i| i.clone()).collect();
+                    for item in items.into_iter().rev() {
+                        stack.push((item, depth + 1));
+                    }
+                }
+            }
+        }
+
+        let mut joined = out.join("\n");
+        if joined.chars().count() > max_chars {
+            joined = joined.chars().take(max_chars).collect();
+        }
+        let joined = joined.trim().to_string();
+        if joined.is_empty() {
+            None
+        } else {
+            Some(joined)
+        }
+    }
+}
+
+/// Copy one AX attribute as an owned CFType. None on error/null.
+#[cfg(target_os = "macos")]
+unsafe fn copy_attr(
+    el: accessibility_sys::AXUIElementRef,
+    name: &str,
+) -> Option<core_foundation::base::CFType> {
+    use accessibility_sys::{kAXErrorSuccess, AXUIElementCopyAttributeValue};
+    use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    use core_foundation::string::CFString;
+    let attr = CFString::new(name);
+    let mut val: CFTypeRef = std::ptr::null_mut();
+    let err = AXUIElementCopyAttributeValue(el, attr.as_concrete_TypeRef(), &mut val);
+    if err != kAXErrorSuccess || val.is_null() {
+        return None;
+    }
+    Some(CFType::wrap_under_create_rule(val))
+}
+
+/// Copy one AX attribute and downcast to String. None when absent or not a
+/// CFString.
+#[cfg(target_os = "macos")]
+unsafe fn attr_string(el: accessibility_sys::AXUIElementRef, name: &str) -> Option<String> {
+    use core_foundation::string::CFString;
+    let v = copy_attr(el, name)?;
+    v.downcast::<CFString>().map(|s| s.to_string())
 }
 
 /// AppleScript that returns {url, title} for a known browser's active tab/doc,
@@ -415,5 +584,20 @@ pub fn gather_pre_focus_context() -> Option<crate::ocr::AmbientContext> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn fetch_browser_url(_bundle: &str) -> Option<(String, String)> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn frontmost_identity() -> Option<(String, String, i32)> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn focused_window_title(_pid: i32) -> Option<String> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn visible_text(_pid: i32, _max_chars: usize) -> Option<String> {
     None
 }

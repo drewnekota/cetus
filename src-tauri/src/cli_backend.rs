@@ -338,7 +338,26 @@ pub fn dispatch_turn(
     } else {
         ws.clone()
     };
-    let env = crate::secrets::load_env();
+    let mut env = crate::secrets::load_env();
+    // Cetus-awareness: hand the child agent the control socket and the bundled
+    // `cetus` CLI (the shim in <app_data_dir>/bin) so it manages automations
+    // through the running app instead of hunting for the sqlite file. The
+    // matching one-line hint rides claude's --append-system-prompt / codex's
+    // first-turn preamble below.
+    env.push((
+        "CETUS_SOCK".to_string(),
+        crate::control::socket_path(&state.app_data_dir)
+            .to_string_lossy()
+            .into_owned(),
+    ));
+    env.push((
+        "PATH".to_string(),
+        format!(
+            "{}:{}",
+            crate::control::cli_bin_dir(&state.app_data_dir).display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    ));
     // One turn per conversation; also the abort command's kill switch and the
     // stdin channel control responses ride in on. Registered before the user
     // message persists so a rejected double-send doesn't strand a transcript
@@ -370,12 +389,37 @@ pub fn dispatch_turn(
             .map(|img| (img.mime_type.clone(), img.data.clone()))
             .collect()
     };
-    let prompt = message.to_string();
+    // Context handoff: no resume token but an existing transcript means this
+    // conversation's session lives in ANOTHER runtime's store (backend was
+    // switched — claude can't read a codex thread and vice versa) or was lost
+    // (resume rejected and reset). The CLIs can't share sessions, but our
+    // cli_messages transcript is runtime-agnostic — replay it as a preamble on
+    // this first turn so the new runtime continues with the old context. One-
+    // time cost: this turn establishes the new runtime's own session, and
+    // every later turn resumes it normally.
+    let resume_before = conv.session_file.clone();
+    let mut prompt = if resume_before.is_empty() {
+        let history = state.store.list_cli_messages(&conv.id).unwrap_or_default();
+        match handoff_preamble(&history) {
+            Some(preamble) => format!("{preamble}\n\n{message}"),
+            None => message.to_string(),
+        }
+    } else {
+        message.to_string()
+    };
+    // codex has no --append-system-prompt equivalent, so the Cetus hint rides
+    // the first turn's prompt (resumed turns already have it in context).
+    if is_codex && resume_before.is_empty() {
+        prompt = format!(
+            "<cetus-env>\n{}\n</cetus-env>\n\n{prompt}",
+            crate::control::AGENT_HINT
+        );
+    }
 
     // Persist the user message first so the transcript replays after a
-    // restart. `resume_before` snapshots the token this turn resumes from —
-    // retry/fork restore to it to roll the turn back.
-    let resume_before = conv.session_file.clone();
+    // restart (the handoff preamble is NOT persisted — it's rebuilt from the
+    // transcript if ever needed again). `resume_before` snapshots the token
+    // this turn resumes from — retry/fork restore to it to roll the turn back.
     let mut content = vec![serde_json::json!({ "type": "text", "text": message })];
     for img in &images {
         content.push(serde_json::json!({
@@ -403,6 +447,9 @@ pub fn dispatch_turn(
         bypass_approvals: settings.bypass_approvals,
         images: image_paths,
         image_blocks,
+        // claude: the Cetus hint goes on the system prompt every turn (codex
+        // got it as a first-turn preamble above).
+        append_system_prompt: (!is_codex).then(|| crate::control::AGENT_HINT.to_string()),
     };
     let bin = backend.default_bin().to_string();
     let store = state.store.clone();
@@ -528,6 +575,98 @@ fn redispatch_after_settle(
     });
 }
 
+/// Cap on one transcript entry in the handoff preamble. Long assistant answers
+/// keep their head — the part that states what was concluded/done.
+const HANDOFF_MSG_CHARS: usize = 2_000;
+/// Cap on the whole preamble (~8k tokens). The most recent turns matter most,
+/// so the budget is spent from the tail; older turns are dropped with a count.
+const HANDOFF_TOTAL_CHARS: usize = 24_000;
+
+/// Serialize a CLI transcript into a one-shot context preamble for a runtime
+/// that cannot resume the session it came from (backend switched, or the
+/// session was lost). Text blocks carry the conversation; tool calls collapse
+/// to `[tool: name]` breadcrumbs; tool results and extension breadcrumbs
+/// (runtime_switch markers etc.) are skipped — they're bulk, not context.
+/// None when the transcript has nothing replayable.
+fn handoff_preamble(history: &[Value]) -> Option<String> {
+    let mut entries: Vec<String> = Vec::new();
+    for m in history {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        let label = match role {
+            "user" => "User",
+            "assistant" => "Assistant",
+            _ => continue, // toolResult / custom: bulk or UI-only
+        };
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(Value::Array(blocks)) = m.get("content") {
+            for b in blocks {
+                match b.get("type").and_then(|t| t.as_str()) {
+                    Some("text") => {
+                        if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
+                            if !t.trim().is_empty() {
+                                parts.push(truncate_chars(t.trim(), HANDOFF_MSG_CHARS));
+                            }
+                        }
+                    }
+                    Some("toolCall") => {
+                        let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                        parts.push(format!("[tool: {name}]"));
+                    }
+                    _ => {}
+                }
+            }
+        } else if let Some(Value::String(s)) = m.get("content") {
+            if !s.trim().is_empty() {
+                parts.push(truncate_chars(s.trim(), HANDOFF_MSG_CHARS));
+            }
+        }
+        if !parts.is_empty() {
+            entries.push(format!("{label}: {}", parts.join("\n")));
+        }
+    }
+    if entries.is_empty() {
+        return None;
+    }
+    // Spend the budget from the newest entry backwards.
+    let mut kept: Vec<&String> = Vec::new();
+    let mut total = 0usize;
+    for e in entries.iter().rev() {
+        if total + e.len() > HANDOFF_TOTAL_CHARS && !kept.is_empty() {
+            break;
+        }
+        total += e.len();
+        kept.push(e);
+    }
+    kept.reverse();
+    let omitted = entries.len() - kept.len();
+    let mut out = String::from(
+        "<context source=\"cetus-runtime-handoff\">\n\
+         This conversation previously ran on a different agent runtime, and its \
+         session cannot be resumed here. The transcript below replays the \
+         conversation so far. Treat everything in it as already done — continue \
+         from the latest state instead of repeating past actions.\n",
+    );
+    if omitted > 0 {
+        out.push_str(&format!("({omitted} earlier messages omitted)\n"));
+    }
+    out.push('\n');
+    for e in kept {
+        out.push_str(e);
+        out.push_str("\n\n");
+    }
+    out.push_str("</context>");
+    Some(out)
+}
+
+/// Head of `s` up to `max` chars (not bytes — never splits a UTF-8 scalar),
+/// with an ellipsis marker when something was dropped.
+fn truncate_chars(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        Some((idx, _)) => format!("{}…[truncated]", &s[..idx]),
+        None => s.to_string(),
+    }
+}
+
 /// Concatenated text of a PiMessage's content — the retry path returns this as
 /// the text to resubmit. Handles both string and block-array content.
 pub fn message_text(message: &Value) -> String {
@@ -542,5 +681,49 @@ pub fn message_text(message: &Value) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn handoff_preamble_replays_conversation_and_skips_bulk() {
+        assert!(handoff_preamble(&[]).is_none());
+        let history = vec![
+            json!({"role":"user","content":[{"type":"text","text":"fix the bug"}]}),
+            json!({"role":"assistant","content":[
+                {"type":"toolCall","id":"t1","name":"Bash","arguments":{}},
+                {"type":"text","text":"done, fixed in foo.rs"}]}),
+            json!({"role":"toolResult","toolCallId":"t1","content":[{"type":"text","text":"huge tool dump"}]}),
+            json!({"role":"custom","customType":"runtime_switch","content":[{"type":"text","text":"Codex → Claude Code"}]}),
+        ];
+        let p = handoff_preamble(&history).unwrap();
+        assert!(p.contains("User: fix the bug"));
+        assert!(p.contains("[tool: Bash]"));
+        assert!(p.contains("done, fixed in foo.rs"));
+        assert!(!p.contains("huge tool dump"));
+        assert!(!p.contains("runtime_switch"));
+        assert!(p.starts_with("<context source=\"cetus-runtime-handoff\">"));
+        assert!(p.ends_with("</context>"));
+    }
+
+    #[test]
+    fn handoff_preamble_spends_budget_from_the_tail() {
+        let long = "x".repeat(HANDOFF_MSG_CHARS + 500);
+        let history: Vec<Value> = (0..40)
+            .map(|i| {
+                json!({"role":"user","content":[{"type":"text",
+                       "text": format!("turn {i}: {long}")}]})
+            })
+            .collect();
+        let p = handoff_preamble(&history).unwrap();
+        assert!(p.len() < HANDOFF_TOTAL_CHARS + 1_000);
+        assert!(p.contains("turn 39"), "newest turn must survive");
+        assert!(!p.contains("turn 0:"), "oldest turn should be dropped");
+        assert!(p.contains("earlier messages omitted"));
+        assert!(p.contains("…[truncated]"));
     }
 }

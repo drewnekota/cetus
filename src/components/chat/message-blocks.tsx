@@ -10,7 +10,7 @@ import remarkMath from "remark-math";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { markdownComponents, LinkifiedText, normalizeMath, KATEX_OPTIONS } from "@/lib/markdown";
+import { markdownComponents, LinkifiedText, normalizeMath, KATEX_OPTIONS, REMARK_MATH_OPTIONS } from "@/lib/markdown";
 import { Check, Copy, FileText, GitFork, RotateCcw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { RenderedBlock } from "@/lib/types";
@@ -28,6 +28,10 @@ import { useTranslation } from "@/lib/i18n";
 
 const PROSE_CLASS = cn(
   "prose prose-sm dark:prose-invert max-w-none",
+  // Contain unbreakable content (KaTeX nowrap spans, long tokens, wide tables)
+  // to this message: without this it widens the Virtuoso scroller and puts a
+  // horizontal scrollbar under the whole conversation.
+  "min-w-0 overflow-x-auto",
   // Tighten default prose spacing so chat bubbles don't blow up.
   "prose-p:my-2 prose-pre:my-2 prose-ul:my-2 prose-ol:my-2 prose-headings:my-3",
   "prose-code:rounded prose-code:bg-secondary prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:before:content-none prose-code:after:content-none",
@@ -44,7 +48,7 @@ const PROSE_CLASS = cn(
  *  expensive part (remark-gfm + remark-math + rehype-katex). */
 const RawMarkdown = memo(function RawMarkdown({ text }: { text: string }) {
   return (
-    <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath, remarkCjkFriendly]} rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]} components={markdownComponents}>
+    <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly]} rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]} components={markdownComponents}>
       {normalizeMath(text)}
     </ReactMarkdown>
   );

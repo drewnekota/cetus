@@ -1,7 +1,9 @@
 mod agent;
+mod ambient;
 mod app_event;
 mod auto_archive;
 mod automation;
+mod automation_api;
 mod automation_tool;
 mod ax;
 mod bash;
@@ -9,8 +11,10 @@ mod biasing;
 pub use cetus_bridge::{bridge, pi_rpc};
 mod caps_remap;
 mod capture;
+pub mod cli;
 mod cli_backend;
 mod commands;
+mod control;
 mod corrections;
 mod cua;
 #[cfg(feature = "devtest")]
@@ -192,6 +196,14 @@ impl AppState {
         if let Some(h) = self.cli_turns.lock().unwrap().remove(conv_id) {
             h.done.notify_one();
         }
+    }
+
+    /// Whether a CLI turn is currently registered for this conversation
+    /// (running or still settling). Gates runtime switching: rebinding the
+    /// backend mid-turn would route the next steer/prompt into the wrong
+    /// CLI's stdin.
+    pub fn cli_turn_active(&self, conv_id: &str) -> bool {
+        self.cli_turns.lock().unwrap().contains_key(conv_id)
     }
 
     /// Fire the kill switch of a running CLI turn. No-op when idle.
@@ -858,6 +870,13 @@ pub fn run() {
             // recent sessions and land them as disabled proposals for review.
             skill_review::spawn_skill_reviewer(app.handle().clone());
 
+            // Always-on control socket + the `cetus` CLI shim: the supported
+            // path for third-party CLI runtimes (claude-code / codex) to read
+            // and edit automations through the running app instead of poking
+            // the sqlite file. See `control.rs`.
+            control::install_cli_shim(&app.state::<AppState>().app_data_dir);
+            control::start(app.handle().clone());
+
             // DEV-ONLY external eval bridge (M4). Compiled out of release; the
             // server itself early-returns unless CETUS_DEVTEST=1 / CETUS_DEVTEST_SOCK
             // is set, so this line is safe to leave in a devtest build.
@@ -1045,6 +1064,15 @@ pub fn run() {
             // gated on the user toggle, so this is a cheap poll until enabled.
             std::env::set_var("CETUS_SCREEN_LOG", capture::recall_log_path(&app_data_dir));
             capture::spawn(app.state::<AppState>().store.clone(), app_data_dir.clone());
+
+            // Ambient text context (Littlebird-like AX collector) — the text-mode
+            // sibling of the capture loop above. Same contract: off by default,
+            // cheap toggle poll until enabled. Own bundle id keeps cetus from
+            // observing its own windows.
+            ambient::spawn(
+                app.state::<AppState>().store.clone(),
+                app.config().identifier.clone(),
+            );
 
             // Meeting memory (ambient audio transcription). Export the recall-log
             // path so the `meeting-recall` pi extension can read it, then start
@@ -1299,6 +1327,13 @@ pub fn run() {
         commands::capture_stats,
         commands::recent_screenshots,
         commands::search_screenshots,
+        commands::get_ambient_settings,
+        commands::set_ambient_settings,
+        commands::ambient_stats,
+        commands::recent_ambient_context,
+        commands::search_ambient_context,
+        commands::clear_ambient_history,
+        commands::ambient_recent_summary,
         commands::set_theme_appearance,
         meeting::get_meeting_settings,
         meeting::set_meeting_settings,
@@ -1443,6 +1478,13 @@ pub fn run() {
         commands::capture_stats,
         commands::recent_screenshots,
         commands::search_screenshots,
+        commands::get_ambient_settings,
+        commands::set_ambient_settings,
+        commands::ambient_stats,
+        commands::recent_ambient_context,
+        commands::search_ambient_context,
+        commands::clear_ambient_history,
+        commands::ambient_recent_summary,
         commands::set_theme_appearance,
         meeting::get_meeting_settings,
         meeting::set_meeting_settings,

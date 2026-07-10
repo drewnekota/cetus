@@ -79,6 +79,11 @@ pub struct CliRunOpts {
     /// Image attachments as (mime_type, base64) pairs. claude receives them
     /// inline as content blocks on the stdin user message — the native path.
     pub image_blocks: Vec<(String, String)>,
+    /// Extra system-prompt text appended to the CLI's own (claude
+    /// `--append-system-prompt`). The host uses this to tell the agent it runs
+    /// inside Cetus. codex has no equivalent flag — the host prepends the hint
+    /// to the first turn's prompt instead.
+    pub append_system_prompt: Option<String>,
 }
 
 impl CliBackend {
@@ -117,6 +122,10 @@ impl CliBackend {
                 if let Some(r) = &opts.resume {
                     a.push("--resume".into());
                     a.push(r.clone());
+                }
+                if let Some(sp) = &opts.append_system_prompt {
+                    a.push("--append-system-prompt".into());
+                    a.push(sp.clone());
                 }
                 // Bypass skips tool approvals only; AskUserQuestion still
                 // arrives as a control_request (verified against 2.1.198).
@@ -246,6 +255,18 @@ fn is_sidechain(v: &Value) -> bool {
     v.get("parent_tool_use_id")
         .map(|p| !p.is_null())
         .unwrap_or(false)
+}
+
+/// Does a main-chain tool_result look like the CLI's immediate "task launched"
+/// ack rather than a real report? The Agent tool (run_in_background) answers
+/// with "Async agent launched successfully…"; the Workflow tool with
+/// "Workflow launched in background. Task ID: …". Matching only the Agent
+/// string made a still-running Workflow read as a settled step — which also
+/// dropped it from has_pending_tasks, so the runner killed the CLI (and the
+/// live workflow with it) right after the turn's `result`.
+fn is_background_launch_ack(content: &Value) -> bool {
+    let s = content.to_string();
+    s.contains("Async agent launched successfully") || s.contains("launched in background")
 }
 
 /// Stateful translator from a backend's raw JSONL lines to Cetus `PiEvent`
@@ -635,14 +656,19 @@ impl EventTranslator {
             .map(|(k, _)| k.clone());
         if let Some(task_id) = task_id {
             let task = self.background_tasks[&task_id].clone();
-            if !task.done && content.to_string().contains("Async agent launched successfully") {
-                let status = json!([{
-                    "type": "text",
-                    "text": format!(
+            if !task.done && is_background_launch_ack(content) {
+                let tool_name = self.tool_names.get(id).map(String::as_str).unwrap_or("");
+                let label = if tool_name == "Workflow" {
+                    // Workflow tasks register with a generic subagent_type
+                    // ("Task"); the tool name reads better than "Task agent".
+                    format!("Workflow running in background — {}", task.description)
+                } else {
+                    format!(
                         "{} agent running in background — {}",
                         task.subagent_type, task.description
-                    ),
-                }]);
+                    )
+                };
+                let status = json!([{ "type": "text", "text": label }]);
                 let details = task.details("running");
                 self.flush_assistant();
                 self.messages.push(json!({
@@ -1336,6 +1362,37 @@ fn auth_expired_hint(backend: CliBackend, stderr: &str) -> Option<String> {
     ))
 }
 
+/// True when an error text reads as a usage/credit/quota limit — the runtime
+/// is fine, the account just can't run more turns right now.
+fn is_usage_limit(text: &str) -> bool {
+    let t = text.to_lowercase();
+    [
+        "credit balance is too low",
+        "usage limit reached",
+        "you've hit your usage limit",
+        "you have hit your usage limit",
+        "usage_limit_reached",
+        "insufficient_quota",
+        "quota exceeded",
+        "out of credits",
+    ]
+    .iter()
+    .any(|p| t.contains(p))
+}
+
+/// Actionable line for a usage/credit-limit failure. Cetus can continue the
+/// SAME conversation on another runtime (the transcript replays as context on
+/// the first turn there), so point the user at the switch instead of leaving
+/// them stuck on a dead quota.
+fn usage_limit_hint(backend: CliBackend) -> String {
+    format!(
+        "{} has hit its usage/credit limit. Switch this conversation to another \
+         runtime from the composer's runtime picker to continue with the same \
+         context, or retry later.",
+        backend.as_str()
+    )
+}
+
 /// Spawn a single headless turn of `backend` with cwd = `cwd`, stream its
 /// output to `sink` as `RuntimeEvent::Protocol` PiEvents, and return the resume
 /// token plus the turn's persistable messages.
@@ -1645,6 +1702,7 @@ pub async fn run_cli_turn(
         if !stderr_buf.is_empty() {
             msg = match auth_expired_hint(backend, stderr_buf) {
                 Some(hint) => hint,
+                None if is_usage_limit(stderr_buf) => usage_limit_hint(backend),
                 None => format!("{msg}: {stderr_buf}"),
             };
         }
@@ -1654,7 +1712,16 @@ pub async fn run_cli_turn(
     // Surface it only when nothing streamed — claude repeats the error text in
     // the result payload, and we already rendered the streamed version.
     if err.is_none() && tr.messages.is_empty() && tr.assistant_blocks_empty() {
-        err = tr.result_error.take();
+        err = tr.result_error.take().map(|e| {
+            // Quota/credit refusals arrive here as a clean-exit result error
+            // (the CLI itself is healthy). Keep the vendor's reason, add the
+            // way out — switching runtime keeps this conversation going.
+            if is_usage_limit(&e) {
+                format!("{e}\n\n{}", usage_limit_hint(backend))
+            } else {
+                e
+            }
+        });
     }
     if resume_rejected {
         // Replace the bare "agent reported an error" with what happened and
@@ -2680,6 +2747,32 @@ mod tests {
         assert!(text.contains("completed"), "{text}");
     }
 
+    /// The Workflow tool's launch ack has its own wording — it must keep the
+    /// card running and the task pending like the Agent tool's ack does.
+    /// (Matching only the Agent string settled the card "completed" and let
+    /// the runner kill the CLI while the workflow was still running.)
+    #[test]
+    fn workflow_launch_ack_keeps_task_pending() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tW","name":"Workflow","input":{}}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"wf1","tool_use_id":"tW","description":"Deep research harness"}"#);
+        let ev = tr.on_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tW","content":"Workflow launched in background. Task ID: wabc123\nSummary: Deep research harness\nTranscript dir: /tmp/x","is_error":false}]}}"#);
+        let tys = types(&ev);
+        assert!(tys.contains(&"tool_execution_update".to_string()), "{tys:?}");
+        assert!(!tys.contains(&"tool_execution_end".to_string()), "card must stay running: {tys:?}");
+        assert!(tr.has_pending_tasks(), "the runner must hold the turn open");
+        let update = ev.iter().find(|e| e["type"] == "tool_execution_update").unwrap();
+        let shown = update["partialResult"]["content"][0]["text"].as_str().unwrap();
+        assert!(shown.starts_with("Workflow running in background"), "{shown}");
+        assert!(!shown.contains("Task ID"), "internal metadata hidden: {shown}");
+        // Completion notification carries the report and releases the turn.
+        let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"wf1","tool_use_id":"tW","status":"completed","summary":"the findings"}"#);
+        let end = ev.iter().find(|e| e["type"] == "tool_execution_end").unwrap();
+        assert_eq!(end["result"]["content"][0]["text"], json!("the findings"));
+        assert!(!tr.has_pending_tasks());
+    }
+
     #[test]
     fn sync_subagent_result_ends_task() {
         let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
@@ -2703,6 +2796,7 @@ mod tests {
                 bypass_approvals: false,
                 images: Vec::new(),
                 image_blocks: Vec::new(),
+                append_system_prompt: Some("host hint".into()),
             },
         );
         assert!(args.contains(&"--output-format".to_string()));
@@ -2713,6 +2807,8 @@ mod tests {
         assert!(args.contains(&"--effort".to_string()));
         assert!(args.contains(&"max".to_string()));
         assert!(args.contains(&"--resume".to_string()));
+        assert!(args.contains(&"--append-system-prompt".to_string()));
+        assert!(args.contains(&"host hint".to_string()));
         // no bypass flag: claude's default mode asks us per tool
         assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
         // the prompt rides stdin, not argv
@@ -2730,6 +2826,7 @@ mod tests {
                 bypass_approvals: true,
                 images: vec!["/tmp/shot.png".into()],
                 image_blocks: Vec::new(),
+                append_system_prompt: None,
             },
         );
         assert_eq!(args[0], "exec");

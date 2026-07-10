@@ -913,17 +913,53 @@ pub async fn get_conversation(
 /// Switch which coding-agent backend serves a conversation:
 /// "pi" (built-in) | "claude-code" | "codex". The next `send_prompt` routes
 /// accordingly. Idempotent.
+///
+/// Swaps the per-runtime resume tokens (see [`crate::store::Store::switch_backend`])
+/// and drops an audit marker into the CLI transcript so the switch is visible
+/// in history. Refused while a CLI turn is mid-run — the running turn belongs
+/// to the old runtime, and rebinding under it would steer the next prompt into
+/// the wrong CLI's stdin.
 #[tauri::command]
 pub async fn set_conversation_backend(
     state: State<'_, AppState>,
     id: String,
     backend: String,
 ) -> CmdResult<()> {
-    state
-        .store
-        .set_backend(&id, &backend, now_ms())
-        .map_err(err)?;
+    if state.cli_turn_active(&id) {
+        return Err(
+            "A turn is still running — stop it or let it finish before switching runtime."
+                .to_string(),
+        );
+    }
+    let now = now_ms();
+    let Some(old) = state.store.switch_backend(&id, &backend, now).map_err(err)? else {
+        return Ok(()); // missing conversation or same backend — nothing to do
+    };
+    // Audit marker, but only when there's already a transcript: fresh
+    // conversations get their backend set at creation (pending picker choice)
+    // and must not open with a stray "Cetus → Codex" divider.
+    let has_transcript = !state.store.list_cli_messages(&id).map_err(err)?.is_empty();
+    if has_transcript {
+        let marker = serde_json::json!({
+            "role": "custom",
+            "customType": "runtime_switch",
+            "content": [{ "type": "text",
+                          "text": format!("{} → {}", backend_label(&old), backend_label(&backend)) }],
+            "details": { "from": old, "to": backend },
+        });
+        state.store.append_cli_message(&id, &marker, None, now).ok();
+    }
     Ok(())
+}
+
+/// Display name for a backend id, matching the frontend's picker labels.
+fn backend_label(id: &str) -> &str {
+    match id {
+        "pi" => "Cetus",
+        "claude-code" => "Claude Code",
+        "codex" => "Codex",
+        other => other,
+    }
 }
 
 /// Set a CLI-backend conversation's model override (`claude --model` /
@@ -1698,137 +1734,44 @@ pub(crate) fn derive_title(prompt: &str) -> String {
 }
 
 // ---- automations ----------------------------------------------------------
+//
+// Thin wrappers over `automation_api` — the same impls back the external
+// control socket (`control.rs`), so validation, next-run derivation, and UI
+// refresh events stay identical no matter who mutates an automation.
 
 use crate::automation::{Automation, AutomationInput};
 
 #[tauri::command]
 pub async fn list_automations(state: State<'_, AppState>) -> CmdResult<Vec<Automation>> {
-    state.store.list_automations().map_err(err)
+    crate::automation_api::list(&state)
 }
 
 #[tauri::command]
-pub async fn create_automation(
-    state: State<'_, AppState>,
-    input: AutomationInput,
-) -> CmdResult<Automation> {
-    input.schedule.validate()?;
-    let now = now_ms();
-    let workspace = input
-        .workspace_dir
-        .filter(|w| !w.trim().is_empty())
-        .unwrap_or_else(|| state.default_workspace.to_string_lossy().to_string());
-    let next_run = if input.enabled {
-        input.schedule.initial_next_run(now)
-    } else {
-        None
-    };
-    let automation = Automation {
-        id: Uuid::new_v4().to_string(),
-        name: input.name.trim().to_string(),
-        prompt: input.prompt,
-        workspace_dir: workspace,
-        model: input.model,
-        schedule: input.schedule,
-        enabled: input.enabled,
-        created_at: now,
-        updated_at: now,
-        next_run_at: next_run,
-        last_run_at: None,
-        last_conversation_id: None,
-        last_status: None,
-        last_error: None,
-        run_count: 0,
-        backend: input.backend,
-        cli_model: input.cli_model,
-        cli_effort: input.cli_effort,
-    };
-    state.store.insert_automation(&automation).map_err(err)?;
-    Ok(automation)
+pub async fn create_automation(app: AppHandle, input: AutomationInput) -> CmdResult<Automation> {
+    crate::automation_api::create(&app, input)
 }
 
 #[tauri::command]
 pub async fn update_automation(
-    state: State<'_, AppState>,
+    app: AppHandle,
     id: String,
     input: AutomationInput,
 ) -> CmdResult<Automation> {
-    input.schedule.validate()?;
-    let existing = state
-        .store
-        .get_automation(&id)
-        .map_err(err)?
-        .ok_or_else(|| "automation not found".to_string())?;
-    let now = now_ms();
-    let workspace = input
-        .workspace_dir
-        .filter(|w| !w.trim().is_empty())
-        .unwrap_or_else(|| state.default_workspace.to_string_lossy().to_string());
-    // Recompute the next fire from the (possibly new) schedule; carry forward
-    // all run-state (last run, count, …).
-    let next_run = if input.enabled {
-        input.schedule.initial_next_run(now)
-    } else {
-        None
-    };
-    let updated = Automation {
-        id: existing.id,
-        name: input.name.trim().to_string(),
-        prompt: input.prompt,
-        workspace_dir: workspace,
-        model: input.model,
-        schedule: input.schedule,
-        enabled: input.enabled,
-        created_at: existing.created_at,
-        updated_at: now,
-        next_run_at: next_run,
-        last_run_at: existing.last_run_at,
-        last_conversation_id: existing.last_conversation_id,
-        last_status: existing.last_status,
-        last_error: existing.last_error,
-        run_count: existing.run_count,
-        backend: input.backend,
-        cli_model: input.cli_model,
-        cli_effort: input.cli_effort,
-    };
-    state.store.update_automation(&updated).map_err(err)?;
-    Ok(updated)
+    crate::automation_api::update(&app, &id, input)
 }
 
 #[tauri::command]
-pub async fn delete_automation(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.store.delete_automation(&id).map_err(err)
+pub async fn delete_automation(app: AppHandle, id: String) -> CmdResult<()> {
+    crate::automation_api::delete(&app, &id)
 }
 
 #[tauri::command]
 pub async fn set_automation_enabled(
-    state: State<'_, AppState>,
+    app: AppHandle,
     id: String,
     enabled: bool,
 ) -> CmdResult<Automation> {
-    let existing = state
-        .store
-        .get_automation(&id)
-        .map_err(err)?
-        .ok_or_else(|| "automation not found".to_string())?;
-    let now = now_ms();
-    let next_run = if enabled {
-        // Keep a still-future slot; otherwise compute a fresh one from now.
-        existing
-            .next_run_at
-            .filter(|&t| t > now)
-            .or_else(|| existing.schedule.initial_next_run(now))
-    } else {
-        None
-    };
-    state
-        .store
-        .set_automation_enabled(&id, enabled, next_run, now)
-        .map_err(err)?;
-    state
-        .store
-        .get_automation(&id)
-        .map_err(err)?
-        .ok_or_else(|| "automation not found".to_string())
+    crate::automation_api::set_enabled(&app, &id, enabled)
 }
 
 #[tauri::command]
@@ -1897,6 +1840,81 @@ pub async fn search_screenshots(
             before_ts,
         )
         .map_err(err)
+}
+
+// ---- ambient text context (Littlebird-like AX collector) -------------------
+
+#[tauri::command]
+pub async fn get_ambient_settings(
+    state: State<'_, AppState>,
+) -> CmdResult<crate::ambient::AmbientSettings> {
+    Ok(crate::ambient::load_settings(&state.store))
+}
+
+#[tauri::command]
+pub async fn set_ambient_settings(
+    state: State<'_, AppState>,
+    settings: crate::ambient::AmbientSettings,
+) -> CmdResult<()> {
+    crate::ambient::save_settings(&state.store, &settings).map_err(err)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AmbientStats {
+    pub enabled: bool,
+    pub count: i64,
+}
+
+#[tauri::command]
+pub async fn ambient_stats(state: State<'_, AppState>) -> CmdResult<AmbientStats> {
+    let enabled = crate::ambient::load_settings(&state.store).enabled;
+    let count = state.store.ax_context_count().map_err(err)?;
+    Ok(AmbientStats { enabled, count })
+}
+
+#[tauri::command]
+pub async fn recent_ambient_context(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+    before_ts: Option<i64>,
+) -> CmdResult<Vec<crate::store::AxContextEntry>> {
+    state
+        .store
+        .recent_ax_context(limit.unwrap_or(50), before_ts)
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn search_ambient_context(
+    state: State<'_, AppState>,
+    query: String,
+    since_ts: Option<i64>,
+    limit: Option<u32>,
+    before_ts: Option<i64>,
+) -> CmdResult<Vec<crate::store::AxContextEntry>> {
+    state
+        .store
+        .search_ax_context(
+            &query,
+            since_ts.unwrap_or(0),
+            limit.unwrap_or(50),
+            before_ts,
+        )
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn clear_ambient_history(state: State<'_, AppState>) -> CmdResult<()> {
+    state.store.clear_ax_context().map_err(err)
+}
+
+/// The compressed recent-activity block the composer injects (inner text of the
+/// `<context source="cetus-ambient">` fence). Null when the collector is off or
+/// the rolling window is empty — the composer simply sends the bare prompt.
+#[tauri::command]
+pub async fn ambient_recent_summary(state: State<'_, AppState>) -> CmdResult<Option<String>> {
+    Ok(crate::ambient::recent_summary(&state.store))
 }
 
 /// Sync the native window appearance to the app's color theme. On macOS/Linux

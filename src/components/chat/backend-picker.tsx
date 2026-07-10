@@ -1,9 +1,15 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Bot, Check, ChevronDown, Cpu, SquareTerminal } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Bot, Check, ChevronDown } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/tauri";
+import { useChatStore } from "@/lib/chat-store";
 import type { BackendId, CliDefaults } from "@/lib/types";
+import {
+  ClaudeCodeIcon,
+  CodexIcon,
+  type AppIcon,
+} from "@/components/brand-icons";
 import {
   Select,
   SelectContent,
@@ -29,10 +35,10 @@ import {
   type ShortcutId,
 } from "@/lib/keyboard-shortcuts";
 
-export const BACKENDS: { id: BackendId; label: string; icon: LucideIcon }[] = [
+export const BACKENDS: { id: BackendId; label: string; icon: AppIcon }[] = [
   { id: "pi", label: "Cetus", icon: Bot },
-  { id: "claude-code", label: "Claude Code", icon: Cpu },
-  { id: "codex", label: "Codex", icon: SquareTerminal },
+  { id: "claude-code", label: "Claude Code", icon: ClaudeCodeIcon },
+  { id: "codex", label: "Codex", icon: CodexIcon },
 ];
 
 /** The next runtime in picker order, wrapping around. Bound to Tab across the
@@ -370,6 +376,7 @@ export function BackendPicker({
   function select(id: string) {
     const b = BACKENDS.find((x) => x.id === id);
     if (!b) return;
+    const prev = backend;
     setBackend(b.id);
     // Model/effort overrides belong to one backend's catalog; switching
     // backends resets both to that CLI's defaults. Only here (a user pick) —
@@ -377,8 +384,26 @@ export function BackendPicker({
     setCliModel("");
     setCliEffort("");
     if (conversationId) {
-      api.setConversationBackend(conversationId, b.id).catch(() => {});
-      api.setConversationCliModel(conversationId, "", "").catch(() => {});
+      const convId = conversationId;
+      api
+        .setConversationBackend(convId, b.id)
+        .then(() => {
+          api.setConversationCliModel(convId, "", "").catch(() => {});
+          // Mirror the audit divider the backend just persisted, so the switch
+          // is visible in the open transcript without a reload. Skip empty
+          // conversations (backend skips the marker there too, and a divider
+          // would knock the pane out of its hero state).
+          const store = useChatStore.getState();
+          if (prev !== b.id && (store.chats[convId]?.messages.length ?? 0) > 0) {
+            store.runtimeSwitch(convId, prev, b.id);
+          }
+        })
+        .catch((e) => {
+          // Refused (e.g. a turn is still running) — roll the picker back so
+          // it keeps showing the runtime that actually serves the conversation.
+          setBackend(prev);
+          toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
+        });
     } else {
       onPendingTuningChange?.("", "");
     }

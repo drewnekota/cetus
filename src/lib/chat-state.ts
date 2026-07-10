@@ -102,7 +102,11 @@ export type ChatAction =
   // settle it with the captured output (bash_done). The key is minted by the
   // caller so the two phases address the same message.
   | { type: "bash_start"; key: string; command: string; cwd?: string }
-  | { type: "bash_done"; key: string; result: BashExecResult };
+  | { type: "bash_done"; key: string; result: BashExecResult }
+  // The conversation's runtime was switched (e.g. Codex → Claude Code): append
+  // the same audit divider the backend persists to the transcript, so the
+  // switch is visible immediately without a reload.
+  | { type: "runtime_switch"; from: string; to: string };
 
 function nowMs() {
   return Date.now();
@@ -412,6 +416,22 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ),
       };
       return { ...state, messages };
+    }
+    case "runtime_switch": {
+      const msg: RenderedMessage = {
+        key: genKey("runtime-switch"),
+        role: "custom",
+        blocks: [
+          {
+            kind: "custom",
+            customType: "runtime_switch",
+            text: `${action.from} → ${action.to}`,
+            details: { from: action.from, to: action.to },
+          },
+        ],
+        createdAt: nowMs(),
+      };
+      return { ...state, messages: [...state.messages, msg] };
     }
     case "pi_event":
       return reducePiEvent(state, action.event);

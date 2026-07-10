@@ -62,6 +62,9 @@ interface ChatsStore {
   bashStart: (id: string, key: string, command: string, cwd?: string) => void;
   /** Settle a bash breadcrumb (by key) with its captured output. */
   bashDone: (id: string, key: string, result: BashResult) => void;
+  /** Append the runtime-switch audit divider (backend ids, e.g. "codex" →
+   *  "claude-code"). Mirrors the marker the backend persists to the transcript. */
+  runtimeSwitch: (id: string, from: string, to: string) => void;
   setError: (id: string, message: string | null) => void;
   /** Locally end an interrupted run (abort emits no agent_end). Flips
    *  isStreaming false so the write-through cache flushes the rendered turn.
@@ -320,6 +323,10 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   bashDone: (id, key, result) => {
     flushPiEvents();
     set((s) => step(s, id, { type: "bash_done", key, result }));
+  },
+  runtimeSwitch: (id, from, to) => {
+    flushPiEvents();
+    set((s) => step(s, id, { type: "runtime_switch", from, to }));
   },
   setError: (id, message) => {
     flushPiEvents();

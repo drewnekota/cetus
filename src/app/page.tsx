@@ -1034,6 +1034,10 @@ export default function Home() {
           case "automation_updated":
             setAutomations((as) => mergeAutomation(as, evt.automation));
             break;
+          case "automation_deleted":
+            // Deleted out-of-band (control socket / cetus CLI).
+            setAutomations((as) => as.filter((a) => a.id !== evt.id));
+            break;
           case "automation_fired":
             // An automation minted a fresh conversation and started streaming.
             setAutomations((as) => mergeAutomation(as, evt.automation));
@@ -1244,6 +1248,7 @@ export default function Home() {
   //   ⌘W    — close the active right-workspace tab when that panel is open
   //   ⌥⌘←/→ — switch right-workspace tabs when that panel is open
   //   ⌥⌘↑/↓ — switch to the previous / next chat
+  //   ⌘9    — switch to the last chat in the sidebar
   //   ⌘⇧A   — toggle artifacts panel (chat view, when artifacts exist)
   //   Esc   — close artifacts panel, else abort current stream (palette closed)
   useEffect(() => {
@@ -1335,6 +1340,12 @@ export default function Home() {
       if (shortcut("nextChat")) {
         e.preventDefault();
         switchChat(1);
+        return;
+      }
+      if (shortcut("lastChat")) {
+        e.preventDefault();
+        const lastId = orderedChatIdsRef.current.at(-1);
+        if (lastId) onSelectChat(lastId);
         return;
       }
       if (shortcut("toggleWorkspace")) {

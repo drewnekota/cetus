@@ -11,6 +11,11 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownComponents } from "@/lib/markdown";
 import {
+  ClaudeCodeIcon,
+  CodexIcon,
+  type AppIcon,
+} from "@/components/brand-icons";
+import {
   ArchiveRestore,
   ArrowLeft,
   AudioLines,
@@ -64,6 +69,7 @@ import {
   onUpdateReady,
   onPiEvent,
   type CaptureSettings,
+  type AmbientSettings,
   type Meeting,
   type MeetingSettings,
   type MeetingStatus,
@@ -402,7 +408,12 @@ export const SettingsPage = memo(function SettingsPage({
                 onConversationsChanged={onConversationsChanged}
               />
             ) : (
-              <ScreenContextSection onOpenHistory={onOpenHistory} />
+              <>
+                <ScreenContextSection onOpenHistory={onOpenHistory} />
+                <div className="mt-10">
+                  <AmbientContextSection />
+                </div>
+              </>
             )}
           </div>
         </main>
@@ -2042,6 +2053,146 @@ function ScreenContextSection({ onOpenHistory }: { onOpenHistory: () => void }) 
           {count === 1
             ? t("screen.frames.one", { count: count.toLocaleString() })
             : t("screen.frames.other", { count: count.toLocaleString() })}
+        </p>
+      )}
+    </section>
+  );
+}
+
+// =============================================================================
+// Ambient text context (accessibility collector)
+// =============================================================================
+
+function AmbientContextSection() {
+  const { t } = useTranslation("settings");
+  const [settings, setSettings] = useState<AmbientSettings | null>(null);
+  const [count, setCount] = useState<number | null>(null);
+  const [excludedText, setExcludedText] = useState("");
+
+  useEffect(() => {
+    api
+      .getAmbientSettings()
+      .then((s) => {
+        setSettings(s);
+        setExcludedText(s.excludedApps.join(", "));
+      })
+      .catch(() => {});
+    api.ambientStats().then((st) => setCount(st.count)).catch(() => {});
+  }, []);
+
+  function update(patch: Partial<AmbientSettings>) {
+    setSettings((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      api.setAmbientSettings(next).catch(() => {});
+      return next;
+    });
+  }
+
+  function commitExcluded() {
+    const apps = excludedText
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    update({ excludedApps: apps });
+  }
+
+  if (!settings) return null;
+
+  return (
+    <section>
+      <SectionHeading
+        title={t("ambient.title")}
+        description={t("ambient.description")}
+      />
+
+      <div className="mt-6 space-y-1">
+        <ToggleRow
+          id="ambient-enabled"
+          label={t("ambient.enable.label")}
+          description={t("ambient.enable.description")}
+          checked={settings.enabled}
+          onCheckedChange={(v) => update({ enabled: v })}
+        />
+      </div>
+
+      <div
+        className={cn(
+          "mt-4 space-y-5",
+          !settings.enabled && "pointer-events-none opacity-50",
+        )}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 space-y-0.5">
+            <Label htmlFor="ambient-retention" className="font-medium">
+              {t("ambient.retention.label")}
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              {t("ambient.retention.description")}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Input
+              id="ambient-retention"
+              type="number"
+              min={0}
+              className="w-20"
+              value={settings.retentionDays}
+              onChange={(e) =>
+                update({
+                  retentionDays: Math.max(0, Number(e.target.value) || 0),
+                })
+              }
+            />
+            <span className="text-xs text-muted-foreground">
+              {t("ambient.retention.unit")}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="ambient-excluded" className="font-medium">
+            {t("ambient.excluded.label")}
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            {t("ambient.excluded.description")}
+          </p>
+          <Input
+            id="ambient-excluded"
+            placeholder="1Password, Messages, com.apple.keychainaccess"
+            value={excludedText}
+            onChange={(e) => setExcludedText(e.target.value)}
+            onBlur={commitExcluded}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitExcluded();
+              }
+            }}
+          />
+        </div>
+
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              api
+                .clearAmbientHistory()
+                .then(() => setCount(0))
+                .catch(() => {});
+            }}
+          >
+            {t("ambient.clear")}
+          </Button>
+        </div>
+      </div>
+
+      {count !== null && (
+        <p className="mt-6 text-xs text-muted-foreground">
+          {count === 1
+            ? t("ambient.entries.one", { count: count.toLocaleString() })
+            : t("ambient.entries.other", { count: count.toLocaleString() })}
         </p>
       )}
     </section>
@@ -4213,13 +4364,17 @@ function ConnectorsSection({ open }: { open: boolean }) {
 }
 
 /** mcporter `imports` sources, with the user-facing label. */
-const MCP_IMPORT_SOURCES: { id: McpImportSource; label: string }[] = [
-  { id: "claude-code", label: "Claude Code" },
+const MCP_IMPORT_SOURCES: {
+  id: McpImportSource;
+  label: string;
+  icon?: AppIcon;
+}[] = [
+  { id: "claude-code", label: "Claude Code", icon: ClaudeCodeIcon },
   { id: "claude-desktop", label: "Claude Desktop" },
   { id: "cursor", label: "Cursor" },
   { id: "vscode", label: "VS Code" },
   { id: "windsurf", label: "Windsurf" },
-  { id: "codex", label: "Codex" },
+  { id: "codex", label: "Codex", icon: CodexIcon },
   { id: "opencode", label: "opencode" },
 ];
 
@@ -4293,6 +4448,7 @@ function DiscoveredMcpCard({
       <div className="mt-3 flex flex-wrap gap-2">
         {MCP_IMPORT_SOURCES.map((src) => {
           const on = enabled.includes(src.id);
+          const Icon = src.icon;
           return (
             <button
               key={src.id}
@@ -4300,12 +4456,13 @@ function DiscoveredMcpCard({
               disabled={!settings}
               onClick={() => toggleSource(src.id, !on)}
               className={cn(
-                "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+                "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
                 on
                   ? "border-primary bg-primary/10 text-foreground"
                   : "border-border text-muted-foreground hover:text-foreground",
               )}
             >
+              {Icon && <Icon className="size-3.5 shrink-0 rounded-[2px]" />}
               {src.label}
             </button>
           );
@@ -4315,12 +4472,16 @@ function DiscoveredMcpCard({
       {enabled.length > 0 && (
         <div className="mt-3 space-y-2 border-t border-border pt-3">
           {enabled.map((id) => {
-            const label =
-              MCP_IMPORT_SOURCES.find((s) => s.id === id)?.label ?? id;
+            const source = MCP_IMPORT_SOURCES.find((s) => s.id === id);
+            const label = source?.label ?? id;
+            const Icon = source?.icon;
             const entries = imports[id];
             return (
               <div key={id} className="text-xs">
-                <p className="font-medium text-muted-foreground">{label}</p>
+                <p className="flex items-center gap-1.5 font-medium text-muted-foreground">
+                  {Icon && <Icon className="size-3.5 shrink-0 rounded-[2px]" />}
+                  {label}
+                </p>
                 {entries === "loading" || entries === undefined ? (
                   <p className="text-muted-foreground">
                     {t("connectors.details.loading")}

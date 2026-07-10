@@ -337,6 +337,15 @@ type MessageGroup =
   | { kind: "assistant"; keys: string[] }
   | { kind: "single"; key: string };
 
+/** Everything Virtuoso can measure as a row. Transient tail UI must be a real
+ * row rather than a Footer: scrollToIndex("LAST") cannot account for Footer
+ * height, which made conversation-open alignment fight the streaming
+ * scroll-to-bottom observer while Thinking was visible. */
+type MessageListItem =
+  | MessageGroup
+  | { kind: "thinking" }
+  | { kind: "error" };
+
 /** Collapse consecutive assistant/tool messages (one agent loop) into a single
  *  group; user and custom messages stay standalone. */
 function buildGroups(keys: string[], roles: string[]): MessageGroup[] {
@@ -393,6 +402,16 @@ function MessageList({
   // When the turn errored, the inline MessageError row owns the Retry action —
   // don't also put a Regenerate on the trailing user bubble (avoid two buttons).
   const hasError = !!useChatError(convId);
+  // Keep every visible tail inside Virtuoso's measured data. In particular,
+  // Thinking used to live in components.Footer, below the item addressed by
+  // scrollToIndex("LAST"). On conversation switch the initial seek/open settle
+  // aligned the last message while the streaming observer aligned the Footer,
+  // producing several visible jumps between the two positions.
+  const items = useMemo<MessageListItem[]>(() => {
+    if (awaiting) return [...groups, { kind: "thinking" }];
+    if (!isStreaming && hasError) return [...groups, { kind: "error" }];
+    return groups;
+  }, [groups, awaiting, isStreaming, hasError]);
 
   // react-virtuoso owns the scroll container and does the hard parts natively:
   // it measures each variable-height turn and corrects scroll in the SAME frame
@@ -466,7 +485,7 @@ function MessageList({
   // extra mounting pressure during this window is what used to chain into the
   // update-depth crash on conversations with huge turns.
   useEffect(() => {
-    if (!scroller || !convId || pendingInitialBottomRef.current !== convId || groups.length === 0) {
+    if (!scroller || !convId || pendingInitialBottomRef.current !== convId || items.length === 0) {
       return;
     }
 
@@ -492,7 +511,7 @@ function MessageList({
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [convId, groups.length, scroller]);
+  }, [convId, items.length, scroller]);
 
   // Streaming follow. Virtuoso's followOutput only reacts to NEW items; a
   // streaming reply grows an EXISTING item, so without help the view strands
@@ -550,11 +569,27 @@ function MessageList({
       window.removeEventListener("resize", scheduleUpdate);
       if (frame != null) cancelAnimationFrame(frame);
     };
-  }, [scroller, groups.length]);
+  }, [scroller, items.length]);
 
   const itemContent = useCallback(
-    (index: number, g: MessageGroup) => {
-      const isLast = index === groups.length - 1;
+    (index: number, item: MessageListItem) => {
+      if (item.kind === "thinking") {
+        return (
+          <div className="mx-auto max-w-3xl px-6">
+            <ThinkingPlaceholder />
+          </div>
+        );
+      }
+      if (item.kind === "error") {
+        return (
+          <div className="mx-auto max-w-3xl px-6">
+            <MessageError convId={convId} onRetry={onRetry} retrying={retrying} />
+          </div>
+        );
+      }
+
+      const g = item;
+      const isLast = index === items.length - 1;
       const messageIndex =
         g.kind === "assistant"
           ? keys.indexOf(g.keys[g.keys.length - 1])
@@ -595,25 +630,18 @@ function MessageList({
       // Center each turn on the reading column. Virtuoso measures this wrapper.
       return <div className="mx-auto max-w-3xl px-6">{node}</div>;
     },
-    [groups.length, keys, convId, onRegenerate, isStreaming, onForkMessage, awaiting, hasError],
-  );
-
-  // The list tail: the between-send shimmer and the inline error row, rendered
-  // after the last turn so they ride stick-to-bottom.
-  // No idle padding here: any non-zero Footer height sits below the last turn
-  // inside the scroll area, so "align last turn to bottom" on open would leave
-  // that gap and land slightly above the true bottom. The shimmer / error rows
-  // carry their own py when present; a settled list has a zero-height footer.
-  const Footer = useCallback(
-    () => (
-      <div className="mx-auto max-w-3xl px-6">
-        {awaiting && <ThinkingPlaceholder />}
-        {!isStreaming && !awaiting && (
-          <MessageError convId={convId} onRetry={onRetry} retrying={retrying} />
-        )}
-      </div>
-    ),
-    [awaiting, isStreaming, convId, onRetry, retrying],
+    [
+      items.length,
+      keys,
+      convId,
+      onRegenerate,
+      isStreaming,
+      onForkMessage,
+      awaiting,
+      hasError,
+      onRetry,
+      retrying,
+    ],
   );
 
   return (
@@ -626,16 +654,20 @@ function MessageList({
         key={convId ?? "new"}
         ref={virtuosoRef}
         scrollerRef={(el) => setScroller((el as HTMLElement) ?? null)}
-        data={groups}
+        data={items}
         data-testid="message-list"
         className="scrollbar-slim min-h-0 flex-1 overscroll-contain bg-background"
-        computeItemKey={(_i, g) => (g.kind === "assistant" ? g.keys[0] : g.key)}
+        computeItemKey={(_i, item) => {
+          if (item.kind === "assistant") return item.keys[0];
+          if (item.kind === "single") return item.key;
+          return `${convId ?? "new"}:tail:${item.kind}`;
+        }}
         itemContent={itemContent}
-        components={{ Header: TopSpacer, Footer }}
-        // Align the LAST turn to the viewport's BOTTOM on open (not its top —
-        // the bare index defaults to top-align, which strands a long final reply
-        // "scrolled to its own top", i.e. slightly above the real bottom).
-        initialTopMostItemIndex={{ index: Math.max(0, groups.length - 1), align: "end" }}
+        components={{ Header: TopSpacer }}
+        // Align the LAST visible row to the viewport's BOTTOM on open. Thinking
+        // and errors are rows too, so every bottom-follow path now targets the
+        // same measured edge.
+        initialTopMostItemIndex={{ index: Math.max(0, items.length - 1), align: "end" }}
         // Do not use alignToBottom: it pins a short/new conversation to the
         // bottom of the empty viewport. The initial index already opens an
         // overflowing history at its newest turn, while short chats keep the
@@ -650,6 +682,7 @@ function MessageList({
         convId={convId}
         userTurns={userTurns}
         topIndex={topIndex}
+        atBottom={atBottom}
         virtuosoRef={virtuosoRef}
       />
       <ScrollToBottomButton show={showScrollToBottom} virtuosoRef={virtuosoRef} />
@@ -672,6 +705,7 @@ function TurnNavigator({
   convId,
   userTurns,
   topIndex,
+  atBottom,
   virtuosoRef,
 }: {
   convId: string | null;
@@ -679,19 +713,27 @@ function TurnNavigator({
   userTurns: { key: string; index: number }[];
   /** Topmost visible group index, published by the list's rangeChanged. */
   topIndex: number;
+  /** Whether the message list is currently pinned to its bottom edge. */
+  atBottom: boolean;
   virtuosoRef: RefObject<VirtuosoHandle | null>;
 }) {
   const [hover, setHover] = useState<number | null>(null);
 
-  // Active tick = the last user turn at or above the top of the viewport.
+  // At the bottom, the newest turn wins explicitly. During a conversation
+  // switch Virtuoso can briefly publish an intermediate range while its
+  // initial end seek settles; using that range alone leaves a middle tick
+  // highlighted even though the viewport has already landed at the bottom.
+  // Away from the bottom, keep tracking the last user turn at or above the
+  // top of the viewport.
   const active = useMemo(() => {
+    if (atBottom) return Math.max(0, userTurns.length - 1);
     let next = 0;
     for (let i = 0; i < userTurns.length; i++) {
       if (userTurns[i].index <= topIndex) next = i;
       else break;
     }
     return next;
-  }, [userTurns, topIndex]);
+  }, [atBottom, userTurns, topIndex]);
 
   if (userTurns.length < 2) return null;
 
@@ -980,10 +1022,9 @@ function serializeSelection(range: Range): string {
     const tex = el
       .querySelector('annotation[encoding="application/x-tex"]')
       ?.textContent?.trim();
-    const display = !!el.closest(".katex-display");
-    const replacement = tex
-      ? `${display ? "$$" : "$"}${tex}${display ? "$$" : "$"}`
-      : (el.textContent ?? "");
+    // Always double-dollar: single-dollar math parsing is disabled (see
+    // REMARK_MATH_OPTIONS), so `$…$` would no longer round-trip as math.
+    const replacement = tex ? `$$${tex}$$` : (el.textContent ?? "");
     el.replaceWith(document.createTextNode(replacement));
   });
 
