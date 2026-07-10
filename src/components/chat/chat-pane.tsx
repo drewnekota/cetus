@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { MessageBubble } from "@/components/chat/message-bubble";
+import { MessageListBoundary } from "@/components/chat/message-list-boundary";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
 import { AgentControlCard } from "@/components/chat/agent-control-card";
 import { CliControlCard } from "@/components/chat/cli-control-card";
@@ -185,15 +186,17 @@ export function ChatPane({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <MessageList
-        convId={convId}
-        isStreaming={isStreaming}
-        onRegenerate={onRegenerate}
-        onRetry={onRetry}
-        onForkMessage={onForkMessage}
-        retrying={retrying}
-        onQuote={addQuote}
-      />
+      <MessageListBoundary key={convId ?? "new"}>
+        <MessageList
+          convId={convId}
+          isStreaming={isStreaming}
+          onRegenerate={onRegenerate}
+          onRetry={onRetry}
+          onForkMessage={onForkMessage}
+          retrying={retrying}
+          onQuote={addQuote}
+        />
+      </MessageListBoundary>
       <div className="relative z-10 bg-background px-4 pb-3 pt-2">
         <div className="mx-auto max-w-3xl space-y-2">
           {convId ? <BackgroundAgentsBar convId={convId} /> : null}
@@ -321,6 +324,10 @@ const SCROLL_TO_BOTTOM_BUTTON_VIEWPORT_RATIO = 0.5;
 // means fast scrolls and expander toggles rarely hit an unmounted turn, and the
 // off-screen markdown parse is spread out instead of hitching on entry.
 const OVERSCAN_PX = 800;
+// Per-frame increment for the post-open overscan ramp (see the ramp effect in
+// MessageList). Small enough that one step never mounts more than a sliver of
+// turns in a single commit, even when individual turns are enormous.
+const OVERSCAN_STEP_PX = 200;
 
 type MessageGroup =
   | { kind: "assistant"; keys: string[] }
@@ -398,6 +405,10 @@ function MessageList({
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  // Starts at zero for the open-at-bottom settle (see the settle effect below);
+  // unlocked to OVERSCAN_PX once the initial position holds still, and reset to
+  // zero on every conversation switch.
+  const [overscan, setOverscan] = useState(0);
   const atBottomRef = useRef(true);
   // Topmost visible group index (from Virtuoso's rangeChanged) — drives the turn
   // navigator's active tick with no getBoundingClientRect scanning.
@@ -421,11 +432,18 @@ function MessageList({
 
   // Snap to the newest message when the user sends (even if scrolled up reading);
   // followOutput then keeps the streaming reply pinned as long as we stay at the
-  // bottom. Keyed on the last message key so it fires once per send, not per token.
+  // bottom. Keyed on the last message key so it fires once per send, not per
+  // token — and NOT on the first non-empty observation: when a restored
+  // conversation happens to end on a user turn (agent never replied), hydration
+  // must not count as "the user just sent" or the open position gets yanked.
   const prevLastKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const lastKey = keys[keys.length - 1] ?? null;
-    if (lastKey !== prevLastKeyRef.current && roles[roles.length - 1] === "user") {
+    if (
+      prevLastKeyRef.current !== null &&
+      lastKey !== prevLastKeyRef.current &&
+      roles[roles.length - 1] === "user"
+    ) {
       virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end" });
     }
     prevLastKeyRef.current = lastKey;
@@ -433,28 +451,48 @@ function MessageList({
 
   useLayoutEffect(() => {
     pendingInitialBottomRef.current = convId;
+    // Every conversation open restarts the zero-overscan mount + ramp cycle.
+    setOverscan(0);
   }, [convId]);
 
+  // Overscan ramp. Opening at the end of a long conversation is the hard case:
+  // Virtuoso seeks the last item while huge turns are still being measured, and
+  // with a generous overscan every height correction (re)mounts a whole window
+  // of turns in the same commit — each remount schedules more sync updates, and
+  // enough consecutive corrections trip React's update-depth limit and unmount
+  // the entire app (the v0.3.14 crash-on-open). With ZERO overscan the same
+  // open settles cleanly at the true bottom, so: mount at zero, wait a few
+  // frames for the landing to hold still, then ramp the overscan up in small
+  // per-frame steps — each step mounts at most a sliver of extra turns, and the
+  // frame boundary between steps keeps React's nested-update counter at rest.
   useEffect(() => {
-    if (!convId || pendingInitialBottomRef.current !== convId || groups.length === 0) {
+    if (!scroller || !convId || pendingInitialBottomRef.current !== convId || groups.length === 0) {
       return;
     }
-    pendingInitialBottomRef.current = null;
 
-    const snap = () => {
-      virtuosoRef.current?.scrollToIndex({
-        index: "LAST",
-        align: "end",
-        behavior: "auto",
+    let prevDist = Number.NaN;
+    let stable = 0;
+    let budget = 120; // safety cap (~2s at 60fps); bailing out just leaves less overscan
+    let frame = requestAnimationFrame(function step() {
+      if (--budget <= 0) return;
+      if (stable < 3) {
+        // "Settled" = the distance to the bottom stopped moving — true both for
+        // the normal landing AND when the user immediately scrolled elsewhere.
+        const dist = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+        stable = Math.abs(dist - prevDist) <= 1 ? stable + 1 : 0;
+        prevDist = dist;
+        frame = requestAnimationFrame(step);
+        return;
+      }
+      setOverscan((prev) => {
+        const next = Math.min(prev + OVERSCAN_STEP_PX, OVERSCAN_PX);
+        if (next >= OVERSCAN_PX) {
+          pendingInitialBottomRef.current = null; // ramp complete for this open
+        } else {
+          frame = requestAnimationFrame(step);
+        }
+        return next;
       });
-      if (scroller) scroller.scrollTop = scroller.scrollHeight;
-      atBottomRef.current = true;
-    };
-
-    snap();
-    const frame = requestAnimationFrame(() => {
-      snap();
-      requestAnimationFrame(snap);
     });
     return () => cancelAnimationFrame(frame);
   }, [convId, groups.length, scroller]);
@@ -595,11 +633,12 @@ function MessageList({
         // the bare index defaults to top-align, which strands a long final reply
         // "scrolled to its own top", i.e. slightly above the real bottom).
         initialTopMostItemIndex={{ index: Math.max(0, groups.length - 1), align: "end" }}
+        alignToBottom
         followOutput={(isAtBottom) => (isAtBottom ? "auto" : false)}
         atBottomThreshold={STICKY_BOTTOM_PX}
         atBottomStateChange={setAtBottomState}
         rangeChanged={(range) => setTopIndex(range.startIndex)}
-        increaseViewportBy={OVERSCAN_PX}
+        increaseViewportBy={overscan}
       />
       <TurnNavigator
         convId={convId}

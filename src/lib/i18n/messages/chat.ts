@@ -90,6 +90,10 @@ export const chat = {
     "pane.retrying": "Retrying…",
     "pane.loadEarlier": "Load earlier messages",
     "pane.scrollToBottom": "Scroll to bottom",
+    "pane.renderError.title": "This conversation failed to render",
+    "pane.renderError.body":
+      "Something in this conversation crashed the message view. You can retry, or switch to another chat — the rest of the app is unaffected.",
+    "pane.renderError.retry": "Retry",
     "quote.addToChat": "Add to chat",
 
     // Message bubble
@@ -255,6 +259,10 @@ export const chat = {
     "pane.retrying": "重试中…",
     "pane.loadEarlier": "加载更早的消息",
     "pane.scrollToBottom": "滚动到底部",
+    "pane.renderError.title": "此对话渲染失败",
+    "pane.renderError.body":
+      "该对话中的内容导致消息视图崩溃。可以重试，或切换到其他对话——应用的其余部分不受影响。",
+    "pane.renderError.retry": "重试",
     "quote.addToChat": "添加到对话",
 
     "bubble.attachment": "附件",
