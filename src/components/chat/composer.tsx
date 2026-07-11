@@ -752,11 +752,9 @@ export function Composer({
         // runtime the next message runs on: Claude Code gets Anthropic's
         // clay orange, Codex a teal. Bash mode's tint wins while active.
         !bashMode &&
-          !streaming &&
           backend === "claude-code" &&
           "border-[#d97757]/60 ring-1 ring-[#d97757]/30 dark:border-[#d97757]/50",
         !bashMode &&
-          !streaming &&
           backend === "codex" &&
           "border-[#10a37f]/60 ring-1 ring-[#10a37f]/30 dark:border-[#10a37f]/50",
         variant === "hero" ? "bg-card p-2" : "bg-card p-1.5",

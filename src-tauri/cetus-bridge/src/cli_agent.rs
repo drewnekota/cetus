@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
 /// Which coding-agent CLI backs a conversation. `pi` stays the default and is
@@ -258,15 +258,15 @@ fn is_sidechain(v: &Value) -> bool {
 }
 
 /// Does a main-chain tool_result look like the CLI's immediate "task launched"
-/// ack rather than a real report? The Agent tool (run_in_background) answers
-/// with "Async agent launched successfully…"; the Workflow tool with
-/// "Workflow launched in background. Task ID: …". Matching only the Agent
-/// string made a still-running Workflow read as a settled step — which also
-/// dropped it from has_pending_tasks, so the runner killed the CLI (and the
-/// live workflow with it) right after the turn's `result`.
+/// ack rather than a real report? Agent, Workflow, and background Bash commands
+/// each use different wording. Missing one makes its still-running tool card
+/// look settled and drops it from `has_pending_tasks`, so the runner can kill
+/// Claude Code (and the background work) at the turn's intermediate `result`.
 fn is_background_launch_ack(content: &Value) -> bool {
     let s = content.to_string();
-    s.contains("Async agent launched successfully") || s.contains("launched in background")
+    s.contains("Async agent launched successfully")
+        || s.contains("launched in background")
+        || s.contains("Command running in background with ID:")
 }
 
 /// Stateful translator from a backend's raw JSONL lines to Cetus `PiEvent`
@@ -411,6 +411,16 @@ impl EventTranslator {
         self.background_tasks.values().any(|t| !t.done)
     }
 
+    /// Background Bash commands (dev servers, watchers, log tails) deliberately
+    /// outlive the model turn. Async agents/workflows are different: Claude
+    /// starts a continuation turn when they finish, so the current turn must
+    /// keep reading until that continuation settles.
+    pub fn has_pending_turn_tasks(&self) -> bool {
+        self.background_tasks
+            .values()
+            .any(|t| !t.done && t.subagent_type != "Bash")
+    }
+
     /// True if any background subagent ran during this turn (pending or done).
     /// The runner uses this to hold the close briefly after a `result`: a
     /// task's completion notification and the CLI's continuation turn can
@@ -423,6 +433,32 @@ impl EventTranslator {
     /// Move the accumulated PiMessages out (call after `finish`).
     pub fn take_messages(&mut self) -> Vec<Value> {
         std::mem::take(&mut self.messages)
+    }
+
+    /// Re-arm the per-turn portions of a translator while retaining Claude's
+    /// conversation-scoped background-task registry. A persistent stream-json
+    /// child uses one translator across many turns so task notifications can
+    /// still settle cards after the launching turn has ended.
+    pub fn begin_next_turn(&mut self) {
+        self.next_index = 0;
+        self.finished = false;
+        self.assistant_blocks.clear();
+        self.messages.clear();
+        self.live_blocks.clear();
+        self.saw_result = false;
+        self.result_error = None;
+        self.opened = false;
+        // Tool names for still-running background cards must survive. Prune
+        // names that no live task references so this map remains bounded.
+        let mut live_ids: std::collections::HashSet<String> = self
+            .background_tasks
+            .values()
+            .filter(|t| !t.done)
+            .map(|t| t.tool_use_id.clone())
+            .collect();
+        live_ids.extend(self.started_items.iter().cloned());
+        self.tool_names.retain(|id, _| live_ids.contains(id));
+        self.background_tasks.retain(|_, t| !t.done);
     }
 
     /// True when no assistant content has accumulated for the open segment.
@@ -662,6 +698,8 @@ impl EventTranslator {
                     // Workflow tasks register with a generic subagent_type
                     // ("Task"); the tool name reads better than "Task agent".
                     format!("Workflow running in background — {}", task.description)
+                } else if tool_name == "Bash" {
+                    format!("Background command running — {}", task.description)
                 } else {
                     format!(
                         "{} agent running in background — {}",
@@ -802,8 +840,12 @@ impl EventTranslator {
                         subagent_type: v
                             .get("subagent_type")
                             .and_then(|t| t.as_str())
-                            .unwrap_or("Task")
-                            .to_string(),
+                            .map(str::to_string)
+                            .unwrap_or_else(|| match v.get("task_type").and_then(|t| t.as_str()) {
+                                Some("local_bash") => "Bash".to_string(),
+                                Some(kind) if !kind.is_empty() => kind.to_string(),
+                                _ => "Task".to_string(),
+                            }),
                         description: v
                             .get("description")
                             .and_then(|t| t.as_str())
@@ -1393,6 +1435,552 @@ fn usage_limit_hint(backend: CliBackend) -> String {
     )
 }
 
+/// Handle to one conversation-scoped Claude Code stream-json process.
+///
+/// Claude's background Bash jobs are owned by the CLI session, not by an
+/// individual model turn. Keeping this handle alive therefore gives dev
+/// servers the same lifetime they have in Claude Code's interactive UI.
+#[derive(Clone)]
+pub struct ClaudeSessionHandle {
+    tx: tokio::sync::mpsc::UnboundedSender<ClaudeSessionCommand>,
+}
+
+enum ClaudeSessionCommand {
+    StartTurn {
+        line: String,
+        sink: Arc<dyn EventSink>,
+        outcome: tokio::sync::oneshot::Sender<CliTurnOutcome>,
+    },
+    Input(String),
+    Abort,
+    Shutdown,
+}
+
+impl ClaudeSessionHandle {
+    pub fn start_turn(
+        &self,
+        line: String,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<tokio::sync::oneshot::Receiver<CliTurnOutcome>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(ClaudeSessionCommand::StartTurn {
+                line,
+                sink,
+                outcome: tx,
+            })
+            .map_err(|_| anyhow::anyhow!("Claude Code session has exited"))?;
+        Ok(rx)
+    }
+
+    pub fn input(&self, line: String) -> Result<()> {
+        self.tx
+            .send(ClaudeSessionCommand::Input(line))
+            .map_err(|_| anyhow::anyhow!("Claude Code session has exited"))
+    }
+
+    pub fn abort(&self) {
+        let _ = self.tx.send(ClaudeSessionCommand::Abort);
+    }
+
+    pub fn shutdown(&self) {
+        let _ = self.tx.send(ClaudeSessionCommand::Shutdown);
+    }
+
+    pub fn is_alive(&self) -> bool {
+        !self.tx.is_closed()
+    }
+}
+
+struct ActiveClaudeTurn {
+    sink: Arc<dyn EventSink>,
+    outcome: tokio::sync::oneshot::Sender<CliTurnOutcome>,
+}
+
+/// Spawn a persistent Claude Code session. `opts.resume` is used only when the
+/// process is first created; subsequent turns are sent over the same stdin.
+pub fn spawn_claude_session(
+    base_sink: Arc<dyn EventSink>,
+    bin: &str,
+    cwd: &Path,
+    conversation_id: Option<String>,
+    extra_env: Vec<(String, String)>,
+    opts: CliRunOpts,
+) -> Result<ClaudeSessionHandle> {
+    let args = CliBackend::ClaudeCode.turn_args("", &opts);
+    let mut cmd = TokioCommand::new(bin);
+    cmd.args(&args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().with_context(|| format!("failed to launch `{bin}`"))?;
+    let mut stdin = child.stdin.take().context("Claude Code stdin missing")?;
+    let stdout = child.stdout.take().context("Claude Code stdout missing")?;
+    let stderr = child.stderr.take();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let handle = ClaudeSessionHandle { tx };
+
+    tokio::spawn(async move {
+        let emit = |sink: &Arc<dyn EventSink>, events: Vec<Value>| {
+            for event in events {
+                sink.emit(RuntimeEvent::Protocol {
+                    conversation_id: conversation_id.clone(),
+                    event,
+                });
+            }
+        };
+        // Initialize the bidirectional control protocol once for the whole
+        // process. User messages follow as StartTurn commands.
+        if let Some(init) = claude_stdin_lines("", &[]).into_iter().next() {
+            if stdin.write_all(init.as_bytes()).await.is_err()
+                || stdin.write_all(b"\n").await.is_err()
+                || stdin.flush().await.is_err()
+            {
+                return;
+            }
+        }
+
+        let stderr_buf = Arc::new(tokio::sync::Mutex::new(String::new()));
+        if let Some(stderr) = stderr {
+            let buf = stderr_buf.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let mut out = buf.lock().await;
+                    if out.len() < 4000 {
+                        out.push_str(&line);
+                        out.push('\n');
+                    }
+                }
+            });
+        }
+
+        let mut reader = BufReader::new(stdout).lines();
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        let mut active: Option<ActiveClaudeTurn> = None;
+        let mut killed = false;
+        let mut interrupted = false;
+        let mut control_id = 2u64;
+
+        loop {
+            tokio::select! {
+                cmd = rx.recv() => match cmd {
+                    Some(ClaudeSessionCommand::StartTurn { line, sink, outcome }) => {
+                        if active.is_some() {
+                            let _ = outcome.send(CliTurnOutcome {
+                                resume_id: tr.resume_id.clone(), messages: Vec::new(),
+                                aborted: false, streamed: false, resume_rejected: false,
+                            });
+                            continue;
+                        }
+                        tr.begin_next_turn();
+                        interrupted = false;
+                        emit(&sink, tr.start());
+                        if stdin.write_all(line.as_bytes()).await.is_err()
+                            || stdin.write_all(b"\n").await.is_err()
+                            || stdin.flush().await.is_err()
+                        {
+                            emit(&sink, tr.finish(Some("Claude Code stdin closed")));
+                            let _ = outcome.send(CliTurnOutcome {
+                                resume_id: tr.resume_id.clone(), messages: tr.take_messages(),
+                                aborted: false, streamed: tr.opened,
+                                resume_rejected: false,
+                            });
+                            break;
+                        }
+                        active = Some(ActiveClaudeTurn { sink, outcome });
+                    }
+                    Some(ClaudeSessionCommand::Input(line)) => {
+                        let _ = stdin.write_all(line.as_bytes()).await;
+                        let _ = stdin.write_all(b"\n").await;
+                        let _ = stdin.flush().await;
+                    }
+                    Some(ClaudeSessionCommand::Abort) => {
+                        // Agent SDK streaming mode supports an out-of-band
+                        // interrupt control request. This stops only the active
+                        // model turn; session-owned background Bash jobs stay
+                        // alive, matching native Claude Code.
+                        let line = json!({
+                            "type": "control_request",
+                            "request_id": format!("cetus-interrupt-{control_id}"),
+                            "request": { "subtype": "interrupt" },
+                        }).to_string();
+                        control_id += 1;
+                        let _ = stdin.write_all(line.as_bytes()).await;
+                        let _ = stdin.write_all(b"\n").await;
+                        let _ = stdin.flush().await;
+                        interrupted = true;
+                    }
+                    Some(ClaudeSessionCommand::Shutdown) | None => {
+                        killed = true;
+                        let _ = child.start_kill();
+                        break;
+                    }
+                },
+                line = reader.next_line() => {
+                    let line = match line { Ok(Some(line)) => line, _ => break };
+                    let sink = active.as_ref().map(|a| &a.sink).unwrap_or(&base_sink);
+                    let events = tr.on_line(&line);
+                    if !events.is_empty() { emit(sink, events); }
+                    if tr.saw_result && tr.result_is_spurious() {
+                        tr.saw_result = false;
+                        continue;
+                    }
+                    if tr.saw_result && tr.has_pending_turn_tasks() {
+                        // Claude will emit a continuation turn when an async
+                        // agent/workflow settles. A background Bash task is not
+                        // included here and may outlive the completed turn.
+                        tr.saw_result = false;
+                        continue;
+                    }
+                    if tr.saw_result {
+                        let Some(turn) = active.take() else {
+                            tr.saw_result = false;
+                            continue;
+                        };
+                        let err = if tr.messages.is_empty() && tr.assistant_blocks_empty() {
+                            tr.result_error.take()
+                        } else { None };
+                        emit(&turn.sink, tr.finish(err.as_deref()));
+                        let streamed = tr.opened;
+                        let _ = turn.outcome.send(CliTurnOutcome {
+                            resume_id: tr.resume_id.clone(),
+                            messages: tr.take_messages(),
+                            aborted: interrupted,
+                            streamed,
+                            resume_rejected: false,
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some(turn) = active.take() {
+            let stderr = stderr_buf.lock().await.trim().to_string();
+            let err = if killed {
+                None
+            } else if stderr.is_empty() {
+                Some("Claude Code session exited unexpectedly".to_string())
+            } else {
+                Some(auth_expired_hint(CliBackend::ClaudeCode, &stderr).unwrap_or(stderr))
+            };
+            emit(&turn.sink, tr.finish(err.as_deref()));
+            let streamed = tr.opened;
+            let _ = turn.outcome.send(CliTurnOutcome {
+                resume_id: tr.resume_id.clone(),
+                messages: tr.take_messages(),
+                aborted: killed,
+                streamed,
+                resume_rejected: false,
+            });
+        }
+        let _ = child.wait().await;
+    });
+
+    Ok(handle)
+}
+
+/// Handle to a conversation-scoped Codex app-server and thread.
+#[derive(Clone)]
+pub struct CodexSessionHandle {
+    tx: tokio::sync::mpsc::UnboundedSender<CodexSessionCommand>,
+}
+
+enum CodexSessionCommand {
+    StartTurn {
+        prompt: String,
+        images: Vec<String>,
+        sink: Arc<dyn EventSink>,
+        outcome: tokio::sync::oneshot::Sender<CliTurnOutcome>,
+    },
+    AbortTurn,
+    Shutdown,
+}
+
+impl CodexSessionHandle {
+    pub fn start_turn(
+        &self,
+        prompt: String,
+        images: Vec<String>,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<tokio::sync::oneshot::Receiver<CliTurnOutcome>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(CodexSessionCommand::StartTurn {
+                prompt,
+                images,
+                sink,
+                outcome: tx,
+            })
+            .map_err(|_| anyhow::anyhow!("Codex app-server has exited"))?;
+        Ok(rx)
+    }
+
+    pub fn abort_turn(&self) {
+        let _ = self.tx.send(CodexSessionCommand::AbortTurn);
+    }
+
+    pub fn shutdown(&self) {
+        let _ = self.tx.send(CodexSessionCommand::Shutdown);
+    }
+
+    pub fn is_alive(&self) -> bool {
+        !self.tx.is_closed()
+    }
+}
+
+async fn write_json_line(stdin: &mut tokio::process::ChildStdin, value: &Value) -> Result<()> {
+    stdin.write_all(value.to_string().as_bytes()).await?;
+    stdin.write_all(b"\n").await?;
+    stdin.flush().await?;
+    Ok(())
+}
+
+async fn read_rpc_response(
+    reader: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    id: u64,
+) -> Result<Value> {
+    while let Some(line) = reader.next_line().await? {
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if value.get("id").and_then(Value::as_u64) == Some(id) {
+            if let Some(error) = value.get("error") {
+                anyhow::bail!("Codex app-server request failed: {error}");
+            }
+            return Ok(value.get("result").cloned().unwrap_or(Value::Null));
+        }
+    }
+    anyhow::bail!("Codex app-server closed before replying")
+}
+
+fn normalize_codex_app_item(mut item: Value) -> Value {
+    let Some(object) = item.as_object_mut() else {
+        return item;
+    };
+    if let Some(kind) = object.get("type").and_then(Value::as_str) {
+        let normalized = match kind {
+            "commandExecution" => "command_execution",
+            "agentMessage" => "agent_message",
+            "fileChange" => "file_change",
+            "mcpToolCall" => "mcp_tool_call",
+            other => other,
+        };
+        if normalized != kind {
+            object.insert("type".to_string(), json!(normalized));
+        }
+    }
+    for (camel, snake) in [
+        ("aggregatedOutput", "aggregated_output"),
+        ("exitCode", "exit_code"),
+    ] {
+        if let Some(value) = object.remove(camel) {
+            object.insert(snake.to_string(), value);
+        }
+    }
+    item
+}
+
+/// Spawn Codex's persistent app-server embedding surface and create or resume
+/// one thread. Unlike `codex exec`, app-server owns background terminals after
+/// `turn/completed`, which is the lifecycle the Codex desktop app uses.
+pub fn spawn_codex_session(
+    base_sink: Arc<dyn EventSink>,
+    bin: &str,
+    cwd: &Path,
+    conversation_id: Option<String>,
+    extra_env: Vec<(String, String)>,
+    opts: CliRunOpts,
+) -> Result<CodexSessionHandle> {
+    let mut cmd = TokioCommand::new(bin);
+    cmd.args(["app-server", "--listen", "stdio://"])
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().with_context(|| format!("failed to launch `{bin} app-server`"))?;
+    let mut stdin = child.stdin.take().context("Codex app-server stdin missing")?;
+    let stdout = child.stdout.take().context("Codex app-server stdout missing")?;
+    let stderr = child.stderr.take();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let handle = CodexSessionHandle { tx };
+    let cwd_string = cwd.to_string_lossy().into_owned();
+
+    tokio::spawn(async move {
+        let emit = |sink: &Arc<dyn EventSink>, events: Vec<Value>| {
+            for event in events {
+                sink.emit(RuntimeEvent::Protocol {
+                    conversation_id: conversation_id.clone(),
+                    event,
+                });
+            }
+        };
+        if let Some(stderr) = stderr {
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::debug!("codex app-server: {line}");
+                }
+            });
+        }
+        let mut reader = BufReader::new(stdout).lines();
+        let initialized = async {
+            write_json_line(&mut stdin, &json!({
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": { "name": "cetus", "title": "Cetus", "version": "0.1.0" },
+                    "capabilities": { "experimentalApi": true, "requestAttestation": false }
+                }
+            })).await?;
+            read_rpc_response(&mut reader, 1).await?;
+            write_json_line(&mut stdin, &json!({ "method": "initialized" })).await?;
+
+            let policy = if opts.bypass_approvals { "danger-full-access" } else { "workspace-write" };
+            let method = if opts.resume.is_some() { "thread/resume" } else { "thread/start" };
+            let mut params = json!({
+                "cwd": cwd_string,
+                "approvalPolicy": "never",
+                "sandbox": policy,
+                "threadSource": "appServer",
+            });
+            if let Some(resume) = &opts.resume {
+                params["threadId"] = json!(resume);
+                params["excludeTurns"] = json!(true);
+            }
+            if let Some(model) = &opts.model { params["model"] = json!(model); }
+            write_json_line(&mut stdin, &json!({ "id": 2, "method": method, "params": params })).await?;
+            let result = read_rpc_response(&mut reader, 2).await?;
+            result.pointer("/thread/id").and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| anyhow::anyhow!("Codex app-server returned no thread id"))
+        }.await;
+
+        let thread_id = match initialized {
+            Ok(id) => id,
+            Err(error) => {
+                if let Some(CodexSessionCommand::StartTurn { sink, outcome, .. }) = rx.recv().await {
+                    let mut tr = EventTranslator::new(CliBackend::Codex);
+                    emit(&sink, tr.start());
+                    emit(&sink, tr.finish(Some(&error.to_string())));
+                    let _ = outcome.send(CliTurnOutcome {
+                        resume_id: None, messages: tr.take_messages(), aborted: false,
+                        streamed: tr.opened, resume_rejected: opts.resume.is_some(),
+                    });
+                }
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                return;
+            }
+        };
+
+        let mut next_id = 10u64;
+        let mut tr = EventTranslator::new(CliBackend::Codex);
+        tr.resume_id = Some(thread_id.clone());
+        let mut active: Option<ActiveClaudeTurn> = None;
+        let mut active_turn_id: Option<String> = None;
+
+        loop {
+            tokio::select! {
+                command = rx.recv() => match command {
+                    Some(CodexSessionCommand::StartTurn { prompt, images, sink, outcome }) => {
+                        if active.is_some() {
+                            let _ = outcome.send(CliTurnOutcome {
+                                resume_id: Some(thread_id.clone()), messages: Vec::new(),
+                                aborted: false, streamed: false, resume_rejected: false,
+                            });
+                            continue;
+                        }
+                        tr.begin_next_turn();
+                        emit(&sink, tr.start());
+                        let mut input = vec![json!({ "type": "text", "text": prompt, "text_elements": [] })];
+                        input.extend(images.into_iter().map(|path| json!({ "type": "localImage", "path": path })));
+                        let id = next_id; next_id += 1;
+                        let mut params = json!({ "threadId": thread_id, "input": input });
+                        if let Some(effort) = &opts.effort { params["effort"] = json!(effort); }
+                        if let Err(error) = write_json_line(&mut stdin, &json!({ "id": id, "method": "turn/start", "params": params })).await {
+                            emit(&sink, tr.finish(Some(&error.to_string())));
+                            let _ = outcome.send(CliTurnOutcome {
+                                resume_id: Some(thread_id.clone()), messages: tr.take_messages(),
+                                aborted: false, streamed: tr.opened, resume_rejected: false,
+                            });
+                            break;
+                        }
+                        active = Some(ActiveClaudeTurn { sink, outcome });
+                    }
+                    Some(CodexSessionCommand::AbortTurn) => {
+                        if let Some(turn_id) = &active_turn_id {
+                            let id = next_id; next_id += 1;
+                            let _ = write_json_line(&mut stdin, &json!({
+                                "id": id, "method": "turn/interrupt",
+                                "params": { "threadId": thread_id, "turnId": turn_id }
+                            })).await;
+                        }
+                    }
+                    Some(CodexSessionCommand::Shutdown) | None => {
+                        let _ = child.start_kill();
+                        break;
+                    }
+                },
+                line = reader.next_line() => {
+                    let line = match line { Ok(Some(line)) => line, _ => break };
+                    let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
+                    if let Some(result) = value.get("result") {
+                        if let Some(id) = result.pointer("/turn/id").and_then(Value::as_str) {
+                            active_turn_id = Some(id.to_string());
+                        }
+                        continue;
+                    }
+                    let method = value.get("method").and_then(Value::as_str).unwrap_or("");
+                    let params = value.get("params").cloned().unwrap_or(Value::Null);
+                    let sink = active.as_ref().map(|a| &a.sink).unwrap_or(&base_sink);
+                    match method {
+                        "item/started" | "item/completed" => {
+                            let ty = if method.ends_with("started") { "item.started" } else { "item.completed" };
+                            let item = normalize_codex_app_item(params.get("item").cloned().unwrap_or(Value::Null));
+                            let events = tr.on_line(&json!({ "type": ty, "item": item }).to_string());
+                            if !events.is_empty() { emit(sink, events); }
+                        }
+                        "turn/completed" => {
+                            let Some(turn) = active.take() else { continue };
+                            let status = params.pointer("/turn/status").and_then(Value::as_str).unwrap_or("completed");
+                            let error = params.pointer("/turn/error/message").and_then(Value::as_str)
+                                .map(str::to_string)
+                                .or_else(|| (status == "failed").then(|| "Codex turn failed".to_string()));
+                            emit(&turn.sink, tr.finish(error.as_deref()));
+                            let streamed = tr.opened;
+                            let _ = turn.outcome.send(CliTurnOutcome {
+                                resume_id: Some(thread_id.clone()), messages: tr.take_messages(),
+                                aborted: status == "interrupted", streamed, resume_rejected: false,
+                            });
+                            active_turn_id = None;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if let Some(turn) = active.take() {
+            emit(&turn.sink, tr.finish(Some("Codex app-server exited unexpectedly")));
+            let streamed = tr.opened;
+            let _ = turn.outcome.send(CliTurnOutcome {
+                resume_id: Some(thread_id), messages: tr.take_messages(), aborted: false,
+                streamed, resume_rejected: false,
+            });
+        }
+        let _ = child.wait().await;
+    });
+
+    Ok(handle)
+}
+
 /// Spawn a single headless turn of `backend` with cwd = `cwd`, stream its
 /// output to `sink` as `RuntimeEvent::Protocol` PiEvents, and return the resume
 /// token plus the turn's persistable messages.
@@ -1671,7 +2259,26 @@ pub async fn run_cli_turn(
         w.abort();
     }
 
-    let status = child.wait().await?;
+    // `agent_start` has already reached the frontend, so a wait failure must
+    // still close the protocol turn. This is especially important for Codex
+    // steering: interrupting the one-shot child can make process reaping fail
+    // on some platforms. Propagating the error here used to leave the chat in
+    // `awaitingAssistant` forever because the caller only had an anyhow error,
+    // not the translator needed to emit `agent_end`.
+    let status = match child.wait().await {
+        Ok(status) => status,
+        Err(e) => {
+            let msg = format!("failed to wait for {} process: {e}", backend.as_str());
+            emit(&sink, tr.finish(Some(&msg)));
+            return Ok(CliTurnOutcome {
+                resume_id: tr.resume_id.clone(),
+                messages: tr.take_messages(),
+                aborted,
+                streamed: tr.opened,
+                resume_rejected: false,
+            });
+        }
+    };
     let clean = status.success() || aborted || tr.saw_result;
     // Stderr carries the failure reason for a dirty exit, but also for a clean
     // exit whose `result` reported an error — a rejected `--resume` logs its
@@ -2123,6 +2730,163 @@ mod tests {
         assert_eq!(types.last().map(String::as_str), Some("agent_end"));
         assert!(types.iter().any(|t| t == "message_update:text_end"));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn persistent_claude_session_reuses_one_process_across_turns() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-claude-session-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-persistent-claude.sh");
+        let pid_file = dir.join("pid");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\n\
+                 echo $$ > '{}'\n\
+                 echo '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"persistent-1\"}}'\n\
+                 n=0\n\
+                 while IFS= read -r line; do\n\
+                   case \"$line\" in *'\"type\":\"user\"'*)\n\
+                     n=$((n + 1))\n\
+                     echo \"{{\\\"type\\\":\\\"item-ignored\\\"}}\"\n\
+                     echo \"{{\\\"type\\\":\\\"stream_event\\\",\\\"event\\\":{{\\\"type\\\":\\\"content_block_start\\\",\\\"index\\\":0,\\\"content_block\\\":{{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"\\\"}}}}}}\"\n\
+                     echo \"{{\\\"type\\\":\\\"stream_event\\\",\\\"event\\\":{{\\\"type\\\":\\\"content_block_delta\\\",\\\"index\\\":0,\\\"delta\\\":{{\\\"type\\\":\\\"text_delta\\\",\\\"text\\\":\\\"turn-$n\\\"}}}}}}\"\n\
+                     echo \"{{\\\"type\\\":\\\"stream_event\\\",\\\"event\\\":{{\\\"type\\\":\\\"content_block_stop\\\",\\\"index\\\":0}}}}\"\n\
+                     echo \"{{\\\"type\\\":\\\"result\\\",\\\"subtype\\\":\\\"success\\\",\\\"is_error\\\":false,\\\"result\\\":\\\"turn-$n\\\"}}\"\n\
+                   ;; esac\n\
+                 done\n",
+                pid_file.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let session = spawn_claude_session(
+            sink.clone() as Arc<dyn EventSink>,
+            &script.to_string_lossy(),
+            &dir,
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+        )
+        .unwrap();
+
+        let first = session
+            .start_turn(
+                claude_user_message_line("one", &[]),
+                sink.clone() as Arc<dyn EventSink>,
+            )
+            .unwrap()
+            .await
+            .unwrap();
+        let pid = std::fs::read_to_string(&pid_file).unwrap();
+        assert_eq!(first.messages[0]["content"][0]["text"], json!("turn-1"));
+        assert!(session.is_alive(), "result must not tear down the CLI session");
+
+        let second = session
+            .start_turn(
+                claude_user_message_line("two", &[]),
+                sink.clone() as Arc<dyn EventSink>,
+            )
+            .unwrap()
+            .await
+            .unwrap();
+        assert_eq!(second.messages[0]["content"][0]["text"], json!("turn-2"));
+        assert_eq!(std::fs::read_to_string(&pid_file).unwrap(), pid);
+
+        session.shutdown();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn codex_app_server_keeps_thread_alive_after_turn_completed() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-codex-app-server-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-codex.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             n=0\n\
+             while IFS= read -r line; do\n\
+               case \"$line\" in\n\
+                 *'\"method\":\"initialize\"'*) echo '{\"id\":1,\"result\":{\"userAgent\":\"fake\",\"codexHome\":\"/tmp\",\"platformFamily\":\"unix\",\"platformOs\":\"macos\"}}' ;;\n\
+                 *'\"method\":\"thread/start\"'*) echo '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-persistent\"}}}' ;;\n\
+                 *'\"method\":\"turn/start\"'*)\n\
+                   n=$((n + 1)); id=$((9 + n));\n\
+                   echo \"{\\\"id\\\":$id,\\\"result\\\":{\\\"turn\\\":{\\\"id\\\":\\\"turn-$n\\\"}}}\";\n\
+                   if [ \"$n\" -eq 1 ]; then\n\
+                     echo '{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-persistent\",\"turnId\":\"turn-1\",\"item\":{\"type\":\"commandExecution\",\"id\":\"server-1\",\"command\":\"pnpm dev\",\"processId\":\"process-1\",\"status\":\"inProgress\",\"aggregatedOutput\":\"\",\"exitCode\":null}}}' ;\n\
+                   fi;\n\
+                   echo \"{\\\"method\\\":\\\"item/completed\\\",\\\"params\\\":{\\\"threadId\\\":\\\"thread-persistent\\\",\\\"turnId\\\":\\\"turn-$n\\\",\\\"item\\\":{\\\"type\\\":\\\"agentMessage\\\",\\\"id\\\":\\\"answer-$n\\\",\\\"text\\\":\\\"turn-$n\\\"}}}\";\n\
+                   echo \"{\\\"method\\\":\\\"turn/completed\\\",\\\"params\\\":{\\\"threadId\\\":\\\"thread-persistent\\\",\\\"turn\\\":{\\\"id\\\":\\\"turn-$n\\\",\\\"status\\\":\\\"completed\\\",\\\"error\\\":null}}}\" ;;\n\
+               esac\n\
+             done\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let session = spawn_codex_session(
+            sink.clone() as Arc<dyn EventSink>,
+            &script.to_string_lossy(),
+            &dir,
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+        )
+        .unwrap();
+        let first = session
+            .start_turn("one".into(), Vec::new(), sink.clone() as Arc<dyn EventSink>)
+            .unwrap()
+            .await
+            .unwrap();
+        assert_eq!(first.resume_id.as_deref(), Some("thread-persistent"));
+        assert!(first.messages.iter().any(|message| {
+            message["content"]
+                .as_array()
+                .is_some_and(|content| content.iter().any(|block| block["text"] == json!("turn-1")))
+        }));
+        assert!(session.is_alive(), "turn/completed must not stop app-server");
+
+        let second = session
+            .start_turn("two".into(), Vec::new(), sink.clone() as Arc<dyn EventSink>)
+            .unwrap()
+            .await
+            .unwrap();
+        assert!(second.messages.iter().any(|message| {
+            message["content"]
+                .as_array()
+                .is_some_and(|content| content.iter().any(|block| block["text"] == json!("turn-2")))
+        }));
+        assert!(session.is_alive());
+
+        session.shutdown();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2770,6 +3534,37 @@ mod tests {
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"wf1","tool_use_id":"tW","status":"completed","summary":"the findings"}"#);
         let end = ev.iter().find(|e| e["type"] == "tool_execution_end").unwrap();
         assert_eq!(end["result"]["content"][0]["text"], json!("the findings"));
+        assert!(!tr.has_pending_tasks());
+    }
+
+    /// Claude Code reports `Bash(run_in_background=true)` through the same
+    /// task lifecycle as agents, but its launch result has command-specific
+    /// wording and `task_type: local_bash` instead of `subagent_type`.
+    #[test]
+    fn background_bash_stays_running_until_notification() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tBash","name":"Bash","input":{}}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\":\"sleep 30\",\"description\":\"Monitor CI\",\"run_in_background\":true}"}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"shell1","tool_use_id":"tBash","description":"Monitor CI","task_type":"local_bash"}"#);
+        assert!(tr.has_pending_tasks());
+
+        let ev = tr.on_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tBash","content":"Command running in background with ID: shell1. Output is being written to: /tmp/shell1.output. You will be notified when it completes.","is_error":false}]}}"#);
+        let tys = types(&ev);
+        assert!(tys.contains(&"tool_execution_update".to_string()), "{tys:?}");
+        assert!(!tys.contains(&"tool_execution_end".to_string()), "card must stay running: {tys:?}");
+        assert!(tr.has_pending_tasks(), "the runner must keep reading the monitor stream");
+        assert!(!tr.has_pending_turn_tasks(), "background Bash must not keep the model turn open");
+        let update = ev.iter().find(|e| e["type"] == "tool_execution_update").unwrap();
+        assert_eq!(update["partialResult"]["details"]["subagent"]["type"], json!("Bash"));
+        let shown = update["partialResult"]["content"][0]["text"].as_str().unwrap();
+        assert!(shown.starts_with("Background command running"), "{shown}");
+        assert!(!shown.contains("/tmp/shell1.output"), "internal output path hidden: {shown}");
+
+        let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"shell1","tool_use_id":"tBash","status":"completed","summary":"Background command completed (exit code 0)"}"#);
+        let end = ev.iter().find(|e| e["type"] == "tool_execution_end").unwrap();
+        assert_eq!(end["toolCallId"], json!("tBash"));
+        assert_eq!(end["result"]["details"]["subagent"]["status"], json!("completed"));
         assert!(!tr.has_pending_tasks());
     }
 

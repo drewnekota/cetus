@@ -684,6 +684,8 @@ pub async fn archive_conversation(
     if archive {
         state.kill_pi(&id).await;
         state.abort_cli_turn(&id);
+        state.kill_claude_session(&id);
+        state.kill_codex_session(&id);
     }
     state
         .store
@@ -717,6 +719,8 @@ pub async fn set_review_state(
 pub async fn delete_conversation(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state.kill_pi(&id).await;
     state.abort_cli_turn(&id);
+    state.kill_claude_session(&id);
+    state.kill_codex_session(&id);
     state.remove_conv_agent(&id);
     // CLI-backend leftovers: the git worktree (its branch survives so finished
     // work isn't lost), the persisted transcript, and on-disk attachments.
@@ -935,6 +939,10 @@ pub async fn set_conversation_backend(
     let Some(old) = state.store.switch_backend(&id, &backend, now).map_err(err)? else {
         return Ok(()); // missing conversation or same backend — nothing to do
     };
+    // An idle vendor process owns background terminals and configuration for
+    // the old runtime. Switching runtime is an explicit lifecycle boundary.
+    state.kill_claude_session(&id);
+    state.kill_codex_session(&id);
     // Audit marker, but only when there's already a transcript: fresh
     // conversations get their backend set at creation (pending picker choice)
     // and must not open with a stray "Cetus → Codex" divider.
@@ -975,7 +983,12 @@ pub async fn set_conversation_cli_model(
     state
         .store
         .set_cli_model(&id, model.trim(), effort.trim(), now_ms())
-        .map_err(err)
+        .map_err(err)?;
+    // Model/effort are sticky app-server/session configuration; recreate the
+    // idle process so the new choice applies on the next turn.
+    state.kill_claude_session(&id);
+    state.kill_codex_session(&id);
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -1004,6 +1017,8 @@ pub async fn retry_last_turn(state: State<'_, AppState>, id: String) -> CmdResul
     // persisted transcript and rewind session_file to the resume token that was
     // in effect before that turn, so the resend replays from the same context.
     if cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend).is_some() {
+        state.kill_claude_session(&id);
+        state.kill_codex_session(&id);
         let (row_id, message, resume_before) = state
             .store
             .last_cli_user_message(&id)
@@ -1223,6 +1238,8 @@ pub async fn set_workspace(
     // The pi process pinned to this conv was spawned with the *old* cwd.
     // Drop it; next interaction lazy-spawns with the new cwd.
     state.kill_pi(&id).await;
+    state.kill_claude_session(&id);
+    state.kill_codex_session(&id);
     Ok(conv)
 }
 
@@ -1325,6 +1342,7 @@ pub async fn set_api_key(
     }
     // Kill every pi so the next interaction respawns with the new env.
     state.kill_all().await;
+    state.kill_all_cli_sessions();
     Ok(())
 }
 
@@ -1332,6 +1350,7 @@ pub async fn set_api_key(
 pub async fn delete_api_key(state: State<'_, AppState>, provider: String) -> CmdResult<()> {
     secrets::delete(&provider).map_err(err)?;
     state.kill_all().await;
+    state.kill_all_cli_sessions();
     Ok(())
 }
 

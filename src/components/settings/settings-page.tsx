@@ -19,6 +19,7 @@ import {
   ArchiveRestore,
   ArrowLeft,
   AudioLines,
+  Cloud,
   Check,
   ChevronDown,
   Copy,
@@ -31,6 +32,8 @@ import {
   Pencil,
   Plus,
   RotateCw,
+  Search,
+  ShieldCheck,
   Trash2,
   X,
 } from "lucide-react";
@@ -73,6 +76,7 @@ import {
   type Meeting,
   type MeetingSettings,
   type MeetingStatus,
+  type MeetingSegment,
 } from "@/lib/tauri";
 import type {
   AutoArchiveSettings,
@@ -2203,6 +2207,135 @@ function AmbientContextSection() {
 // Meetings (ambient audio transcription)
 // =============================================================================
 
+function MeetingTranscriptPanel({
+  meetingId,
+  live = false,
+}: {
+  meetingId: string;
+  live?: boolean;
+}) {
+  const { t } = useTranslation("meeting");
+  const [segments, setSegments] = useState<MeetingSegment[]>([]);
+  const [query, setQuery] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const refresh = useCallback(() => {
+    api.meetingTranscript(meetingId).then(setSegments).catch(() => {});
+  }, [meetingId]);
+
+  useEffect(() => {
+    refresh();
+    if (!live) return;
+    const timer = setInterval(refresh, 1200);
+    return () => clearInterval(timer);
+  }, [live, refresh]);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    return needle
+      ? segments.filter((segment) =>
+          segment.text.toLocaleLowerCase().includes(needle),
+        )
+      : segments;
+  }, [query, segments]);
+
+  async function copyAll() {
+    const text = segments
+      .map(
+        (segment) =>
+          `${segment.source === "mic" ? t("transcript.you") : t("transcript.them")}: ${segment.text}`,
+      )
+      .join("\n\n");
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-black/[0.07] bg-[#f7f7f4] dark:border-white/10 dark:bg-white/[0.035]">
+      <div className="flex items-center justify-between gap-3 border-b border-black/[0.06] px-3 py-2.5 dark:border-white/10">
+        <div className="flex items-center gap-2">
+          {live && (
+            <span className="flex h-3 items-end gap-px" aria-hidden="true">
+              {[7, 11, 5, 9].map((height, index) => (
+                <span
+                  key={index}
+                  className="w-0.5 animate-pulse rounded-full bg-emerald-600"
+                  style={{ height, animationDelay: `${index * 120}ms` }}
+                />
+              ))}
+            </span>
+          )}
+          <p className="text-xs font-semibold tracking-tight">
+            {live ? t("transcript.live") : t("transcript.title")}
+          </p>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="relative hidden sm:block">
+            <Search className="absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("transcript.search")}
+              aria-label={t("transcript.search")}
+              className="h-7 w-40 border-0 bg-black/[0.04] pl-7 text-xs shadow-none dark:bg-white/[0.06]"
+            />
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={copyAll}
+            disabled={segments.length === 0}
+            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+          >
+            {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+            {copied ? t("transcript.copied") : t("transcript.copy")}
+          </Button>
+        </div>
+      </div>
+      <div className="max-h-80 space-y-3 overflow-y-auto px-3 py-4 [scrollbar-width:thin]">
+        {filtered.length === 0 ? (
+          <div className="flex min-h-24 items-center justify-center text-xs text-muted-foreground">
+            {t("transcript.empty")}
+          </div>
+        ) : (
+          filtered.map((segment, index) => {
+            const mine = segment.source === "mic";
+            return (
+              <div
+                key={`${segment.ts}-${index}`}
+                className={cn("flex", mine ? "justify-end" : "justify-start")}
+              >
+                <div className={cn("max-w-[86%]", mine && "text-right")}>
+                  <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                    {mine ? t("transcript.you") : t("transcript.them")}
+                    <span className="font-normal normal-case tracking-normal opacity-70">
+                      {new Date(segment.ts).toLocaleTimeString(undefined, {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                  <p
+                    className={cn(
+                      "rounded-2xl px-3 py-2 text-left text-[13px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
+                      mine
+                        ? "rounded-br-md bg-[#ddefd7] text-[#173819] dark:bg-emerald-900/50 dark:text-emerald-50"
+                        : "rounded-bl-md bg-white text-foreground dark:bg-white/[0.08]",
+                    )}
+                  >
+                    {segment.text}
+                  </p>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MeetingsSection({ open }: { open: boolean }) {
   const { t } = useTranslation("meeting");
   // The hotkey recorder reuses the summon shortcut's generic strings.
@@ -2309,16 +2442,23 @@ function MeetingsSection({ open }: { open: boolean }) {
       )}
 
       {/* Live session / manual control */}
-      <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-3">
+      <div
+        className={cn(
+          "mt-5 overflow-hidden rounded-2xl border transition-colors",
+          recording
+            ? "border-emerald-700/20 bg-[#f4f8f0] shadow-[0_12px_40px_rgba(31,70,35,0.08)] dark:border-emerald-400/20 dark:bg-emerald-950/20"
+            : "border-border bg-muted/20",
+        )}
+      >
+      <div className="flex items-center justify-between gap-4 px-4 py-4">
         {recording && status?.startedTs ? (
           <>
             <div className="flex min-w-0 items-center gap-2.5">
-              <span className="relative flex size-2.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-60" />
-                <span className="relative inline-flex size-2.5 rounded-full bg-destructive" />
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-white shadow-sm">
+                <AudioLines className="size-4" />
               </span>
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium">
+                <p className="truncate text-sm font-semibold tracking-tight">
                   {t("status.recording")} {formatElapsed(status.startedTs)}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
@@ -2327,20 +2467,35 @@ function MeetingsSection({ open }: { open: boolean }) {
                     : t("status.manual")}
                   {" · "}
                   {t("status.segments", { count: String(status.segments) })}
+                  {" · "}
+                  {t(status.engine === "cloud" ? "status.cloud" : "status.local")}
                 </p>
               </div>
             </div>
-            <Button variant="outline" size="sm" onClick={onStop}>
+            <Button
+              size="sm"
+              onClick={onStop}
+              className="rounded-full bg-foreground px-4 text-background hover:bg-foreground/85"
+            >
               {t("action.stop")}
             </Button>
           </>
         ) : (
           <>
-            <div />
+            <div className="flex items-center gap-3">
+              <span className="flex size-9 items-center justify-center rounded-full border border-border bg-background text-muted-foreground">
+                <Mic className="size-4" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold">{t("ready.title")}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t("ready.description", { hotkey: settings.toggleHotkey })}
+                </p>
+              </div>
+            </div>
             <Button
-              variant="outline"
               size="sm"
-              className="gap-1.5"
+              className="gap-1.5 rounded-full bg-emerald-700 px-4 text-white hover:bg-emerald-800"
               onClick={onStart}
               disabled={!settings.enabled || !isMac}
             >
@@ -2349,6 +2504,12 @@ function MeetingsSection({ open }: { open: boolean }) {
             </Button>
           </>
         )}
+      </div>
+      {recording && status?.meetingId && (
+        <div className="border-t border-emerald-800/10 p-3 dark:border-emerald-300/10">
+          <MeetingTranscriptPanel meetingId={status.meetingId} live />
+        </div>
+      )}
       </div>
 
       <div className="mt-6 space-y-1">
@@ -2368,6 +2529,38 @@ function MeetingsSection({ open }: { open: boolean }) {
         )}
       >
         <div className="rounded-lg border border-border">
+          <div className="flex items-center justify-between gap-4 p-3">
+            <div className="flex min-w-0 gap-2.5">
+              {settings.asrEngine === "local" ? (
+                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <Cloud className="mt-0.5 size-4 shrink-0 text-emerald-700" />
+              )}
+              <div className="min-w-0 space-y-0.5">
+                <Label htmlFor="meeting-asr" className="font-medium">
+                  {t("asr.label")}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("asr.description")}
+                </p>
+              </div>
+            </div>
+            <Select
+              value={settings.asrEngine}
+              onValueChange={(value) =>
+                update({ asrEngine: value as MeetingSettings["asrEngine"] })
+              }
+            >
+              <SelectTrigger id="meeting-asr" className="w-44 shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">{t("asr.auto")}</SelectItem>
+                <SelectItem value="local">{t("asr.local")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="border-t border-border" />
           <ToggleRow
             id="meeting-auto-detect"
             label={t("autoDetect.label")}
@@ -2504,6 +2697,9 @@ function MeetingsSection({ open }: { open: boolean }) {
                           {t("noSummary")}
                         </p>
                       )}
+                      <div className="mt-4">
+                        <MeetingTranscriptPanel meetingId={m.id} />
+                      </div>
                       <div className="mt-2 flex justify-end">
                         <Button
                           variant="ghost"

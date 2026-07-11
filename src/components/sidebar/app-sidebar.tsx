@@ -3,9 +3,11 @@ import {
   memo,
   useCallback,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -15,6 +17,8 @@ import {
   Archive,
   ArchiveRestore,
   Blocks,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Folder,
   FolderOpen,
@@ -171,9 +175,26 @@ export const AppSidebar = memo(function AppSidebar({
     }),
   );
   const [activeDragDir, setActiveDragDir] = useState<string | null>(null);
+  // Per-workspace collapsed state, persisted so folded folders stay folded
+  // across launches. Everything starts expanded.
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(loadCollapsedDirs);
+  // Releasing a reorder drag fires a click on the folder header (it's both the
+  // drag handle and the collapse toggle), which would fold the group you just
+  // dropped. Stamp drag-end and swallow toggles that land right after it.
+  const lastDragEndAtRef = useRef(0);
+  const toggleCollapsed = useCallback((dir: string) => {
+    if (Date.now() - lastDragEndAtRef.current < 250) return;
+    setCollapsedDirs((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(dir)) next.add(dir);
+      persistCollapsedDirs(next);
+      return next;
+    });
+  }, []);
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       setActiveDragDir(null);
+      lastDragEndAtRef.current = Date.now();
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const from = sortableIds.indexOf(String(active.id));
@@ -400,6 +421,8 @@ export const AppSidebar = memo(function AppSidebar({
                   group={defaultGroup}
                   label={t("workspace.default")}
                   isDefault
+                  collapsed={collapsedDirs.has(defaultGroup.dir)}
+                  onToggleCollapse={toggleCollapsed}
                   activeId={activeId}
                   streamingIds={streamingIds}
                   unreadCompletedIds={unreadCompletedIds}
@@ -419,6 +442,8 @@ export const AppSidebar = memo(function AppSidebar({
                   key={g.dir}
                   group={g}
                   label={workspaceName(g.dir)}
+                  collapsed={collapsedDirs.has(g.dir)}
+                  onToggleCollapse={toggleCollapsed}
                   activeId={activeId}
                   streamingIds={streamingIds}
                   unreadCompletedIds={unreadCompletedIds}
@@ -501,6 +526,8 @@ interface WorkspaceGroupViewProps {
   isDefault?: boolean;
   /** Drag-handle props (attributes + listeners) from useSortable. */
   handleProps?: Record<string, unknown>;
+  collapsed: boolean;
+  onToggleCollapse: (dir: string) => void;
   activeId: string | null;
   streamingIds: Set<string>;
   unreadCompletedIds: Set<string>;
@@ -521,6 +548,8 @@ function WorkspaceGroupView({
   label,
   isDefault,
   handleProps,
+  collapsed,
+  onToggleCollapse,
   activeId,
   streamingIds,
   unreadCompletedIds,
@@ -538,16 +567,40 @@ function WorkspaceGroupView({
       <div className="group/project-row relative">
         <SidebarGroupLabel
           {...handleProps}
+          // The header is both the collapse toggle (click) and, for real
+          // folders, the reorder handle (250ms hold — see the PointerSensor
+          // activation constraint). The default section has no handleProps, so
+          // it needs its own role/tabIndex to stay keyboard-toggleable.
+          role="button"
+          tabIndex={0}
+          aria-expanded={!collapsed}
+          onClick={() => onToggleCollapse(group.dir)}
+          onKeyDown={(e: ReactKeyboardEvent) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onToggleCollapse(group.dir);
+            }
+          }}
           className={cn(
-            "pr-16",
+            "cursor-pointer pr-16 select-none",
             ROW_ACCENT_CLASS,
-            handleProps && "cursor-grab touch-none select-none active:cursor-grabbing",
+            handleProps && "touch-none active:cursor-grabbing",
           )}
         >
-          {isDefault ? (
-            <MessageSquare className="mr-1.5 !size-3" />
+          {/* Folded groups always show the chevron (the visible cue that rows
+              are hidden); expanded ones keep their glyph and swap to a chevron
+              on hover, when the toggle affordance matters. */}
+          {collapsed ? (
+            <ChevronRight className="mr-1.5 !size-3" />
           ) : (
-            <Folder className="mr-1.5 !size-3" />
+            <>
+              {isDefault ? (
+                <MessageSquare className="mr-1.5 !size-3 group-hover/project-row:hidden" />
+              ) : (
+                <Folder className="mr-1.5 !size-3 group-hover/project-row:hidden" />
+              )}
+              <ChevronDown className="mr-1.5 hidden !size-3 group-hover/project-row:block" />
+            </>
           )}
           <span className="truncate">{label}</span>
         </SidebarGroupLabel>
@@ -601,28 +654,30 @@ function WorkspaceGroupView({
           </DropdownMenu>
         </div>
       </div>
-      <SidebarMenu>
-        {group.items.length === 0 ? (
-          <SidebarMenuItem>
-            <div className="px-2 py-1.5 text-xs text-muted-foreground">
-              {t("chats.empty.group")}
-            </div>
-          </SidebarMenuItem>
-        ) : (
-          group.items.map((c) => (
-            <ConversationRow
-              key={c.id}
-              conversation={c}
-              active={c.id === activeId}
-              streaming={streamingIds.has(c.id)}
-              unreadCompleted={unreadCompletedIds.has(c.id)}
-              onSelect={onSelect}
-              onArchive={onArchive}
-              archiveShortcut={archiveShortcut}
-            />
-          ))
-        )}
-      </SidebarMenu>
+      {!collapsed && (
+        <SidebarMenu>
+          {group.items.length === 0 ? (
+            <SidebarMenuItem>
+              <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                {t("chats.empty.group")}
+              </div>
+            </SidebarMenuItem>
+          ) : (
+            group.items.map((c) => (
+              <ConversationRow
+                key={c.id}
+                conversation={c}
+                active={c.id === activeId}
+                streaming={streamingIds.has(c.id)}
+                unreadCompleted={unreadCompletedIds.has(c.id)}
+                onSelect={onSelect}
+                onArchive={onArchive}
+                archiveShortcut={archiveShortcut}
+              />
+            ))
+          )}
+        </SidebarMenu>
+      )}
     </>
   );
 }
@@ -731,6 +786,29 @@ function WorkspaceDragGhost({ label }: { label: string }) {
       <span className="truncate">{label}</span>
     </div>
   );
+}
+
+const SIDEBAR_COLLAPSED_KEY = "cetus.sidebar-collapsed-dirs";
+
+/** Workspace dirs whose sidebar group is folded, persisted across launches.
+ *  Dirs that no longer exist just sit inert in the set — harmless. */
+function loadCollapsedDirs(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(
+      Array.isArray(parsed) ? parsed.filter((d): d is string => typeof d === "string") : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function persistCollapsedDirs(dirs: Set<string>) {
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, JSON.stringify([...dirs]));
+  } catch {}
 }
 
 const SIDEBAR_WIDTH_KEY = "cetus.sidebar-width";

@@ -260,56 +260,20 @@ pub fn dispatch_turn(
         .ok_or_else(|| format!("not a CLI backend: {}", conv.backend))?;
     let state = handle.state::<AppState>();
 
-    // Steer: a prompt sent while a claude turn is mid-run is injected into
-    // that turn over stdin (a bidirectional stream-json user message — the
-    // same steering the interactive CLI does on mid-run input) instead of
-    // failing "already running". The runner keeps the turn open through the
-    // injection (see run_cli_turn's steer grace). codex has no live stdin —
-    // its steer below interrupts the turn and resumes the thread instead.
+    // A new prompt during a Claude turn uses the Agent SDK interrupt control
+    // request, then starts a fresh turn on the same persistent session. This
+    // preserves background Bash jobs while avoiding a race where a queued user
+    // message lands just after the prior result and loses its UI turn owner.
     if backend == cetus_bridge::cli_agent::CliBackend::ClaudeCode {
-        let blocks: Vec<(String, String)> = images
-            .iter()
-            .map(|img| (img.mime_type.clone(), img.data.clone()))
-            .collect();
-        let line = cetus_bridge::cli_agent::claude_user_message_line(message, &blocks);
-        match state.cli_steer(&conv.id, line) {
-            crate::CliSteer::Steered => {
-                let mut content = vec![serde_json::json!({ "type": "text", "text": message })];
-                for img in &images {
-                    content.push(serde_json::json!({
-                        "type": "image", "data": img.data, "mimeType": img.mime_type,
-                    }));
-                }
-                state
-                    .store
-                    .append_cli_message(
-                        &conv.id,
-                        &serde_json::json!({ "role": "user", "content": content }),
-                        None,
-                        now_ms(),
-                    )
-                    .ok();
-                return Ok(());
-            }
-            // The turn already closed (its stdin is dead) — the follow-up queue
-            // flushed on `agent_end` before the turn unregistered. Resume it as
-            // a fresh turn once it settles, so the prompt isn't lost to a dead
-            // pipe.
-            crate::CliSteer::Closing(done) => {
-                redispatch_after_settle(handle, conv.id.clone(), message.to_string(), images, done);
-                return Ok(());
-            }
-            // No running turn: fall through to a normal dispatch.
-            crate::CliSteer::Idle => {}
+        if let Some(done) = state.cli_interrupt_turn(&conv.id) {
+            redispatch_after_settle(handle, conv.id.clone(), message.to_string(), images, done);
+            return Ok(());
         }
     }
 
-    // Steer, codex flavor: `codex exec` is one-shot (no live stdin to inject
-    // into), so a prompt sent mid-run interrupts the turn — the same move as
-    // Esc + a new message in the codex TUI. The kill makes the runner close
-    // the turn with whatever streamed (persisted as partial messages, kept on
-    // screen); once it settles we redispatch this prompt as a fresh turn that
-    // resumes the same thread, so the model sees its interrupted work.
+    // Codex app-server exposes turn/interrupt. A prompt sent mid-run interrupts
+    // only that turn, then redispatches on the same thread; app-server-owned
+    // background terminals remain alive.
     if backend == cetus_bridge::cli_agent::CliBackend::Codex {
         if let Some(done) = state.cli_interrupt_turn(&conv.id) {
             redispatch_after_settle(handle, conv.id.clone(), message.to_string(), images, done);
@@ -362,7 +326,7 @@ pub fn dispatch_turn(
     // stdin channel control responses ride in on. Registered before the user
     // message persists so a rejected double-send doesn't strand a transcript
     // row that never ran.
-    let (kill, input_rx, steer_pending, closing) = state.begin_cli_turn(&conv.id)?;
+    let (kill, input_rx, _steer_pending, closing) = state.begin_cli_turn(&conv.id)?;
     // Wrap the event sink so it flips `closing` true the instant this turn's
     // `agent_end` passes through — BEFORE that event reaches the frontend, so a
     // follow-up flushed on `agent_end` (see cli_steer) never races ahead of the
@@ -445,8 +409,8 @@ pub fn dispatch_turn(
         // codex thread_id) so a conversation keeps context across turns.
         resume: (!resume_before.is_empty()).then(|| resume_before.clone()),
         bypass_approvals: settings.bypass_approvals,
-        images: image_paths,
-        image_blocks,
+        images: image_paths.clone(),
+        image_blocks: image_blocks.clone(),
         // claude: the Cetus hint goes on the system prompt every turn (codex
         // got it as a first-turn preamble above).
         append_system_prompt: (!is_codex).then(|| crate::control::AGENT_HINT.to_string()),
@@ -455,60 +419,141 @@ pub fn dispatch_turn(
     let store = state.store.clone();
     let task_handle = handle.clone();
     let conv_id = conv.id.clone();
-    // Fire-and-stream: return promptly; events arrive over the sink like pi.
-    tokio::spawn(async move {
-        let outcome = cetus_bridge::cli_agent::run_cli_turn(
-            sink,
-            backend,
-            &bin,
-            &cwd,
-            &prompt,
-            Some(conv_id.clone()),
-            env,
-            opts,
-            Some(kill),
-            Some(input_rx),
-            Some(steer_pending),
-        )
-        .await;
-        match outcome {
-            Ok(o) => {
-                // Persist the turn's assistant/toolResult messages and the
-                // next-turn resume token.
-                let ts = now_ms();
-                for m in &o.messages {
-                    store.append_cli_message(&conv_id, m, None, ts).ok();
-                }
-                if o.resume_rejected {
-                    // The stored token points at a session that isn't on disk
-                    // (its turn was killed before the CLI saved it) — reset it
-                    // so the next send starts fresh instead of failing forever.
-                    store.set_session_file(&conv_id, "").ok();
-                } else if o.streamed {
-                    // Only a turn that streamed content has certainly been
-                    // written to the CLI's session store; persisting the id of
-                    // one stopped earlier (Stop during boot) would poison
-                    // every later turn with an unresumable session.
-                    if let Some(resume) = &o.resume_id {
-                        store.set_session_file(&conv_id, resume).ok();
+
+    if backend == cetus_bridge::cli_agent::CliBackend::ClaudeCode {
+        let session = match state.claude_session(&conv.id) {
+            Some(session) => session,
+            None => {
+                let base_sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
+                    std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(handle.clone()));
+                let session = match cetus_bridge::cli_agent::spawn_claude_session(
+                    base_sink,
+                    &bin,
+                    &cwd,
+                    Some(conv.id.clone()),
+                    env,
+                    opts,
+                ) {
+                    Ok(session) => session,
+                    Err(error) => {
+                        state.end_cli_turn(&conv.id);
+                        return Err(error.to_string());
+                    }
+                };
+                state.set_claude_session(conv.id.clone(), session.clone());
+                session
+            }
+        };
+        let line = cetus_bridge::cli_agent::claude_user_message_line(&prompt, &image_blocks);
+        let outcome_rx = match session.start_turn(line, sink) {
+            Ok(receiver) => receiver,
+            Err(error) => {
+                state.kill_claude_session(&conv.id);
+                state.end_cli_turn(&conv.id);
+                return Err(error.to_string());
+            }
+        };
+        tokio::spawn(async move {
+            let mut outcome_rx = outcome_rx;
+            let mut input_rx = input_rx;
+            let outcome = loop {
+                tokio::select! {
+                    result = &mut outcome_rx => break result.ok(),
+                    line = input_rx.recv() => match line {
+                        Some(line) => { let _ = session.input(line); }
+                        None => break None,
+                    },
+                    _ = kill.notified() => {
+                        // SDK interrupt stops only the active turn; the
+                        // conversation session and background Bash jobs live on.
+                        session.abort();
                     }
                 }
+            };
+            if let Some(o) = outcome {
+                persist_cli_outcome(&store, &conv_id, &o);
             }
-            Err(e) => {
-                tracing::error!("cli backend {} turn failed: {e:#}", backend.as_str());
+            let st = task_handle.state::<AppState>();
+            st.end_cli_turn(&conv_id);
+        });
+        return Ok(());
+    }
+
+    if backend == cetus_bridge::cli_agent::CliBackend::Codex {
+        let session = match state.codex_session(&conv.id) {
+            Some(session) => session,
+            None => {
+                let base_sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
+                    std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(handle.clone()));
+                let session = match cetus_bridge::cli_agent::spawn_codex_session(
+                    base_sink,
+                    &bin,
+                    &cwd,
+                    Some(conv.id.clone()),
+                    env,
+                    opts,
+                ) {
+                    Ok(session) => session,
+                    Err(error) => {
+                        state.end_cli_turn(&conv.id);
+                        return Err(error.to_string());
+                    }
+                };
+                state.set_codex_session(conv.id.clone(), session.clone());
+                session
             }
+        };
+        let outcome_rx = match session.start_turn(prompt, image_paths, sink) {
+            Ok(receiver) => receiver,
+            Err(error) => {
+                state.kill_codex_session(&conv.id);
+                state.end_cli_turn(&conv.id);
+                return Err(error.to_string());
+            }
+        };
+        tokio::spawn(async move {
+            let mut outcome_rx = outcome_rx;
+            let outcome = loop {
+                tokio::select! {
+                    result = &mut outcome_rx => break result.ok(),
+                    _ = kill.notified() => session.abort_turn(),
+                }
+            };
+            if let Some(o) = outcome {
+                persist_cli_outcome(&store, &conv_id, &o);
+            }
+            let st = task_handle.state::<AppState>();
+            st.end_cli_turn(&conv_id);
+        });
+        return Ok(());
+    }
+
+    unreachable!("all CLI backends dispatch through a persistent session")
+}
+
+fn persist_cli_outcome(
+    store: &Store,
+    conv_id: &str,
+    outcome: &cetus_bridge::cli_agent::CliTurnOutcome,
+) {
+    let ts = now_ms();
+    for message in &outcome.messages {
+        store.append_cli_message(conv_id, message, None, ts).ok();
+    }
+    if outcome.resume_rejected {
+        store.set_session_file(conv_id, "").ok();
+    } else if outcome.streamed {
+        if let Some(resume) = &outcome.resume_id {
+            store.set_session_file(conv_id, resume).ok();
         }
-        let st = task_handle.state::<AppState>();
-        st.end_cli_turn(&conv_id);
-    });
-    Ok(())
+    }
 }
 
 /// Event sink that trips `closing` the instant a turn's `agent_end` flows
 /// through, then forwards the event unchanged. Because the flag is set before
 /// `inner.emit`, the frontend can only observe `agent_end` after the flag is
 /// visible — so a follow-up the frontend flushes on that event reads the turn
-/// as `Closing` (dead stdin) rather than steering into it.
+/// as `Closing` rather than attaching it to the turn that just ended.
 struct ClosingSink {
     inner: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink>,
     closing: std::sync::Arc<std::sync::atomic::AtomicBool>,

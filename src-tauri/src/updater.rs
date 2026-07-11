@@ -142,6 +142,20 @@ async fn check_once(app: AppHandle, auto: bool) {
         }
     };
 
+    // The updater still reports this version as available until the process
+    // relaunches into the swapped bundle. If it is already on disk, the
+    // persistent sidebar affordance is the only prompt we need; re-downloading
+    // it or emitting another passive toast would duplicate that state.
+    let ready = app
+        .state::<AppState>()
+        .store
+        .get_setting(READY_KEY)
+        .ok()
+        .flatten();
+    if ready.as_deref() == Some(update.version.as_str()) {
+        return;
+    }
+
     if auto {
         let v = update.version.clone();
         tracing::info!("cetus: update {v} available — installing in background");

@@ -109,6 +109,8 @@ export interface MeetingSettings {
   autoDetect: boolean;
   systemAudio: boolean;
   summarize: boolean;
+  /** auto = SeedASR when configured, otherwise Apple on-device. */
+  asrEngine: "auto" | "local";
   retentionDays: number;
   /** Global accelerator that starts/stops a manual session ("" = none). */
   toggleHotkey: string;
@@ -120,6 +122,8 @@ export interface MeetingStatus {
   auto: boolean;
   appHint: string | null;
   segments: number;
+  engine: "cloud" | "local" | "idle";
+  meetingId: string | null;
 }
 
 export interface Meeting {

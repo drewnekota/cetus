@@ -1,65 +1,95 @@
 <p align="center"><img src="docs/logo.png" width="120" alt="Cetus logo" /></p>
 
-# Cetus
+<h1 align="center">Cetus</h1>
 
-**English** · [简体中文](./README.zh-CN.md)
+<p align="center"><strong>The open-source macOS control plane for Codex, Claude Code, and persistent AI agents.</strong></p>
 
-A desktop agent for macOS, built on DeepSeek V4.1. It watches your screen, remembers what matters, and can act on your behalf — cheap enough to keep running all day.
+<p align="center">Run agents with optional worktree isolation, schedule background jobs, and review results on a single Kanban board — with the context and memory to keep work moving across sessions.</p>
 
----
+<p align="center">
+  <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="Download for macOS" src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-111111?style=for-the-badge&logo=apple" /></a>
+</p>
 
-## What's in the app
+<p align="center">
+  <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/drewnekota/cetus" /></a>
+  <a href="https://github.com/drewnekota/cetus/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/drewnekota/cetus" /></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/drewnekota/cetus" /></a>
+</p>
 
-| | Cetus today |
-| --- | --- |
-| **Context** | Rewind-style screen capture with on-device Apple Vision OCR (off by default) · **meeting memory** — on-device call transcription into searchable notes · a **contextful launcher** that attaches your screenshot, active app, browser URL, and selection · third-party data through pi connectors |
-| **Intelligence** | DeepSeek **V4.1 Flash** ⚡ / **V4.1 Pro** ✨ · the pi harness · **pluggable runtimes** — run any conversation on **Claude Code** or **Codex** instead of the built-in engine · **Ultra Code** mode (the agent authors a workflow and orchestrates sub-agents) · **parallel solutions** (best-of-N fan-out with side-by-side review) |
-| **Abilities** | pi tools & skills · 30+ providers and any OpenAI-compatible endpoint · scheduled **automations** that start background conversations · on-device **voice dictation** · a global double-⌘ **launcher** |
-| **Memory** | Durable notes you and the agent both edit (identity, preferences, projects), injected each turn · **Dreaming**: offline consolidation while idle (on by default) |
+<p align="center"><strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a></p>
 
-## A tour of Cetus
+![Cetus runtime picker — run Cetus, Claude Code, or Codex in the same desktop app](docs/screenshot-runtime-picker.png)
 
-### Chat
+## Why developers use Cetus
 
-A single composer: pick a **workspace** (working directory), a **preset** (Daily ⚡ / High / Max / UltraCode ✨), optionally attach files or a screenshot, and send. Replies stream live with collapsible **thinking** blocks and **tool-use** cards showing args, results, and any errors.
+- **One home for your agents.** Switch any conversation between Cetus's built-in runtime, Claude Code, and Codex without losing the desktop workflow around it.
+- **Safe, parallel coding sessions.** Enable per-conversation git worktrees when you want agents to edit in isolation instead of touching the current checkout.
+- **Background work you can review.** Schedule a task, leave it running, and find the result waiting in **Needs review** instead of buried in a terminal session.
+- **Context that survives the chat.** Workspaces, durable notes, meeting memory, and optional on-device screen context help the next run pick up where the last one stopped.
+- **Local control.** Cetus is a native macOS app. Screen OCR, meeting transcription, and voice dictation run on-device; sensitive capabilities are opt-in.
+
+## Get started
+
+The prebuilt app supports **Apple Silicon** and **macOS 13 or later**.
+
+1. [Download the latest release](https://github.com/drewnekota/cetus/releases/latest).
+2. Open the DMG and move Cetus to Applications.
+3. Use the built-in Cetus runtime, or select an already installed and signed-in `claude` or `codex` CLI.
+4. Choose a workspace and give the agent its first task.
+
+Claude Code and Codex reuse their existing CLI login — there is no second account to configure. Building from source is documented under [Development](#development).
+
+> **Early release:** Cetus is under active development. Please [open an issue](https://github.com/drewnekota/cetus/issues) if something breaks or if a workflow is missing.
+
+## Put agents to work
+
+### Run Codex and Claude Code side by side
+
+Pick a **workspace**, choose a runtime, optionally attach files or a screenshot, and send. Replies stream live with collapsible thinking blocks and tool-use cards. For parallel coding tasks, enable worktree isolation so each CLI conversation edits a separate checkout.
 
 ![Cetus chat — What should we work on?](docs/screenshot-chat.png)
 
-### Agent runtimes
+### Pick the right runtime for each job
 
-Every conversation picks its engine. **Cetus** (the bundled pi harness) is the default; flip the composer's runtime picker to **Claude Code** or **Codex** and the same conversation runs on the vendor CLI instead — with per-conversation **model** (Fable / Opus / Sonnet / Haiku · GPT-5.5 family) and **reasoning-effort** overrides next to it.
+**Cetus** uses the bundled pi harness. Switch a conversation to **Claude Code** or **Codex** to run it on the corresponding vendor CLI, with per-conversation model and reasoning-effort overrides.
 
-![Cetus runtime picker — Cetus, Claude Code, or Codex per conversation](docs/screenshot-runtime-picker.png)
+The CLI runtimes reuse whatever `claude` / `codex` you already have installed and logged in on your `PATH` — no separate sign-in. Cetus keeps a conversation-scoped runtime alive (`claude -p` in streaming-input mode / `codex app-server`), translates its structured event stream into the same chat UI (text, thinking, tool cards), and preserves background terminals such as local dev servers across replies. Context and process cleanup follow the conversation lifecycle, and edits can be isolated in a per-conversation **git worktree**. Automations can fire on any runtime, so a scheduled job can run on Claude Code while your chats stay on Cetus.
 
-The CLI runtimes reuse whatever `claude` / `codex` you already have installed and logged in on your `PATH` — no separate sign-in. Cetus runs one headless turn per message (`claude -p --output-format stream-json` / `codex exec --json`), translates the structured event stream into the same chat UI (text, thinking, tool cards), resumes context across turns via each CLI's session token, and isolates edits in a per-conversation **git worktree**. Automations can fire on any runtime, so a scheduled job can run on Claude Code while your chats stay on Cetus.
-
-### Kanban
+### Send work to the background
 
 Every conversation is a card tracked across **In progress · Needs review · Done**, filtered by workspace or across all of them. Background runs (automations, parallel solutions) surface here, so work that spans multiple sessions doesn't get buried in a chat list.
 
 ![Cetus Kanban board](docs/screenshot-kanban.png)
 
-### Automations
+### Schedule recurring agents
 
 Saved prompts that fire on a schedule (`at` / `every` / `cron` / `daily`). Each run starts a fresh background conversation — e.g. a weekday-09:00 news digest that searches the last 24 hours and renders an HTML summary while you're away.
 
 ![Cetus Automations](docs/screenshot-automations.png)
 
-### Quick launcher
+### Bring the current screen with you
 
 A global **double-⌘** panel: ask Cetus anything without leaving the app you're in. It reads what's in front of you and attaches it as removable context chips: a screenshot of your screen, the active app, the current browser URL, and any selected text. Keep what's useful, drop the rest, then start a new run or continue the last one.
 
 ![Cetus quick launcher](docs/screenshot-launcher.png)
 
-### Voice input
+## More than a coding-agent shell
+
+- **Persistent memory** you and the agent both edit, injected into future turns
+- **Parallel solutions**: fan one prompt into N candidate runs, then keep one and archive the rest
+- **Ultra Code** mode: author a workflow and orchestrate sub-agents for a single request
+- **Voice dictation** (on-device, macOS) — in-app and as a global push-to-talk
+- **Meeting memory** (on-device, macOS) — auto-detect, system-audio capture, DeepSeek-distilled minutes the agent can search
+- **Computer and browser control** through structured accessibility elements, with confirmation before consequential actions
+- **30+ model providers under the hood**, including Anthropic, OpenAI, Google, Bedrock, Ollama, LM Studio, OpenRouter, and OpenAI-compatible endpoints
+
+### Dictate from any app
 
 Hold a hotkey from any app and talk — Cetus pops a floating equalizer HUD, transcribes on-device with Seed-ASR, and drops the cleaned-up text wherever your cursor is. The same stack as the in-app mic, but it follows you across the desktop.
 
-![Cetus voice HUD — the floating equalizer that listens while you talk](docs/voice-hud.jpeg)
+![Cetus voice dictation HUD](docs/voice-hud.jpeg)
 
-> 📸 Yes, that's a phone photo of a screen. The HUD is a borderless always-on-top overlay that dodged every screenshot tool I threw at it, so I pointed my camera at the monitor instead. 😄
-
-### Meeting memory
+### Turn meetings into searchable context
 
 Turn on **meeting memory** and Cetus quietly transcribes your calls into searchable notes — on-device, text only, no audio stored.
 
@@ -73,45 +103,30 @@ Those notes become context the agent can reach: ask "what did we decide about th
 
 ![Cetus meeting memory — Settings → Meetings](docs/screenshot-meetings.png)
 
-### Screen context
+### Remember what was on your screen
 
 With screen context on, Cetus periodically captures frames, dedupes them with a perceptual hash, and OCRs on-device with Apple Vision so the agent can recall what you were working on — and you can search by OCR text or app. Images and text stay on your Mac; nothing is uploaded. Off by default; controls include capture interval, retention period, and an excluded-apps list that pauses capture when sensitive apps (1Password, Messages…) are frontmost.
 
 ![Cetus screen context settings](docs/screenshot-screen-history.png)
 
-### Settings
+### Stay in control
 
 Each capability is opt-in. **Computer & Browser control** lets the agent drive your browser and Mac apps through numbered element lists (not raw pixels), with a confirmation step before anything consequential (sending, deleting, purchasing, submitting, authenticating) and a Stop button always in reach.
 
 ![Cetus settings — Computer & Browser control](docs/screenshot-settings.png)
 
-## Also in the box
-
-- **Persistent memory** you and the agent both edit, injected each turn (identity, preferences, projects)
-- **Pluggable runtimes**: run any conversation (or automation) on **Claude Code** or **Codex** — headless turns of your locally installed CLIs, streamed into the native chat UI, isolated in per-conversation git worktrees
-- **Parallel solutions**: fan one prompt into N candidate runs, then keep one and archive the rest
-- **Ultra Code** mode: the agent spawns its own sub-agents for a single request
-- **Voice dictation** (on-device, macOS) — in-app and as a global push-to-talk
-- **Meeting memory** (on-device, macOS) — auto-detect, system-audio capture, DeepSeek-distilled minutes the agent can search
-- New / switch / rename / archive / delete conversations (SQLite-backed metadata)
-- Abort in-flight runs · one pi RPC subprocess shared across conversations via `switch_session`
-- pi binary bundled as a Tauri sidecar — no PATH dependency for end users
-- **Any model under the hood**: pi supports 30+ providers (Anthropic, OpenAI, Google, Bedrock, Ollama, LM Studio, OpenRouter, …) and any OpenAI-compatible endpoint; the current UI is DeepSeek-only, swap models with one line in `model-picker.tsx`
-
 ## Why Cetus
 
-Most AI assistants treat every conversation as a blank slate. They can reason well, but they don't know what you're working on, and they can't do much beyond chat.
+Terminal agents are excellent at individual tasks, but long-running work is easy to lose across sessions, repositories, and background processes. Cetus turns each run into a visible work item with a workspace, state, history, and review step.
 
-A useful agent needs three things: **context** (what it knows about your situation), **intelligence** (how well it reasons), and **abilities** (what it can actually do). For a while, intelligence was the hard part. It's not anymore — modern models are good, and DeepSeek V4.1 made them cheap. That changes what's worth building.
+A useful agent needs **context** about your situation, **intelligence** from the right model, and **abilities** to act. Cetus keeps those pieces independent: choose the runtime for each task, add only the context you want, and make the resulting work inspectable.
 
-When tokens cost an order of magnitude less, things that didn't make sense before become practical:
+That makes workflows practical that do not fit neatly into a terminal tab:
 
-- Running continuous screen capture and OCR for recall
-- Spinning up N parallel attempts on the same task and keeping the best
-- Scheduling agents that work while you're away
-- Letting one agent orchestrate sub-agents for a single request
-
-Cetus spends those savings on the parts most agents skimp on: giving the agent richer context about your situation and more ways to actually do things.
+- Run an agent while you are away and review the result later.
+- Compare independent solutions without colliding git changes.
+- Carry project decisions and preferences into the next conversation.
+- Connect coding work to the meetings, screens, and apps surrounding it.
 
 ### Memory and Dreaming
 
@@ -122,7 +137,9 @@ The three factors describe a single moment. What makes an agent useful over time
 - **Memory** is context the agent writes back to itself — so the next session picks up where the last one left off instead of starting from scratch.
 - **Dreaming** runs while you're idle: Cetus reflects on recent conversations and consolidates them into durable notes, turning raw history into preferences that persist. On by default.
 
-## Requirements
+## Development
+
+### Requirements
 
 - **Node** ≥ 20, **pnpm**, **bun** (for building the pi sidecar binary)
 - **Rust** stable (`rustc`, `cargo`)
@@ -130,7 +147,7 @@ The three factors describe a single moment. What makes an agent useful over time
 - A **`DEEPSEEK_API_KEY`** (or your provider of choice; pi auto-picks up `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)
 - **Optional**: the **Claude Code** (`claude`) and/or **Codex** (`codex`) CLIs installed and logged in, if you want them as conversation runtimes — Cetus reuses their existing login, no extra setup
 
-## First-time setup
+### First-time setup
 
 ```bash
 pnpm install
@@ -139,7 +156,7 @@ pnpm install
 ./scripts/build-pi-sidecar.sh
 ```
 
-## Run in dev
+### Run in dev
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
@@ -148,7 +165,7 @@ pnpm tauri dev
 
 Tauri launches the Next.js dev server (port 3000) and a window pointing at it. The pi sidecar is spawned automatically from the bundled binary.
 
-### Dev backdoor: `PI_BIN`
+#### Dev backdoor: `PI_BIN`
 
 If you're iterating on pi itself, point at any pi build to bypass the sidecar:
 
@@ -159,7 +176,7 @@ pnpm tauri dev
 
 This skips `tauri-plugin-shell` entirely and uses raw `tokio::process::Command`.
 
-## Build
+### Build
 
 ```bash
 ./scripts/build-pi-sidecar.sh   # if you haven't already
@@ -198,7 +215,7 @@ Outputs `.app` / `.dmg` on macOS. A real multi-size icon set is required for `ta
 - **Streaming**: pi emits `agent_start`, `message_update` with `assistantMessageEvent` deltas, and `tool_execution_*` events. The frontend `chatReducer` folds these into stable `RenderedMessage[]` indexed by `contentIndex`, with a `toolCallId → block` side-table to route execution updates.
 - **Framing**: strict-LF JSONL. `tauri-plugin-shell` delivers stdout in arbitrary byte chunks, so the reader maintains its own accumulator and emits one line per `\n`, stripping optional `\r`. Generic line readers that split on Unicode separators (Node `readline`) are non-compliant.
 - **Sidecar packaging**: `src-tauri/binaries/pi-<target>` ships inside `.app/Contents/Resources/`. `PI_BIN` env var is the dev backdoor for iterating on pi.
-- **CLI runtimes**: conversations on **Claude Code** / **Codex** bypass the pi RPC entirely — `cetus-bridge::cli_agent` spawns one headless CLI process per turn (`claude -p --output-format stream-json` / `codex exec --json`), and a unit-tested `EventTranslator` maps their JSONL into the same PiEvent stream `chatReducer` already consumes. Context persists across turns via each CLI's resume token (claude `session_id` / codex `thread_id`); turns run inside a per-conversation git worktree.
+- **CLI runtimes**: conversations on **Claude Code** / **Codex** bypass the pi RPC entirely — `cetus-bridge::cli_agent` keeps a conversation-scoped Claude streaming session or Codex app-server thread alive, and a unit-tested `EventTranslator` maps their events into the same PiEvent stream `chatReducer` already consumes. Context and background terminals persist across turns via the vendor session/thread; optional per-conversation git worktrees isolate edits.
 - **Extension UI**: when a pi extension calls `ctx.ui.select()` etc., pi sends `extension_ui_request` over the event stream. The frontend `DialogHost` renders a dialog and replies via the `extension_ui_respond` Tauri command.
 - **Bridge**: Cetus also intercepts known extension host tunnels and routes them to native handlers. See [docs/bridge.md](docs/bridge.md) for the protocol, security boundary, and open-source extraction plan.
 

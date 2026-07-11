@@ -292,7 +292,7 @@
 
 /* Hallmark · component: composer running state · genre: modern-minimal
  * Motion is the status cue: one restrained highlight circles the frame while
- * the agent is working, then the normal runtime border returns when it stops. */
+ * the agent is working, layered over the normal runtime border. */
 @property --composer-border-angle {
   syntax: "<angle>";
   inherits: false;
@@ -307,19 +307,29 @@
 
 [data-chat-composer][data-streaming="true"] {
   --composer-runner: var(--primary);
-  border-width: 2px;
-  border-color: transparent;
-  background:
-    linear-gradient(var(--card), var(--card)) padding-box,
-    conic-gradient(
-        from var(--composer-border-angle),
-        transparent 0% 62%,
-        color-mix(in oklab, var(--composer-runner) 22%, transparent) 74%,
-        var(--composer-runner) 88%,
-        color-mix(in oklab, var(--composer-runner) 28%, transparent) 95%,
-        transparent 100%
-      )
-      border-box;
+}
+
+[data-chat-composer][data-streaming="true"]::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  z-index: 20;
+  pointer-events: none;
+  padding: 2px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--composer-border-angle),
+    transparent 0% 62%,
+    color-mix(in oklab, var(--composer-runner) 22%, transparent) 74%,
+    var(--composer-runner) 88%,
+    color-mix(in oklab, var(--composer-runner) 28%, transparent) 95%,
+    transparent 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
   animation: composer-border-spin 4s linear infinite;
 }
 
@@ -332,9 +342,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-chat-composer][data-streaming="true"] {
-    border-color: color-mix(in oklab, var(--composer-runner) 60%, transparent);
-    background: var(--card);
+  [data-chat-composer][data-streaming="true"]::after {
     animation: none;
   }
 }

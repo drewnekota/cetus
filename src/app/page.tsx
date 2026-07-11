@@ -2068,11 +2068,13 @@ export default function Home() {
   // Passive "update available" toast: fired only when auto-update is off and a
   // background check finds a (not-yet-dismissed) newer version. Install applies
   // on next launch; Ignore remembers this version so it won't re-prompt.
+  const updateToastId = (version: string) => `update-available-${version}`;
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     onUpdateAvailable((u) => {
       toast(tt("settings", "update.toast.title", { version: u.version }), {
+        id: updateToastId(u.version),
         description: tt("settings", "update.toast.body"),
         duration: Infinity,
         action: {
@@ -2134,10 +2136,16 @@ export default function Home() {
     api
       .pendingUpdateVersion()
       .then((version) => {
-        if (!cancelled && version) setUpdateReadyVersion(version);
+        if (!cancelled && version) {
+          toast.dismiss(updateToastId(version));
+          setUpdateReadyVersion(version);
+        }
       })
       .catch(() => {});
-    onUpdateReady((u) => setUpdateReadyVersion(u.version)).then((u) => {
+    onUpdateReady((u) => {
+      toast.dismiss(updateToastId(u.version));
+      setUpdateReadyVersion(u.version);
+    }).then((u) => {
       if (cancelled) u();
       else unlisten = u;
     });

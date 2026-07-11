@@ -1,5 +1,7 @@
 # Cetus E2E Test Plan
 
+会议听写的真实音频专项流程见 [meeting-e2e.md](meeting-e2e.md)。
+
 End-to-end test plan for the Cetus desktop agent (Tauri + Next.js + pi sidecar).
 
 > **Scope note:** README mentions _Parallel solutions_ (并行候选). That path has been

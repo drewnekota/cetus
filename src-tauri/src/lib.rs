@@ -115,6 +115,15 @@ pub struct AppState {
     /// the sender feeds the child's stdin (control responses answering
     /// permission prompts / AskUserQuestion).
     cli_turns: std::sync::Mutex<HashMap<String, CliTurnHandle>>,
+    /// Conversation-scoped Claude Code processes. Unlike `cli_turns` (which is
+    /// only the currently streaming UI turn), these remain alive while idle so
+    /// Claude's background Bash jobs can survive across replies.
+    claude_sessions:
+        std::sync::Mutex<HashMap<String, cetus_bridge::cli_agent::ClaudeSessionHandle>>,
+    /// Conversation-scoped Codex app-server threads. Background terminals are
+    /// owned here and therefore survive `turn/completed`.
+    codex_sessions:
+        std::sync::Mutex<HashMap<String, cetus_bridge::cli_agent::CodexSessionHandle>>,
 }
 
 /// Handles onto one running CLI-backend turn.
@@ -153,6 +162,74 @@ pub enum CliSteer {
 }
 
 impl AppState {
+    pub fn claude_session(
+        &self,
+        conv_id: &str,
+    ) -> Option<cetus_bridge::cli_agent::ClaudeSessionHandle> {
+        let mut sessions = self.claude_sessions.lock().unwrap();
+        if sessions.get(conv_id).is_some_and(|s| !s.is_alive()) {
+            sessions.remove(conv_id);
+        }
+        sessions.get(conv_id).cloned()
+    }
+
+    pub fn set_claude_session(
+        &self,
+        conv_id: String,
+        session: cetus_bridge::cli_agent::ClaudeSessionHandle,
+    ) {
+        if let Some(old) = self
+            .claude_sessions
+            .lock()
+            .unwrap()
+            .insert(conv_id, session)
+        {
+            old.shutdown();
+        }
+    }
+
+    pub fn kill_claude_session(&self, conv_id: &str) {
+        if let Some(session) = self.claude_sessions.lock().unwrap().remove(conv_id) {
+            session.shutdown();
+        }
+    }
+
+    pub fn codex_session(
+        &self,
+        conv_id: &str,
+    ) -> Option<cetus_bridge::cli_agent::CodexSessionHandle> {
+        let mut sessions = self.codex_sessions.lock().unwrap();
+        if sessions.get(conv_id).is_some_and(|s| !s.is_alive()) {
+            sessions.remove(conv_id);
+        }
+        sessions.get(conv_id).cloned()
+    }
+
+    pub fn set_codex_session(
+        &self,
+        conv_id: String,
+        session: cetus_bridge::cli_agent::CodexSessionHandle,
+    ) {
+        if let Some(old) = self.codex_sessions.lock().unwrap().insert(conv_id, session) {
+            old.shutdown();
+        }
+    }
+
+    pub fn kill_codex_session(&self, conv_id: &str) {
+        if let Some(session) = self.codex_sessions.lock().unwrap().remove(conv_id) {
+            session.shutdown();
+        }
+    }
+
+    pub fn kill_all_cli_sessions(&self) {
+        for (_, session) in self.claude_sessions.lock().unwrap().drain() {
+            session.shutdown();
+        }
+        for (_, session) in self.codex_sessions.lock().unwrap().drain() {
+            session.shutdown();
+        }
+    }
+
     /// Register a CLI-backend turn for `conv_id`, returning its kill switch,
     /// the stdin-lines receiver, and the pending-steer counter for the runner.
     /// Errors when a turn is already running — one turn per conversation.
@@ -841,6 +918,8 @@ pub fn run() {
                 run_semaphore,
                 cua: cua.clone(),
                 cli_turns: std::sync::Mutex::new(HashMap::new()),
+                claude_sessions: std::sync::Mutex::new(HashMap::new()),
+                codex_sessions: std::sync::Mutex::new(HashMap::new()),
             });
 
             // Meeting memory: the single in-flight capture session, shared by
@@ -1586,6 +1665,10 @@ pub fn run() {
                 window_geom::flush(&_app.state::<AppState>().store);
                 // Hand Caps Lock back to the OS if we'd remapped it for dictation.
                 caps_remap::restore();
+                // A dev hot-reload or app quit must never orphan a meeting
+                // helper with the microphone/system-audio tap still active.
+                meeting::shutdown_capture();
+                _app.state::<AppState>().kill_all_cli_sessions();
             }
             // cetus is resident: closing the window only hides it. A macOS dock
             // click (Reopen) with nothing visible should bring the main window

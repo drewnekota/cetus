@@ -14,7 +14,7 @@
 //          cetus's own helpers are filtered out by bundle-id prefix so a running
 //          meeting recorder never counts as "someone is on a call".
 //          Exits on stdin EOF.
-//   cetus-meeting-helper record [--no-system] [localeIdentifier]
+//   cetus-meeting-helper record [--no-system] [--cloud] [localeIdentifier]
 //       -> captures the microphone (AVAudioEngine) and — on macOS 14.2+ — the
 //          system audio output (CoreAudio process tap mixed down into a private
 //          aggregate device), runs one streaming SFSpeechRecognizer per stream,
@@ -27,8 +27,8 @@
 //          Stops + finalizes as soon as ANYTHING (a newline, or EOF) arrives on
 //          stdin — same convention as the speech helper.
 //
-// Only TEXT ever leaves this process. No audio is written to disk, ever —
-// that's the product stance (Granola-style): transcripts, not recordings.
+// `--cloud` emits ephemeral 16 kHz mono PCM chunks to the parent process for
+// real-time cloud ASR. Audio is never written to disk.
 //
 // Recognition is forced on-device when the locale supports it. Each stream's
 // recognition request is rotated on speech pauses (and on a hard interval) so
@@ -359,6 +359,65 @@ final class StreamTranscriber {
     }
 }
 
+/// Converts one capture stream to the 16 kHz mono s16le format expected by the
+/// cloud ASR socket. Chunks are buffered and emitted by the main-queue timer,
+/// keeping JSON/stdout work off CoreAudio's real-time callback.
+final class PCMStreamer {
+    let source: String
+    private let lock = NSLock()
+    private var buffered = Data()
+    private var converter: AVAudioConverter?
+    private var inputRate: Double = 0
+    private var inputChannels: AVAudioChannelCount = 0
+    private let output = AVAudioFormat(
+        commonFormat: .pcmFormatInt16,
+        sampleRate: 16000,
+        channels: 1,
+        interleaved: true)!
+
+    init(source: String) { self.source = source }
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
+        let format = buffer.format
+        if converter == nil || inputRate != format.sampleRate || inputChannels != format.channelCount {
+            converter = AVAudioConverter(from: format, to: output)
+            inputRate = format.sampleRate
+            inputChannels = format.channelCount
+        }
+        guard let converter else { return }
+        let ratio = output.sampleRate / format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
+        guard let converted = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: capacity) else { return }
+        var fed = false
+        converter.convert(to: converted, error: nil) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        guard converted.frameLength > 0, let channels = converted.int16ChannelData else { return }
+        let byteCount = Int(converted.frameLength) * MemoryLayout<Int16>.size
+        buffered.append(Data(bytes: channels[0], count: byteCount))
+    }
+
+    func flush() {
+        lock.lock()
+        let chunk = buffered
+        buffered = Data()
+        lock.unlock()
+        if !chunk.isEmpty {
+            emit(["pcm": ["source": source, "data": chunk.base64EncodedString()]])
+        }
+    }
+
+    func finish() {
+        flush()
+        emit(["pcm_end": source])
+    }
+}
+
 /// Deep-copy a HAL-owned buffer list into a standalone AVAudioPCMBuffer. The
 /// IOProc's memory is only valid during the callback, while the recognizer may
 /// hold onto appended buffers — so copying is mandatory, not paranoia.
@@ -397,7 +456,7 @@ func copyPCMBuffer(_ abl: UnsafePointer<AudioBufferList>, format: AVAudioFormat)
 /// `CATapDescription(stereoGlobalTapButExcludeProcesses:)` behind
 /// `#available` — leaves a non-weak Swift-overlay symbol in the binary and
 /// dyld ABORTS AT LAUNCH on macOS 14.0/14.1, killing even `permcheck`.
-func startSystemTap(sink: StreamTranscriber) -> (() -> Void)? {
+func startSystemTap(sink: @escaping (AVAudioPCMBuffer) -> Void) -> (() -> Void)? {
     typealias TapFn = @convention(c) (AnyObject, UnsafeMutablePointer<AudioObjectID>) -> OSStatus
     typealias DestroyFn = @convention(c) (AudioObjectID) -> OSStatus
     let dl = dlopen(nil, RTLD_NOW)
@@ -482,7 +541,7 @@ func startSystemTap(sink: StreamTranscriber) -> (() -> Void)? {
     status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
         _, inInputData, _, _, _ in
         if let buf = copyPCMBuffer(inInputData, format: format) {
-            sink.append(buf)
+            sink(buf)
         }
     }
     guard status == noErr, let proc = ioProcID else {
@@ -501,12 +560,20 @@ func startSystemTap(sink: StreamTranscriber) -> (() -> Void)? {
 
 // ---- record ------------------------------------------------------------------
 
-func runRecord(noSystem: Bool, localeId: String?) {
-    if SFSpeechRecognizer.authorizationStatus() == .notDetermined
-        || AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
-        requestAuthorizations()
+func runRecord(noSystem: Bool, cloud: Bool, localeId: String?) {
+    if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+        let group = DispatchGroup()
+        group.enter()
+        AVCaptureDevice.requestAccess(for: .audio) { _ in group.leave() }
+        group.wait()
     }
-    guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
+    if !cloud && SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+        let group = DispatchGroup()
+        group.enter()
+        SFSpeechRecognizer.requestAuthorization { _ in group.leave() }
+        group.wait()
+    }
+    if !cloud && SFSpeechRecognizer.authorizationStatus() != .authorized {
         emit(["error": "speech recognition not authorized"])
         exit(3)
     }
@@ -516,13 +583,16 @@ func runRecord(noSystem: Bool, localeId: String?) {
     }
 
     let locale = localeId.map { Locale(identifier: $0) } ?? Locale.current
-    guard let micT = StreamTranscriber(source: "mic", locale: locale) else {
+    let micT = cloud ? nil : StreamTranscriber(source: "mic", locale: locale)
+    let micPCM = cloud ? PCMStreamer(source: "mic") : nil
+    guard micT != nil || micPCM != nil else {
         emit(["error": "no speech recognizer for this locale"])
         exit(1)
     }
     // The system stream gets its own recognizer so the two sides of a call
     // can't garble each other's hypotheses.
-    let sysT = StreamTranscriber(source: "system", locale: locale)
+    let sysT = cloud ? nil : StreamTranscriber(source: "system", locale: locale)
+    let sysPCM = cloud ? PCMStreamer(source: "system") : nil
 
     // Microphone: same AVAudioEngine tap as dictation, but feeding a rotating
     // long-form recognizer instead of a one-shot request.
@@ -543,7 +613,7 @@ func runRecord(noSystem: Bool, localeId: String?) {
         emit(["warn": "aec_unavailable"])
     }
 
-    micT.start()
+    micT?.start()
 
     /// (Re)attach the mic tap and start the engine — also the recovery path
     /// when the input route changes mid-session.
@@ -551,7 +621,8 @@ func runRecord(noSystem: Bool, localeId: String?) {
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { return false }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-            micT.append(buffer)
+            micT?.append(buffer)
+            micPCM?.append(buffer)
         }
         engine.prepare()
         do {
@@ -585,7 +656,7 @@ func runRecord(noSystem: Bool, localeId: String?) {
     ) { _ in
         if finished { return }
         input.removeTap(onBus: 0)
-        micT.forceRotate()
+        micT?.forceRotate()
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(400)) {
             if finished { return }
             if !attachMic() {
@@ -597,24 +668,29 @@ func runRecord(noSystem: Bool, localeId: String?) {
     // System audio (what the user hears — the other meeting participants).
     // startSystemTap self-gates by probing for the 14.2+ tap API at runtime.
     var tapTeardown: (() -> Void)? = nil
-    if noSystem || sysT == nil {
+    if noSystem || (sysT == nil && sysPCM == nil) {
         if !noSystem { emit(["warn": "system_audio_unavailable"]) }
     } else {
 #if NO_TAP
         emit(["warn": "system_audio_unavailable"])
 #else
-        sysT!.start()
-        tapTeardown = startSystemTap(sink: sysT!)
+        sysT?.start()
+        tapTeardown = startSystemTap { buffer in
+            sysT?.append(buffer)
+            sysPCM?.append(buffer)
+        }
 #endif
     }
 
-    emit(["ready": true])
+    emit(["ready": true, "engine": cloud ? "cloud" : "local"])
 
     let ticker = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
     ticker.schedule(deadline: .now() + .milliseconds(500), repeating: .milliseconds(500))
     ticker.setEventHandler {
-        micT.tick()
+        micT?.tick()
         sysT?.tick()
+        micPCM?.flush()
+        sysPCM?.flush()
     }
     ticker.resume()
 
@@ -625,8 +701,10 @@ func runRecord(noSystem: Bool, localeId: String?) {
             input.removeTap(onBus: 0)
             engine.stop()
             tapTeardown?()
-            micT.finish()
+            micT?.finish()
             sysT?.finish()
+            micPCM?.finish()
+            sysPCM?.finish()
             emit(["done": true])
             exit(0)
         }
@@ -658,15 +736,18 @@ case "monitor":
 
 case "record":
     var noSystem = false
+    var cloud = false
     var localeId: String? = nil
     for a in args.dropFirst(2) {
         if a == "--no-system" {
             noSystem = true
+        } else if a == "--cloud" {
+            cloud = true
         } else {
             localeId = a
         }
     }
-    runRecord(noSystem: noSystem, localeId: localeId)
+    runRecord(noSystem: noSystem, cloud: cloud, localeId: localeId)
 
 default:
     eprint("unknown subcommand: \(args[1])")

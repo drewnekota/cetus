@@ -10,12 +10,21 @@ APP="${1:?usage: package-dmg.sh <app> <dmg>}"
 DMG="${2:?usage: package-dmg.sh <app> <dmg>}"
 VOLNAME="Cetus"
 APP_NAME="$(basename "$APP")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKGROUND="$SCRIPT_DIR/assets/dmg-background.png"
+
+[ -f "$BACKGROUND" ] || {
+  echo "missing dmg background: $BACKGROUND" >&2
+  exit 1
+}
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 ditto "$APP" "$STAGE/src/$APP_NAME"
 ln -s /Applications "$STAGE/src/Applications"
+mkdir -p "$STAGE/src/.background"
+cp "$BACKGROUND" "$STAGE/src/.background/background.png"
 
 # Build read-write first so we can mount it and let Finder write the .DS_Store
 # that records icon positions, then compress to the final read-only UDZO.
@@ -40,12 +49,17 @@ tell application "Finder"
     set current view of container window to icon view
     set toolbar visible of container window to false
     set statusbar visible of container window to false
-    set the bounds of container window to {200, 120, 860, 520}
+    set pathbar visible of container window to false
+    set the bounds of container window to {200, 120, 920, 560}
     set viewOptions to the icon view options of container window
     set arrangement of viewOptions to not arranged
-    set icon size of viewOptions to 128
-    set position of item "$APP_NAME" of container window to {180, 170}
-    set position of item "Applications" of container window to {480, 170}
+    set icon size of viewOptions to 144
+    set text size of viewOptions to 14
+    set background picture of viewOptions to file ".background:background.png"
+    set position of item "$APP_NAME" of container window to {185, 230}
+    set position of item "Applications" of container window to {535, 230}
+    update without registering applications
+    delay 1
     close
   end tell
 end tell

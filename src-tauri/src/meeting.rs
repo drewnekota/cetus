@@ -61,6 +61,10 @@ const PRUNE_INTERVAL_SECS: u64 = 3600;
 
 const SUMMARY_MODEL: &str = "deepseek-v4-pro";
 
+/// PID to terminate on process exit. Negative means a process group created by
+/// `cetus-spawn-disclaim`; positive means a directly spawned helper.
+static ACTIVE_CAPTURE_TARGET: AtomicI64 = AtomicI64::new(0);
+
 const SUMMARY_SYSTEM_PROMPT: &str = "\
 You summarize a meeting transcript captured on the user's machine. The `mic` \
 lines are the user speaking; the `system` lines are everyone else (heard \
@@ -94,6 +98,10 @@ pub struct MeetingSettings {
     /// Generate a title + minutes when a session ends.
     #[serde(default = "default_true")]
     pub summarize: bool,
+    /// "auto" uses SeedASR when a Doubao key is configured and otherwise
+    /// falls back to Apple on-device recognition. "local" never sends audio.
+    #[serde(default = "default_asr_engine")]
+    pub asr_engine: String,
     /// Delete meetings older than this many days (0 = keep forever).
     #[serde(default = "default_retention")]
     pub retention_days: u32,
@@ -110,6 +118,9 @@ fn default_true() -> bool {
 fn default_retention() -> u32 {
     90
 }
+fn default_asr_engine() -> String {
+    "auto".into()
+}
 fn default_toggle_hotkey() -> String {
     "Cmd+Shift+M".into()
 }
@@ -121,6 +132,7 @@ impl Default for MeetingSettings {
             auto_detect: true,
             system_audio: true,
             summarize: true,
+            asr_engine: default_asr_engine(),
             retention_days: default_retention(),
             toggle_hotkey: default_toggle_hotkey(),
         }
@@ -197,7 +209,7 @@ mod helper {
         let bin_dir = app_data.join("bin");
         // Bump the version suffix whenever the embedded Swift changes so cached
         // installs recompile.
-        let bin = bin_dir.join("cetus-meeting-helper-v5");
+        let bin = bin_dir.join("cetus-meeting-helper-v6");
         if bin.exists() {
             return Some(bin);
         }
@@ -292,6 +304,7 @@ struct ActiveSession {
     started_ts: i64,
     auto: bool,
     app_hint: Option<String>,
+    engine: String,
     /// Taken by `stop` — dropping it (EOF) or writing a newline asks the helper
     /// to finalize, after which the reader task cleans this slot up.
     stdin: Option<tokio::process::ChildStdin>,
@@ -307,6 +320,8 @@ pub struct MeetingStatus {
     pub auto: bool,
     pub app_hint: Option<String>,
     pub segments: i64,
+    pub engine: String,
+    pub meeting_id: Option<String>,
 }
 
 /// Start a capture session. Holds the runtime lock across the whole start so a
@@ -340,10 +355,19 @@ async fn start_internal(
                 .map_err(|e| e.to_string())??;
         args.push("record".into());
         let settings = load_settings(store);
+        let cloud = settings.asr_engine != "local" && crate::secrets::has("doubao");
         if !settings.system_audio {
             args.push("--no-system".into());
         }
+        if cloud {
+            args.push("--cloud".into());
+        }
 
+        let grouped = program
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.contains("spawn-disclaim"))
+            .unwrap_or(false);
         let mut child = tokio::process::Command::new(&program)
             .args(&args)
             .stdin(std::process::Stdio::piped())
@@ -351,6 +375,12 @@ async fn start_internal(
             .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| format!("failed to start meeting capture: {e}"))?;
+        if let Some(pid) = child.id() {
+            ACTIVE_CAPTURE_TARGET.store(
+                if grouped { -(pid as i64) } else { pid as i64 },
+                Ordering::Relaxed,
+            );
+        }
         let stdin = child.stdin.take().ok_or("no stdin on meeting helper")?;
         let stdout = child.stdout.take().ok_or("no stdout on meeting helper")?;
         if let Some(stderr) = child.stderr.take() {
@@ -366,7 +396,8 @@ async fn start_internal(
         let id = uuid::Uuid::new_v4().to_string();
         let started_ts = now_ms();
         if let Err(e) = store.insert_meeting(&id, started_ts, app_hint.as_deref()) {
-            let _ = child.kill().await; // never leave the mic hot on a failed start
+            kill_active_capture(); // never leave the mic hot on a failed start
+            let _ = child.wait().await;
             return Err(e.to_string());
         }
 
@@ -376,6 +407,11 @@ async fn start_internal(
             started_ts,
             auto,
             app_hint: app_hint.clone(),
+            engine: if cloud {
+                "cloud".into()
+            } else {
+                "local".into()
+            },
             child_pid: child.id(),
             stdin: Some(stdin),
             segments: segments.clone(),
@@ -416,6 +452,7 @@ async fn start_internal(
             child,
             stdout,
             segments,
+            cloud,
         ));
         Ok(())
     }
@@ -445,10 +482,8 @@ async fn stop_internal(app: &AppHandle) -> Result<bool, String> {
             return Ok(true);
         }
         if i == 60 {
-            if let Some(pid) = pid {
-                let _ = std::process::Command::new("/bin/kill")
-                    .args(["-9", &pid.to_string()])
-                    .output();
+            if pid.is_some() {
+                kill_active_capture();
             }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -526,6 +561,7 @@ async fn run_reader(
     mut child: tokio::process::Child,
     stdout: tokio::process::ChildStdout,
     segments: Arc<AtomicI64>,
+    cloud: bool,
 ) {
     use tokio::io::{AsyncBufReadExt, BufReader};
     let recall = recall_log_path(&app_data);
@@ -534,13 +570,53 @@ async fn run_reader(
         let slot = runtime.active.lock().await;
         slot.as_ref().and_then(|s| s.app_hint.clone())
     };
+    // Do not open the ASR sockets until the helper produces its first PCM
+    // packet. A cold CoreAudio system tap can take >10s to initialize; opening
+    // earlier makes the provider time out while the audio hardware is still
+    // coming online.
+    let mut mic_pcm = None;
+    let mut system_pcm = None;
+    let mut cloud_tasks = Vec::new();
 
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         let Ok(v) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
-        if let Some(seg) = v.get("segment") {
+        if let Some(pcm) = v.get("pcm") {
+            use base64::Engine as _;
+            let source = pcm.get("source").and_then(|s| s.as_str()).unwrap_or("mic");
+            if let Some(data) = pcm.get("data").and_then(|d| d.as_str()) {
+                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
+                    if cloud && mic_pcm.is_none() && system_pcm.is_none() {
+                        let (mic, system, tasks) = spawn_cloud_asr(
+                            store.clone(),
+                            id.clone(),
+                            recall.clone(),
+                            app_hint.clone(),
+                            segments.clone(),
+                        );
+                        mic_pcm = Some(mic);
+                        system_pcm = Some(system);
+                        cloud_tasks = tasks;
+                    }
+                    let tx = if source == "system" {
+                        &system_pcm
+                    } else {
+                        &mic_pcm
+                    };
+                    if let Some(tx) = tx {
+                        let _ = tx.send(bytes).await;
+                    }
+                }
+            }
+        } else if let Some(source) = v.get("pcm_end").and_then(|s| s.as_str()) {
+            if source == "system" {
+                system_pcm.take();
+            } else {
+                mic_pcm.take();
+            }
+        } else if let Some(seg) = v.get("segment") {
             let source = seg.get("source").and_then(|s| s.as_str()).unwrap_or("mic");
             let ts = seg
                 .get("ts")
@@ -573,7 +649,13 @@ async fn run_reader(
             tracing::warn!("meeting helper error: {e}");
         }
     }
+    drop(mic_pcm);
+    drop(system_pcm);
+    for task in cloud_tasks {
+        let _ = task.await;
+    }
     let _ = child.wait().await;
+    ACTIVE_CAPTURE_TARGET.store(0, Ordering::Relaxed);
 
     // Clear the slot if it is still ours (stop_internal polls for this).
     {
@@ -604,6 +686,96 @@ async fn run_reader(
     } else {
         emit_meeting_event(&app, "saved", &id, app_hint.as_deref(), None);
     }
+}
+
+fn kill_active_capture() {
+    let target = ACTIVE_CAPTURE_TARGET.swap(0, Ordering::Relaxed);
+    if target != 0 {
+        // SAFETY: target is either the child PID or the negated process-group
+        // leader PID created by our disclaim shim. SIGKILL is the final
+        // backstop after graceful stdin shutdown, or during app exit.
+        unsafe {
+            libc::kill(target as libc::pid_t, libc::SIGKILL);
+        }
+    }
+}
+
+/// Synchronous exit hook: do not leave a privacy-sensitive capture helper
+/// holding the microphone if the desktop process is killed/restarted.
+pub fn shutdown_capture() {
+    kill_active_capture();
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_cloud_asr(
+    store: Arc<Store>,
+    id: String,
+    recall: PathBuf,
+    app_hint: Option<String>,
+    segments: Arc<AtomicI64>,
+) -> (
+    tokio::sync::mpsc::Sender<Vec<u8>>,
+    tokio::sync::mpsc::Sender<Vec<u8>>,
+    Vec<tokio::task::JoinHandle<()>>,
+) {
+    let key = crate::secrets::get("doubao")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let resource = crate::doubao::DEFAULT_RESOURCE_ID.to_string();
+    let (mic_tx, mic_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+    let (system_tx, system_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+    let mut tasks = Vec::new();
+    for (source, rx) in [("mic", mic_rx), ("system", system_rx)] {
+        let key = key.clone();
+        let resource = resource.clone();
+        let store = store.clone();
+        let id = id.clone();
+        let recall = recall.clone();
+        let app_hint = app_hint.clone();
+        let segments = segments.clone();
+        tasks.push(tokio::spawn(async move {
+            let store_for_sentence = store.clone();
+            let id_for_sentence = id.clone();
+            let recall_for_sentence = recall.clone();
+            let hint_for_sentence = app_hint.clone();
+            let on_sentence = move |text: &str| {
+                let text = text.trim();
+                if text.is_empty() {
+                    return;
+                }
+                let ts = now_ms();
+                if let Err(e) =
+                    store_for_sentence.insert_meeting_segment(&id_for_sentence, ts, source, text)
+                {
+                    tracing::warn!("meeting: cloud segment insert failed: {e}");
+                    return;
+                }
+                append_recall(
+                    &recall_for_sentence,
+                    ts,
+                    "segment",
+                    source,
+                    hint_for_sentence.as_deref(),
+                    None,
+                    text,
+                );
+                segments.fetch_add(1, Ordering::Relaxed);
+            };
+            if let Err(e) = crate::doubao::stream_hands_free(
+                &key,
+                &resource,
+                crate::doubao::Corpus::default(),
+                rx,
+                on_sentence,
+            )
+            .await
+            {
+                tracing::warn!("meeting: {source} cloud ASR failed: {e}");
+            }
+        }));
+    }
+    (mic_tx, system_tx, tasks)
 }
 
 /// One-shot DeepSeek minutes pass (out-of-band, mirrors dream::distill).
@@ -1082,6 +1254,8 @@ pub async fn meeting_status(runtime: State<'_, MeetingRuntime>) -> Result<Meetin
             auto: s.auto,
             app_hint: s.app_hint.clone(),
             segments: s.segments.load(Ordering::Relaxed),
+            engine: s.engine.clone(),
+            meeting_id: Some(s.id.clone()),
         },
         None => MeetingStatus {
             recording: false,
@@ -1089,6 +1263,8 @@ pub async fn meeting_status(runtime: State<'_, MeetingRuntime>) -> Result<Meetin
             auto: false,
             app_hint: None,
             segments: 0,
+            engine: "idle".into(),
+            meeting_id: None,
         },
     })
 }

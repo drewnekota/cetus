@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="410" viewBox="0 0 720 410">
+  <defs>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fffdf9"/>
+      <stop offset="0.5" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#edf4fb"/>
+    </linearGradient>
+    <radialGradient id="warmGlow" cx="0" cy="0" r="1" gradientTransform="translate(132 22) rotate(45) scale(245 170)">
+      <stop stop-color="#ffe7a8" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#ffe7a8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coolGlow" cx="0" cy="0" r="1" gradientTransform="translate(658 388) rotate(-135) scale(270 190)">
+      <stop stop-color="#bbddff" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#bbddff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softShadow" x="-100%" y="-100%" width="300%" height="300%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#64748b" flood-opacity=".18"/>
+    </filter>
+  </defs>
+
+  <rect width="720" height="410" fill="url(#canvas)"/>
+  <rect width="720" height="410" fill="url(#warmGlow)"/>
+  <rect width="720" height="410" fill="url(#coolGlow)"/>
+
+  <text x="360" y="66" text-anchor="middle"
+        font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif"
+        font-size="24" font-weight="500" fill="#20242a">
+    Drag Cetus to Applications
+  </text>
+  <text x="360" y="91" text-anchor="middle"
+        font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif"
+        font-size="13" font-weight="400" fill="#727983">
+    拖动即可完成安装
+  </text>
+
+  <g transform="translate(336 210)" fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#softShadow)">
+    <path d="M0 0l13 15L0 30" stroke="#aeb4bc" stroke-width="5"/>
+    <path d="M17 0l13 15-13 15" stroke="#727983" stroke-width="5"/>
+    <path d="M34 0l13 15-13 15" stroke="#252a31" stroke-width="5"/>
+  </g>
+</svg>

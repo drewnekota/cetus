@@ -1,65 +1,95 @@
 <p align="center"><img src="docs/logo.png" width="120" alt="Cetus logo" /></p>
 
-# Cetus
+<h1 align="center">Cetus</h1>
 
-[English](./README.md) · **简体中文**
+<p align="center"><strong>面向 Codex、Claude Code 与持久化 AI agent 的开源 macOS 控制台。</strong></p>
 
-一个 macOS 桌面 agent，基于 DeepSeek V4.1。它能看见你的屏幕、记住要紧的事，也能替你动手 —— 便宜到可以整天开着陪你跑。
+<p align="center">按需让 agent 在独立 worktree 中工作、按计划在后台运行，再从一张看板审阅全部结果；上下文与记忆会把工作延续到下一次对话。</p>
 
----
+<p align="center">
+  <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="下载 macOS 版" src="https://img.shields.io/badge/下载_macOS_版-Apple_Silicon-111111?style=for-the-badge&logo=apple" /></a>
+</p>
 
-## app 里有什么
+<p align="center">
+  <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/drewnekota/cetus" /></a>
+  <a href="https://github.com/drewnekota/cetus/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/drewnekota/cetus" /></a>
+  <a href="LICENSE"><img alt="MIT 协议" src="https://img.shields.io/github/license/drewnekota/cetus" /></a>
+</p>
 
-| | Cetus 现在 |
-| --- | --- |
-| **Context** | Rewind 式屏幕截取 + 设备端 Apple Vision OCR（默认关闭）· **会议记忆** —— 设备端转写通话，生成可搜索的纪要 · **带上下文的启动器**，自动附上截图、当前 app、浏览器 URL 与选中文本 · 通过 pi connectors 接入第三方数据 |
-| **Intelligence** | DeepSeek **V4.1 Flash** ⚡ / **V4.1 Pro** ✨ · pi harness · **可插拔 runtime** —— 任意对话可切到 **Claude Code** 或 **Codex** 上运行 · **Ultra Code** 模式（agent 自己编写 workflow 并编排子 agent）· **并行解法**（best-of-N 并行跑 + 并排对比挑选） |
-| **Abilities** | pi 的 tools 与 skills · 30+ 模型供应商及任意 OpenAI 兼容端点 · 定时**自动化任务**，在后台开出新对话 · 设备端**语音听写** · 全局双击 ⌘ **启动器** |
-| **Memory** | 持久笔记（身份、偏好、进行中的项目），你和 agent 都能编辑，每一轮都注入 · **Dreaming**：空闲时离线整合（默认开启） |
+<p align="center"><a href="./README.md">English</a> · <strong>简体中文</strong></p>
 
-## 界面一览
+![Cetus runtime 选择器 —— 在同一个桌面 app 中运行 Cetus、Claude Code 或 Codex](docs/screenshot-runtime-picker.png)
 
-### 对话
+## 为什么开发者会用 Cetus
 
-一个输入框搞定一切：选 **workspace**（工作目录）、选 **preset**（Daily ⚡ / High / Max / UltraCode ✨）、可选附上文件或截图，然后发出去。回复实时流式，带可折叠的 **thinking** 块和 **tool use** 卡片（参数、结果、错误高亮）。
+- **所有 agent 共用一个工作台。** 每个对话都可以选择 Cetus 内置 runtime、Claude Code 或 Codex，同时保留一致的桌面工作流。
+- **安全地并行处理代码。** 需要隔离时可为 CLI 对话启用独立 git worktree，避免 agent 直接修改当前 checkout。
+- **后台工作也能有序审阅。** 定时启动任务，离开一会儿，回来时从看板的**待审阅**列接手结果，不必再翻找终端 session。
+- **上下文不会随聊天结束而消失。** Workspace、持久笔记、会议记忆和可选的设备端屏幕 context，能让下一次运行从上次停下的位置继续。
+- **控制权留在本机。** 屏幕 OCR、会议转写和语音听写都在设备端运行；敏感能力默认关闭，由你选择是否启用。
+
+## 立即使用
+
+预编译版本支持 **Apple Silicon** 和 **macOS 13 或更高版本**。
+
+1. [下载最新版本](https://github.com/drewnekota/cetus/releases/latest)。
+2. 打开 DMG，将 Cetus 移入 Applications。
+3. 使用 Cetus 内置 runtime，或选择本机已经安装并登录的 `claude` / `codex` CLI。
+4. 选择一个 workspace，交给 agent 第一个任务。
+
+Claude Code 和 Codex 会复用现有 CLI 登录，不需要再配置一个账号。从源码构建请参阅[参与开发](#参与开发)。
+
+> **早期版本：** Cetus 仍在快速开发。如果遇到问题或缺少需要的工作流，欢迎[提交 Issue](https://github.com/drewnekota/cetus/issues)。
+
+## 让 agent 真正开始工作
+
+### 并排运行 Codex 与 Claude Code
+
+选择 **workspace** 和 runtime，可选附上文件或截图，然后发送。回复实时流式展示 thinking 与 tool use 卡片。并行处理代码任务时可开启 worktree 隔离，让每个 CLI 对话编辑独立的 checkout。
 
 ![Cetus 对话](docs/screenshot-chat.png)
 
-### Agent runtime
+### 为每项工作选择合适的 runtime
 
-每个对话都可以选自己的引擎。默认是 **Cetus**（内置的 pi harness）；在输入框的 runtime 选择器里切到 **Claude Code** 或 **Codex**，同一个对话就跑在对应的官方 CLI 上 —— 旁边还有按对话生效的**模型**（Fable / Opus / Sonnet / Haiku · GPT-5.5 系列）和**推理力度**选项。
+**Cetus** 使用内置的 pi harness。将对话切换到 **Claude Code** 或 **Codex**，就能通过对应的官方 CLI 运行，并按对话设置模型与推理力度。
 
-![Cetus runtime 选择器 —— 每个对话可选 Cetus、Claude Code 或 Codex](docs/screenshot-runtime-picker.png)
+CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（PATH 上找），**不需要单独登录**。Cetus 为每个对话保持一个常驻 runtime（Claude streaming-input session / Codex app-server thread），把结构化事件流翻译进同一套聊天 UI（文本、thinking、工具卡片），并让本地开发服务器等后台终端跨回复继续运行。上下文和进程清理由对话生命周期统一管理，改动也可以放进每个对话独立的 **git worktree**。自动化任务同样可以指定 runtime —— 定时 job 跑在 Claude Code 上、日常聊天留在 Cetus 上，互不影响。
 
-CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（PATH 上找），**不需要单独登录**。Cetus 为每条消息跑一次 headless turn（`claude -p --output-format stream-json` / `codex exec --json`），把结构化事件流翻译进同一套聊天 UI（文本、thinking、工具卡片），用 CLI 自己的 session token 跨轮保持上下文，并在每个对话独立的 **git worktree** 里隔离改动。自动化任务同样可以指定 runtime —— 定时job 跑在 Claude Code 上、日常聊天留在 Cetus 上，互不影响。
-
-### 看板
+### 把工作交给后台
 
 每个对话都是一张卡片，按**进行中 · 待审阅 · 已完成**跟踪，可按 workspace 筛选或查看全部。后台运行（自动化任务、并行解法）都会落在这里，让跨越多次坐下才完成的工作不会淹没在聊天列表里。
 
 ![Cetus 看板](docs/screenshot-kanban.png)
 
-### 自动化任务
+### 定时运行 agent
 
 按计划触发（`at` / `every` / `cron` / `daily`）的保存 prompt。每次触发都会开出一个全新的后台对话 —— 比如工作日 09:00 的 Daily news digest，在你不在时搜索过去 24 小时的新闻并渲染成 HTML 摘要。
 
 ![Cetus 自动化任务](docs/screenshot-automations.png)
 
-### 快捷启动器
+### 带着当前屏幕开始对话
 
 全局**双击 ⌘** 唤出的磨砂面板：不离开当前 app，就能直接向 Cetus 提问。它读取你眼前的内容，以可移除标签的形式附上：屏幕截图、当前 app、浏览器 URL、以及选中的文本。留下有用的、去掉多余的，然后开启新对话或接续上一次。
 
 ![Cetus 快捷启动器](docs/screenshot-launcher.png)
 
-### 语音输入
+## 不只是 coding agent 的外壳
+
+- **持久记忆**：用户和 agent 都能编辑，并注入未来的对话
+- **并行解法**：把一个 prompt 铺开成 N 个候选运行，然后留一个、归档其余
+- **Ultra Code** 模式：为单次请求编写 workflow 并编排子 agent
+- **语音听写**（设备端，macOS）：在 app 内可用，也支持全局按住说话
+- **会议记忆**（设备端，macOS）：自动识别、系统音频采集、DeepSeek 蒸馏的纪要，agent 可检索
+- **电脑与浏览器控制**：通过结构化辅助功能元素操作，在执行有后果的动作前请求确认
+- **底层支持 30+ 模型供应商**：包括 Anthropic、OpenAI、Google、Bedrock、Ollama、LM Studio、OpenRouter 及 OpenAI 兼容端点
+
+### 在任意 app 中听写
 
 在任意 app 里按住热键开口说话 —— Cetus 弹出一个随声音起伏的悬浮均衡器 HUD，在设备端用 Seed-ASR 转写，并把整理好的文字落到你光标所在的位置。和 app 内麦克风用同一套管线，只不过它跟着你跑遍整个桌面。
 
-![Cetus 语音 HUD](docs/voice-hud.jpeg)
+![Cetus 语音听写 HUD](docs/voice-hud.jpeg)
 
-> 📸 没错，这是一张用手机拍屏幕的照片。这个 HUD 是无边框永远置顶的悬浮层，把我试过的每个截图工具都躲开了，只好举起相机对着显示器拍。😄
-
-### 会议记忆
+### 把会议变成可搜索的上下文
 
 打开**会议记忆**，Cetus 会安静地把通话转写成可搜索的纪要 —— 全程设备端、只存文字、不保存音频。
 
@@ -73,45 +103,30 @@ CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（P
 
 ![Cetus 会议记忆](docs/screenshot-meetings.png)
 
-### 屏幕 context
+### 记住屏幕上出现过什么
 
 开启后，Cetus 周期性截帧、用感知哈希去重，并在设备端用 Apple Vision 做 OCR —— agent 可以回忆起你当时在做什么，你也能按 OCR 文本或 app 搜索这段历史。图像和文本都留在你的 Mac 上，不上传。默认关闭；控制项包括截取间隔、历史保留时长，以及一份排除 app 列表 —— 1Password、Messages 这类敏感 app 处于前台时自动暂停截取。
 
 ![Cetus 屏幕 context 设置](docs/screenshot-screen-history.png)
 
-### 设置
+### 始终保有控制权
 
 每项能力都是显式开启的。**Computer & Browser control** 让 agent 通过编号的元素列表（而非原始像素）驱动你的浏览器和 Mac app，在任何有后果的操作（发送、删除、购买、提交、认证）前需要确认，Stop 按钮始终触手可及。
 
 ![Cetus 设置](docs/screenshot-settings.png)
 
-## 还有这些
-
-- **持久记忆**：用户和 agent 都能编辑，每一轮都注入（身份、偏好、进行中的项目）
-- **可插拔 runtime**：任意对话（或自动化任务）都能跑在 **Claude Code** / **Codex** 上 —— headless 调用本机 CLI，流式渲染进原生聊天 UI，per-conversation git worktree 隔离
-- **并行解法**：把一个 prompt 铺开成 N 个候选运行，然后留一个、归档其余
-- **Ultra Code** 模式：agent 为单次请求派生自己的子 agent
-- **语音听写**（设备端，macOS）：在 app 内可用，也支持全局按住说话
-- **会议记忆**（设备端，macOS）：自动识别、系统音频采集、DeepSeek 蒸馏的纪要，agent 可检索
-- 新建 / 切换 / 重命名 / 归档 / 删除对话（元数据存于 SQLite）
-- 中断进行中的运行 · 通过 `switch_session` 在多对话间共享同一个 pi RPC 子进程
-- pi 二进制以 Tauri sidecar 形式打包，终端用户无需依赖 PATH
-- **底层 any-model**：pi 支持 30+ 供应商（Anthropic、OpenAI、Google、Bedrock、Ollama、LM Studio、OpenRouter…）及任意 OpenAI 兼容端点；当前 UI 仅暴露 DeepSeek，改 `model-picker.tsx` 里一行即可切换
-
 ## 为什么做 Cetus
 
-大多数 AI 助手每次对话都从空白开始。推理能力不错，但它们不知道你在做什么，能做的也基本只是聊聊天。
+终端 agent 很擅长完成单项任务，但跨 session、仓库与后台进程的长期工作很容易丢失。Cetus 把每次运行变成一项可见的工作，带有 workspace、状态、历史与审阅步骤。
 
-一个真正有用的 agent 需要三样东西：**context**（了解你的处境）、**intelligence**（推理能力）和 **abilities**（能实际做哪些事）。很长一段时间里，智力是瓶颈。现在不是了 —— 现代模型已经够好，DeepSeek V4.1 又把价格打下来了。这件事改变了什么值得去做。
+真正有用的 agent 需要三样东西：了解当前情况的 **context**、来自合适模型的 **intelligence**，以及能够动手的 **abilities**。Cetus 让这些部分保持独立：为每个任务选择 runtime，只加入你愿意提供的上下文，并让执行结果始终可以检查。
 
-当 token 便宜一个数量级，很多以前做不起的事就变得可行：
+这样，一些不适合塞在终端标签页里的工作流就变得可行：
 
-- 持续截取屏幕并做 OCR，以便日后回溯
-- 对同一个任务并行跑 N 次、取最好的结果
-- 定时调度 agent，在你离开时自己干活
-- 让一个 agent 为单次请求编排子 agent
-
-Cetus 把这省下来的钱花在大多数 agent 欠缺的地方：给 agent 更厚的 context，以及更多真正能动手的能力。
+- 你离开时继续运行 agent，回来后审阅结果。
+- 比较彼此独立的方案，而不让 git 改动相互冲突。
+- 把项目决策与个人偏好带入下一次对话。
+- 把编码工作与周围的会议、屏幕和 app 连接起来。
 
 ### Memory 与 Dreaming
 
@@ -122,7 +137,9 @@ Cetus 把这省下来的钱花在大多数 agent 欠缺的地方：给 agent 更
 - **Memory（记忆）** 是 agent 写回给自己的 context —— 下一个 session 从上次停下的地方继续，而不是从零开始。
 - **Dreaming（做梦）** 在你闲着的时候跑：Cetus 回顾最近的对话，把它们整合成持久的笔记，让原始聊天记录沉淀为可以复用的偏好。默认开启。
 
-## 环境要求
+## 参与开发
+
+### 环境要求
 
 - **Node** ≥ 20、**pnpm**、**bun**（用于构建 pi sidecar 二进制）
 - **Rust** stable（`rustc`、`cargo`）
@@ -130,7 +147,7 @@ Cetus 把这省下来的钱花在大多数 agent 欠缺的地方：给 agent 更
 - 一个 **`DEEPSEEK_API_KEY`**（或你选用的供应商；pi 会自动读取 `ANTHROPIC_API_KEY`、`OPENAI_API_KEY` 等）
 - **可选**：本机安装并登录过 **Claude Code**（`claude`）和/或 **Codex**（`codex`）CLI，即可把它们用作对话 runtime —— Cetus 复用其现有登录，无需额外配置
 
-## 首次配置
+### 首次配置
 
 ```bash
 pnpm install
@@ -139,7 +156,7 @@ pnpm install
 ./scripts/build-pi-sidecar.sh
 ```
 
-## 开发运行
+### 开发运行
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
@@ -148,7 +165,7 @@ pnpm tauri dev
 
 Tauri 会启动 Next.js 开发服务器（端口 3000）并打开一个指向它的窗口。pi sidecar 会从打包好的二进制自动派生。
 
-### 开发后门：`PI_BIN`
+#### 开发后门：`PI_BIN`
 
 如果你在迭代 pi 本身，可以指向任意 pi 构建来绕过 sidecar：
 
@@ -159,7 +176,7 @@ pnpm tauri dev
 
 这会完全跳过 `tauri-plugin-shell`，改用原始的 `tokio::process::Command`。
 
-## 构建
+### 构建
 
 ```bash
 ./scripts/build-pi-sidecar.sh   # 如果还没跑过
@@ -198,7 +215,7 @@ pnpm tauri build
 - **流式**：pi 发出 `agent_start`、带 `assistantMessageEvent` 增量的 `message_update`，以及 `tool_execution_*` 事件。前端的 `chatReducer` 把这些折叠成按 `contentIndex` 索引的稳定 `RenderedMessage[]`，并用一张 `toolCallId → block` 旁表来路由执行更新。
 - **分帧**：严格 LF 的 JSONL。`tauri-plugin-shell` 以任意字节块投递 stdout，所以读取端维护自己的累加缓冲，按每个 `\n` 吐出一行，并剥掉可选的 `\r`。按 Unicode 分隔符切分的通用行读取器（Node `readline`）不符合规范。
 - **Sidecar 打包**：`src-tauri/binaries/pi-<target>` 打进 `.app/Contents/Resources/`。`PI_BIN` 环境变量是迭代 pi 的开发后门。
-- **CLI runtime**：跑在 **Claude Code** / **Codex** 上的对话完全绕过 pi RPC —— `cetus-bridge::cli_agent` 每个 turn 派生一个 headless CLI 进程（`claude -p --output-format stream-json` / `codex exec --json`），由带单测的 `EventTranslator` 把它们的 JSONL 翻译成 `chatReducer` 已经在消费的 PiEvent 流。上下文用各 CLI 的 resume token（claude `session_id` / codex `thread_id`）跨轮延续；turn 在 per-conversation git worktree 里执行。
+- **CLI runtime**：跑在 **Claude Code** / **Codex** 上的对话完全绕过 pi RPC —— `cetus-bridge::cli_agent` 为每个对话保持 Claude streaming session 或 Codex app-server thread，由带单测的 `EventTranslator` 把事件翻译成 `chatReducer` 已经在消费的 PiEvent 流。上下文与后台终端通过 vendor session/thread 跨轮延续；可选的 per-conversation git worktree 用于隔离改动。
 - **Extension UI**：当某个 pi extension 调用 `ctx.ui.select()` 等，pi 会通过事件流发出 `extension_ui_request`。前端 `DialogHost` 渲染一个对话框，并通过 `extension_ui_respond` Tauri 命令回复。
 
 ## 可复用的 bridge 包
