@@ -105,6 +105,30 @@ pub async fn get_cli_defaults(backend: String) -> Result<CliDefaults, String> {
     })
 }
 
+/// Whether the third-party runtimes Cetus can launch are present on PATH.
+/// `adopt_login_shell_path` runs before Tauri is built, so this sees the same
+/// PATH later used by the actual Claude Code / Codex child processes.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliRuntimeStatus {
+    pub claude_code: bool,
+    pub codex: bool,
+}
+
+#[tauri::command]
+pub async fn get_cli_runtime_status() -> Result<CliRuntimeStatus, String> {
+    Ok(CliRuntimeStatus {
+        claude_code: executable_on_path("claude"),
+        codex: executable_on_path("codex"),
+    })
+}
+
+fn executable_on_path(name: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).any(|dir| dir.join(name).is_file()))
+        .unwrap_or(false)
+}
+
 fn claude_defaults(home: &Path) -> CliDefaults {
     let raw =
         std::fs::read_to_string(home.join(".claude/settings.json")).unwrap_or_default();

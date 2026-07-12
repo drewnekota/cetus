@@ -4,13 +4,17 @@
 // conversation switch (which keeps the composer mounted but changes its key).
 //
 // Backed by an in-memory cache (survives unmounts within a session) plus
-// localStorage write-through, so a draft also survives a ⌘R reload. Only the
-// text is persisted — attachments stay local to the live composer to avoid
-// dangling object URLs.
+// localStorage write-through, so text also survives a ⌘R reload. Attachment
+// bytes stay in memory: they can be large, but still need to survive composer
+// unmounts while navigating around the app.
 
 const PREFIX = "cetus:draft:";
 
 const cache = new Map<string, string>();
+export type DraftAttachment =
+  | { type: "image"; data: string; mimeType: string; name: string }
+  | { type: "file"; data: string; mimeType: string; name: string; sizeBytes: number };
+const attachmentCache = new Map<string, DraftAttachment[]>();
 let hydrated = false;
 
 /** Pull any persisted drafts into the in-memory cache once, lazily. */
@@ -44,4 +48,28 @@ export function writeDraft(key: string, text: string): void {
     if (text) localStorage.setItem(PREFIX + key, text);
     else localStorage.removeItem(PREFIX + key);
   } catch {}
+}
+
+export function readDraftAttachments(key: string): DraftAttachment[] {
+  return attachmentCache.get(key)?.map((attachment) => ({ ...attachment })) ?? [];
+}
+
+export function writeDraftAttachments(key: string, attachments: DraftAttachment[]): void {
+  if (attachments.length) {
+    attachmentCache.set(
+      key,
+      attachments.map((attachment) =>
+        attachment.type === "image"
+          ? {
+              type: attachment.type,
+              data: attachment.data,
+              mimeType: attachment.mimeType,
+              name: attachment.name,
+            }
+          : { ...attachment },
+      ),
+    );
+  } else {
+    attachmentCache.delete(key);
+  }
 }

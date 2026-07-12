@@ -9,6 +9,9 @@ export const automation = {
     "view.subtitle":
       "Saved prompts that run on a schedule. Each run starts a fresh task.",
     "view.new": "New automation",
+    "view.sortLabel": "Sort automations",
+    "view.sortUpdated": "Recently updated",
+    "view.sortCreated": "Recently created",
 
     // Automations view — empty state
     "empty.title": "No automations yet",
@@ -124,6 +127,9 @@ export const automation = {
     "view.title": "自动化",
     "view.subtitle": "按计划运行的保存提示词。每次运行都会开启一个新任务。",
     "view.new": "新建自动化",
+    "view.sortLabel": "自动化排序",
+    "view.sortUpdated": "最近更新",
+    "view.sortCreated": "最近创建",
 
     "empty.title": "暂无自动化",
     "empty.description":
@@ -228,6 +234,9 @@ export const automation = {
     "view.subtitle":
       "スケジュールで実行される保存済みプロンプト。実行のたびに新しいタスクが始まります。",
     "view.new": "新しい自動化",
+    "view.sortLabel": "自動化を並べ替え",
+    "view.sortUpdated": "更新日時順",
+    "view.sortCreated": "作成日時順",
 
     "empty.title": "自動化はまだありません",
     "empty.description":
@@ -332,6 +341,9 @@ export const automation = {
     "view.subtitle":
       "일정에 따라 실행되는 저장된 프롬프트입니다. 실행할 때마다 새 작업이 시작됩니다.",
     "view.new": "새 자동화",
+    "view.sortLabel": "자동화 정렬",
+    "view.sortUpdated": "최근 업데이트순",
+    "view.sortCreated": "최근 생성순",
 
     "empty.title": "아직 자동화가 없습니다",
     "empty.description":
@@ -436,6 +448,9 @@ export const automation = {
     "view.subtitle":
       "Prompts guardados que se ejecutan según una programación. Cada ejecución inicia una tarea nueva.",
     "view.new": "Nueva automatización",
+    "view.sortLabel": "Ordenar automatizaciones",
+    "view.sortUpdated": "Actualizadas recientemente",
+    "view.sortCreated": "Creadas recientemente",
 
     "empty.title": "Aún no hay automatizaciones",
     "empty.description":
@@ -540,6 +555,9 @@ export const automation = {
     "view.subtitle":
       "Prompts salvos que rodam em uma programação. Cada execução inicia uma nova tarefa.",
     "view.new": "Nova automação",
+    "view.sortLabel": "Ordenar automações",
+    "view.sortUpdated": "Atualizadas recentemente",
+    "view.sortCreated": "Criadas recentemente",
 
     "empty.title": "Nenhuma automação ainda",
     "empty.description":
@@ -644,6 +662,9 @@ export const automation = {
     "view.subtitle":
       "Prompts enregistrés qui s'exécutent selon une planification. Chaque exécution lance une nouvelle tâche.",
     "view.new": "Nouvelle automatisation",
+    "view.sortLabel": "Trier les automatisations",
+    "view.sortUpdated": "Récemment mises à jour",
+    "view.sortCreated": "Récemment créées",
 
     "empty.title": "Aucune automatisation pour l'instant",
     "empty.description":
@@ -748,6 +769,9 @@ export const automation = {
     "view.subtitle":
       "Gespeicherte Prompts, die nach einem Zeitplan ausgeführt werden. Jede Ausführung startet eine neue Aufgabe.",
     "view.new": "Neue Automatisierung",
+    "view.sortLabel": "Automatisierungen sortieren",
+    "view.sortUpdated": "Kürzlich aktualisiert",
+    "view.sortCreated": "Kürzlich erstellt",
 
     "empty.title": "Noch keine Automatisierungen",
     "empty.description":
@@ -852,6 +876,9 @@ export const automation = {
     "view.subtitle":
       "Prompt salvati che vengono eseguiti secondo una pianificazione. Ogni esecuzione avvia una nuova attività.",
     "view.new": "Nuova automazione",
+    "view.sortLabel": "Ordina automazioni",
+    "view.sortUpdated": "Aggiornate di recente",
+    "view.sortCreated": "Create di recente",
 
     "empty.title": "Ancora nessuna automazione",
     "empty.description":
@@ -956,6 +983,9 @@ export const automation = {
     "view.subtitle":
       "Сохранённые промпты, выполняемые по расписанию. Каждый запуск создаёт новую задачу.",
     "view.new": "Новая автоматизация",
+    "view.sortLabel": "Сортировать автоматизации",
+    "view.sortUpdated": "Недавно обновлённые",
+    "view.sortCreated": "Недавно созданные",
 
     "empty.title": "Автоматизаций пока нет",
     "empty.description":

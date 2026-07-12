@@ -43,7 +43,7 @@ Claude Code and Codex reuse their existing CLI login — there is no second acco
 
 ## Put agents to work
 
-### Run Codex and Claude Code side by side
+### Run Codex, Claude Code and DeepSeek Agent side by side
 
 Pick a **workspace**, choose a runtime, optionally attach files or a screenshot, and send. Replies stream live with collapsible thinking blocks and tool-use cards. For parallel coding tasks, enable worktree isolation so each CLI conversation edits a separate checkout.
 

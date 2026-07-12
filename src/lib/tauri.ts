@@ -266,6 +266,8 @@ export const api = {
     payload: ExtensionUIResponseBody,
   ) => invoke<void>("extension_ui_respond", { conversationId, id, payload }),
   listApiKeys: () => invoke<string[]>("list_api_keys"),
+  getCliRuntimeStatus: () =>
+    invoke<{ claudeCode: boolean; codex: boolean }>("get_cli_runtime_status"),
   listApiKeysMasked: () => invoke<Record<string, string>>("list_api_keys_masked"),
   revealApiKey: (provider: string) =>
     invoke<string | null>("reveal_api_key", { provider }),

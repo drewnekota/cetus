@@ -668,6 +668,7 @@ export default function Home() {
   );
   const orderedChatIdsRef = useRef<string[]>([]);
   orderedChatIdsRef.current = orderedChatIds;
+  const selectChatRef = useRef<(id: string) => void>(() => {});
 
   // Mirror the live queue + send fn so the flush effect (deps: streaming sig
   // only) never reads stale closures. onSend is a hoisted function declaration.
@@ -1113,12 +1114,27 @@ export default function Home() {
 
   const archiveConversation = useCallback(
     async (c: Conversation) => {
-      await api.archiveConversation(c.id, !c.archivedAt);
+      const archiving = !c.archivedAt;
+      const isActive = c.id === activeIdRef.current;
+      const ids = orderedChatIdsRef.current;
+      const currentIndex = ids.indexOf(c.id);
+      const nextId = currentIndex >= 0 ? ids[currentIndex + 1] : undefined;
+
+      await api.archiveConversation(c.id, archiving);
       await refreshList();
       chatStore.getState().drop(c.id);
-      if (c.id === activeIdRef.current) {
+
+      if (archiving && isActive && nextId) {
+        selectChatRef.current(nextId);
+      } else if (archiving && isActive) {
+        // The archived chat was the last visible row. Start a fresh chat in
+        // the same repo instead of falling back to the repo-less default.
+        pendingSelectRef.current = null;
+        setView("chat");
+        setWorkspaceDir(c.workspaceDir);
         saveLastActive(null);
         setActiveId(null);
+        setFocusToken((t) => t + 1);
       }
     },
     [refreshList, chatStore],
@@ -1985,6 +2001,7 @@ export default function Home() {
     },
     [onSelect],
   );
+  selectChatRef.current = onSelectChat;
   const switchChat = useCallback(
     (direction: 1 | -1) => {
       // Walk the sidebar's visual order (grouped by workspace), not the raw

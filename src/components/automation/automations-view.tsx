@@ -1,4 +1,5 @@
 "use client";
+import { useMemo, useState } from "react";
 import {
   Clock,
   Folder,
@@ -11,6 +12,13 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +54,17 @@ export function AutomationsView({
   onOpenConversation,
 }: Props) {
   const { t } = useTranslation("automation");
+  const [sortBy, setSortBy] = useState<"updatedAt" | "createdAt">("updatedAt");
+  const sortedAutomations = useMemo(
+    () =>
+      [...automations].sort((a, b) => {
+        const aIsStudio = isStudioAutomation(a);
+        const bIsStudio = isStudioAutomation(b);
+        if (aIsStudio !== bIsStudio) return aIsStudio ? 1 : -1;
+        return b[sortBy] - a[sortBy] || a.name.localeCompare(b.name);
+      }),
+    [automations, sortBy],
+  );
   return (
     <div className="scrollbar-slim flex-1 overflow-y-auto px-4 pb-6 pt-2">
       <div className="mx-auto w-full max-w-5xl">
@@ -56,10 +75,32 @@ export function AutomationsView({
             </h2>
             <p className="text-xs text-muted-foreground">{t("view.subtitle")}</p>
           </div>
-          <Button size="sm" onClick={onNew} className="gap-1.5">
-            <Plus className="size-4" />
-            {t("view.new")}
-          </Button>
+          <div className="flex items-center gap-2">
+            {automations.length > 0 && (
+              <Select
+                value={sortBy}
+                onValueChange={(value) =>
+                  setSortBy(value as "updatedAt" | "createdAt")
+                }
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-36"
+                  aria-label={t("view.sortLabel")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="updatedAt">{t("view.sortUpdated")}</SelectItem>
+                  <SelectItem value="createdAt">{t("view.sortCreated")}</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            <Button size="sm" onClick={onNew} className="gap-1.5">
+              <Plus className="size-4" />
+              {t("view.new")}
+            </Button>
+          </div>
         </div>
 
         {automations.length === 0 ? (
@@ -80,7 +121,7 @@ export function AutomationsView({
           </button>
         ) : (
           <div className="grid min-w-0 gap-3 md:grid-cols-2">
-            {automations.map((a) => (
+            {sortedAutomations.map((a) => (
               <AutomationCard
                 key={a.id}
                 automation={a}
@@ -96,6 +137,13 @@ export function AutomationsView({
         )}
       </div>
     </div>
+  );
+}
+
+function isStudioAutomation(automation: Automation): boolean {
+  const haystack = `${automation.name}\n${automation.workspaceDir}\n${automation.prompt}`;
+  return /(?:^|[^a-z0-9])(soku(?:-gtm)?|nex-studio)(?:$|[^a-z0-9])/i.test(
+    haystack,
   );
 }
 

@@ -15,7 +15,12 @@ import { useTranslation } from "@/lib/i18n";
 import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
 import { api } from "@/lib/tauri";
 import { composeWithAmbient } from "@/lib/quick-context";
-import { readDraft, writeDraft } from "@/lib/draft-store";
+import {
+  readDraft,
+  readDraftAttachments,
+  writeDraft,
+  writeDraftAttachments,
+} from "@/lib/draft-store";
 import type { BackendId, ModelChoice } from "@/lib/types";
 
 /** Walk back from the caret to find an open `/<token>` the user is typing: a `/`
@@ -239,6 +244,20 @@ export function Composer({
     [locale, focusToken],
   );
   const [text, setText] = useState(() => (draftKey ? readDraft(draftKey) : ""));
+  const restoreAttachments = useCallback(
+    (key?: string): ComposerAttachment[] =>
+      key
+        ? readDraftAttachments(key).map((attachment) =>
+            attachment.type === "image"
+              ? {
+                  ...attachment,
+                  previewUrl: `data:${attachment.mimeType};base64,${attachment.data}`,
+                }
+              : attachment,
+          )
+        : [],
+    [],
+  );
 
   // Write-through setter: every edit persists the draft under the current key so
   // it's already saved when the composer unmounts (view switch) or its key
@@ -259,8 +278,22 @@ export function Composer({
     if (draftKeyRef.current === draftKey) return;
     draftKeyRef.current = draftKey;
     setText(draftKey ? readDraft(draftKey) : "");
-  }, [draftKey]);
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+    setAttachments(restoreAttachments(draftKey));
+  }, [draftKey, restoreAttachments]);
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
+    restoreAttachments(draftKey),
+  );
+
+  const updateAttachments = useCallback(
+    (update: (previous: ComposerAttachment[]) => ComposerAttachment[]) => {
+      setAttachments((previous) => {
+        const next = update(previous);
+        if (draftKey) writeDraftAttachments(draftKey, next);
+        return next;
+      });
+    },
+    [draftKey],
+  );
   const [isDragging, setIsDragging] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
   // Mirrors the BackendPicker's value so pi-only affordances (the DeepSeek
@@ -643,7 +676,7 @@ export function Composer({
         setAttachError(String(e));
       }
     }
-    if (next.length) setAttachments((prev) => [...prev, ...next]);
+    if (next.length) updateAttachments((prev) => [...prev, ...next]);
     if (referenced.length) insertPaths(referenced);
     // Only surface the size error when nothing salvaged the file by path.
     if (tooLarge) setAttachError(tooLarge);
@@ -661,7 +694,7 @@ export function Composer({
   }
 
   function removeAttachment(i: number) {
-    setAttachments((prev) => {
+    updateAttachments((prev) => {
       const dropped = prev[i];
       if (dropped?.type === "image") URL.revokeObjectURL(dropped.previewUrl);
       return prev.filter((_, idx) => idx !== i);
@@ -703,7 +736,7 @@ export function Composer({
     closeSlash();
     closeMention();
     // Drop refs to revoke after send completes — onSend may consume async.
-    setAttachments((prev) => {
+    updateAttachments((prev) => {
       prev.forEach((a) => a.type === "image" && URL.revokeObjectURL(a.previewUrl));
       return [];
     });
@@ -753,10 +786,10 @@ export function Composer({
         // clay orange, Codex a teal. Bash mode's tint wins while active.
         !bashMode &&
           backend === "claude-code" &&
-          "border-[#d97757]/60 ring-1 ring-[#d97757]/30 dark:border-[#d97757]/50",
+          "border-[#d97757]/60 dark:border-[#d97757]/50",
         !bashMode &&
           backend === "codex" &&
-          "border-[#10a37f]/60 ring-1 ring-[#10a37f]/30 dark:border-[#10a37f]/50",
+          "border-[#10a37f]/60 dark:border-[#10a37f]/50",
         variant === "hero" ? "bg-card p-2" : "bg-card p-1.5",
       )}
     >

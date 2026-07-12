@@ -322,16 +322,16 @@ const STICKY_BOTTOM_PX = 32;
 // nudge away from the latest message should not summon a floating control.
 const SCROLL_TO_BOTTOM_BUTTON_MIN_PX = 360;
 const SCROLL_TO_BOTTOM_BUTTON_VIEWPORT_RATIO = 0.5;
-// Extra rows Virtuoso keeps mounted above/below the viewport: NONE, on purpose.
-// Any positive overscan lets a single height correction during the open-at-end
+// Pre-render 800px above the viewport so older turns are ready during upward
+// reading, while keeping the streaming/bottom edge tight. Positive overscan can
+// let a single height correction during the open-at-end
 // seek (or a streaming growth spurt) mount whole extra turns in the same
 // commit; on conversations with huge turns those corrections chain into 50+
 // nested sync updates and React kills the tree ("Maximum update depth
 // exceeded" — the v0.3.14–v0.3.16 crash family). Every crashing configuration
-// observed had overscan > 0; zero overscan opened the same conversations
-// cleanly every time. The cost is an occasional blank flash on fast scroll —
-// cheap next to an unrenderable conversation.
-const OVERSCAN_PX = 0;
+// observed had overscan > 0, so keep this asymmetric: pre-render history, but
+// do not add mounting pressure at the streaming/bottom edge.
+const OVERSCAN_PX = { top: 800, bottom: 0 } as const;
 
 type MessageGroup =
   | { kind: "assistant"; keys: string[] }
@@ -426,6 +426,15 @@ function MessageList({
   // toolbar (selection root + scroll-to-dismiss). Held in state so its effects
   // re-run once the node exists.
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
+  // Keep the ref callback stable. An inline callback gets a new identity on
+  // every render, so React clears the old ref with `null` and attaches the new
+  // one again. Calling setState from both ref calls can recurse until React
+  // throws "Maximum update depth exceeded" while Virtuoso is settling a large
+  // conversation (especially in the faster production build).
+  const setScrollerRef = useCallback((el: HTMLElement | Window | null) => {
+    const next = el instanceof HTMLElement ? el : null;
+    setScroller((current) => (current === next ? current : next));
+  }, []);
   const [atBottom, setAtBottom] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const atBottomRef = useRef(true);
@@ -653,7 +662,7 @@ function MessageList({
         // position carried over from the previous conversation.
         key={convId ?? "new"}
         ref={virtuosoRef}
-        scrollerRef={(el) => setScroller((el as HTMLElement) ?? null)}
+        scrollerRef={setScrollerRef}
         data={items}
         data-testid="message-list"
         className="scrollbar-slim min-h-0 flex-1 overscroll-contain bg-background"
