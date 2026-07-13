@@ -134,11 +134,26 @@ fn claude_defaults(home: &Path) -> CliDefaults {
         std::fs::read_to_string(home.join(".claude/settings.json")).unwrap_or_default();
     let v: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
     let s = |key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_string);
+    // settings.json holds an explicit `model` only when the user pinned one; the
+    // `/model` picker instead persists its choice to ~/.claude.json's top-level
+    // `model`, so fall back there before giving up. Neither present → the user is
+    // on Claude Code's own adaptive default (labelled "Recommended" in the UI).
+    let model = s("model").or_else(|| claude_json_model(home));
     CliDefaults {
-        model: s("model"),
+        model,
         effort: s("effortLevel"),
         models: None,
     }
+}
+
+/// Top-level `model` from ~/.claude.json, where the `/model` picker persists an
+/// explicitly chosen default. Absent when the user stays on the recommended one.
+fn claude_json_model(home: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(home.join(".claude.json")).ok()?;
+    let v: Value = serde_json::from_str(&raw).ok()?;
+    v.get("model")
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
 }
 
 fn codex_defaults(home: &Path) -> CliDefaults {
@@ -213,6 +228,13 @@ fn toml_str_value(line: &str, key: &str) -> Option<String> {
 /// surfaced in the chat as a `cli_control_request` event. `response` is the
 /// inner permission result — `{"behavior":"allow","updatedInput":{...}}` or
 /// `{"behavior":"deny","message":"..."}` — written to the running turn's stdin.
+///
+/// A control request can arrive with NO turn registered: a Monitor/subagent
+/// completion wakes the CLI into a self-started continuation turn, and from
+/// Cetus's perspective the previous turn already settled. The persistent
+/// session child is still alive and reading stdin, so fall back to writing
+/// the response there — otherwise the answer is lost and the CLI blocks on
+/// the unanswered request forever.
 #[tauri::command]
 pub async fn cli_control_respond(
     state: State<'_, AppState>,
@@ -221,7 +243,14 @@ pub async fn cli_control_respond(
     response: Value,
 ) -> Result<(), String> {
     let line = cetus_bridge::cli_agent::claude_control_response_line(&request_id, &response);
-    state.cli_send_input(&id, line)
+    let turn_err = match state.cli_send_input(&id, line.clone()) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    match state.claude_session(&id) {
+        Some(session) => session.input(line).map_err(|e| e.to_string()),
+        None => Err(turn_err),
+    }
 }
 
 /// Where a conversation's CLI-turn image attachments live on disk. The CLIs
@@ -266,6 +295,30 @@ pub fn save_turn_images(
     out
 }
 
+/// Persist the user-visible message exactly once, whether it starts a fresh
+/// CLI turn or is injected into Claude's currently running turn as a steer.
+fn append_cli_user_message(
+    store: &Store,
+    conv: &Conversation,
+    message: &str,
+    images: &[crate::commands::ImageAttachment],
+) {
+    let mut content = vec![serde_json::json!({ "type": "text", "text": message })];
+    for img in images {
+        content.push(serde_json::json!({
+            "type": "image", "data": img.data, "mimeType": img.mime_type,
+        }));
+    }
+    store
+        .append_cli_message(
+            &conv.id,
+            &serde_json::json!({ "role": "user", "content": content }),
+            (!conv.session_file.is_empty()).then_some(conv.session_file.as_str()),
+            now_ms(),
+        )
+        .ok();
+}
+
 /// Run one turn of a CLI-backend conversation: isolate in a worktree (git
 /// repos), persist the user message, spawn the vendor CLI, stream its events
 /// over the `app-event` channel, and persist the outcome + resume token when it
@@ -284,14 +337,27 @@ pub fn dispatch_turn(
         .ok_or_else(|| format!("not a CLI backend: {}", conv.backend))?;
     let state = handle.state::<AppState>();
 
-    // A new prompt during a Claude turn uses the Agent SDK interrupt control
-    // request, then starts a fresh turn on the same persistent session. This
-    // preserves background Bash jobs while avoiding a race where a queued user
-    // message lands just after the prior result and loses its UI turn owner.
+    // Claude's bidirectional stream accepts user messages while a turn is
+    // running. Inject the steer instead of sending the SDK interrupt control:
+    // interrupt also cancels async Agent/Workflow tasks owned by the active
+    // turn. A turn already past `agent_end` can no longer read stdin, so wait
+    // for it to settle and dispatch a fresh resuming turn in that narrow race.
     if backend == cetus_bridge::cli_agent::CliBackend::ClaudeCode {
-        if let Some(done) = state.cli_interrupt_turn(&conv.id) {
-            redispatch_after_settle(handle, conv.id.clone(), message.to_string(), images, done);
-            return Ok(());
+        let image_blocks: Vec<(String, String)> = images
+            .iter()
+            .map(|img| (img.mime_type.clone(), img.data.clone()))
+            .collect();
+        let line = cetus_bridge::cli_agent::claude_user_message_line(message, &image_blocks);
+        match state.cli_steer(&conv.id, line) {
+            crate::CliSteer::Steered => {
+                append_cli_user_message(&state.store, conv, message, &images);
+                return Ok(());
+            }
+            crate::CliSteer::Closing(done) => {
+                redispatch_after_settle(handle, conv.id.clone(), message.to_string(), images, done);
+                return Ok(());
+            }
+            crate::CliSteer::Idle => {}
         }
     }
 
@@ -408,21 +474,7 @@ pub fn dispatch_turn(
     // restart (the handoff preamble is NOT persisted — it's rebuilt from the
     // transcript if ever needed again). `resume_before` snapshots the token
     // this turn resumes from — retry/fork restore to it to roll the turn back.
-    let mut content = vec![serde_json::json!({ "type": "text", "text": message })];
-    for img in &images {
-        content.push(serde_json::json!({
-            "type": "image", "data": img.data, "mimeType": img.mime_type,
-        }));
-    }
-    state
-        .store
-        .append_cli_message(
-            &conv.id,
-            &serde_json::json!({ "role": "user", "content": content }),
-            (!resume_before.is_empty()).then_some(resume_before.as_str()),
-            now_ms(),
-        )
-        .ok();
+    append_cli_user_message(&state.store, conv, message, &images);
 
     let opts = cetus_bridge::cli_agent::CliRunOpts {
         // Per-conversation model + effort overrides; empty → the CLI's own
@@ -450,6 +502,25 @@ pub fn dispatch_turn(
             None => {
                 let base_sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
                     std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(handle.clone()));
+                // Self-started continuation turns (Monitor/subagent wake-ups)
+                // stream with no registered turn, so no CliTurnOutcome ever
+                // carries their messages — persist them as they settle, or
+                // they'd exist only in the CLI's session file and vanish from
+                // the Cetus transcript on restart.
+                let (orphan_tx, mut orphan_rx) =
+                    tokio::sync::mpsc::unbounded_channel::<Vec<serde_json::Value>>();
+                {
+                    let store = state.store.clone();
+                    let conv_id = conv.id.clone();
+                    tauri::async_runtime::spawn(async move {
+                        while let Some(messages) = orphan_rx.recv().await {
+                            let ts = now_ms();
+                            for message in &messages {
+                                store.append_cli_message(&conv_id, message, None, ts).ok();
+                            }
+                        }
+                    });
+                }
                 let session = match cetus_bridge::cli_agent::spawn_claude_session(
                     base_sink,
                     &bin,
@@ -457,6 +528,7 @@ pub fn dispatch_turn(
                     Some(conv.id.clone()),
                     env,
                     opts,
+                    Some(orphan_tx),
                 ) {
                     Ok(session) => session,
                     Err(error) => {

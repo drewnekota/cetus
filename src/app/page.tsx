@@ -74,7 +74,9 @@ import {
   type AppEvent,
   type Automation,
   type AutomationInput,
+  type CliBackgroundTask,
   type CliControlRequest,
+  type CliSlashCommand,
   type Conversation,
   type ExtensionUIRequest,
   type ModelChoice,
@@ -87,6 +89,7 @@ import {
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
 import { loadBackendChoice, saveBackendChoice } from "@/lib/backend-choice";
 import { composeWithContext } from "@/lib/quick-context";
+import { useConversationAutoSort } from "@/lib/conversation-order";
 import {
   KEYBOARD_SHORTCUTS_EVENT,
   KEYBOARD_SHORTCUTS_STORAGE_KEY,
@@ -349,6 +352,7 @@ function createInitialWorkspaceDocksByChat(): WorkspaceDocksByChatState {
 
 export default function Home() {
   useZoom();
+  const autoSortConversations = useConversationAutoSort();
   const initialViewStateRef = useRef<PersistedAppViewState | null>(null);
   if (initialViewStateRef.current === null) {
     initialViewStateRef.current = readAppViewState();
@@ -448,7 +452,19 @@ export default function Home() {
   const [defaultWorkspace, setDefaultWorkspace] = useState<string>("");
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
   const [hiddenWorkspaces, setHiddenWorkspaces] = useState<string[]>([]);
+  // A hidden workspace can still receive a fresh automation conversation.
+  // Surface it for as long as that workspace has active chats, without changing
+  // the user's persisted recent/hidden workspace preferences.
+  const [temporaryWorkspaces, setTemporaryWorkspaces] = useState<string[]>([]);
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
+
+  // Once the last active chat in a temporary workspace is archived, remove the
+  // empty folder from the sidebar naturally.
+  useEffect(() => {
+    setTemporaryWorkspaces((dirs) =>
+      dirs.filter((dir) => conversations.some((c) => c.workspaceDir === dir)),
+    );
+  }, [conversations]);
   const [settingsOpen, setSettingsOpen] = useState(
     initialViewState.settingsOpen === true,
   );
@@ -660,11 +676,19 @@ export default function Home() {
     () =>
       groupByWorkspace(
         conversations,
-        recentWorkspaces,
-        hiddenWorkspaces,
+        [...recentWorkspaces, ...temporaryWorkspaces],
+        hiddenWorkspaces.filter((dir) => !temporaryWorkspaces.includes(dir)),
         defaultWorkspace,
+        autoSortConversations,
       ).flatMap((g) => g.items.map((c) => c.id)),
-    [conversations, recentWorkspaces, hiddenWorkspaces, defaultWorkspace],
+    [
+      conversations,
+      recentWorkspaces,
+      hiddenWorkspaces,
+      temporaryWorkspaces,
+      defaultWorkspace,
+      autoSortConversations,
+    ],
   );
   const orderedChatIdsRef = useRef<string[]>([]);
   orderedChatIdsRef.current = orderedChatIds;
@@ -728,29 +752,31 @@ export default function Home() {
     convId: string,
     text: string,
     attachments: ComposerAttachment[],
+    beforeIds: string[] = [],
   ) {
     const id =
       typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
         : `q-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
-    setQueued((q) => ({
-      ...q,
-      [convId]: [...(q[convId] ?? []), { id, text, attachments }],
-    }));
+    setQueued((q) => {
+      const current = q[convId] ?? [];
+      const beforeIndex = current.findIndex((item) => beforeIds.includes(item.id));
+      const insertAt = beforeIndex < 0 ? current.length : beforeIndex;
+      return {
+        ...q,
+        [convId]: [
+          ...current.slice(0, insertAt),
+          { id, text, attachments },
+          ...current.slice(insertAt),
+        ],
+      };
+    });
   }
 
   function removeQueued(convId: string, id: string) {
     setQueued((q) => ({
       ...q,
       [convId]: (q[convId] ?? []).filter((m) => m.id !== id),
-    }));
-  }
-
-  /** Rewrite a queued message's text in place (attachments are kept as-is). */
-  function editQueued(convId: string, id: string, text: string) {
-    setQueued((q) => ({
-      ...q,
-      [convId]: (q[convId] ?? []).map((m) => (m.id === id ? { ...m, text } : m)),
     }));
   }
 
@@ -956,8 +982,10 @@ export default function Home() {
                 `pi exited (code ${evt.code ?? "n/a"})`,
               );
               // The child is gone; any control request it was waiting on can
-              // never be answered, so drop the card.
+              // never be answered, so drop the card — and it owned every live
+              // background task (monitors, async agents), so clear the strip.
               store.clearControlRequest(evt.conversationId);
+              store.setBackgroundTasks(evt.conversationId, []);
               // Close out any live run so a trailing agent_end can't double-fire.
               if (r) r.running = false;
               dispatchNotification("task_finished", {
@@ -971,14 +999,35 @@ export default function Home() {
           case "pi_event": {
             const cid = evt.conversationId;
             // extension_ui_request → DialogHost; cli_control_request → the
-            // CliControlCard in the chat pane. Neither belongs in the reducer.
+            // CliControlCard in the chat pane; cli_background_tasks → the
+            // task strip. None of these belong in the reducer.
             const eventType = evt.event.type as string;
             if (
               evt.event.type !== "extension_ui_request" &&
               eventType !== "cli_control_request" &&
+              eventType !== "cli_background_tasks" &&
+              eventType !== "cli_commands" &&
               cid
             ) {
               store.piEvent(cid, evt.event);
+            }
+            // The CLI session's slash-command catalog (initialize ack) — the
+            // composer's slash menu reads it back per conversation.
+            if (cid && eventType === "cli_commands") {
+              store.setCliCommands(
+                cid,
+                (evt.event as unknown as { commands?: CliSlashCommand[] }).commands ?? [],
+              );
+            }
+            // Live background tasks (Monitors, async agents, background Bash)
+            // owned by the conversation's CLI session. Standing state — they
+            // outlive model turns, so the bridge streams the full set on every
+            // change (empty when the session process exits).
+            if (cid && eventType === "cli_background_tasks") {
+              store.setBackgroundTasks(
+                cid,
+                (evt.event as unknown as { tasks?: CliBackgroundTask[] }).tasks ?? [],
+              );
             }
             // A claude-code control request (permission prompt / AskUserQuestion)
             // is parked in the store — captured here in the app's single
@@ -1043,6 +1092,11 @@ export default function Home() {
             // An automation minted a fresh conversation and started streaming.
             setAutomations((as) => mergeAutomation(as, evt.automation));
             setConversations((cs) => mergeConversation(cs, evt.conversation));
+            setTemporaryWorkspaces((dirs) =>
+              dirs.includes(evt.conversation.workspaceDir)
+                ? dirs
+                : [...dirs, evt.conversation.workspaceDir],
+            );
             break;
           case "meeting_event": {
             // Meeting capture lifecycle → localized OS notification. "started"
@@ -1245,10 +1299,7 @@ export default function Home() {
     });
   }, [activeId, view]);
 
-  // Global keyboard shortcuts (parallels macOS app conventions). App-level
-  // shortcuts are user-configurable in Settings; Cmd/Ctrl+R remains fixed as a
-  // recovery escape hatch.
-  //   ⌘R    — reload the webview (works even behind a modal)
+  // Global keyboard shortcuts (parallels macOS app conventions).
   //   ⌘K    — command palette
   //   ⌘N    — new chat / new board task
   //   ⌘D    — archive current conversation
@@ -1271,26 +1322,10 @@ export default function Home() {
     const onKey = (e: KeyboardEvent) => {
       const shortcut = (id: keyof typeof keyboardShortcuts) =>
         matchesShortcut(e, keyboardShortcuts[id]);
-      // ⌘R / Ctrl+R — reload the webview. Tauri binds no reload shortcut and
-      // cetus has no app menu, so wire it here (focus-scoped to this window, so
-      // it doesn't hijack ⌘R system-wide the way a global shortcut would).
-      // Handled before the modal guard so it's a true escape hatch even with a
-      // dialog open; reloading also clears in-memory store state, which is
-      // sometimes the only way out of a wedged render.
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.altKey &&
-        !e.shiftKey &&
-        e.key.toLowerCase() === "r"
-      ) {
-        e.preventDefault();
-        window.location.reload();
-        return;
-      }
       // ⌘K / Ctrl+K — the command palette is a global launcher: openable from
-      // anywhere. Handled before the modal guard (like ⌘R) so an open dialog
-      // doesn't swallow it; it stacks over whatever's showing and owns its own
-      // Esc to close. Toggles, so a second ⌘K dismisses it.
+      // anywhere. Handled before the modal guard so an open dialog doesn't
+      // swallow it; it stacks over whatever's showing and owns its own Esc to
+      // close. Toggles, so a second ⌘K dismisses it.
       if (shortcut("commandPalette")) {
         e.preventDefault();
         setPaletteOpen((v) => !v);
@@ -2331,12 +2366,25 @@ export default function Home() {
   // optimistic user bubble, so route the payload through the normal send path.
   async function quickLaunch(p: QuickLaunchPayload) {
     setView("chat");
-    const localImages = p.image
-      ? [{ dataUrl: `data:${p.image.mimeType};base64,${p.image.data}`, name: "Screenshot.jpg" }]
-      : [];
-    const images = p.image
-      ? [{ type: "image" as const, data: p.image.data, mimeType: p.image.mimeType }]
-      : [];
+    const attachments: ComposerAttachment[] = [
+      ...(p.image
+        ? [{
+            type: "image" as const,
+            data: p.image.data,
+            mimeType: p.image.mimeType,
+            name: "Screenshot.jpg",
+            previewUrl: `data:${p.image.mimeType};base64,${p.image.data}`,
+          }]
+        : []),
+      ...(p.attachments ?? []).map((attachment) =>
+        attachment.type === "image"
+          ? {
+              ...attachment,
+              previewUrl: `data:${attachment.mimeType};base64,${attachment.data}`,
+            }
+          : attachment,
+      ),
+    ];
 
     // Adopt the model + Ultra choice the launcher made so the composer and the
     // launched conversation agree. Ultra is a global switch the launcher already
@@ -2390,10 +2438,18 @@ export default function Home() {
     // model reads it as environment data, the bubble renders it as a chip. One
     // composed string drives both the optimistic render and the model send.
     const composed = composeWithContext(p.text, p.context);
-    store.userSent(convId, composed, localImages);
+    let out: Awaited<ReturnType<typeof prepareOutgoing>>;
+    try {
+      out = await prepareOutgoing(convId, composed, attachments);
+    } catch (e) {
+      store.ensure(convId);
+      chatStore.getState().setError(convId, String(e));
+      return;
+    }
+    store.userSent(convId, composed, out.localImages, out.savedFiles);
     setFocusToken((t) => t + 1);
     try {
-      await api.sendPrompt(convId, composed, images);
+      await api.sendPrompt(convId, out.piMessage, out.piImages);
     } catch (e) {
       chatStore.getState().setError(convId, String(e));
     }
@@ -2823,6 +2879,9 @@ export default function Home() {
       return;
     }
     setConversations((cs) => mergeConversation(cs, conv));
+    setTemporaryWorkspaces((dirs) =>
+      dirs.includes(conv.workspaceDir) ? dirs : [...dirs, conv.workspaceDir],
+    );
     setModelChoice(conv.model);
     setWorkspaceDir(conv.workspaceDir);
     // Seed the prompt bubble so onSelect takes the client-side fast path and
@@ -2926,17 +2985,14 @@ export default function Home() {
         onRetry={onDetailRetry}
         retrying={retrying}
         queued={detailId ? queued[detailId] : undefined}
-        onQueue={(text, atts) => {
-          if (detailId) enqueueMessage(detailId, text, atts);
+        onQueue={(text, atts, beforeIds) => {
+          if (detailId) enqueueMessage(detailId, text, atts, beforeIds);
         }}
         onSteerQueued={
           detailConvBackend && !backendSupportsSteer(detailConvBackend)
             ? undefined
             : (id) => steerQueuedDetail(id)
         }
-        onEditQueued={(id, text) => {
-          if (detailId) editQueued(detailId, id, text);
-        }}
         onRemoveQueued={(id) => {
           if (detailId) removeQueued(detailId, id);
         }}
@@ -2997,8 +3053,10 @@ export default function Home() {
         activeId={activeId}
         streamingIds={streamingIds}
         unreadCompletedIds={unreadCompletedIds}
-        workspaceDirs={recentWorkspaces}
-        hiddenWorkspaceDirs={hiddenWorkspaces}
+        workspaceDirs={[...recentWorkspaces, ...temporaryWorkspaces]}
+        hiddenWorkspaceDirs={hiddenWorkspaces.filter(
+          (dir) => !temporaryWorkspaces.includes(dir),
+        )}
         defaultWorkspace={defaultWorkspace}
         view={view}
         onViewChange={setView}
@@ -3119,8 +3177,8 @@ export default function Home() {
                 }}
                 retrying={retrying}
                 queued={activeId ? queued[activeId] : undefined}
-                onQueue={(text, atts) => {
-                  if (activeId) enqueueMessage(activeId, text, atts);
+                onQueue={(text, atts, beforeIds) => {
+                  if (activeId) enqueueMessage(activeId, text, atts, beforeIds);
                 }}
                 onSteerQueued={
                   // pi steers via RPC, claude-code over stdin, and codex uses
@@ -3132,9 +3190,6 @@ export default function Home() {
                         if (activeId) steerQueued(activeId, id);
                       }
                 }
-                onEditQueued={(id, text) => {
-                  if (activeId) editQueued(activeId, id, text);
-                }}
                 onRemoveQueued={(id) => {
                   if (activeId) removeQueued(activeId, id);
                 }}

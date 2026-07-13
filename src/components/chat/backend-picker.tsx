@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { loadCliTuningChoice, saveCliTuningChoice } from "@/lib/backend-choice";
 import {
   matchesShortcut,
   shortcutDisplay,
@@ -220,7 +221,11 @@ export function CliTuningMenu({
   const efforts = CLI_EFFORTS[backend];
   const curModel = models.find((m) => m.id === model) ?? models[0];
   const curEffort = efforts.find((e) => e.id === effort) ?? efforts[0];
-  const defaultModelLabel = resolveDefaultLabel(defaults?.model, models);
+  // Claude Code's adaptive default has no fixed model id to echo; label it
+  // "Recommended" (its own wording) so the row never reads a bare "Default".
+  const defaultModelLabel =
+    resolveDefaultLabel(defaults?.model, models) ??
+    (backend === "claude-code" ? "Recommended" : null);
   const defaultEffortLabel = resolveDefaultLabel(defaults?.effort, efforts);
   // Menu rows spell the resolution out ("Default (Fable)"); the compact
   // trigger shows the resolved name directly.
@@ -377,18 +382,20 @@ export function BackendPicker({
     const b = BACKENDS.find((x) => x.id === id);
     if (!b) return;
     const prev = backend;
+    const previousTuning = { model: cliModel, effort: cliEffort };
+    const tuning = b.id === "pi"
+      ? { model: "", effort: "" }
+      : loadCliTuningChoice(b.id);
     setBackend(b.id);
-    // Model/effort overrides belong to one backend's catalog; switching
-    // backends resets both to that CLI's defaults. Only here (a user pick) —
-    // resetting on the load path would clobber a hydrated pending choice.
-    setCliModel("");
-    setCliEffort("");
+    setCliModel(tuning.model);
+    setCliEffort(tuning.effort);
+    if (b.id !== "pi") saveCliTuningChoice(b.id, tuning);
     if (conversationId) {
       const convId = conversationId;
       api
         .setConversationBackend(convId, b.id)
         .then(() => {
-          api.setConversationCliModel(convId, "", "").catch(() => {});
+          api.setConversationCliModel(convId, tuning.model, tuning.effort).catch(() => {});
           // Mirror the audit divider the backend just persisted, so the switch
           // is visible in the open transcript without a reload. Skip empty
           // conversations (backend skips the marker there too, and a divider
@@ -402,15 +409,21 @@ export function BackendPicker({
           // Refused (e.g. a turn is still running) — roll the picker back so
           // it keeps showing the runtime that actually serves the conversation.
           setBackend(prev);
+          setCliModel(previousTuning.model);
+          setCliEffort(previousTuning.effort);
           toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
         });
     } else {
-      onPendingTuningChange?.("", "");
+      onPendingTuningChange?.(tuning.model, tuning.effort);
     }
   }
 
   function selectModel(model: string) {
     setCliModel(model);
+    saveCliTuningChoice(shown as Exclude<BackendId, "pi">, {
+      model,
+      effort: cliEffort,
+    });
     if (conversationId) {
       api.setConversationCliModel(conversationId, model, cliEffort).catch(() => {});
     }
@@ -418,6 +431,10 @@ export function BackendPicker({
 
   function selectEffort(effort: string) {
     setCliEffort(effort);
+    saveCliTuningChoice(shown as Exclude<BackendId, "pi">, {
+      model: cliModel,
+      effort,
+    });
     if (conversationId) {
       api.setConversationCliModel(conversationId, cliModel, effort).catch(() => {});
     }

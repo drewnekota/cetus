@@ -1,5 +1,5 @@
 "use client";
-import { ChevronDown, ChevronRight, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, CheckCircle2, AlertCircle } from "lucide-react";
 import type { RenderedBlock } from "@/lib/types";
 import { useTranslation } from "@/lib/i18n";
 import { useDisclosure } from "@/lib/disclosure";
@@ -47,7 +47,7 @@ export function ActivityGroup({
           <ChevronRight className="h-3.5 w-3.5 shrink-0" />
         )}
         {running ? (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+          <ActivitySpinner />
         ) : hasError ? (
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning" />
         ) : (
@@ -83,6 +83,32 @@ export function ActivityGroup({
         </div>
       )}
     </div>
+  );
+}
+
+/** Keep the circular silhouette stationary and rotate only its highlight.
+ *  Rotating Lucide's asymmetric 14px arc makes its rasterized visual centre
+ *  appear to orbit, which reads as a subtle vertical wobble. */
+function ActivitySpinner() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5 shrink-0"
+      fill="none"
+    >
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeDasharray="14 43"
+        className="animate-spinner-dash"
+      />
+    </svg>
   );
 }
 

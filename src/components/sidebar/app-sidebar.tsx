@@ -77,6 +77,7 @@ import { shortcutDisplay, useKeyboardShortcuts } from "@/lib/keyboard-shortcuts"
 import { workspaceName } from "@/lib/paths";
 import { formatFullDateTime } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/conversation-search";
+import { useConversationAutoSort } from "@/lib/conversation-order";
 import type { Conversation } from "@/lib/types";
 
 interface Props {
@@ -145,6 +146,7 @@ export const AppSidebar = memo(function AppSidebar({
     [shortcuts],
   );
   const { width, startResize, resetWidth } = useSidebarWidth();
+  const autoSortConversations = useConversationAutoSort();
   const groups = useMemo(
     () =>
       groupByWorkspace(
@@ -152,8 +154,15 @@ export const AppSidebar = memo(function AppSidebar({
         workspaceDirs,
         hiddenWorkspaceDirs,
         defaultWorkspace,
+        autoSortConversations,
       ),
-    [conversations, workspaceDirs, hiddenWorkspaceDirs, defaultWorkspace],
+    [
+      conversations,
+      workspaceDirs,
+      hiddenWorkspaceDirs,
+      defaultWorkspace,
+      autoSortConversations,
+    ],
   );
   const chatGroups = groups;
   // The default workspace surfaces as the standalone "Chat" section, pinned
@@ -1059,6 +1068,7 @@ export function groupByWorkspace(
   workspaceDirs: string[],
   hiddenWorkspaceDirs: string[],
   defaultWorkspace: string,
+  autoSortConversations = true,
 ): { dir: string; items: Conversation[] }[] {
   const order: string[] = [];
   const map = new Map<string, Conversation[]>();
@@ -1077,6 +1087,13 @@ export function groupByWorkspace(
   for (const c of items) {
     ensure(c.workspaceDir);
     map.get(c.workspaceDir)?.push(c);
+  }
+  if (!autoSortConversations) {
+    for (const conversations of map.values()) {
+      conversations.sort(
+        (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+      );
+    }
   }
   return order.map((dir) => ({ dir, items: map.get(dir)! }));
 }

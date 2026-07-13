@@ -90,9 +90,11 @@ export const chat = {
     "cliControl.otherPlaceholder": "Other — type your own answer…",
     "cliControl.denyMessage": "The user denied this action.",
     "cliControl.notifyTitle": "The agent needs your input",
+    "cliControl.respondFailed":
+      "Couldn't deliver your answer to the agent — try again.",
     "pane.worktree.tooltip":
       "This agent's changes land on an isolated worktree branch. Click to open the folder:\n{path}",
-    "pane.backgroundAgents.title": "{count} background agent(s) running",
+    "pane.backgroundAgents.title": "{count} background task(s) running",
     "pane.backgroundAgents.more": " +{count} more",
     "pane.retrying": "Retrying…",
     "pane.loadEarlier": "Load earlier messages",
@@ -268,6 +270,9 @@ export const chat = {
     "cliControl.otherPlaceholder": "其他——输入你自己的回答…",
     "cliControl.denyMessage": "The user denied this action.",
     "cliControl.notifyTitle": "智能体需要你的输入",
+    "cliControl.respondFailed": "答案没能送达智能体——请重试。",
+    "pane.backgroundAgents.title": "{count} 个后台任务运行中",
+    "pane.backgroundAgents.more": "，还有 {count} 个",
     "pane.worktree.tooltip": "该智能体的改动落在独立的 worktree 分支上。点击打开文件夹：\n{path}",
     "pane.retrying": "重试中…",
     "pane.loadEarlier": "加载更早的消息",

@@ -775,6 +775,8 @@ pub async fn quick_dismiss(app: AppHandle) -> Result<(), String> {
 pub struct QuickSubmit {
     pub text: String,
     pub image: Option<Screenshot>,
+    #[serde(default)]
+    pub attachments: Vec<serde_json::Value>,
     pub session_mode: String,
     /// Repo the launched task should run in; None → main window's default.
     pub workspace_dir: Option<String>,
@@ -794,6 +796,8 @@ pub struct QuickSubmit {
     /// CLI backends' model override; empty → the CLI's own default.
     #[serde(default)]
     pub cli_model: String,
+    #[serde(default)]
+    pub cli_effort: String,
 }
 
 /// Hand the captured prompt to the main window, bring it forward, hide the
@@ -807,6 +811,7 @@ pub async fn quick_submit(app: AppHandle, payload: QuickSubmit) -> Result<(), St
         serde_json::json!({
             "text": payload.text,
             "image": payload.image,
+            "attachments": payload.attachments,
             "sessionMode": payload.session_mode,
             "workspaceDir": payload.workspace_dir,
             "model": payload.model,
@@ -815,6 +820,7 @@ pub async fn quick_submit(app: AppHandle, payload: QuickSubmit) -> Result<(), St
             "context": payload.context,
             "backend": payload.backend,
             "cliModel": payload.cli_model,
+            "cliEffort": payload.cli_effort,
         }),
     );
     // Routes through `focus_main` so a parked (warm off-screen) main window is

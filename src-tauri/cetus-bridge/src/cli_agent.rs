@@ -350,6 +350,21 @@ impl BackgroundTask {
     }
 }
 
+/// Human task kind from a claude task event or `background_tasks_changed`
+/// list item: the subagent type when present, else the task_type (with the
+/// CLI's `local_bash` — background Bash AND Monitor scripts — shown as
+/// "Bash").
+fn task_kind(v: &Value) -> String {
+    v.get("subagent_type")
+        .and_then(|t| t.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| match v.get("task_type").and_then(|t| t.as_str()) {
+            Some("local_bash") => "Bash".to_string(),
+            Some(kind) if !kind.is_empty() => kind.to_string(),
+            _ => "Task".to_string(),
+        })
+}
+
 /// One line summarizing a subagent tool call's input — the field that carries
 /// the "what" of the call, mirroring the frontend's summarizeArgs.
 fn summarize_tool_input(input: &Value) -> String {
@@ -659,6 +674,16 @@ impl EventTranslator {
     /// Just the tool_execution_end (+ transcript row) — for flows that already
     /// emitted tool_execution_start when the tool began running.
     fn emit_tool_result_end(&mut self, id: &str, content: &Value, is_error: bool) -> Vec<Value> {
+        self.emit_tool_result_end_with_details(id, content, Value::Null, is_error)
+    }
+
+    fn emit_tool_result_end_with_details(
+        &mut self,
+        id: &str,
+        content: &Value,
+        details: Value,
+        is_error: bool,
+    ) -> Vec<Value> {
         let content = normalize_content(content);
         // A result closes the assistant segment that issued the call, matching
         // the assistant / toolResult interleaving of a pi transcript.
@@ -668,12 +693,13 @@ impl EventTranslator {
             "toolCallId": id,
             "toolName": self.tool_names.get(id).cloned().unwrap_or_else(|| "tool".to_string()),
             "content": content,
+            "details": details.clone(),
             "isError": is_error,
         }));
         vec![json!({
             "type": "tool_execution_end",
             "toolCallId": id,
-            "result": { "content": content, "details": Value::Null },
+            "result": { "content": content, "details": details },
             "isError": is_error,
         })]
     }
@@ -823,10 +849,81 @@ impl EventTranslator {
         })]
     }
 
+    /// The CLI's own authoritative list of live session-owned background
+    /// tasks (`background_tasks_changed`, fires whenever the set changes).
+    /// Translated straight into the frontend snapshot — after a resume this
+    /// is the only source that knows what the fresh process still owns, our
+    /// registry having started empty. `statusText` merges in from the
+    /// registry where the task is one we tracked from `task_started`.
+    fn on_claude_background_tasks_changed(&self, v: &Value) -> Vec<Value> {
+        let Some(items) = v.get("tasks").and_then(|t| t.as_array()) else {
+            return Vec::new();
+        };
+        let tasks: Vec<Value> = items
+            .iter()
+            .filter_map(|item| {
+                let id = item.get("task_id").and_then(|t| t.as_str())?;
+                let status_text = self
+                    .background_tasks
+                    .get(id)
+                    .map(|t| t.status_text.clone())
+                    .unwrap_or_default();
+                Some(json!({
+                    "taskId": id,
+                    "kind": task_kind(item),
+                    "description": item
+                        .get("description")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("background task"),
+                    "statusText": status_text,
+                }))
+            })
+            .collect();
+        vec![json!({ "type": "cli_background_tasks", "tasks": tasks })]
+    }
+
+    /// Live (not yet settled) background tasks — Monitors, async
+    /// agents/workflows, background Bash — as the frontend's task strip
+    /// renders them. Sorted by task id so equal registries compare equal.
+    fn background_tasks_snapshot(&self) -> Value {
+        let mut live: Vec<(&String, &BackgroundTask)> = self
+            .background_tasks
+            .iter()
+            .filter(|(_, t)| !t.done)
+            .collect();
+        live.sort_by(|a, b| a.0.cmp(b.0));
+        Value::Array(
+            live.into_iter()
+                .map(|(id, t)| {
+                    json!({
+                        "taskId": id,
+                        "kind": t.subagent_type,
+                        "description": t.description,
+                        "statusText": t.status_text,
+                    })
+                })
+                .collect(),
+        )
+    }
+
     /// Background-task lifecycle system events (claude). Progress is painted
     /// onto the launching Agent/Task tool card via tool_execution_update; the
     /// notification settles the card and releases the turn (has_pending_tasks).
+    /// Any change to the set of live tasks additionally emits a conversation-
+    /// level `cli_background_tasks` snapshot: these tasks outlive model turns
+    /// (a Monitor can wake the CLI hours later), so the frontend needs standing
+    /// state, not just paint on the launching card.
     fn on_claude_task_event(&mut self, subtype: &str, v: &Value) -> Vec<Value> {
+        let before = self.background_tasks_snapshot();
+        let mut events = self.on_claude_task_event_inner(subtype, v);
+        let after = self.background_tasks_snapshot();
+        if before != after {
+            events.push(json!({ "type": "cli_background_tasks", "tasks": after }));
+        }
+        events
+    }
+
+    fn on_claude_task_event_inner(&mut self, subtype: &str, v: &Value) -> Vec<Value> {
         let task_id = v.get("task_id").and_then(|t| t.as_str()).unwrap_or("");
         if task_id.is_empty() {
             return Vec::new();
@@ -837,15 +934,7 @@ impl EventTranslator {
                 if !tool_use_id.is_empty() {
                     self.background_tasks.insert(task_id.to_string(), BackgroundTask {
                         tool_use_id: tool_use_id.to_string(),
-                        subagent_type: v
-                            .get("subagent_type")
-                            .and_then(|t| t.as_str())
-                            .map(str::to_string)
-                            .unwrap_or_else(|| match v.get("task_type").and_then(|t| t.as_str()) {
-                                Some("local_bash") => "Bash".to_string(),
-                                Some(kind) if !kind.is_empty() => kind.to_string(),
-                                _ => "Task".to_string(),
-                            }),
+                        subagent_type: task_kind(v),
                         description: v
                             .get("description")
                             .and_then(|t| t.as_str())
@@ -962,6 +1051,7 @@ impl EventTranslator {
                     }
                     sub @ ("task_started" | "task_progress" | "task_updated"
                     | "task_notification") => self.on_claude_task_event(sub, v),
+                    "background_tasks_changed" => self.on_claude_background_tasks_changed(v),
                     _ => Vec::new(),
                 }
             }
@@ -1030,8 +1120,39 @@ impl EventTranslator {
                     "suggestions": req.get("permission_suggestions").cloned().unwrap_or(Value::Null),
                 })]
             }
-            // Ack of our initialize handshake — nothing to do.
-            "control_response" => Vec::new(),
+            // Ack of our initialize handshake. It carries the CLI's slash
+            // command catalog (built-ins like /usage /compact /context plus
+            // every skill) — surface it so the composer's slash menu can offer
+            // the runtime's real commands instead of a hardcoded snapshot.
+            // Entries suffixed "(user)" / "(project)" are skills, which the
+            // menu already lists from its own skill sources — the frontend
+            // filters; we forward the catalog verbatim.
+            "control_response" => {
+                let Some(commands) = v
+                    .pointer("/response/response/commands")
+                    .and_then(|c| c.as_array())
+                else {
+                    return Vec::new();
+                };
+                let commands: Vec<Value> = commands
+                    .iter()
+                    .filter_map(|c| {
+                        let name = c.get("name").and_then(|n| n.as_str())?;
+                        Some(json!({
+                            "name": name,
+                            "description": c
+                                .get("description")
+                                .and_then(|d| d.as_str())
+                                .unwrap_or(""),
+                            "argumentHint": c
+                                .get("argumentHint")
+                                .and_then(|d| d.as_str())
+                                .unwrap_or(""),
+                        }))
+                    })
+                    .collect();
+                vec![json!({ "type": "cli_commands", "commands": commands })]
+            }
             "user" => {
                 // Sidechain traffic: a subagent's internal tool results. They
                 // reference tool ids the frontend never saw, and emitting them
@@ -1246,7 +1367,56 @@ impl EventTranslator {
                     Some(i) => i,
                     None => return Vec::new(),
                 };
-                if item.get("type").and_then(|t| t.as_str()) != Some("command_execution") {
+                let item_ty = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if item_ty == "collab_agent_tool_call" {
+                    if item.get("tool").and_then(|t| t.as_str()) != Some("spawnAgent") {
+                        return Vec::new();
+                    }
+                    let id = item.get("id").and_then(|t| t.as_str()).unwrap_or("item");
+                    let Some(thread_id) = item
+                        .get("receiver_thread_ids")
+                        .and_then(Value::as_array)
+                        .and_then(|ids| ids.first())
+                        .and_then(Value::as_str)
+                    else {
+                        return Vec::new();
+                    };
+                    let description = item
+                        .get("prompt")
+                        .and_then(Value::as_str)
+                        .unwrap_or("background task")
+                        .to_string();
+                    let subagent_type = item
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Codex")
+                        .to_string();
+                    let task = BackgroundTask {
+                        tool_use_id: id.to_string(),
+                        subagent_type,
+                        description: description.clone(),
+                        done: false,
+                        steps: Vec::new(),
+                        status_text: String::new(),
+                    };
+                    self.background_tasks.insert(thread_id.to_string(), task.clone());
+                    let mut out = self.emit_tool_call(
+                        id,
+                        "Agent",
+                        &json!({ "prompt": description, "threadId": thread_id }),
+                    );
+                    out.push(json!({ "type": "tool_execution_start", "toolCallId": id }));
+                    out.push(json!({
+                        "type": "tool_execution_update",
+                        "toolCallId": id,
+                        "partialResult": {
+                            "content": [{ "type": "text", "text": "Agent running in background" }],
+                            "details": task.details("running"),
+                        },
+                    }));
+                    return out;
+                }
+                if item_ty != "command_execution" {
                     return Vec::new();
                 }
                 let id = item.get("id").and_then(|t| t.as_str()).unwrap_or("item");
@@ -1317,6 +1487,55 @@ impl EventTranslator {
                         let mut out = self.emit_tool_call(id, name, &args);
                         let result = item.get("result").cloned().unwrap_or(Value::Null);
                         out.extend(self.emit_tool_result(id, &result, false));
+                        out
+                    }
+                    "collab_agent_tool_call" => {
+                        let Some(states) = item.get("agents_states").and_then(Value::as_object)
+                        else {
+                            return Vec::new();
+                        };
+                        let mut out = Vec::new();
+                        for (thread_id, state) in states {
+                            let Some(task) = self.background_tasks.get_mut(thread_id) else {
+                                continue;
+                            };
+                            if task.done {
+                                continue;
+                            }
+                            let status = state
+                                .get("status")
+                                .and_then(Value::as_str)
+                                .unwrap_or("running");
+                            let terminal = matches!(
+                                status,
+                                "completed" | "interrupted" | "errored" | "shutdown" | "notFound"
+                            );
+                            task.done = terminal;
+                            let task = task.clone();
+                            let text = state
+                                .get("message")
+                                .and_then(Value::as_str)
+                                .filter(|s| !s.trim().is_empty())
+                                .map(str::to_string)
+                                .unwrap_or_else(|| format!("{} agent {status}", task.subagent_type));
+                            if terminal {
+                                out.extend(self.emit_tool_result_end_with_details(
+                                    &task.tool_use_id,
+                                    &json!(text),
+                                    task.details(status),
+                                    status != "completed",
+                                ));
+                            } else {
+                                out.push(json!({
+                                    "type": "tool_execution_update",
+                                    "toolCallId": task.tool_use_id,
+                                    "partialResult": {
+                                        "content": [{ "type": "text", "text": text }],
+                                        "details": task.details("running"),
+                                    },
+                                }));
+                            }
+                        }
                         out
                     }
                     "error" => {
@@ -1506,6 +1725,11 @@ pub fn spawn_claude_session(
     conversation_id: Option<String>,
     extra_env: Vec<(String, String)>,
     opts: CliRunOpts,
+    // Persistence channel for messages of SELF-STARTED continuation turns
+    // (a Monitor/subagent wake-up streams with no registered turn, so no
+    // CliTurnOutcome ever carries them; without this they exist only in the
+    // CLI's own session file and vanish from Cetus on restart).
+    orphan_messages: Option<tokio::sync::mpsc::UnboundedSender<Vec<Value>>>,
 ) -> Result<ClaudeSessionHandle> {
     let args = CliBackend::ClaudeCode.turn_args("", &opts);
     let mut cmd = TokioCommand::new(bin);
@@ -1577,6 +1801,17 @@ pub fn spawn_claude_session(
                             });
                             continue;
                         }
+                        // A continuation turn may still be mid-flight (e.g.
+                        // blocked on an AskUserQuestion) — begin_next_turn
+                        // would wipe whatever it accumulated. Settle the
+                        // completed blocks and ship them for persistence.
+                        if let Some(orphan) = &orphan_messages {
+                            tr.flush_assistant();
+                            let msgs = tr.take_messages();
+                            if !msgs.is_empty() {
+                                let _ = orphan.send(msgs);
+                            }
+                        }
                         tr.begin_next_turn();
                         interrupted = false;
                         emit(&sink, tr.start());
@@ -1626,6 +1861,16 @@ pub fn spawn_claude_session(
                     let sink = active.as_ref().map(|a| &a.sink).unwrap_or(&base_sink);
                     let events = tr.on_line(&line);
                     if !events.is_empty() { emit(sink, events); }
+                    // Continuation-turn content settles with no registered
+                    // turn to carry it into a CliTurnOutcome — persist each
+                    // message as it completes, in stream order (so it lands
+                    // BEFORE any later user message row, matching when it
+                    // actually happened).
+                    if active.is_none() && !tr.messages.is_empty() {
+                        if let Some(orphan) = &orphan_messages {
+                            let _ = orphan.send(tr.take_messages());
+                        }
+                    }
                     if tr.saw_result && tr.result_is_spurious() {
                         tr.saw_result = false;
                         continue;
@@ -1639,6 +1884,18 @@ pub fn spawn_claude_session(
                     }
                     if tr.saw_result {
                         let Some(turn) = active.take() else {
+                            // A self-started continuation turn settled: its
+                            // text-only reply is still sitting in the open
+                            // assistant segment (only tool results flush it
+                            // mid-turn) — settle and persist it now, nothing
+                            // else will.
+                            if let Some(orphan) = &orphan_messages {
+                                tr.flush_assistant();
+                                let msgs = tr.take_messages();
+                                if !msgs.is_empty() {
+                                    let _ = orphan.send(msgs);
+                                }
+                            }
                             tr.saw_result = false;
                             continue;
                         };
@@ -1677,7 +1934,21 @@ pub fn spawn_claude_session(
                 streamed,
                 resume_rejected: false,
             });
+        } else if let Some(orphan) = &orphan_messages {
+            // No active turn to carry them: settle and ship whatever a
+            // continuation turn accumulated before the process died.
+            tr.flush_assistant();
+            let msgs = tr.take_messages();
+            if !msgs.is_empty() {
+                let _ = orphan.send(msgs);
+            }
         }
+        // The child owned every live background task (Monitors, async agents,
+        // background Bash) — it's gone, so clear the frontend's task strip.
+        emit(
+            &base_sink,
+            vec![json!({ "type": "cli_background_tasks", "tasks": [] })],
+        );
         let _ = child.wait().await;
     });
 
@@ -1768,6 +2039,7 @@ fn normalize_codex_app_item(mut item: Value) -> Value {
             "agentMessage" => "agent_message",
             "fileChange" => "file_change",
             "mcpToolCall" => "mcp_tool_call",
+            "collabAgentToolCall" => "collab_agent_tool_call",
             other => other,
         };
         if normalized != kind {
@@ -1777,6 +2049,9 @@ fn normalize_codex_app_item(mut item: Value) -> Value {
     for (camel, snake) in [
         ("aggregatedOutput", "aggregated_output"),
         ("exitCode", "exit_code"),
+        ("agentsStates", "agents_states"),
+        ("receiverThreadIds", "receiver_thread_ids"),
+        ("senderThreadId", "sender_thread_id"),
     ] {
         if let Some(value) = object.remove(camel) {
             object.insert(snake.to_string(), value);
@@ -2563,6 +2838,19 @@ mod tests {
             .is_empty());
     }
 
+    /// The initialize ack's `commands` catalog (built-ins + skills, captured
+    /// from claude 2.x) surfaces as a `cli_commands` event for the slash menu.
+    #[test]
+    fn initialize_ack_commands_surface_for_slash_menu() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        let ev = tr.on_line(
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"init-1","response":{"commands":[{"name":"usage","description":"Show plan usage","argumentHint":"","aliases":["cost"]},{"name":"compact","description":"Free up context","argumentHint":"<instructions>"}]}}}"#,
+        );
+        assert_eq!(types(&ev), vec!["cli_commands"]);
+        assert_eq!(ev[0]["commands"][0]["name"], json!("usage"));
+        assert_eq!(ev[0]["commands"][1]["argumentHint"], json!("<instructions>"));
+    }
+
     #[test]
     fn claude_stdin_lines_shape() {
         let lines = claude_stdin_lines("hi", &[("image/png".into(), "AAAA".into())]);
@@ -2639,6 +2927,57 @@ mod tests {
         );
         assert_eq!(types(&ev), vec!["tool_execution_end"]);
         assert_eq!(ev[0]["result"]["content"][0]["text"], json!("done"));
+    }
+
+    #[test]
+    fn codex_background_agent_stays_live_until_agent_state_settles() {
+        let mut tr = EventTranslator::new(CliBackend::Codex);
+        let started = normalize_codex_app_item(json!({
+            "id": "spawn-1", "type": "collabAgentToolCall", "tool": "spawnAgent",
+            "prompt": "inspect the parser", "model": "gpt-5", "status": "inProgress",
+            "senderThreadId": "root", "receiverThreadIds": ["child-1"], "agentsStates": {},
+        }));
+        let ev = tr.on_line(&json!({ "type": "item.started", "item": started }).to_string());
+        assert_eq!(
+            types(&ev),
+            vec![
+                "message_start",
+                "message_update:toolcall_start",
+                "message_update:toolcall_end",
+                "tool_execution_start",
+                "tool_execution_update"
+            ]
+        );
+        assert_eq!(
+            ev[4]["partialResult"]["details"]["subagent"]["status"],
+            json!("running")
+        );
+
+        // Completing the spawn call itself does not settle the card while the
+        // child thread is still running.
+        let running = normalize_codex_app_item(json!({
+            "id": "spawn-1", "type": "collabAgentToolCall", "tool": "spawnAgent",
+            "prompt": "inspect the parser", "status": "completed", "senderThreadId": "root",
+            "receiverThreadIds": ["child-1"],
+            "agentsStates": { "child-1": { "status": "running", "message": "reading files" } },
+        }));
+        let ev = tr.on_line(&json!({ "type": "item.completed", "item": running }).to_string());
+        assert_eq!(types(&ev), vec!["tool_execution_update"]);
+
+        // A later wait/collab item carries the terminal state for that same
+        // child thread and settles the original spawn card.
+        let completed = normalize_codex_app_item(json!({
+            "id": "wait-1", "type": "collabAgentToolCall", "tool": "wait",
+            "status": "completed", "senderThreadId": "root", "receiverThreadIds": ["child-1"],
+            "agentsStates": { "child-1": { "status": "completed", "message": "parser is sound" } },
+        }));
+        let ev = tr.on_line(&json!({ "type": "item.completed", "item": completed }).to_string());
+        assert_eq!(types(&ev), vec!["tool_execution_end"]);
+        assert_eq!(ev[0]["result"]["content"][0]["text"], json!("parser is sound"));
+        assert_eq!(
+            ev[0]["result"]["details"]["subagent"]["status"],
+            json!("completed")
+        );
     }
 
     #[test]
@@ -2781,6 +3120,7 @@ mod tests {
             None,
             Vec::new(),
             CliRunOpts::default(),
+            None,
         )
         .unwrap();
 
@@ -2806,6 +3146,89 @@ mod tests {
             .unwrap();
         assert_eq!(second.messages[0]["content"][0]["text"], json!("turn-2"));
         assert_eq!(std::fs::read_to_string(&pid_file).unwrap(), pid);
+
+        session.shutdown();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A self-started continuation turn (Monitor/subagent wake-up) streams
+    /// with no active turn registered — its messages must reach the orphan
+    /// persistence channel instead of being wiped by the next StartTurn's
+    /// begin_next_turn (observed data loss: the wake-up's tool calls and
+    /// AskUserQuestion never hit the Cetus transcript).
+    #[tokio::test]
+    async fn continuation_turn_messages_reach_orphan_channel() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-claude-orphan-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-continuation-claude.sh");
+        // On boot: init, then a spontaneous continuation turn (text + result)
+        // BEFORE any user turn. Then answer user turns normally.
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             echo '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"cont-1\"}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"monitor woke me\"}}}'\n\
+             echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}'\n\
+             echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"monitor woke me\"}'\n\
+             while IFS= read -r line; do\n\
+               case \"$line\" in *'\"type\":\"user\"'*)\n\
+                 echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}'\n\
+                 echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"real turn\"}}}'\n\
+                 echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}'\n\
+                 echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"real turn\"}'\n\
+               ;; esac\n\
+             done\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let (orphan_tx, mut orphan_rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = spawn_claude_session(
+            sink.clone() as Arc<dyn EventSink>,
+            &script.to_string_lossy(),
+            &dir,
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+            Some(orphan_tx),
+        )
+        .unwrap();
+
+        // The continuation turn's reply lands on the orphan channel.
+        let orphaned = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            orphan_rx.recv(),
+        )
+        .await
+        .expect("continuation message not shipped")
+        .unwrap();
+        assert_eq!(orphaned[0]["content"][0]["text"], json!("monitor woke me"));
+
+        // A normal turn afterwards is unaffected and does NOT re-carry it.
+        let outcome = session
+            .start_turn(
+                claude_user_message_line("hi", &[]),
+                sink.clone() as Arc<dyn EventSink>,
+            )
+            .unwrap()
+            .await
+            .unwrap();
+        assert_eq!(outcome.messages.len(), 1);
+        assert_eq!(outcome.messages[0]["content"][0]["text"], json!("real turn"));
 
         session.shutdown();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -3509,6 +3932,69 @@ mod tests {
         assert_eq!(row["toolName"], json!("Agent"));
         let text = row["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("completed"), "{text}");
+    }
+
+    /// Every change to the live background-task set (start, progress text,
+    /// completion) must emit a `cli_background_tasks` snapshot — the standing
+    /// state behind the frontend's task strip. Tasks outlive model turns, so
+    /// paint on the launching card alone isn't enough.
+    #[test]
+    fn background_task_changes_emit_strip_snapshots() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tA","name":"Agent","input":{}}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+
+        let ev = tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"bg1","tool_use_id":"tA","description":"scan repo","subagent_type":"Explore"}"#);
+        let snap = ev.iter().find(|e| e["type"] == "cli_background_tasks").unwrap();
+        assert_eq!(snap["tasks"][0]["taskId"], json!("bg1"));
+        assert_eq!(snap["tasks"][0]["kind"], json!("Explore"));
+        assert_eq!(snap["tasks"][0]["description"], json!("scan repo"));
+
+        let ev = tr.on_line(r#"{"type":"system","subtype":"task_progress","task_id":"bg1","tool_use_id":"tA","description":"Running ls","subagent_type":"Explore"}"#);
+        let snap = ev.iter().find(|e| e["type"] == "cli_background_tasks").unwrap();
+        assert_eq!(snap["tasks"][0]["statusText"], json!("Running ls"));
+
+        // A sidechain step changes the card's step list but not the strip —
+        // no redundant snapshot.
+        let ev = tr.on_line(r#"{"type":"assistant","parent_tool_use_id":"tA","message":{"content":[{"type":"tool_use","id":"inner-1","name":"Read","input":{"file_path":"main.rs"}}]}}"#);
+        assert!(!types(&ev).contains(&"cli_background_tasks".to_string()));
+
+        let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"bg1","tool_use_id":"tA","status":"completed","summary":"done"}"#);
+        let snap = ev.iter().find(|e| e["type"] == "cli_background_tasks").unwrap();
+        assert_eq!(snap["tasks"], json!([]));
+    }
+
+    /// A Monitor rides the task lifecycle as `task_type: local_bash` (real
+    /// event shape captured from claude 2.x): it must show in the strip
+    /// snapshot, must NOT hold the model turn open (a persistent monitor can
+    /// live for hours), and a firing emits no notification — the task stays
+    /// live in the strip. The CLI's own `background_tasks_changed` list is
+    /// translated as the authoritative snapshot.
+    #[test]
+    fn monitor_stays_in_strip_without_holding_the_turn() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        let ev = tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"b864cfibk","tool_use_id":"tM","description":"content change in /tmp/flag.txt","task_type":"local_bash"}"#);
+        let snap = ev.iter().find(|e| e["type"] == "cli_background_tasks").unwrap();
+        assert_eq!(snap["tasks"][0]["kind"], json!("Bash"));
+        assert_eq!(snap["tasks"][0]["description"], json!("content change in /tmp/flag.txt"));
+        // local_bash never holds the turn — the reply can settle while the
+        // monitor keeps watching.
+        assert!(!tr.has_pending_turn_tasks());
+
+        // The CLI's authoritative list re-emits the same snapshot (this is
+        // what a resumed process reports even when our registry is empty).
+        let ev = tr.on_line(r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b864cfibk","task_type":"local_bash","description":"content change in /tmp/flag.txt"}]}"#);
+        let snap = ev.iter().find(|e| e["type"] == "cli_background_tasks").unwrap();
+        assert_eq!(snap["tasks"][0]["taskId"], json!("b864cfibk"));
+        assert_eq!(snap["tasks"][0]["kind"], json!("Bash"));
+
+        // Turn boundary: the live monitor survives into the next turn's
+        // registry, so the strip stays truthful across replies.
+        tr.begin_next_turn();
+        assert_eq!(
+            tr.background_tasks_snapshot()[0]["taskId"],
+            json!("b864cfibk")
+        );
     }
 
     /// The Workflow tool's launch ack has its own wording — it must keep the

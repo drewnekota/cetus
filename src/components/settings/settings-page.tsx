@@ -66,6 +66,10 @@ import {
 } from "@/lib/i18n";
 import { formatElapsed } from "@/lib/format";
 import {
+  setConversationAutoSort,
+  useConversationAutoSort,
+} from "@/lib/conversation-order";
+import {
   api,
   onAppEvent,
   onUpdateDownloadProgress,
@@ -472,6 +476,7 @@ function GeneralSection() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
   const { preference: localePref, setPreference: setLocalePref } = useLocale();
+  const autoSortConversations = useConversationAutoSort();
   const [settings, setSettings] = useState<QuickSettings>(DEFAULT_QUICK_SETTINGS);
   const [cliSettings, setCliSettings] = useState<CliAgentSettings>({
     bypassApprovals: true,
@@ -615,6 +620,13 @@ function GeneralSection() {
       </div>
 
       <div className="mt-2">
+        <ToggleRow
+          id="auto-sort-conversations"
+          label={t("general.autoSortConversations.label")}
+          description={t("general.autoSortConversations.description")}
+          checked={autoSortConversations}
+          onCheckedChange={setConversationAutoSort}
+        />
         <ToggleRow
           id="launch-on-startup"
           label={t("launcher.startup.label")}

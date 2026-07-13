@@ -87,6 +87,9 @@ export const settings = {
     // --- General ----------------------------------------------------------
     "general.title": "General",
     "general.description": "Language and app-level basics.",
+    "general.autoSortConversations.label": "Move active chats to the top",
+    "general.autoSortConversations.description":
+      "Reorder chats when they receive new messages. Turn this off to keep chats in creation order, with newly created chats at the top.",
     "general.autoUpdate.label": "Automatic updates",
     "general.autoUpdate.description":
       "Check for and install updates in the background. Applied the next time you open Cetus.",
@@ -582,6 +585,9 @@ export const settings = {
     "nav.general": "通用",
     "general.title": "通用",
     "general.description": "语言和应用级基础设置。",
+    "general.autoSortConversations.label": "有新消息时将对话移到顶部",
+    "general.autoSortConversations.description":
+      "对话收到新消息时自动重新排序。关闭后按创建顺序固定排列，新建的对话位于顶部。",
     "general.autoUpdate.label": "自动更新",
     "general.autoUpdate.description": "在后台检查并安装更新，下次打开 Cetus 时生效。",
     "general.cliAgents.label": "CLI 智能体：跳过权限确认",
@@ -1089,6 +1095,9 @@ export const settings = {
     "nav.general": "一般",
     "general.title": "一般",
     "general.description": "言語とアプリの基本設定。",
+    "general.autoSortConversations.label": "更新されたチャットを上に移動",
+    "general.autoSortConversations.description":
+      "新しいメッセージが届くとチャットを並べ替えます。オフにすると作成順を維持し、新しいチャットが上に表示されます。",
     "general.autoUpdate.label": "自動アップデート",
     "general.autoUpdate.description":
       "バックグラウンドで更新を確認・インストールします。次回 Cetus 起動時に適用されます。",
@@ -1465,6 +1474,9 @@ export const settings = {
     "nav.general": "일반",
     "general.title": "일반",
     "general.description": "언어 및 앱 기본 설정.",
+    "general.autoSortConversations.label": "활성 채팅을 맨 위로 이동",
+    "general.autoSortConversations.description":
+      "새 메시지가 오면 채팅 순서를 변경합니다. 끄면 생성 순서를 유지하고 새 채팅이 맨 위에 표시됩니다.",
     "general.autoUpdate.label": "자동 업데이트",
     "general.autoUpdate.description":
       "백그라운드에서 업데이트를 확인하고 설치합니다. 다음에 Cetus를 열 때 적용됩니다.",
@@ -1834,6 +1846,9 @@ export const settings = {
     "nav.general": "General",
     "general.title": "General",
     "general.description": "Idioma y ajustes básicos de la aplicación.",
+    "general.autoSortConversations.label": "Mover chats activos arriba",
+    "general.autoSortConversations.description":
+      "Reordena los chats al recibir mensajes nuevos. Desactívalo para mantener el orden de creación, con los chats nuevos arriba.",
     "general.autoUpdate.label": "Actualizaciones automáticas",
     "general.autoUpdate.description":
       "Busca e instala actualizaciones en segundo plano. Se aplican la próxima vez que abras Cetus.",
@@ -2204,6 +2219,9 @@ export const settings = {
     "nav.general": "Geral",
     "general.title": "Geral",
     "general.description": "Idioma e configurações básicas do aplicativo.",
+    "general.autoSortConversations.label": "Mover chats ativos para o topo",
+    "general.autoSortConversations.description":
+      "Reordena os chats ao receber novas mensagens. Desative para manter a ordem de criação, com os novos chats no topo.",
     "general.autoUpdate.label": "Atualizações automáticas",
     "general.autoUpdate.description":
       "Verifica e instala atualizações em segundo plano. Aplicadas na próxima vez que você abrir o Cetus.",
@@ -2571,6 +2589,9 @@ export const settings = {
     "nav.general": "Général",
     "general.title": "Général",
     "general.description": "Langue et réglages de base de l'application.",
+    "general.autoSortConversations.label": "Remonter les discussions actives",
+    "general.autoSortConversations.description":
+      "Réorganise les discussions à l'arrivée de nouveaux messages. Désactivez cette option pour conserver l'ordre de création, avec les nouvelles discussions en haut.",
     "general.autoUpdate.label": "Mises à jour automatiques",
     "general.autoUpdate.description":
       "Recherche et installe les mises à jour en arrière-plan. Appliquées au prochain lancement de Cetus.",
@@ -2938,6 +2959,9 @@ export const settings = {
     "nav.general": "Allgemein",
     "general.title": "Allgemein",
     "general.description": "Sprache und grundlegende App-Einstellungen.",
+    "general.autoSortConversations.label": "Aktive Chats nach oben verschieben",
+    "general.autoSortConversations.description":
+      "Sortiert Chats bei neuen Nachrichten neu. Deaktivieren, um die Erstellungsreihenfolge mit neuen Chats oben beizubehalten.",
     "general.autoUpdate.label": "Automatische Updates",
     "general.autoUpdate.description":
       "Sucht und installiert Updates im Hintergrund. Wird beim nächsten Start von Cetus angewendet.",
@@ -3305,6 +3329,9 @@ export const settings = {
     "nav.general": "Generale",
     "general.title": "Generale",
     "general.description": "Lingua e impostazioni di base dell'app.",
+    "general.autoSortConversations.label": "Sposta in alto le chat attive",
+    "general.autoSortConversations.description":
+      "Riordina le chat quando arrivano nuovi messaggi. Disattiva per mantenere l'ordine di creazione, con le nuove chat in alto.",
     "general.autoUpdate.label": "Aggiornamenti automatici",
     "general.autoUpdate.description":
       "Cerca e installa gli aggiornamenti in background. Applicati al prossimo avvio di Cetus.",
@@ -3672,6 +3699,9 @@ export const settings = {
     "nav.general": "Основные",
     "general.title": "Основные",
     "general.description": "Язык и основные параметры приложения.",
+    "general.autoSortConversations.label": "Перемещать активные чаты вверх",
+    "general.autoSortConversations.description":
+      "Меняет порядок чатов при новых сообщениях. Отключите, чтобы сохранить порядок создания с новыми чатами сверху.",
     "general.autoUpdate.label": "Автоматические обновления",
     "general.autoUpdate.description":
       "Проверяет и устанавливает обновления в фоне. Применяются при следующем запуске Cetus.",

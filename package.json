@@ -1,6 +1,6 @@
 {
   "name": "cetus",
-  "version": "0.3.20",
+  "version": "0.3.21",
   "description": "Key of the Twilight — an affordable desktop agent, made possible by DeepSeek V4. Built on pi; perceives (screen context), remembers (memory), and acts (tools, automations, parallel runs).",
   "private": true,
   "packageManager": "pnpm@10.27.0",
@@ -24,6 +24,8 @@
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.0.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

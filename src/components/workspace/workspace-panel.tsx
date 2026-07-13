@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   type ButtonHTMLAttributes,
-  type FormEvent,
   type ReactNode,
 } from "react";
 import {
@@ -29,12 +28,14 @@ import {
   X,
 } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal as XTermTerminal, type ITheme } from "@xterm/xterm";
 import hljs from "highlight.js/lib/common";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import {
   BrowserView,
@@ -45,7 +46,7 @@ import { formatBytes } from "@/lib/artifact";
 import { useTranslation } from "@/lib/i18n";
 import { markdownComponents } from "@/lib/markdown";
 import { api } from "@/lib/tauri";
-import type { BashResult, WorkspaceFileEntry } from "@/lib/types";
+import type { WorkspaceFileEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export type WorkspaceTabKind = "files" | "terminal" | "browser";
@@ -57,21 +58,10 @@ export interface TerminalRunRequest {
   autoRun?: boolean;
 }
 
-export interface TerminalHistoryEntry {
-  id: string;
-  command: string;
-  result: BashResult | null;
-  error?: string;
-}
-
-export interface TerminalViewState {
-  command: string;
-  running: boolean;
-  history: TerminalHistoryEntry[];
-}
+export type TerminalViewState = Record<string, never>;
 
 export function createTerminalViewState(): TerminalViewState {
-  return { command: "", running: false, history: [] };
+  return {};
 }
 
 export interface WorkspaceTab {
@@ -277,20 +267,31 @@ export function WorkspacePanel({
           </Button>
         </div>
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
+        {/* Keep every Terminal tab mounted while this workspace is alive. The
+            PTY continues in Rust either way; retaining xterm here also keeps
+            its screen/scrollback exact while the user switches tabs. */}
+        {tabs
+          .filter((tab) => tab.kind === "terminal")
+          .map((tab) => {
+            const visible = tab.id === active?.id;
+            return (
+              <div key={tab.id} className={cn("absolute inset-0", !visible && "hidden")}>
+                <TerminalPanel
+                  sessionId={tab.id}
+                  workspaceDir={cwd}
+                  visible={visible && !hidden && motionState !== "closed"}
+                  runRequest={tab.terminalRunRequest}
+                  focusRequest={tab.terminalFocusRequest}
+                />
+              </div>
+            );
+          })}
         {!active ? (
           <EmptyPanel onNewTab={onNewTab} />
         ) : active.kind === "files" ? (
           <FilesPanel workspaceDir={cwd} />
-        ) : active.kind === "terminal" ? (
-          <TerminalPanel
-            workspaceDir={cwd}
-            state={active.terminalState ?? createTerminalViewState()}
-            onStateChange={(state) => onUpdateTerminalTab(active.id, state)}
-            runRequest={active.terminalRunRequest}
-            focusRequest={active.terminalFocusRequest}
-          />
-        ) : (
+        ) : active.kind === "browser" ? (
           <BrowserView
             key={active.id}
             state={active.browserState ?? createBrowserViewState()}
@@ -298,7 +299,7 @@ export function WorkspacePanel({
             onAnnotate={onAnnotate}
             visible={!hidden && motionState !== "closed"}
           />
-        )}
+        ) : null}
       </div>
     </aside>
   );
@@ -1135,151 +1136,191 @@ function parseCsvPreview(text: string): string[][] {
 }
 
 function TerminalPanel({
+  sessionId,
   workspaceDir,
-  state,
-  onStateChange,
+  visible,
   runRequest,
   focusRequest,
 }: {
+  sessionId: string;
   workspaceDir: string;
-  state: TerminalViewState;
-  onStateChange: (state: TerminalViewState) => void;
+  visible: boolean;
   runRequest?: TerminalRunRequest;
   focusRequest?: string;
 }) {
-  const { t } = useTranslation("chat");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<XTermTerminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const readyRef = useRef<Promise<void>>(Promise.resolve());
   const lastRunRequestRef = useRef<string | null>(null);
-  const stateRef = useRef(state);
-  stateRef.current = state;
 
-  function focusInput() {
-    window.requestAnimationFrame(() => inputRef.current?.focus());
-  }
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
 
-  function updateState(updater: (current: TerminalViewState) => TerminalViewState) {
-    const next = updater(stateRef.current);
-    stateRef.current = next;
-    onStateChange(next);
-  }
+    const terminal = new XTermTerminal({
+      allowProposedApi: false,
+      cursorBlink: true,
+      cursorStyle: "block",
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+      fontSize: 12,
+      lineHeight: 1.2,
+      scrollback: 10_000,
+      theme: terminalTheme(),
+    });
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(host);
+    terminalRef.current = terminal;
+    fitRef.current = fit;
 
-  async function runCommand(textRaw: string) {
-    const text = textRaw.trim();
-    if (!text || stateRef.current.running) return;
-    const item: TerminalHistoryEntry = {
-      id:
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `terminal-history-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      command: text,
-      result: null,
+    let cancelled = false;
+    let unlistenOutput: UnlistenFn | undefined;
+    let unlistenExit: UnlistenFn | undefined;
+
+    const ready = (async () => {
+      [unlistenOutput, unlistenExit] = await Promise.all([
+        listen<TerminalOutputEvent>("terminal-output", (event) => {
+          if (event.payload.sessionId !== sessionId) return;
+          terminal.write(base64ToBytes(event.payload.dataBase64));
+        }),
+        listen<TerminalExitEvent>("terminal-exit", (event) => {
+          if (event.payload.sessionId !== sessionId) return;
+          const { exitCode, signal } = event.payload;
+          terminal.writeln(
+            `\r\n\x1b[90m[process exited${signal ? `: ${signal}` : ` with code ${exitCode}`}]\x1b[0m`,
+          );
+        }),
+      ]);
+      if (cancelled) {
+        unlistenOutput();
+        unlistenExit();
+        return;
+      }
+      if (host.offsetWidth && host.offsetHeight) fit.fit();
+      await api.terminalStart(sessionId, workspaceDir, terminal.cols, terminal.rows);
+    })().catch((error) => {
+      if (!cancelled) {
+        terminal.writeln(`\r\n\x1b[31mFailed to start terminal: ${String(error)}\x1b[0m`);
+      }
+    });
+    readyRef.current = ready;
+
+    const inputDisposable = terminal.onData((data) => {
+      void api
+        .terminalWrite(sessionId, bytesToBase64(new TextEncoder().encode(data)))
+        .catch(() => {});
+    });
+    const binaryDisposable = terminal.onBinary((data) => {
+      const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
+      void api.terminalWrite(sessionId, bytesToBase64(bytes)).catch(() => {});
+    });
+    const resizeObserver = new ResizeObserver(() => {
+      if (!host.offsetWidth || !host.offsetHeight) return;
+      fit.fit();
+      void ready
+        .then(() => api.terminalResize(sessionId, terminal.cols, terminal.rows))
+        .catch(() => {});
+    });
+    resizeObserver.observe(host);
+
+    const themeObserver = new MutationObserver(() => {
+      terminal.options.theme = terminalTheme();
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+
+    return () => {
+      cancelled = true;
+      resizeObserver.disconnect();
+      themeObserver.disconnect();
+      inputDisposable.dispose();
+      binaryDisposable.dispose();
+      unlistenOutput?.();
+      unlistenExit?.();
+      terminalRef.current = null;
+      fitRef.current = null;
+      terminal.dispose();
+      void api.terminalStop(sessionId).catch(() => {});
     };
-    updateState((current) => ({
-      ...current,
-      command: "",
-      running: true,
-      history: [...current.history, item],
-    }));
-    try {
-      const result = await api.runBash(text, workspaceDir);
-      updateState((current) => ({
-        ...current,
-        history: current.history.map((x) => (x.id === item.id ? { ...x, result } : x)),
-      }));
-    } catch (err) {
-      updateState((current) => ({
-        ...current,
-        history: current.history.map((x) =>
-          x.id === item.id ? { ...x, error: String(err) } : x,
-        ),
-      }));
-    } finally {
-      updateState((current) => ({ ...current, running: false }));
-      focusInput();
-    }
-  }
+  }, [sessionId, workspaceDir]);
 
-  async function run(e: FormEvent) {
-    e.preventDefault();
-    await runCommand(state.command);
-  }
+  useEffect(() => {
+    if (!visible) return;
+    window.requestAnimationFrame(() => {
+      fitRef.current?.fit();
+      const terminal = terminalRef.current;
+      if (terminal) {
+        void readyRef.current
+          .then(() => api.terminalResize(sessionId, terminal.cols, terminal.rows))
+          .catch(() => {});
+        terminal.focus();
+      }
+    });
+  }, [visible, focusRequest, sessionId]);
 
   useEffect(() => {
     if (!runRequest || lastRunRequestRef.current === runRequest.id) return;
     lastRunRequestRef.current = runRequest.id;
-    updateState((current) => ({ ...current, command: runRequest.command }));
-    focusInput();
-    if (runRequest.autoRun) void runCommand(runRequest.command);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runRequest?.id]);
-
-  useEffect(() => {
-    if (!focusRequest) return;
-    focusInput();
-  }, [focusRequest]);
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [state.history.length, state.running]);
+    if (!runRequest.autoRun) return;
+    void readyRef.current
+      .then(() =>
+        api.terminalWrite(
+          sessionId,
+          bytesToBase64(new TextEncoder().encode(`${runRequest.command}\r`)),
+        ),
+      )
+      .catch(() => {});
+  }, [runRequest, sessionId]);
 
   return (
     <div
-      className="h-full bg-background text-foreground dark:bg-[#0f1011] dark:text-[#eeeeee]"
-      onClick={focusInput}
-    >
-      <div ref={scrollRef} className="h-full overflow-y-auto px-3 py-2 font-mono text-xs">
-        {state.history.map((item) => (
-          <TerminalHistoryItem key={item.id} item={item} />
-        ))}
-        <form
-          onSubmit={run}
-          className="flex items-baseline gap-2"
-        >
-          <span className="font-mono text-xs text-emerald-700 dark:text-emerald-300">$</span>
-          <Input
-            ref={inputRef}
-            value={state.command}
-            onChange={(e) =>
-              updateState((current) => ({ ...current, command: e.target.value }))
-            }
-            disabled={state.running}
-            className="h-auto flex-1 border-0 bg-transparent p-0 font-mono text-xs text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0 disabled:cursor-default dark:bg-transparent dark:text-white dark:placeholder:text-white/35"
-            placeholder={t("workspacePanel.commandPlaceholder")}
-            spellCheck={false}
-          />
-        </form>
-      </div>
-    </div>
+      ref={hostRef}
+      className="h-full w-full bg-[#fcfcfd] px-2 py-1 dark:bg-[#0f0f11]"
+      onClick={() => terminalRef.current?.focus()}
+    />
   );
 }
 
-function TerminalHistoryItem({
-  item,
-}: {
-  item: TerminalHistoryEntry;
-}) {
-  const { t } = useTranslation("chat");
-  const result = item.result;
-  return (
-    <div className="mb-4">
-      <p className="text-emerald-700 dark:text-emerald-300">$ {item.command}</p>
-      {!result && !item.error ? (
-        <p className="text-muted-foreground dark:text-white/45">
-          {t("workspacePanel.running")}
-        </p>
-      ) : item.error ? (
-        <pre className="mt-1 whitespace-pre-wrap text-destructive dark:text-red-300">
-          {item.error}
-        </pre>
-      ) : result ? (
-        <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap text-foreground/80 dark:text-white/80">
-          {[result.stdout, result.stderr].filter(Boolean).join("\n") || `(exit ${result.exitCode})`}
-        </pre>
-      ) : null}
-    </div>
-  );
+interface TerminalOutputEvent {
+  sessionId: string;
+  dataBase64: string;
+}
+
+interface TerminalExitEvent {
+  sessionId: string;
+  exitCode: number;
+  signal?: string | null;
+}
+
+function terminalTheme(): ITheme {
+  const dark = document.documentElement.classList.contains("dark");
+  return dark
+    ? {
+        background: "#0f0f11",
+        foreground: "#e3e4e6",
+        cursor: "#e3e4e6",
+        selectionBackground: "#3f3c70",
+      }
+    : {
+        background: "#fcfcfd",
+        foreground: "#1b1b1b",
+        cursor: "#1b1b1b",
+        selectionBackground: "#dcd9fa",
+      };
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  return Uint8Array.from(window.atob(value), (char) => char.charCodeAt(0));
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return window.btoa(binary);
 }

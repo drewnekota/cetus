@@ -17,9 +17,6 @@
 // record the attempt somewhere durable. Two limits: COOLDOWN_MS between
 // reloads, and MAX_RELOADS consecutive attempts inside RESET_MS before we stop.
 //
-// This also binds Cmd/Ctrl+R to a manual reload: the app ships no menu bar and
-// no reload accelerator (only a tray menu), so the OS' default Cmd+R never
-// reaches the webview — without this the user has no way to refresh by hand.
 import { useEffect } from "react";
 
 const COOLDOWN_MS = 10_000;
@@ -118,26 +115,11 @@ export function ChunkReloadGuard() {
     const onRejection = (e: PromiseRejectionEvent) => {
       if (isChunkLoadError(e.reason)) recover();
     };
-    // Manual reload: Cmd+R (macOS) / Ctrl+R. Bypasses the cooldown — an explicit
-    // refresh should always go through, even right after an auto-recover.
-    // Capture phase + a window-level listener so it wins over any focused
-    // surface (board, terminal, embedded browser, sidebar…) whose own keydown
-    // handler calls stopPropagation. Stop propagation here too so the same
-    // keystroke cannot be reinterpreted as an embedded-surface reload.
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "r" || e.key === "R")) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        window.location.reload();
-      }
-    };
     window.addEventListener("error", onError);
     window.addEventListener("unhandledrejection", onRejection);
-    window.addEventListener("keydown", onKeyDown, true);
     return () => {
       window.removeEventListener("error", onError);
       window.removeEventListener("unhandledrejection", onRejection);
-      window.removeEventListener("keydown", onKeyDown, true);
     };
   }, []);
   return null;

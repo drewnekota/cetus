@@ -21,7 +21,9 @@ import {
 } from "./chat-state";
 import type {
   BashResult,
+  CliBackgroundTask,
   CliControlRequest,
+  CliSlashCommand,
   PiEvent,
   PiMessage,
   RenderedBlock,
@@ -43,6 +45,11 @@ interface ChatsStore {
    *  so the card survives conversation switches and never races a per-component
    *  listener's async registration. Cleared when answered or when the turn ends. */
   controlRequests: Record<string, CliControlRequest[]>;
+  /** Live background tasks (Monitors, async agents, background Bash) per
+   *  conversation — the CLI session owns them across turns, so they're
+   *  standing state, not part of any streaming turn. Replaced wholesale on
+   *  each `cli_background_tasks` snapshot from the bridge. */
+  backgroundTasks: Record<string, CliBackgroundTask[]>;
   ensure: (id: string) => void;
   drop: (id: string) => void;
   reset: (id: string, messages: PiMessage[] | undefined) => void;
@@ -58,6 +65,12 @@ interface ChatsStore {
   /** Drop one answered control request; also used to clear all of a
    *  conversation's pending requests when its turn ends (`requestId` omitted). */
   clearControlRequest: (id: string, requestId?: string) => void;
+  /** Replace the conversation's live background-task list. */
+  setBackgroundTasks: (id: string, tasks: CliBackgroundTask[]) => void;
+  /** Native slash commands reported by the conversation's CLI session
+   *  (initialize ack). Refreshed on every session (re)spawn. */
+  cliCommands: Record<string, CliSlashCommand[]>;
+  setCliCommands: (id: string, commands: CliSlashCommand[]) => void;
   /** Append a "running" breadcrumb for a local `!` bash command. */
   bashStart: (id: string, key: string, command: string, cwd?: string) => void;
   /** Settle a bash breadcrumb (by key) with its captured output. */
@@ -245,6 +258,8 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   streamingIds: new Set<string>(),
   hydrated: {},
   controlRequests: {},
+  backgroundTasks: {},
+  cliCommands: {},
   ensure: (id) => {
     flushPiEvents();
     set((s) => {
@@ -274,10 +289,22 @@ export const useChatStore = create<ChatsStore>()((set) => ({
         controlRequests = { ...controlRequests };
         delete controlRequests[id];
       }
+      let backgroundTasks = s.backgroundTasks;
+      if (id in backgroundTasks) {
+        backgroundTasks = { ...backgroundTasks };
+        delete backgroundTasks[id];
+      }
+      let cliCommands = s.cliCommands;
+      if (id in cliCommands) {
+        cliCommands = { ...cliCommands };
+        delete cliCommands[id];
+      }
       return {
         chats: next,
         streamingIds: withoutStreaming(s.streamingIds, id),
         controlRequests,
+        backgroundTasks,
+        cliCommands,
       };
     });
   },
@@ -315,6 +342,18 @@ export const useChatStore = create<ChatsStore>()((set) => ({
       else controlRequests[id] = next;
       return { controlRequests };
     });
+  },
+  setBackgroundTasks: (id, tasks) => {
+    set((s) => {
+      if (tasks.length === 0 && !(id in s.backgroundTasks)) return s;
+      const backgroundTasks = { ...s.backgroundTasks };
+      if (tasks.length === 0) delete backgroundTasks[id];
+      else backgroundTasks[id] = tasks;
+      return { backgroundTasks };
+    });
+  },
+  setCliCommands: (id, commands) => {
+    set((s) => ({ cliCommands: { ...s.cliCommands, [id]: commands } }));
   },
   bashStart: (id, key, command, cwd) => {
     flushPiEvents();
@@ -551,6 +590,29 @@ export function useControlRequests(
   );
 }
 
+const EMPTY_BACKGROUND_TASKS: CliBackgroundTask[] = [];
+
+/** Live background tasks (Monitors, async agents, background Bash) owned by
+ *  `convId`'s CLI session. */
+export function useBackgroundTasks(
+  convId: string | null | undefined,
+): CliBackgroundTask[] {
+  return useChatStore((s) =>
+    convId ? s.backgroundTasks[convId] ?? EMPTY_BACKGROUND_TASKS : EMPTY_BACKGROUND_TASKS,
+  );
+}
+
+const EMPTY_CLI_COMMANDS: CliSlashCommand[] = [];
+
+/** Native slash commands the conversation's CLI session reported on boot. */
+export function useCliCommands(
+  convId: string | null | undefined,
+): CliSlashCommand[] {
+  return useChatStore((s) =>
+    convId ? s.cliCommands[convId] ?? EMPTY_CLI_COMMANDS : EMPTY_CLI_COMMANDS,
+  );
+}
+
 /** Set of conv ids currently active or awaiting the assistant (for board view
  *  dots etc). Maintained incrementally in the store, so this is an
  *  identity-stable read that only changes when a run starts/ends — not on every
@@ -591,8 +653,8 @@ function readRunningSubagent(block: RenderedBlock): RunningSubagent | null {
   };
 }
 
-/** Background subagents still running in the active turn (claude-code
- *  run_in_background Agent/Task). The selector returns a signature string so the
+/** Background subagents still running in the conversation (Claude async tasks
+ *  and Codex child threads, which may outlive their launching root turn). The selector returns a signature string so the
  *  strip only re-renders when the *set* changes — not on every streaming token —
  *  and useMemo re-inflates the array off that signature. Scans backwards from
  *  the end to the turn's user boundary, so it's robust to whether the main
@@ -602,11 +664,10 @@ export function useRunningSubagents(
 ): RunningSubagent[] {
   const sig = useChatStore((s) => {
     const c = convId ? s.chats[convId] : undefined;
-    if (!c || !c.isStreaming) return "";
+    if (!c) return "";
     const found: RunningSubagent[] = [];
     for (let i = c.messages.length - 1; i >= 0; i--) {
       const m = c.messages[i];
-      if (m.role === "user") break; // turn boundary — stop at the prompt
       for (const b of m.blocks) {
         const sub = readRunningSubagent(b);
         if (sub) found.push(sub);

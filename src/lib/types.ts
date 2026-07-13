@@ -106,6 +106,12 @@ export interface QuickScreenshot {
   mimeType: string;
 }
 
+/** An attachment collected by the quick launcher. Images use the model's image
+ * channel; other files are persisted once the main window picks a conversation. */
+export type QuickAttachment =
+  | { type: "image"; data: string; mimeType: string; name: string }
+  | { type: "file"; data: string; mimeType: string; name: string; sizeBytes: number };
+
 /** Ambient context captured the moment the launcher is summoned — what the user
  *  was looking at before the panel took focus. Every field is best-effort and may
  *  be empty. Mirrors Rust's `AmbientContext`. */
@@ -183,6 +189,31 @@ export interface CliControlRequest {
   suggestions?: unknown;
 }
 
+/** One live background task owned by a conversation's CLI session (a Monitor,
+ *  async Agent/Workflow, or background Bash). These outlive model turns — a
+ *  Monitor can wake the agent long after the reply settled — so the bridge
+ *  streams the full live set as `cli_background_tasks` snapshots and the chat
+ *  pane renders them as a standing strip. */
+export interface CliBackgroundTask {
+  taskId: string;
+  /** Subagent type or task kind: "Monitor", "Bash", "Explore", "Workflow", … */
+  kind: string;
+  description: string;
+  /** Latest task_progress line, if any. */
+  statusText?: string;
+}
+
+/** One native slash command reported by a CLI backend's initialize handshake
+ *  (claude-code: built-ins like /usage /compact /context plus every skill).
+ *  Surfaced as a `cli_commands` event when the session process boots; the
+ *  composer merges them into the slash menu and passes the picked token to
+ *  the CLI verbatim. */
+export interface CliSlashCommand {
+  name: string;
+  description: string;
+  argumentHint: string;
+}
+
 /** Persisted CLI-agent (claude-code / codex) switches. */
 export interface CliAgentSettings {
   /** Skip the CLIs' permission prompts (headless turns can't answer them). */
@@ -207,6 +238,8 @@ export interface CliDefaults {
 export interface QuickLaunchPayload {
   text: string;
   image: QuickScreenshot | null;
+  /** Files manually pasted or picked in the launcher. */
+  attachments: QuickAttachment[];
   sessionMode: QuickSessionMode;
   /** Repo the launched task should run in; null → backend default workspace. */
   workspaceDir: string | null;

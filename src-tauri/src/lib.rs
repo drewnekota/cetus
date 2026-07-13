@@ -51,6 +51,7 @@ mod skills;
 mod slash_commands;
 mod store;
 mod tauri_bridge;
+mod terminal;
 #[cfg(target_os = "macos")]
 mod text_input;
 mod titling;
@@ -921,6 +922,7 @@ pub fn run() {
                 claude_sessions: std::sync::Mutex::new(HashMap::new()),
                 codex_sessions: std::sync::Mutex::new(HashMap::new()),
             });
+            app.manage(terminal::TerminalRuntime::default());
 
             // Meeting memory: the single in-flight capture session, shared by
             // the commands, the auto-detect monitor, and the global hotkey.
@@ -1314,29 +1316,11 @@ pub fn run() {
             }
             Ok(())
         })
-        // App menu bar. Start from the platform default (App / Edit / Window /
-        // Help) so copy, paste, select-all and the rest keep their accelerators,
-        // then graft a View menu carrying an explicit Reload bound to ⌘R — the
-        // bare WKWebView has no reload command, so without this menu item ⌘R
-        // never reaches the page (the JS guard is a focus-dependent fallback).
+        // App menu bar. Keep the platform default (App / Edit / Window / Help)
+        // so copy, paste, select-all and the rest retain their accelerators.
+        // Deliberately omit Reload: refreshing destroys frontend session state.
         .menu(|app| {
-            use tauri::menu::{Menu, MenuItemBuilder, Submenu};
-            let menu = Menu::default(app)?;
-            let reload = MenuItemBuilder::with_id("view_reload", "Reload")
-                .accelerator("CmdOrCtrl+R")
-                .build(app)?;
-            let view = Submenu::with_items(app, "View", true, &[&reload])?;
-            // Conventional slot: right after Edit (App=0, Edit=1). Fall back to
-            // appending if the default menu's shape ever differs.
-            if menu.insert(&view, 2).is_err() {
-                let _ = menu.append(&view);
-            }
-            Ok(menu)
-        })
-        .on_menu_event(|app, event| {
-            if event.id.as_ref() == "view_reload" {
-                reload_focused_window(app);
-            }
+            tauri::menu::Menu::default(app)
         });
 
     // Self-update plugin. Registered only in release builds so `tauri dev` never
@@ -1497,6 +1481,10 @@ pub fn run() {
         plugins::delete_plugin,
         notify::post_notification,
         bash::run_bash,
+        terminal::terminal_start,
+        terminal::terminal_write,
+        terminal::terminal_resize,
+        terminal::terminal_stop,
     ]);
 
     #[cfg(feature = "devtest")]
@@ -1649,6 +1637,10 @@ pub fn run() {
         plugins::delete_plugin,
         notify::post_notification,
         bash::run_bash,
+        terminal::terminal_start,
+        terminal::terminal_write,
+        terminal::terminal_resize,
+        terminal::terminal_stop,
         devtest::test_eval,
         devtest::test_screenshot,
         devtest::test_ax,
@@ -1665,6 +1657,7 @@ pub fn run() {
             // while the window is parked off-screen still saves the real values.
             if let tauri::RunEvent::Exit = &_event {
                 window_geom::flush(&_app.state::<AppState>().store);
+                _app.state::<terminal::TerminalRuntime>().shutdown_all();
                 // Hand Caps Lock back to the OS if we'd remapped it for dictation.
                 caps_remap::restore();
                 // A dev hot-reload or app quit must never orphan a meeting
@@ -1778,20 +1771,6 @@ pub(crate) fn park_main(app: &AppHandle) {
         if let Some(w) = app.get_webview_window("main") {
             let _ = w.hide();
         }
-    }
-}
-
-/// Reload the focused window's webview — the View → Reload menu item / ⌘R. The
-/// bare WKWebView ships no reload of its own, so the menu drives it via JS.
-/// Targets whichever window currently has focus, falling back to the main one.
-fn reload_focused_window(app: &AppHandle) {
-    let target = app
-        .webview_windows()
-        .into_values()
-        .find(|w| w.is_focused().unwrap_or(false))
-        .or_else(|| app.get_webview_window("main"));
-    if let Some(win) = target {
-        let _ = win.eval("window.location.reload()");
     }
 }
 

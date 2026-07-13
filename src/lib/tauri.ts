@@ -216,6 +216,18 @@ export const api = {
    *  exit is a normal result in `exitCode`. */
   runBash: (command: string, cwd?: string | null) =>
     invoke<BashResult>("run_bash", { command, cwd: cwd ?? null }),
+  terminalStart: (
+    sessionId: string,
+    cwd: string,
+    cols: number,
+    rows: number,
+  ) => invoke<void>("terminal_start", { sessionId, cwd, cols, rows }),
+  terminalWrite: (sessionId: string, dataBase64: string) =>
+    invoke<void>("terminal_write", { sessionId, dataBase64 }),
+  terminalResize: (sessionId: string, cols: number, rows: number) =>
+    invoke<void>("terminal_resize", { sessionId, cols, rows }),
+  terminalStop: (sessionId: string) =>
+    invoke<void>("terminal_stop", { sessionId }),
   /** Roll back the last (failed/empty) turn and return the user text to resend
    *  plus the truncated history. See commands::retry_last_turn. */
   retryLastTurn: (id: string) =>

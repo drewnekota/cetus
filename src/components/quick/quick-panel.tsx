@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AppWindow, CornerDownLeft, Globe, ImageOff, Loader2, TextSelect, X } from "lucide-react";
+import { AppWindow, CornerDownLeft, File, Globe, ImageOff, Loader2, Paperclip, TextSelect, X } from "lucide-react";
+import { formatBytes } from "@/lib/artifact";
 import { Kbd } from "@/components/ui/kbd";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { ModelPicker } from "@/components/chat/model-picker";
@@ -27,13 +28,18 @@ import {
   type BackendId,
   type ModelChoice,
   type QuickContext,
+  type QuickAttachment,
   type QuickOpenPayload,
   type QuickOpenUrlPayload,
   type QuickScreenshot,
   type QuickSessionMode,
 } from "@/lib/types";
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
-import { loadBackendChoice, saveBackendChoice } from "@/lib/backend-choice";
+import {
+  loadBackendChoice,
+  loadCliTuningChoice,
+  saveBackendChoice,
+} from "@/lib/backend-choice";
 import { cn } from "@/lib/utils";
 import {
   Tooltip,
@@ -48,6 +54,8 @@ import {
 export function QuickPanel() {
   const { t } = useTranslation("quick");
   const [text, setText] = useState("");
+  const [attachments, setAttachments] = useState<QuickAttachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const [screenshot, setScreenshot] = useState<QuickScreenshot | null>(null);
   // Permission is only known once a quick-open payload arrives. Until then a
   // null screenshot means "not captured yet", NOT "denied" — so the grant hint
@@ -87,6 +95,7 @@ export function QuickPanel() {
   const [hasLastChat, setHasLastChat] = useState(true);
 
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // Mirrors for the mount-once blur listener (which closes over stale state).
   const submittingRef = useRef(false);
   // True for a beat right after the panel opens, so a not-yet-key window losing
@@ -153,11 +162,17 @@ export function QuickPanel() {
       // Same runtime again (e.g. a repeated shortcut) is a no-op so it doesn't
       // reset the model/effort overrides.
       if (!b || b.id === backend) return;
+      const tuning = b.id === "pi"
+        ? { model: "", effort: "" }
+        : loadCliTuningChoice(b.id);
       setBackend(b.id);
-      // Model/effort overrides belong to one backend's catalog.
-      setCliModel("");
-      setCliEffort("");
-      saveBackendChoice({ backend: b.id, cliModel: "", cliEffort: "" });
+      setCliModel(tuning.model);
+      setCliEffort(tuning.effort);
+      saveBackendChoice({
+        backend: b.id,
+        cliModel: tuning.model,
+        cliEffort: tuning.effort,
+      });
     },
     [backend],
   );
@@ -210,6 +225,8 @@ export function QuickPanel() {
       const p = e.payload;
       openIdRef.current = p.openId;
       setText("");
+      setAttachments([]);
+      setAttachError(null);
       setSubmitting(false);
       setScreenshot(p.screenshot);
       setScreenshotDenied(p.screenshotDefault && !p.screenshotPermission);
@@ -278,6 +295,11 @@ export function QuickPanel() {
     let cancelled = false;
     getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
+        if (focused && pickingWorkspaceRef.current) {
+          pickingWorkspaceRef.current = false;
+          focusSoon();
+          return;
+        }
         if (
           !focused &&
           !submittingRef.current &&
@@ -306,13 +328,14 @@ export function QuickPanel() {
 
   const submit = useCallback(async () => {
     const t = text.trim();
-    if (!t || submittingRef.current) return;
+    if ((!t && attachments.length === 0) || submittingRef.current) return;
     setSubmitting(true);
     submittingRef.current = true;
     try {
       await api.quickSubmit({
         text: t,
         image: includeScreenshot ? screenshot : null,
+        attachments,
         sessionMode,
         workspaceDir,
         model: modelChoice.model,
@@ -328,6 +351,7 @@ export function QuickPanel() {
       // with-screenshot submit doesn't leave a stale thumbnail that flashes
       // when the no-screenshot launcher opens next.
       setText("");
+      setAttachments([]);
       setScreenshot(null);
       setScreenshotDenied(false);
       setIncludeScreenshot(false);
@@ -337,7 +361,46 @@ export function QuickPanel() {
       setSubmitting(false);
       submittingRef.current = false;
     }
-  }, [text, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, ultraEnabled, backend, cliModel, cliEffort]);
+  }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, ultraEnabled, backend, cliModel, cliEffort]);
+
+  const addFiles = useCallback(async (files: FileList | File[]) => {
+    setAttachError(null);
+    const next: QuickAttachment[] = [];
+    for (const file of Array.from(files)) {
+      const isImage = file.type.startsWith("image/");
+      const limit = isImage ? 8 * 1024 * 1024 : 25 * 1024 * 1024;
+      if (file.size > limit) {
+        setAttachError(t("attachment.tooLarge", { name: file.name, limit: limit / 1024 / 1024 }));
+        continue;
+      }
+      try {
+        const data = await fileToBase64(file);
+        next.push(isImage
+          ? { type: "image", data, mimeType: file.type, name: file.name || t("attachment.pastedImage") }
+          : { type: "file", data, mimeType: file.type || "application/octet-stream", name: file.name || t("attachment.unnamed"), sizeBytes: file.size });
+      } catch (error) {
+        setAttachError(String(error));
+      }
+    }
+    if (next.length) setAttachments((current) => [...current, ...next]);
+  }, [t]);
+
+  function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.clipboardData.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    if (!files.length) return;
+    e.preventDefault();
+    void addFiles(files);
+    const pastedText = e.clipboardData.getData("text/plain");
+    if (pastedText) {
+      const el = taRef.current;
+      const start = el?.selectionStart ?? text.length;
+      const end = el?.selectionEnd ?? start;
+      setText((value) => value.slice(0, start) + pastedText + value.slice(end));
+    }
+  }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Escape") {
@@ -377,6 +440,7 @@ export function QuickPanel() {
           autoFocus
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onPaste={onPaste}
           onKeyDown={onKeyDown}
           placeholder={t("launcher.placeholder")}
           className="w-full flex-1 resize-none overflow-x-hidden overflow-y-auto bg-transparent text-lg font-medium leading-7 text-foreground outline-none placeholder:font-medium placeholder:text-muted-foreground/60"
@@ -389,11 +453,25 @@ export function QuickPanel() {
             ambient-context chips share ONE horizontal row so they don't stack
             and overflow the fixed-height panel. Each ✕ drops that item from the
             prompt. Only rendered once there's something to show. */}
-        {includeScreenshot &&
+        {(attachments.length > 0 || (includeScreenshot &&
           (screenshot ||
             screenshotDenied ||
-            (context && (context.app || context.url || context.selection))) && (
+            (context && (context.app || context.url || context.selection))))) && (
           <div className="flex shrink-0 flex-wrap items-end gap-2 pt-2">
+            {attachments.map((attachment, index) => (
+              <div key={`${attachment.name}-${index}`} className="group/shot relative inline-block">
+                {attachment.type === "image" ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={`data:${attachment.mimeType};base64,${attachment.data}`} alt={attachment.name} className="size-14 rounded-md border border-black/10 object-cover dark:border-white/10" />
+                ) : (
+                  <div className="flex h-14 max-w-44 items-center gap-2 rounded-md border border-black/10 bg-black/[0.03] px-2.5 dark:border-white/10 dark:bg-white/[0.04]">
+                    <File className="size-4 shrink-0" />
+                    <div className="min-w-0"><div className="truncate text-xs">{attachment.name}</div><div className="text-[10px] opacity-60">{formatBytes(attachment.sizeBytes)}</div></div>
+                  </div>
+                )}
+                <button type="button" onClick={() => setAttachments((items) => items.filter((_, i) => i !== index))} aria-label={t("attachment.remove", { name: attachment.name })} className="absolute -top-1.5 -right-1.5 inline-flex size-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 ring-1 ring-white/20 transition-opacity hover:bg-black/90 group-hover/shot:opacity-100"><X className="size-3" /></button>
+              </div>
+            ))}
             {screenshot ? (
               <div className="group/shot relative inline-block">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -421,7 +499,7 @@ export function QuickPanel() {
                 {t("screenshot.permission")}
               </span>
             ) : null}
-            {context && (context.app || context.url || context.selection) && (
+            {includeScreenshot && context && (context.app || context.url || context.selection) && (
               <div className="flex flex-wrap items-center gap-1.5">
                 {context.app && (
                   <ContextChip
@@ -455,6 +533,8 @@ export function QuickPanel() {
 
       {/* Thin, muted action strip — subordinate to the input. */}
       <div className="flex items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-[13px] text-muted-foreground dark:border-white/[0.06]">
+        <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { pickingWorkspaceRef.current = false; if (e.target.files?.length) void addFiles(e.target.files); e.target.value = ""; }} />
+        <button type="button" onClick={() => { pickingWorkspaceRef.current = true; fileInputRef.current?.click(); }} title={t("attachment.add")} aria-label={t("attachment.add")} className="inline-flex size-8 items-center justify-center rounded-md hover:bg-black/5 hover:text-foreground dark:hover:bg-white/[0.08]"><Paperclip className="size-3.5" /></button>
         <Segmented
           value={sessionMode}
           onChange={setSessionMode}
@@ -510,8 +590,18 @@ export function QuickPanel() {
           {t("footer.dismiss")}
         </span>
       </div>
+      {attachError && <div className="absolute bottom-12 left-4 text-[11px] text-destructive">{attachError}</div>}
     </div>
   );
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
 }
 
 /** Compact coding-agent picker for the launcher's action strip: Cetus (the

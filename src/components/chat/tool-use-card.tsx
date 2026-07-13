@@ -109,12 +109,14 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
   const { t } = useTranslation("chat");
   const [open, toggle] = useDisclosure(id);
   const isError = block.result?.isError;
-  const isRunning = block.streaming === true;
+  const subagent = subagentInfo(block.result?.details);
+  // Codex child threads may outlive the root turn, so agent_end can clear the
+  // generic streaming bit while the structured subagent state is still live.
+  const isRunning = block.streaming === true || subagent?.status === "running";
   // A settled (non-streaming) tool call that never got a result was interrupted
   // — the run was aborted or pi died before the tool returned. Show a terminal
   // "interrupted" state instead of a spinner that never resolves.
   const isIncomplete = !isRunning && !isError && block.result == null;
-  const subagent = subagentInfo(block.result?.details);
   const preview = subagent
     ? [subagent.type, subagent.description].filter(Boolean).join(" — ")
     : summarizeArgs(block.args);

@@ -46,7 +46,7 @@ export function SlashMenu({ items, activeIndex, onSelect, onHover }: Props) {
   return (
     <div
       ref={listRef}
-      className="absolute bottom-full left-0 z-20 mb-2 max-h-80 w-[min(40rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg"
+      className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg"
       role="listbox"
     >
       {items.map((item, idx) => {
@@ -72,17 +72,17 @@ export function SlashMenu({ items, activeIndex, onSelect, onHover }: Props) {
               }}
               onMouseMove={() => onHover(idx)}
               className={cn(
-                "flex w-full items-start rounded-md px-3 py-2 text-left transition-colors motion-reduce:transition-none",
+                "flex w-full items-start rounded-md px-3 py-1.5 text-left transition-colors motion-reduce:transition-none",
                 active ? "bg-muted text-foreground" : "hover:bg-muted/60",
               )}
             >
               <span className="min-w-0 flex-1">
-                <span className="flex min-w-0 items-baseline font-mono text-sm font-medium">
+                <span className="flex min-w-0 items-baseline font-mono text-xs font-medium">
                   <span className="shrink-0 text-muted-foreground">/</span>
                   <span className="truncate font-sans">{item.name}</span>
                 </span>
                 {item.description && (
-                  <span className="mt-0.5 line-clamp-1 block text-xs text-muted-foreground">
+                  <span className="mt-0.5 line-clamp-1 block text-[11px] text-muted-foreground">
                     {item.description}
                   </span>
                 )}
@@ -97,7 +97,7 @@ export function SlashMenu({ items, activeIndex, onSelect, onHover }: Props) {
 
 function Heading({ label }: { label: string }) {
   return (
-    <div className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground">
+    <div className="px-3 pb-1 pt-2 text-[10px] font-medium text-muted-foreground">
       {label}
     </div>
   );

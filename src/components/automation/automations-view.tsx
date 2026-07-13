@@ -43,6 +43,26 @@ interface Props {
   onOpenConversation: (id: string) => void;
 }
 
+type AutomationSort = "updatedAt" | "createdAt";
+
+const AUTOMATION_SORT_STORAGE_KEY = "cetus:automationSort";
+
+function loadAutomationSort(): AutomationSort {
+  if (typeof window === "undefined") return "updatedAt";
+  try {
+    const saved = window.localStorage.getItem(AUTOMATION_SORT_STORAGE_KEY);
+    return saved === "createdAt" ? "createdAt" : "updatedAt";
+  } catch {
+    return "updatedAt";
+  }
+}
+
+function saveAutomationSort(value: AutomationSort) {
+  try {
+    window.localStorage.setItem(AUTOMATION_SORT_STORAGE_KEY, value);
+  } catch {}
+}
+
 export function AutomationsView({
   automations,
   defaultWorkspace,
@@ -54,7 +74,7 @@ export function AutomationsView({
   onOpenConversation,
 }: Props) {
   const { t } = useTranslation("automation");
-  const [sortBy, setSortBy] = useState<"updatedAt" | "createdAt">("updatedAt");
+  const [sortBy, setSortBy] = useState<AutomationSort>(loadAutomationSort);
   const sortedAutomations = useMemo(
     () =>
       [...automations].sort((a, b) => {
@@ -79,9 +99,11 @@ export function AutomationsView({
             {automations.length > 0 && (
               <Select
                 value={sortBy}
-                onValueChange={(value) =>
-                  setSortBy(value as "updatedAt" | "createdAt")
-                }
+                onValueChange={(value) => {
+                  const next = value as AutomationSort;
+                  setSortBy(next);
+                  saveAutomationSort(next);
+                }}
               >
                 <SelectTrigger
                   size="sm"

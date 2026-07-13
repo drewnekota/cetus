@@ -15,6 +15,7 @@
 // (agent_end) clears any stragglers, since the child process is then gone.
 
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Check, MessageCircleQuestion, ShieldQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/tauri";
@@ -37,7 +38,12 @@ export function CliControlCard({ convId }: { convId: string }) {
     try {
       await api.cliControlRespond(convId, req.requestId, response);
     } catch (e) {
+      // The answer never reached the CLI, which is still blocked waiting on
+      // it — silently eating this leaves the conversation wedged on a request
+      // the user believes they answered. Put the card back and say so.
       console.error("cli_control_respond failed:", e);
+      useChatStore.getState().pushControlRequest(convId, req);
+      toast.error(t("cliControl.respondFailed"));
     }
   }
 

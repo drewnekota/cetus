@@ -60,6 +60,10 @@ xcap = "0.4"
 image = "0.25"
 tracing-appender = "0.2.5"
 sysinfo = "0.33"
+# Workspace Terminal tabs are real, long-lived pseudo terminals.  This keeps
+# interactive programs (codex, claude, vim, dev servers) attached to a TTY and
+# lets the frontend resize/write the same shell process across commands.
+portable-pty = "0.9"
 
 # macOS-only: the global "double / both ⌘" launcher gesture is detected with a
 # CGEventTap (the OS hotkey API can't register modifier-only chords), and the

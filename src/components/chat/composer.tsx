@@ -6,6 +6,7 @@ import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { BackendPicker, nextBackend } from "@/components/chat/backend-picker";
+import { useCliCommands } from "@/lib/chat-store";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { SlashMenu, type SlashItem } from "@/components/chat/slash-menu";
 import { MentionMenu } from "@/components/chat/mention-menu";
@@ -75,6 +76,15 @@ export interface QueuedMessage {
   attachments: ComposerAttachment[];
 }
 
+/** Imperative-looking, token-keyed request to replace the current draft. Used
+ *  when a queued message is removed from the queue and returned to the shared
+ *  composer for full text + attachment editing. */
+export interface ComposerDraftRequest {
+  id: number;
+  text: string;
+  attachments: ComposerAttachment[];
+}
+
 export interface QuoteRequest {
   id: number;
   text: string;
@@ -138,6 +148,8 @@ interface Props {
    *  composer unmounts) or a conversation switch (the key changes in place).
    *  Omit for ephemeral composers (dialogs) that shouldn't retain a draft. */
   draftKey?: string;
+  /** Replace the current draft and focus the textarea when this token changes. */
+  draftRequest?: ComposerDraftRequest | null;
   /** Selected text from the current conversation to append as a Markdown quote. */
   quoteRequest?: QuoteRequest | null;
   /** Backend choice held before a conversation exists (the hero composer):
@@ -226,6 +238,7 @@ export function Composer({
   placeholder,
   focusToken,
   draftKey,
+  draftRequest,
   quoteRequest,
   pendingBackend,
   onPendingBackendChange,
@@ -335,6 +348,7 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastQuoteIdRef = useRef<number | null>(null);
+  const lastDraftRequestIdRef = useRef<number | null>(null);
 
   // A leading `!` flips the composer into Terminal mode: submit opens/focuses
   // the Terminal surface and runs the command there instead of sending a chat
@@ -343,6 +357,8 @@ export function Composer({
   const bashCommand = bashMode ? text.slice(1).trim() : "";
 
   // ---- Slash menu (commands + skills) -------------------------------------
+  // Native commands the conversation's CLI session reported on boot.
+  const nativeCommands = useCliCommands(conversationId);
   const [slashCommands, setSlashCommands] = useState<SlashItem[]>([]);
   const [slashSkills, setSlashSkills] = useState<SlashItem[]>([]);
   const [slashOpen, setSlashOpen] = useState(false);
@@ -415,10 +431,30 @@ export function Composer({
     const match = (it: SlashItem) =>
       it.name.toLowerCase().includes(q) || it.description.toLowerCase().includes(q);
     // Runtime built-ins first: on claude-code they're what /-muscle-memory
-    // from the native CLI reaches for.
-    const builtins = backend === "claude-code" ? CLAUDE_CLI_COMMANDS.filter(match) : [];
+    // from the native CLI reaches for. Prefer the catalog the session itself
+    // reported on boot (initialize ack — /usage, /compact, /context, /model …);
+    // the hardcoded snapshot only covers conversations whose session hasn't
+    // spawned yet. Skills ride the catalog too, suffixed "(user)"/"(project)"
+    // — dropped here since the menu already lists them from its own sources.
+    const skillNames = new Set(slashSkills.map((s) => s.name.toLowerCase()));
+    const native: SlashItem[] = nativeCommands
+      .filter((c) => !/\((?:user|project|plugin|builtin)\)\s*$/.test(c.description))
+      .filter((c) => !skillNames.has(c.name.toLowerCase()))
+      .map((c) => ({
+        kind: "command",
+        id: `cli:${c.name}`,
+        name: c.name,
+        description: c.argumentHint
+          ? `${c.description} — ${c.argumentHint}`
+          : c.description,
+        prompt: `/${c.name} `,
+      }));
+    const builtins =
+      backend === "claude-code"
+        ? (native.length > 0 ? native : CLAUDE_CLI_COMMANDS).filter(match)
+        : [];
     return [...builtins, ...slashCommands.filter(match), ...slashSkills.filter(match)];
-  }, [slashCommands, slashSkills, slashQuery, backend]);
+  }, [slashCommands, slashSkills, slashQuery, backend, nativeCommands]);
 
   const slashVisible = slashOpen && slashItems.length > 0;
   const slashIdx = Math.min(slashActive, slashItems.length - 1);
@@ -583,6 +619,37 @@ export function Composer({
       node.setSelectionRange(pos, pos);
     });
   }, [disabled, draftKey, quoteRequest]);
+
+  useEffect(() => {
+    if (!draftRequest || draftRequest.id === lastDraftRequestIdRef.current) return;
+    lastDraftRequestIdRef.current = draftRequest.id;
+    updateText(draftRequest.text);
+    updateAttachments((previous) => {
+      previous.forEach((attachment) => {
+        if (attachment.type === "image" && attachment.previewUrl.startsWith("blob:")) {
+          URL.revokeObjectURL(attachment.previewUrl);
+        }
+      });
+      return draftRequest.attachments.map((attachment) =>
+        attachment.type === "image"
+          ? {
+              ...attachment,
+              // The original object URL is revoked when the message is queued.
+              // A data URL gives the composer a durable thumbnail while editing.
+              previewUrl: `data:${attachment.mimeType};base64,${attachment.data}`,
+            }
+          : attachment,
+      );
+    });
+    setAttachError(null);
+    requestAnimationFrame(() => {
+      const node = taRef.current;
+      if (!node || disabled) return;
+      node.focus({ preventScroll: true });
+      const pos = node.value.length;
+      node.setSelectionRange(pos, pos);
+    });
+  }, [disabled, draftRequest, updateAttachments, updateText]);
 
   useEffect(() => {
     if (disabled) return;

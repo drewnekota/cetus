@@ -49,9 +49,12 @@ interface Props {
   retrying?: boolean;
   /** Follow-up queue for this conversation (typed while the agent is mid-run). */
   queued?: QueuedMessage[];
-  onQueue?: (text: string, attachments: ComposerAttachment[]) => void;
+  onQueue?: (
+    text: string,
+    attachments: ComposerAttachment[],
+    beforeIds?: string[],
+  ) => void;
   onSteerQueued?: (id: string) => void;
-  onEditQueued?: (id: string, text: string) => void;
   onRemoveQueued?: (id: string) => void;
   /** Ultra Code state + toggle, forwarded to the composer. */
   ultra?: boolean;
@@ -78,7 +81,6 @@ export function SessionDetailDialog({
   queued,
   onQueue,
   onSteerQueued,
-  onEditQueued,
   onRemoveQueued,
   ultra,
   onUltraToggle,
@@ -422,7 +424,6 @@ export function SessionDetailDialog({
                 queued={queued}
                 onQueue={onQueue}
                 onSteerQueued={onSteerQueued}
-                onEditQueued={onEditQueued}
                 onRemoveQueued={onRemoveQueued}
                 ultra={ultra}
                 onUltraToggle={onUltraToggle}

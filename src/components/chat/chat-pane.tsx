@@ -19,12 +19,14 @@ import { AlertTriangle, ArrowDown, ArrowUp, Bot, GitBranch, Loader2, MessageCirc
 import {
   Composer,
   type ComposerAttachment,
+  type ComposerDraftRequest,
   type QuoteRequest,
   type QueuedMessage,
 } from "@/components/chat/composer";
 import {
   getTurnPreview,
   useAwaitingAssistant,
+  useBackgroundTasks,
   useChatError,
   useHasMessages,
   useIsStreaming,
@@ -62,9 +64,12 @@ interface Props {
   /** Follow-up queue (messages typed while the agent is mid-run). When omitted,
    *  the composer falls back to immediate steer while streaming. */
   queued?: QueuedMessage[];
-  onQueue?: (text: string, attachments: ComposerAttachment[]) => void;
+  onQueue?: (
+    text: string,
+    attachments: ComposerAttachment[],
+    beforeIds?: string[],
+  ) => void;
   onSteerQueued?: (id: string) => void;
-  onEditQueued?: (id: string, text: string) => void;
   onRemoveQueued?: (id: string) => void;
   /** Ultra Code state + toggle, forwarded to the composer. */
   ultra?: boolean;
@@ -112,7 +117,6 @@ export function ChatPane({
   queued,
   onQueue,
   onSteerQueued,
-  onEditQueued,
   onRemoveQueued,
   ultra,
   onUltraToggle,
@@ -132,7 +136,13 @@ export function ChatPane({
   const hasMessages = useHasMessages(convId);
   const isStreaming = useIsStreaming(convId);
   const [quoteRequest, setQuoteRequest] = useState<QuoteRequest | null>(null);
+  const [queuedDrafts, setQueuedDrafts] = useState<
+    Record<string, { request: ComposerDraftRequest; beforeIds: string[] }>
+  >({});
+  const queuedDraftKey = convId ?? "new";
+  const queuedDraft = queuedDrafts[queuedDraftKey] ?? null;
   const quoteIdRef = useRef(0);
+  const queuedDraftIdRef = useRef(0);
   // A fresh greeting per new chat. Keyed on focusToken (bumped when "New chat"
   // is clicked) + convId + locale so it re-rolls on a new chat but stays put
   // across keystrokes/re-renders. An explicit emptyHeadline prop still wins.
@@ -145,6 +155,50 @@ export function ChatPane({
     quoteIdRef.current += 1;
     setQuoteRequest({ id: quoteIdRef.current, text });
   }, []);
+  const editQueued = useCallback(
+    (id: string) => {
+      const index = (queued ?? []).findIndex((item) => item.id === id);
+      if (index < 0) return;
+      const item = queued![index];
+      queuedDraftIdRef.current += 1;
+      setQueuedDrafts((drafts) => ({
+        ...drafts,
+        [queuedDraftKey]: {
+          request: {
+            id: queuedDraftIdRef.current,
+            text: item.text,
+            attachments: item.attachments,
+          },
+          // Reinsert before the first successor that still exists when the
+          // edited draft is submitted. This preserves FIFO order even if
+          // earlier queued turns finish while the user is editing.
+          beforeIds: queued!.slice(index + 1).map((successor) => successor.id),
+        },
+      }));
+      onRemoveQueued?.(id);
+    },
+    [onRemoveQueued, queued, queuedDraftKey],
+  );
+  const queueFromComposer = useCallback(
+    (text: string, attachments: ComposerAttachment[]) => {
+      onQueue?.(text, attachments, queuedDraft?.beforeIds);
+      setQueuedDrafts((drafts) => {
+        const { [queuedDraftKey]: _submitted, ...rest } = drafts;
+        return rest;
+      });
+    },
+    [onQueue, queuedDraft, queuedDraftKey],
+  );
+  const sendFromComposer = useCallback(
+    (text: string, attachments: ComposerAttachment[]) => {
+      onSend(text, attachments);
+      setQueuedDrafts((drafts) => {
+        const { [queuedDraftKey]: _submitted, ...rest } = drafts;
+        return rest;
+      });
+    },
+    [onSend, queuedDraftKey],
+  );
 
   if (!hasMessages) {
     return (
@@ -207,7 +261,9 @@ export function ChatPane({
           <QueuedMessages
             items={queued ?? []}
             onSteer={onSteerQueued}
-            onEdit={onEditQueued}
+            // Only one queue item can own the composer at a time. A second edit
+            // would otherwise overwrite the first removed item's only draft.
+            onEdit={onRemoveQueued && !queuedDraft ? editQueued : undefined}
             onRemove={onRemoveQueued}
           />
           <Composer
@@ -222,10 +278,11 @@ export function ChatPane({
             workspaceDir={workspaceDir}
             defaultWorkspace={defaultWorkspace}
             onWorkspaceChange={onWorkspaceChange}
-            onSend={onSend}
-            onQueue={onQueue}
+            onSend={sendFromComposer}
+            onQueue={onQueue ? queueFromComposer : undefined}
             onBash={onBash}
             onAbort={onAbort}
+            draftRequest={queuedDraft?.request}
             ultra={ultra}
             onUltraToggle={onUltraToggle}
             quoteRequest={quoteRequest}
@@ -238,17 +295,29 @@ export function ChatPane({
   );
 }
 
-/** Awareness strip for background subagents (claude-code run_in_background
- *  Agent/Task, e.g. an UltraCode workflow) still running after the main reply
- *  landed. Without it the composer just says "Agent is running…" with no hint of
- *  *what* — the run is held open waiting on these to report back. Renders
- *  nothing when none are active. */
+/** Awareness strip for background work owned by this conversation: subagents
+ *  (claude-code run_in_background Agent/Task, e.g. an UltraCode workflow) and
+ *  session-scoped tasks (Monitors, background Bash) that outlive model turns.
+ *  Without it the composer just says "Agent is running…" with no hint of
+ *  *what* — or, worse, the conversation looks idle while a Monitor is watching
+ *  something and will wake the agent later. Two sources, merged: the bridge's
+ *  live task registry (`cli_background_tasks` snapshots — authoritative for
+ *  CLI backends, cleared when the session process exits) and the rendered
+ *  cards' running-subagent details (covers pi-backend runs). Renders nothing
+ *  when both are empty. */
 function BackgroundAgentsBar({ convId }: { convId: string }) {
   const { t } = useTranslation("chat");
   const agents = useRunningSubagents(convId);
-  if (agents.length === 0) return null;
-  // Prefer the human task description; fall back to the agent type.
-  const labels = agents.map((a) => a.description || a.type).filter(Boolean);
+  const tasks = useBackgroundTasks(convId);
+  if (agents.length === 0 && tasks.length === 0) return null;
+  // Prefer the human task description; fall back to the agent/task type.
+  const seen = new Set(tasks.map((task) => `${task.kind}|${task.description}`));
+  const labels = [
+    ...tasks.map((task) => task.description || task.kind),
+    ...agents
+      .filter((a) => !seen.has(`${a.type}|${a.description}`))
+      .map((a) => a.description || a.type),
+  ].filter(Boolean);
   const shown = labels.slice(0, 3).join(", ");
   const extra = labels.length - Math.min(labels.length, 3);
   return (
@@ -256,7 +325,7 @@ function BackgroundAgentsBar({ convId }: { convId: string }) {
       <Bot className="size-3.5 shrink-0 text-[#d97757]" />
       <Loader2 className="size-3 shrink-0 animate-spin text-[#d97757]" />
       <span className="shrink-0 font-medium text-foreground">
-        {t("pane.backgroundAgents.title", { count: agents.length })}
+        {t("pane.backgroundAgents.title", { count: labels.length })}
       </span>
       {shown ? (
         <span className="truncate">
@@ -1142,7 +1211,7 @@ function MessageError({
 /** The follow-up queue rendered just above the composer: messages the user
  *  typed while the agent was mid-run. Each waits for the run to end (then it's
  *  delivered as a new turn), or the user can "Steer now" to inject it into the
- *  current run immediately, or edit it in place while it waits. */
+ *  current run immediately, or return it to the composer for editing. */
 function QueuedMessages({
   items,
   onSteer,
@@ -1151,7 +1220,7 @@ function QueuedMessages({
 }: {
   items: QueuedMessage[];
   onSteer?: (id: string) => void;
-  onEdit?: (id: string, text: string) => void;
+  onEdit?: (id: string) => void;
   onRemove?: (id: string) => void;
 }) {
   if (items.length === 0) return null;
@@ -1178,83 +1247,15 @@ function QueuedMessageRow({
 }: {
   item: QueuedMessage;
   onSteer?: (id: string) => void;
-  onEdit?: (id: string, text: string) => void;
+  onEdit?: (id: string) => void;
   onRemove?: (id: string) => void;
 }) {
   const { t } = useTranslation("chat");
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(item.text);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  // If the item auto-delivers or gets steered away mid-edit the row unmounts,
-  // so no stale-edit cleanup is needed; local state dies with it.
-  function startEdit() {
-    setDraft(item.text);
-    setEditing(true);
-  }
-  function saveEdit() {
-    setEditing(false);
-    if (draft !== item.text) onEdit?.(item.id, draft);
-  }
-  function cancelEdit() {
-    setEditing(false);
-    setDraft(item.text);
-  }
-
-  useEffect(() => {
-    if (!editing) return;
-    const el = textareaRef.current;
-    if (el) {
-      el.focus();
-      el.setSelectionRange(el.value.length, el.value.length);
-    }
-  }, [editing]);
-
   const label =
     item.text.trim() ||
     (item.attachments.length
       ? t("pane.attachmentCount", { count: item.attachments.length })
       : t("pane.emptyMessage"));
-
-  if (editing) {
-    return (
-      <div className="flex flex-col gap-1.5 rounded-lg border border-dashed border-border bg-muted/40 px-2.5 py-1.5 text-xs">
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              saveEdit();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              cancelEdit();
-            }
-          }}
-          rows={Math.min(6, Math.max(1, draft.split("\n").length))}
-          className="w-full resize-none bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
-          placeholder={t("pane.emptyMessage")}
-        />
-        <div className="flex items-center justify-end gap-1">
-          <button
-            type="button"
-            onClick={cancelEdit}
-            className="rounded-md px-1.5 py-0.5 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            {t("pane.cancelEdit")}
-          </button>
-          <button
-            type="button"
-            onClick={saveEdit}
-            className="rounded-md px-1.5 py-0.5 font-medium text-primary transition-colors hover:bg-primary/10"
-          >
-            {t("pane.saveEdit")}
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="group flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/40 px-2.5 py-1.5 text-xs">
@@ -1265,7 +1266,7 @@ function QueuedMessageRow({
       {onEdit && (
         <button
           type="button"
-          onClick={startEdit}
+          onClick={() => onEdit(item.id)}
           title={t("pane.editQueued")}
           aria-label={t("pane.editQueued")}
           className="shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
