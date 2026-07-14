@@ -19,7 +19,7 @@ import {
 import { createBrowserViewState, type BrowserViewState } from "@/components/browser/browser-view";
 import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
 import { useChatStore, useIsStreaming } from "@/lib/chat-store";
-import { isArtifactDetails } from "@/lib/artifact";
+import { artifactsFromDetails } from "@/lib/artifact";
 import { formatTimestamp } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
 import { workspaceName } from "@/lib/paths";
@@ -118,11 +118,10 @@ export function SessionDetailDialog({
         for (const b of m.blocks) {
           if (
             b.kind === "tool_use" &&
-            b.name === "send_artifact" &&
             b.result &&
-            isArtifactDetails(b.result.details)
+            artifactsFromDetails(b.result.details).length > 0
           ) {
-            n++;
+            n += artifactsFromDetails(b.result.details).length;
           }
         }
       }

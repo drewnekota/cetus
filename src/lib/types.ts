@@ -214,6 +214,23 @@ export interface CliSlashCommand {
   argumentHint: string;
 }
 
+/** Claude's unified rate-limit heartbeat (`rate_limit_event`), forwarded by
+ *  the bridge as a `cli_rate_limit` event after each API call. Account-level
+ *  (not per conversation), so the store keeps one snapshot per runtime and
+ *  the runtime picker renders it as a quota line. */
+export interface CliRateLimitInfo {
+  /** "allowed" | "allowed_warning" | "rejected" */
+  status: string;
+  /** 0..1 fraction of the window used; the CLI includes it only near/over
+   *  the warning threshold. */
+  utilization?: number;
+  /** Epoch seconds when the window resets. */
+  resetsAt?: number;
+  /** "five_hour" | "seven_day" | "overage" … */
+  rateLimitType?: string;
+  isUsingOverage?: boolean;
+}
+
 /** Persisted CLI-agent (claude-code / codex) switches. */
 export interface CliAgentSettings {
   /** Skip the CLIs' permission prompts (headless turns can't answer them). */
@@ -225,9 +242,9 @@ export interface CliAgentSettings {
 
 /** What a CLI backend actually runs when no override is set, resolved from
  *  the vendor's config on disk (claude settings.json / codex config.toml), so
- *  the tuning menu can echo "Default (Fable)" instead of a bare "Default".
- *  `models` is codex's own fetched catalog (models_cache.json); null → use the
- *  static fallback catalog. */
+ *  the tuning menu can echo "Default (Opus)" instead of a bare "Default".
+ *  `models` is the CLI's own live catalog; null → use the static fallback
+ *  catalog. */
 export interface CliDefaults {
   model: string | null;
   effort: string | null;

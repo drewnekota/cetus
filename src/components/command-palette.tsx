@@ -55,7 +55,7 @@ interface Props {
   activeId: string | null;
   modelChoice: ModelChoice;
   onSelectConversation: (id: string) => void;
-  onNewChat: () => void;
+  onNewTask: () => void;
   onModelChange: (next: ModelChoice) => void;
   onOpenSettings: () => void;
   onOpenScreenHistory: (query?: string, frame?: Screenshot) => void;
@@ -128,7 +128,7 @@ export function CommandPalette({
   activeId,
   modelChoice,
   onSelectConversation,
-  onNewChat,
+  onNewTask,
   onModelChange,
   onOpenSettings,
   onOpenScreenHistory,
@@ -222,7 +222,7 @@ export function CommandPalette({
 
   const actions = useMemo(
     () => [
-      { id: "new", label: t("action.newChat.label"), keywords: t("action.newChat.keywords"), shortcut: shortcutDisplay(shortcuts.newChat), icon: Plus, run: onNewChat },
+      { id: "new", label: t("action.newTask.label"), keywords: t("action.newTask.keywords"), shortcut: shortcutDisplay(shortcuts.newChat), icon: Plus, run: onNewTask },
       { id: "chats", label: t("action.switchChats.label"), keywords: t("action.switchChats.keywords"), shortcut: shortcutDisplay(shortcuts.switchChats), icon: MessageSquare, run: () => onViewChange("chat") },
       { id: "board", label: t("action.switchBoard.label"), keywords: t("action.switchBoard.keywords"), shortcut: shortcutDisplay(shortcuts.switchBoard), icon: LayoutGrid, run: () => onViewChange("board") },
       { id: "automations", label: t("action.switchAutomations.label"), keywords: t("action.switchAutomations.keywords"), shortcut: shortcutDisplay(shortcuts.switchAutomations), icon: Clock, run: () => onViewChange("automations") },
@@ -230,7 +230,7 @@ export function CommandPalette({
       { id: "settings", label: t("action.openSettings.label"), keywords: t("action.openSettings.keywords"), shortcut: shortcutDisplay(shortcuts.openSettings), icon: Settings, run: onOpenSettings },
       { id: "screen-history", label: t("action.screenHistory.label"), keywords: t("action.screenHistory.keywords"), shortcut: "", icon: Monitor, run: () => onOpenScreenHistory() },
     ],
-    [t, shortcuts, onNewChat, onOpenSettings, onOpenScreenHistory, onViewChange],
+    [t, shortcuts, onNewTask, onOpenSettings, onOpenScreenHistory, onViewChange],
   );
 
   const shownActions = useMemo(

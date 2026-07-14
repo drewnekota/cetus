@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/lib/format";
 import { useChatStore, loadCachedMessages } from "@/lib/chat-store";
 import type { ChatState } from "@/lib/chat-state";
-import { isArtifactDetails } from "@/lib/artifact";
+import { artifactsFromDetails } from "@/lib/artifact";
 import { isReviewRequestDetails, type ReviewRequestDetails } from "@/lib/review";
 import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
 import { useTranslation } from "@/lib/i18n";
@@ -389,11 +389,10 @@ function computeArtifactCount(c: ChatState): number {
     for (const b of m.blocks) {
       if (
         b.kind === "tool_use" &&
-        b.name === "send_artifact" &&
         b.result &&
-        isArtifactDetails(b.result.details)
+        artifactsFromDetails(b.result.details).length > 0
       ) {
-        n++;
+        n += artifactsFromDetails(b.result.details).length;
       }
     }
   }

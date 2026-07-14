@@ -95,6 +95,7 @@ interface Props {
   workspaceFilter: string | null;
   onWorkspaceFilterChange: (dir: string | null) => void;
   onSelect: (id: string) => void;
+  onNewTask: () => void;
   onNew: (workspaceDir?: string) => void;
   onRevealWorkspace: (dir: string) => void;
   onArchiveWorkspaceChats: (dir: string) => void;
@@ -122,6 +123,7 @@ export const AppSidebar = memo(function AppSidebar({
   workspaceFilter,
   onWorkspaceFilterChange,
   onSelect,
+  onNewTask,
   onNew,
   onRevealWorkspace,
   onArchiveWorkspaceChats,
@@ -137,6 +139,7 @@ export const AppSidebar = memo(function AppSidebar({
   const shortcutLabels = useMemo(
     () => ({
       newChat: shortcutDisplay(shortcuts.newChat),
+      newDefaultChat: shortcutDisplay(shortcuts.newDefaultChat),
       archiveChat: shortcutDisplay(shortcuts.archiveChat),
       switchChats: shortcutDisplay(shortcuts.switchChats),
       switchBoard: shortcutDisplay(shortcuts.switchBoard),
@@ -222,11 +225,6 @@ export const AppSidebar = memo(function AppSidebar({
     return m;
   }, [conversations]);
 
-  // The top action is a conversations action: "New task" on the board, "New
-  // chat" everywhere else. It stays "New chat" on the Automations destination —
-  // automations are created from that page's own button.
-  const newLabel = view === "board" ? t("new.task") : t("new.chat");
-
   return (
     <Sidebar
       collapsible="none"
@@ -290,27 +288,27 @@ export const AppSidebar = memo(function AppSidebar({
             board: shortcutLabels.switchBoard,
           }}
         />
-        {/* New chat + Automations are pinned with the header (logo + toggle) so
+        {/* New task + Automations are pinned with the header (logo + toggle) so
             they stay put while the conversation / workspace list scrolls. */}
         <SidebarMenu>
           <SidebarMenuItem>
             <Tooltip>
               <TooltipTrigger asChild>
                 <SidebarMenuButton
-                  onClick={() => onNew()}
+                  onClick={onNewTask}
                   // Plain nav row (no standalone fill) so it sits flush with the
                   // other sidebar actions; the hover/active states come from the
                   // default SidebarMenuButton treatment.
                   className="min-w-8"
                 >
                   <PlusCircle />
-                  <span>{newLabel}</span>
+                  <span>{t("new.task")}</span>
                   <Kbd className="ml-auto border-transparent">{shortcutLabels.newChat}</Kbd>
                 </SidebarMenuButton>
               </TooltipTrigger>
               <TooltipContent side="right">
-                <span>New chat</span>
-                <Kbd>opt+cmd+n</Kbd>
+                <span>{t("new.chat")}</span>
+                <Kbd>{shortcutLabels.newDefaultChat}</Kbd>
               </TooltipContent>
             </Tooltip>
           </SidebarMenuItem>

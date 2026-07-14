@@ -11,7 +11,7 @@ import {
 import { ArtifactView } from "@/components/chat/artifact-view";
 import { useTranslation } from "@/lib/i18n";
 import { useChatStore } from "@/lib/chat-store";
-import { isArtifactDetails, type ArtifactDetails } from "@/lib/artifact";
+import { artifactsFromDetails, type ArtifactDetails } from "@/lib/artifact";
 
 interface Props {
   /** Conversation whose artifacts to show. Null closes the dialog. */
@@ -41,9 +41,8 @@ export function ArtifactsDialog({ convId, title, open, onOpenChange }: Props) {
       for (const m of c.messages) {
         for (const b of m.blocks) {
           if (b.kind !== "tool_use") continue;
-          if (b.name !== "send_artifact") continue;
-          if (!b.result || !isArtifactDetails(b.result.details)) continue;
-          out.push(b.result.details);
+          if (!b.result) continue;
+          out.push(...artifactsFromDetails(b.result.details));
         }
       }
       return out;

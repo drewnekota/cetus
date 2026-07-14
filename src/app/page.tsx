@@ -76,6 +76,7 @@ import {
   type AutomationInput,
   type CliBackgroundTask,
   type CliControlRequest,
+  type CliRateLimitInfo,
   type CliSlashCommand,
   type Conversation,
   type ExtensionUIRequest,
@@ -1007,9 +1008,17 @@ export default function Home() {
               eventType !== "cli_control_request" &&
               eventType !== "cli_background_tasks" &&
               eventType !== "cli_commands" &&
+              eventType !== "cli_rate_limit" &&
               cid
             ) {
               store.piEvent(cid, evt.event);
+            }
+            // Account-level quota heartbeat. Only claude-code emits it, and
+            // the snapshot is per runtime (not per conversation) — the
+            // runtime picker reads it back as a quota line.
+            if (eventType === "cli_rate_limit") {
+              const info = (evt.event as unknown as { info?: CliRateLimitInfo }).info;
+              if (info) store.setCliRateLimit("claude-code", info);
             }
             // The CLI session's slash-command catalog (initialize ack) — the
             // composer's slash menu reads it back per conversation.
@@ -1423,13 +1432,7 @@ export default function Home() {
         );
       } else if (shortcut("newChat")) {
         e.preventDefault();
-        if (view === "board") {
-          setNewTaskOpen(true);
-        } else {
-          // Non-board destinations start a new chat; Automations creates
-          // schedules from its own button.
-          onNew();
-        }
+        setNewTaskOpen(true);
       } else if (shortcut("newDefaultChat")) {
         e.preventDefault();
         // ⌥⌘N always lands a new chat in Chat (the default workspace), even
@@ -2934,10 +2937,9 @@ export default function Home() {
           setPaletteOpen(false);
           onSelect(id);
         }}
-        onNewChat={() => {
+        onNewTask={() => {
           setPaletteOpen(false);
-          if (view === "board") setNewTaskOpen(true);
-          else onNew();
+          setNewTaskOpen(true);
         }}
         onModelChange={(m) => {
           setPaletteOpen(false);
@@ -3063,6 +3065,7 @@ export default function Home() {
         workspaceFilter={boardWorkspaceFilter}
         onWorkspaceFilterChange={setBoardWorkspaceFilter}
         onSelect={onSelectChat}
+        onNewTask={() => setNewTaskOpen(true)}
         onNew={onNewSidebar}
         onRevealWorkspace={onRevealWorkspace}
         onArchiveWorkspaceChats={onArchiveWorkspaceChats}

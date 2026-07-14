@@ -9,7 +9,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { markdownComponents } from "@/lib/markdown";
+import { markdownComponents, markdownUrlTransform } from "@/lib/markdown";
 import {
   ClaudeCodeIcon,
   CodexIcon,
@@ -2700,6 +2700,7 @@ function MeetingsSection({ open }: { open: boolean }) {
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             components={markdownComponents}
+                            urlTransform={markdownUrlTransform}
                           >
                             {m.summary}
                           </ReactMarkdown>
@@ -3985,7 +3986,11 @@ function DiscoveredSkillRow({
             <div className="text-xs text-muted-foreground">{t("skills.loading")}</div>
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-pre:my-2 prose-ul:my-2 prose-ol:my-2 prose-headings:my-3 prose-pre:bg-secondary prose-pre:text-foreground prose-code:rounded prose-code:bg-secondary prose-code:px-1 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={markdownComponents}
+                urlTransform={markdownUrlTransform}
+              >
                 {stripFrontmatter(body)}
               </ReactMarkdown>
             </div>

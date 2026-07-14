@@ -94,10 +94,15 @@ function MessageBubbleView({
 
   return (
     <div
-      className={cn("group/msg flex w-full gap-3 py-3", isUser ? "justify-end" : "justify-start")}
+      className={cn("flex w-full gap-3 py-3", isUser ? "justify-end" : "justify-start")}
       data-testid={`message-${message.role}`}
     >
-      <div className={cn("flex max-w-[88%] flex-col gap-2", isUser ? "items-end" : "items-start")}>
+      <div
+        className={cn(
+          "group/msg flex max-w-[88%] flex-col gap-2",
+          isUser ? "items-end" : "items-start",
+        )}
+      >
         {!isUser && (
           <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             {t("pane.assistant")}

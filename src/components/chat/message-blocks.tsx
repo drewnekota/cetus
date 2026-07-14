@@ -10,13 +10,20 @@ import remarkMath from "remark-math";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { markdownComponents, LinkifiedText, normalizeMath, KATEX_OPTIONS, REMARK_MATH_OPTIONS } from "@/lib/markdown";
+import {
+  markdownComponents,
+  markdownUrlTransform,
+  LinkifiedText,
+  normalizeMath,
+  KATEX_OPTIONS,
+  REMARK_MATH_OPTIONS,
+} from "@/lib/markdown";
 import { Check, Copy, FileText, GitFork, RotateCcw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { RenderedBlock } from "@/lib/types";
 import { ArtifactView } from "./artifact-view";
 import { ContextCard } from "./context-card";
-import { isArtifactDetails, formatBytes } from "@/lib/artifact";
+import { artifactsFromDetails, formatBytes } from "@/lib/artifact";
 import { formatTimeHM, formatFullDateTime } from "@/lib/format";
 import {
   Dialog,
@@ -48,7 +55,12 @@ const PROSE_CLASS = cn(
  *  expensive part (remark-gfm + remark-math + rehype-katex). */
 const RawMarkdown = memo(function RawMarkdown({ text }: { text: string }) {
   return (
-    <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly]} rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]} components={markdownComponents}>
+    <ReactMarkdown
+      remarkPlugins={[[remarkGfm, { singleTilde: false }], [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly]}
+      rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+      components={markdownComponents}
+      urlTransform={markdownUrlTransform}
+    >
       {normalizeMath(text)}
     </ReactMarkdown>
   );
@@ -267,10 +279,15 @@ export const AnswerBlock = memo(function AnswerBlock({
       </button>
     );
   if (block.kind === "tool_use") {
-    // send_artifact piggybacks on the tool-call plumbing but renders as a rich
-    // inline preview instead of being folded into the activity timeline.
-    if (block.name === "send_artifact" && block.result && isArtifactDetails(block.result.details)) {
-      return <ArtifactView artifact={block.result.details} />;
+    const artifacts = block.result ? artifactsFromDetails(block.result.details) : [];
+    if (artifacts.length > 0) {
+      return (
+        <div className="flex w-full flex-col gap-3">
+          {artifacts.map((artifact) => (
+            <ArtifactView key={artifact.path} artifact={artifact} />
+          ))}
+        </div>
+      );
     }
   }
   // Ambient context the quick launcher attached to this prompt — a compact chip.

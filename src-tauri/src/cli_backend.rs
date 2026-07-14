@@ -8,7 +8,11 @@ use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command as TokioCommand;
 
 /// Persisted switches, one JSON blob in `app_settings` (mirrors AgentSettings).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,10 +75,10 @@ pub async fn set_cli_agent_settings(
 
 /// What a CLI backend actually runs when no per-conversation override is set,
 /// resolved from the vendor's own config on disk — so the tuning menu can echo
-/// "Default (Fable)" instead of a bare "Default". For codex it also carries the
-/// live model catalog from `models_cache.json` (the CLI's own fetched list),
-/// which replaces the static fallback catalog in the UI. Everything is
-/// best-effort: unreadable config → None → the UI shows a plain "Default".
+/// "Default (Opus)" instead of a bare "Default". For codex it also carries the
+/// live model catalog reported by the CLI itself, which replaces the static
+/// fallback catalog in the UI. Everything is best-effort: unreadable config or
+/// an unavailable CLI → None → the UI shows a plain "Default".
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CliDefaults {
@@ -82,7 +86,7 @@ pub struct CliDefaults {
     pub model: Option<String>,
     /// Raw configured reasoning effort (e.g. "high" / "medium").
     pub effort: Option<String>,
-    /// Codex only: the models the CLI itself lists (slug + display name).
+    /// Models the CLI itself lists (selectable id + display name).
     pub models: Option<Vec<CliModelEntry>>,
 }
 
@@ -99,7 +103,20 @@ pub async fn get_cli_defaults(backend: String) -> Result<CliDefaults, String> {
         .map(PathBuf::from)
         .map_err(|e| e.to_string())?;
     Ok(match backend.as_str() {
-        "claude-code" => claude_defaults(&home),
+        "claude-code" => {
+            let mut defaults = claude_defaults(&home);
+            // Claude's recommended model is account/rollout dependent and is
+            // not persisted in settings. Its initialize response is the only
+            // authoritative source (for example default may currently resolve
+            // to Opus even while Fable is also available).
+            if defaults.model.is_none() {
+                if let Some(probed) = probe_claude_defaults().await {
+                    defaults.model = probed.model;
+                    defaults.models = probed.models;
+                }
+            }
+            defaults
+        }
         "codex" => codex_defaults(&home),
         _ => CliDefaults::default(),
     })
@@ -136,14 +153,105 @@ fn claude_defaults(home: &Path) -> CliDefaults {
     let s = |key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_string);
     // settings.json holds an explicit `model` only when the user pinned one; the
     // `/model` picker instead persists its choice to ~/.claude.json's top-level
-    // `model`, so fall back there before giving up. Neither present → the user is
-    // on Claude Code's own adaptive default (labelled "Recommended" in the UI).
+    // `model`, so fall back there before giving up. Neither present means the
+    // account's recommended default; `probe_claude_defaults` resolves it.
     let model = s("model").or_else(|| claude_json_model(home));
     CliDefaults {
         model,
         effort: s("effortLevel"),
         models: None,
     }
+}
+
+/// Ask Claude Code for the account's resolved default and live model catalog.
+/// `--safe-mode` prevents user hooks/plugins from running during this read-only
+/// probe. Keep stdin open until the initialize response arrives, then terminate
+/// the idle process without sending a model request.
+async fn probe_claude_defaults() -> Option<CliDefaults> {
+    let mut child = TokioCommand::new("claude")
+        .args([
+            "--safe-mode",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--input-format",
+            "stream-json",
+            "--verbose",
+            "--permission-prompt-tool",
+            "stdio",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .ok()?;
+    let mut stdin = child.stdin.take()?;
+    let stdout = child.stdout.take()?;
+    let init = serde_json::json!({
+        "type": "control_request",
+        "request_id": "cetus-models",
+        "request": { "subtype": "initialize" },
+    })
+    .to_string();
+    stdin.write_all(init.as_bytes()).await.ok()?;
+    stdin.write_all(b"\n").await.ok()?;
+    stdin.flush().await.ok()?;
+
+    let mut lines = BufReader::new(stdout).lines();
+    let result = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Ok(Some(line)) = lines.next_line().await {
+            let value: Value = match serde_json::from_str(&line) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if let Some(defaults) = claude_defaults_from_initialize(&value) {
+                return Some(defaults);
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten();
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    result
+}
+
+fn claude_defaults_from_initialize(value: &Value) -> Option<CliDefaults> {
+    let models = value
+        .pointer("/response/response/models")?
+        .as_array()?;
+    let default = models
+        .iter()
+        .find(|model| model.get("value").and_then(Value::as_str) == Some("default"))?;
+    let model = default
+        .get("resolvedModel")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let catalog: Vec<CliModelEntry> = models
+        .iter()
+        .filter_map(|entry| {
+            let id = entry.get("value")?.as_str()?;
+            if id == "default" {
+                return None;
+            }
+            let label = entry
+                .get("displayName")
+                .and_then(Value::as_str)
+                .unwrap_or(id);
+            Some(CliModelEntry {
+                id: id.to_string(),
+                label: label.to_string(),
+            })
+        })
+        .collect();
+    Some(CliDefaults {
+        model,
+        effort: None,
+        models: (!catalog.is_empty()).then_some(catalog),
+    })
 }
 
 /// Top-level `model` from ~/.claude.json, where the `/model` picker persists an
@@ -261,6 +369,12 @@ pub fn attachments_dir(app_data_dir: &Path, conv_id: &str) -> PathBuf {
     app_data_dir.join("cli-attachments").join(conv_id)
 }
 
+/// Managed storage for inline artifacts returned by third-party runtimes.
+/// Local-path artifacts remain in place; only byte/data-url results land here.
+pub fn artifacts_dir(app_data_dir: &Path, conv_id: &str) -> PathBuf {
+    app_data_dir.join("runtime-artifacts").join(conv_id)
+}
+
 /// Persist one turn's base64 image attachments as files; returns their
 /// absolute paths. Best-effort: an unwritable image is skipped.
 pub fn save_turn_images(
@@ -295,24 +409,34 @@ pub fn save_turn_images(
     out
 }
 
-/// Persist the user-visible message exactly once, whether it starts a fresh
-/// CLI turn or is injected into Claude's currently running turn as a steer.
-fn append_cli_user_message(
-    store: &Store,
-    conv: &Conversation,
+/// The PiMessage-shaped transcript row for a user prompt (+ image blocks).
+fn cli_user_message_json(
     message: &str,
     images: &[crate::commands::ImageAttachment],
-) {
+) -> serde_json::Value {
     let mut content = vec![serde_json::json!({ "type": "text", "text": message })];
     for img in images {
         content.push(serde_json::json!({
             "type": "image", "data": img.data, "mimeType": img.mime_type,
         }));
     }
+    serde_json::json!({ "role": "user", "content": content })
+}
+
+/// Persist the user message that opens a fresh CLI turn. A steered message
+/// does NOT go through here — it rides the translator's message list so it
+/// lands in the transcript at its merge point inside the turn (persisting it
+/// now would order it before the whole turn's assistant rows).
+fn append_cli_user_message(
+    store: &Store,
+    conv: &Conversation,
+    message: &str,
+    images: &[crate::commands::ImageAttachment],
+) {
     store
         .append_cli_message(
             &conv.id,
-            &serde_json::json!({ "role": "user", "content": content }),
+            &cli_user_message_json(message, images),
             (!conv.session_file.is_empty()).then_some(conv.session_file.as_str()),
             now_ms(),
         )
@@ -348,9 +472,11 @@ pub fn dispatch_turn(
             .map(|img| (img.mime_type.clone(), img.data.clone()))
             .collect();
         let line = cetus_bridge::cli_agent::claude_user_message_line(message, &image_blocks);
-        match state.cli_steer(&conv.id, line) {
+        // The transcript row rides along and is spliced in at the steer's
+        // merge point by the session's translator (persisted with the turn's
+        // outcome) — appending it here would order it before the whole turn.
+        match state.cli_steer(&conv.id, line, cli_user_message_json(message, &images)) {
             crate::CliSteer::Steered => {
-                append_cli_user_message(&state.store, conv, message, &images);
                 return Ok(());
             }
             crate::CliSteer::Closing(done) => {
@@ -525,6 +651,7 @@ pub fn dispatch_turn(
                     base_sink,
                     &bin,
                     &cwd,
+                    Some(artifacts_dir(&state.app_data_dir, &conv.id)),
                     Some(conv.id.clone()),
                     env,
                     opts,
@@ -556,7 +683,10 @@ pub fn dispatch_turn(
                 tokio::select! {
                     result = &mut outcome_rx => break result.ok(),
                     line = input_rx.recv() => match line {
-                        Some(line) => { let _ = session.input(line); }
+                        Some(crate::CliInput::Line(line)) => { let _ = session.input(line); }
+                        Some(crate::CliInput::Steer { line, message }) => {
+                            let _ = session.steer(line, message);
+                        }
                         None => break None,
                     },
                     _ = kill.notified() => {
@@ -585,6 +715,7 @@ pub fn dispatch_turn(
                     base_sink,
                     &bin,
                     &cwd,
+                    Some(artifacts_dir(&state.app_data_dir, &conv.id)),
                     Some(conv.id.clone()),
                     env,
                     opts,
@@ -829,6 +960,37 @@ pub fn message_text(message: &Value) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn claude_initialize_resolves_recommended_model_and_catalog() {
+        let response = json!({
+            "type": "control_response",
+            "response": { "response": { "models": [
+                {
+                    "value": "default",
+                    "resolvedModel": "claude-opus-4-8[1m]",
+                    "displayName": "Default (recommended)"
+                },
+                {
+                    "value": "opus[1m]",
+                    "resolvedModel": "claude-opus-4-8[1m]",
+                    "displayName": "Opus"
+                },
+                {
+                    "value": "claude-fable-5[1m]",
+                    "resolvedModel": "claude-fable-5",
+                    "displayName": "Fable"
+                }
+            ]}}
+        });
+        let defaults = claude_defaults_from_initialize(&response).unwrap();
+        assert_eq!(defaults.model.as_deref(), Some("claude-opus-4-8[1m]"));
+        let models = defaults.models.unwrap();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "opus[1m]");
+        assert_eq!(models[0].label, "Opus");
+        assert_eq!(models[1].label, "Fable");
+    }
 
     #[test]
     fn handoff_preamble_replays_conversation_and_skips_bulk() {

@@ -2,7 +2,7 @@
 import { useCallback, useMemo } from "react";
 import type { RenderedBlock, RenderedMessage } from "@/lib/types";
 import { useIsStreaming, useMessagesByKeys } from "@/lib/chat-store";
-import { isArtifactDetails } from "@/lib/artifact";
+import { artifactsFromDetails } from "@/lib/artifact";
 import { useTranslation } from "@/lib/i18n";
 import { AnswerBlock, MessageActions } from "./message-blocks";
 import { ActivityGroup, type ProcessBlock } from "./activity-group";
@@ -26,10 +26,8 @@ type Segment =
  *  it counts as answer even though it rides the tool-call plumbing. */
 function isProcessBlock(b: RenderedBlock): b is ProcessBlock {
   if (b.kind === "thinking") return true;
-  if (b.kind === "tool_use") {
-    if (b.name === "send_artifact" && b.result && isArtifactDetails(b.result.details)) return false;
-    return true;
-  }
+  if (b.kind === "tool_use")
+    return !(b.result && artifactsFromDetails(b.result.details).length > 0);
   return false;
 }
 
@@ -48,6 +46,11 @@ function buildSegments(messages: RenderedMessage[]): Segment[] {
   };
   for (const m of messages) {
     for (const b of m.blocks) {
+      // Settled empty thinking: transcripts persisted before the CLI opted
+      // into a thinking display carry signature-only blocks with no text —
+      // an empty "Thinking" step says nothing, drop it. A live empty block
+      // (streaming) stays: its text is still arriving.
+      if (b.kind === "thinking" && !b.text && !b.streaming) continue;
       if (isProcessBlock(b)) {
         if (!run) run = { steps: [], min: m.createdAt, max: m.createdAt };
         run.steps.push(b);
@@ -118,8 +121,8 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork }: Props) {
   const lastCreatedAt = messages[messages.length - 1].createdAt;
 
   return (
-    <div className="group/msg flex w-full justify-start py-3">
-      <div className="flex w-full max-w-[88%] flex-col gap-2 items-start">
+    <div className="flex w-full justify-start py-3">
+      <div className="group/msg flex w-full max-w-[88%] flex-col gap-2 items-start">
         <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           {t("pane.assistant")}
         </div>

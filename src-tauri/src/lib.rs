@@ -127,10 +127,25 @@ pub struct AppState {
         std::sync::Mutex<HashMap<String, cetus_bridge::cli_agent::CodexSessionHandle>>,
 }
 
+/// One line bound for a running CLI turn's stdin.
+pub enum CliInput {
+    /// A raw protocol line (control_response answering a permission prompt
+    /// or AskUserQuestion).
+    Line(String),
+    /// A steered user message: `line` is the stdin injection, `message` the
+    /// PiMessage-shaped user row the claude session splices into the
+    /// transcript at the steer's merge point (so it renders and persists
+    /// where it landed in the turn, not after it).
+    Steer {
+        line: String,
+        message: serde_json::Value,
+    },
+}
+
 /// Handles onto one running CLI-backend turn.
 struct CliTurnHandle {
     kill: Arc<tokio::sync::Notify>,
-    input: tokio::sync::mpsc::UnboundedSender<String>,
+    input: tokio::sync::mpsc::UnboundedSender<CliInput>,
     /// Steer messages injected into this turn's stdin and not yet settled by
     /// the runner (see `run_cli_turn`'s steer grace). Bumped before the line
     /// is sent so the runner can't observe the message without the count.
@@ -241,7 +256,7 @@ impl AppState {
     ) -> Result<
         (
             Arc<tokio::sync::Notify>,
-            tokio::sync::mpsc::UnboundedReceiver<String>,
+            tokio::sync::mpsc::UnboundedReceiver<CliInput>,
             Arc<std::sync::atomic::AtomicUsize>,
             Arc<std::sync::atomic::AtomicBool>,
         ),
@@ -309,7 +324,7 @@ impl AppState {
     ///    follow-up queue's flush, which fires on exactly that `agent_end` while
     ///    the turn is still registered (unregistration trails persistence).
     ///  - `Steered`: injected into a live turn.
-    pub fn cli_steer(&self, conv_id: &str, line: String) -> CliSteer {
+    pub fn cli_steer(&self, conv_id: &str, line: String, message: serde_json::Value) -> CliSteer {
         let turns = self.cli_turns.lock().unwrap();
         let Some(h) = turns.get(conv_id) else {
             return CliSteer::Idle;
@@ -322,7 +337,7 @@ impl AppState {
         // with the steer unread).
         h.steer_pending
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if h.input.send(line).is_ok() {
+        if h.input.send(CliInput::Steer { line, message }).is_ok() {
             CliSteer::Steered
         } else {
             // Receiver gone (child exited between the closing check and the
@@ -339,7 +354,7 @@ impl AppState {
             return Err("no running agent turn for this conversation".to_string());
         };
         h.input
-            .send(line)
+            .send(CliInput::Line(line))
             .map_err(|_| "the agent turn already ended".to_string())
     }
 

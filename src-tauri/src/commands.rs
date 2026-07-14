@@ -737,6 +737,7 @@ pub async fn delete_conversation(state: State<'_, AppState>, id: String) -> CmdR
     }
     state.store.delete_cli_messages(&id).ok();
     let _ = std::fs::remove_dir_all(crate::cli_backend::attachments_dir(&state.app_data_dir, &id));
+    let _ = std::fs::remove_dir_all(crate::cli_backend::artifacts_dir(&state.app_data_dir, &id));
     state.store.delete(&id).map_err(err)
 }
 

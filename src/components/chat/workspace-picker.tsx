@@ -24,6 +24,8 @@ interface Props {
   defaultWorkspace: string;
   onChange: (dir: string) => void;
   disabled?: boolean;
+  /** Hide the repository-free Chat workspace (used by task creation). */
+  excludeDefault?: boolean;
   /** Fires true/false around the native "Add folder…" dialog. The quick panel
    *  uses it to suppress its blur-to-dismiss while the OS picker has focus. */
   onNativePick?: (active: boolean) => void;
@@ -34,7 +36,7 @@ interface Props {
 const ADD_FOLDER = "__add_folder__";
 const ADD_REMOTE = "__add_remote__";
 
-export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disabled, onNativePick }: Props) {
+export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disabled, excludeDefault = false, onNativePick }: Props) {
   const { t } = useTranslation("chat");
   // The default workspace surfaces as "Chat" (never its on-disk folder name) —
   // users aren't meant to perceive it as a folder.
@@ -44,7 +46,8 @@ export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disa
   const [recent, setRecent] = useState<string[]>([]);
   const [remoteOpen, setRemoteOpen] = useState(false);
   const [remoteValue, setRemoteValue] = useState("");
-  const current = workspaceDir ?? defaultWorkspace;
+  const selected = workspaceDir ?? defaultWorkspace;
+  const current = excludeDefault && selected === defaultWorkspace ? "" : selected;
 
   useEffect(() => {
     setRecent(loadRecentWorkspaces());
@@ -55,10 +58,12 @@ export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disa
   const options = useMemo(() => {
     const set = new Set<string>();
     if (current) set.add(current);
-    if (defaultWorkspace) set.add(defaultWorkspace);
-    for (const d of recent) set.add(d);
+    if (defaultWorkspace && !excludeDefault) set.add(defaultWorkspace);
+    for (const d of recent) {
+      if (!excludeDefault || d !== defaultWorkspace) set.add(d);
+    }
     return Array.from(set);
-  }, [current, defaultWorkspace, recent]);
+  }, [current, defaultWorkspace, excludeDefault, recent]);
 
   function remember(dir: string) {
     setRecent(rememberRecentWorkspace(dir));

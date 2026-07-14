@@ -44,7 +44,7 @@ import {
 } from "@/components/browser/browser-view";
 import { formatBytes } from "@/lib/artifact";
 import { useTranslation } from "@/lib/i18n";
-import { markdownComponents } from "@/lib/markdown";
+import { markdownComponents, markdownUrlTransform } from "@/lib/markdown";
 import { api } from "@/lib/tauri";
 import type { WorkspaceFileEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -717,6 +717,7 @@ function FilePreview({ file }: { file: WorkspaceFileEntry | null }) {
                 <ReactMarkdown
                   remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkFriendly]}
                   components={markdownComponents}
+                  urlTransform={markdownUrlTransform}
                 >
                   {value}
                 </ReactMarkdown>

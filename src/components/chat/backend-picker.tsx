@@ -4,7 +4,7 @@ import { Bot, Check, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/tauri";
 import { useChatStore } from "@/lib/chat-store";
-import type { BackendId, CliDefaults } from "@/lib/types";
+import type { BackendId, CliDefaults, CliRateLimitInfo } from "@/lib/types";
 import {
   ClaudeCodeIcon,
   CodexIcon,
@@ -168,8 +168,8 @@ function fetchCliDefaults(backend: string): Promise<CliDefaults> {
 }
 
 /** Human label for a raw configured default: exact catalog id first, then
- *  substring (claude configs hold full ids like "claude-fable-5[1m]" while the
- *  catalog carries aliases like "fable"), else the raw string as-is. */
+ *  substring (claude reports full ids like "claude-opus-4-8[1m]" while the
+ *  catalog carries aliases like "opus[1m]"), else the raw string as-is. */
 function resolveDefaultLabel(
   raw: string | null | undefined,
   catalog: { id: string; label: string }[],
@@ -177,8 +177,27 @@ function resolveDefaultLabel(
   if (!raw) return null;
   const exact = catalog.find((m) => m.id && m.id === raw);
   if (exact) return exact.label;
-  const sub = catalog.find((m) => m.id && raw.includes(m.id));
+  const sub = catalog.find((m) => {
+    const family = m.id.split("[")[0];
+    return family && raw.includes(family);
+  });
   return sub ? sub.label : raw;
+}
+
+/** Keep persisted Claude aliases (for example `fable`) selected when a newer
+ * live catalog reports the same choice as `claude-fable-5[1m]`. */
+function findCatalogModel(
+  selected: string,
+  catalog: { id: string; label: string }[],
+) {
+  const exact = catalog.find((model) => model.id === selected);
+  if (exact || !selected) return exact;
+  const family = selected.split("[")[0].toLowerCase();
+  return catalog.find((model) => {
+    const id = model.id.split("[")[0].toLowerCase();
+    const label = model.label.toLowerCase();
+    return id.includes(family) || family.includes(label);
+  });
 }
 
 /** Combined model + reasoning-effort menu for a CLI backend, styled after
@@ -219,13 +238,14 @@ export function CliTuningMenu({
     ? [{ id: "", label: "Default" }, ...defaults.models]
     : CLI_MODELS[backend];
   const efforts = CLI_EFFORTS[backend];
-  const curModel = models.find((m) => m.id === model) ?? models[0];
+  const curModel = findCatalogModel(model, models) ?? models[0];
   const curEffort = efforts.find((e) => e.id === effort) ?? efforts[0];
-  // Claude Code's adaptive default has no fixed model id to echo; label it
-  // "Recommended" (its own wording) so the row never reads a bare "Default".
+  // Claude Code reports its account-specific resolved default through the
+  // initialize handshake. "Recommended" remains only as a compatibility
+  // fallback for older CLI versions that don't expose that catalog.
   const defaultModelLabel =
     resolveDefaultLabel(defaults?.model, models) ??
-    (backend === "claude-code" ? "Recommended" : null);
+    (backend === "claude-code" && defaults !== null ? "Recommended" : null);
   const defaultEffortLabel = resolveDefaultLabel(defaults?.effort, efforts);
   // Menu rows spell the resolution out ("Default (Fable)"); the compact
   // trigger shows the resolved name directly.
@@ -292,6 +312,34 @@ export function CliTuningMenu({
   );
 }
 
+/** "14:30" for a reset within 24h, "Sat 14:30" beyond that (weekly windows). */
+function formatReset(resetsAt: number): string {
+  const d = new Date(resetsAt * 1000);
+  const opts: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
+  if (d.getTime() - Date.now() >= 24 * 60 * 60 * 1000) opts.weekday = "short";
+  return d.toLocaleString(undefined, opts);
+}
+
+/** Quota line for a runtime row in the picker dropdown. Deliberately quiet:
+ *  a healthy account (status "allowed", no utilization reported) renders
+ *  nothing at all — the line appears only when there's something to say. */
+function quotaLabel(
+  q: CliRateLimitInfo | undefined,
+): { text: string; warn: boolean } | null {
+  if (!q) return null;
+  const pct =
+    q.utilization !== undefined ? `${Math.round(q.utilization * 100)}%` : null;
+  const reset = q.resetsAt ? `resets ${formatReset(q.resetsAt)}` : null;
+  if (q.status === "rejected")
+    return { text: ["limit reached", reset].filter(Boolean).join(" · "), warn: true };
+  if (q.status === "allowed_warning")
+    return {
+      text: [pct ?? "near limit", reset].filter(Boolean).join(" · "),
+      warn: true,
+    };
+  return pct ? { text: pct, warn: false } : null;
+}
+
 /** Self-contained picker: reads the conversation's current backend and switches
  *  it via the API. Rendered next to the model picker in the composer.
  *  `onBackendChange` reports both the loaded value and user switches so the
@@ -328,6 +376,9 @@ export function BackendPicker({
   const [backend, setBackendState] = useState<BackendId>("pi");
   const [cliModel, setCliModel] = useState("");
   const [cliEffort, setCliEffort] = useState("");
+  // Account-level quota snapshots (backend id → rate_limit_info), fed by the
+  // CLI's rate_limit_event heartbeat. Shown only inside the dropdown.
+  const cliRateLimits = useChatStore((s) => s.cliRateLimits);
 
   function setBackend(b: BackendId) {
     setBackendState(b);
@@ -461,10 +512,23 @@ export function BackendPicker({
         <SelectContent align="start">
           {BACKENDS.map((b) => {
             const Icon = b.icon;
+            const quota = quotaLabel(cliRateLimits[b.id]);
             return (
               <SelectItem key={b.id} value={b.id} className="text-xs">
                 <Icon className="size-4" />
                 <span className="truncate">{b.label}</span>
+                {quota && (
+                  <span
+                    className={cn(
+                      "ml-1 whitespace-nowrap text-[10px]",
+                      quota.warn
+                        ? "text-amber-600 dark:text-amber-500"
+                        : "text-muted-foreground/70",
+                    )}
+                  >
+                    {quota.text}
+                  </span>
+                )}
                 <RuntimeShortcutHint backend={b.id} />
               </SelectItem>
             );

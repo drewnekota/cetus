@@ -32,8 +32,9 @@ use crate::AppState;
 /// codex: first-turn prompt preamble). Deliberately terse — it rides on every
 /// session, so it only announces the door; `cetus cron help` is the real docs.
 pub const AGENT_HINT: &str = "You are running inside Cetus, a desktop agent app. \
-To read or change Cetus scheduled automations (cron jobs), use the bundled `cetus` CLI \
-— start with `cetus cron help`. Never edit Cetus's sqlite database directly.";
+Whenever you create or obtain any file the user should receive, run `cetus artifact <path>`; \
+Cetus will display every file type in chat. To read or change scheduled automations, use \
+`cetus cron` — start with `cetus cron help`. Never edit Cetus's sqlite database directly.";
 
 /// Socket path: `$CETUS_SOCK` override, else `<app_data_dir>/cetus.sock`.
 pub fn socket_path(app_data_dir: &Path) -> PathBuf {

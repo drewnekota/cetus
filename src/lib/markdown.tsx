@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { type Components } from "react-markdown";
+import { defaultUrlTransform, type Components } from "react-markdown";
 import { invoke } from "@tauri-apps/api/core";
 
 /**
@@ -59,6 +59,48 @@ export function openExternal(href: string) {
   invoke("open_external", { url: href }).catch(console.error);
 }
 
+/** Keep react-markdown's URL filtering, but allow explicit local file URLs. */
+export function markdownUrlTransform(url: string): string {
+  return url.toLowerCase().startsWith("file:") ? url : defaultUrlTransform(url);
+}
+
+function decodeLocalPath(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    // A literal '%' is valid in a filename even though it is not a valid URL
+    // escape. In that case, hand the original path to the OS unchanged.
+    return path;
+  }
+}
+
+/** Return a filesystem path for local markdown links, or null for web links. */
+export function localPathFromHref(href: string): string | null {
+  if (href.startsWith("/")) return decodeLocalPath(href);
+  if (!href.toLowerCase().startsWith("file:")) return null;
+
+  try {
+    const url = new URL(href);
+    // Do not turn remote file shares into local paths. `localhost` is the only
+    // host commonly emitted in an otherwise-local file URL.
+    if (url.hostname && url.hostname !== "localhost") return null;
+    const path = decodeLocalPath(url.pathname);
+    // URL.pathname prefixes Windows drive paths with a slash.
+    return /^\/[a-z]:\//i.test(path) ? path.slice(1) : path;
+  } catch {
+    return null;
+  }
+}
+
+/** Open web links in the browser and local links with their default app. */
+export function openMarkdownLink(href: string) {
+  const path = localPathFromHref(href);
+  const request = path
+    ? invoke("open_path", { path })
+    : invoke("open_external", { url: href });
+  request.catch(console.error);
+}
+
 /** Link renderer for assistant markdown — relies on prose styles for color. */
 export const markdownComponents: Components = {
   a({ href, children, ...props }) {
@@ -69,7 +111,7 @@ export const markdownComponents: Components = {
         onClick={(e) => {
           if (!href) return;
           e.preventDefault();
-          openExternal(href);
+          openMarkdownLink(href);
         }}
       >
         {children}

@@ -17,10 +17,14 @@
 use crate::bridge::RuntimeEvent;
 use crate::pi_rpc::EventSink;
 use anyhow::{Context, Result};
+use base64::Engine as _;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
@@ -109,6 +113,13 @@ impl CliBackend {
                 a.push("stream-json".into());
                 a.push("--include-partial-messages".into());
                 a.push("--verbose".into()); // required for stream-json to emit all events
+                // Adaptive-thinking models (Opus 4.8 / Fable 5) omit thinking
+                // text unless the client opts into a display mode, and
+                // headless -p additionally forces "omitted" when unset — every
+                // thinking block would arrive as signature-only with an empty
+                // body. Hidden flag; accepted since at least 2.1.204.
+                a.push("--thinking-display".into());
+                a.push("summarized".into());
                 a.push("--permission-prompt-tool".into());
                 a.push("stdio".into());
                 if let Some(m) = &opts.model {
@@ -232,6 +243,11 @@ fn normalize_content(v: &Value) -> Value {
                     Value::Object(o) => {
                         if o.get("type").and_then(|t| t.as_str()) == Some("text") {
                             it.clone()
+                        } else if matches!(
+                            o.get("type").and_then(|t| t.as_str()),
+                            Some("image" | "input_image" | "inputImage" | "input_file" | "inputFile" | "file")
+                        ) {
+                            json!({ "type": "text", "text": "[Artifact delivered to user]" })
                         } else if let Some(t) = o.get("text").and_then(|t| t.as_str()) {
                             json!({ "type": "text", "text": t })
                         } else {
@@ -245,6 +261,257 @@ fn normalize_content(v: &Value) -> Value {
         }
         Value::Null => json!([]),
         other => json!([{ "type": "text", "text": other.to_string() }]),
+    }
+}
+
+static ARTIFACT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+fn mime_for_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "heic" => "image/heic",
+        "avif" => "image/avif",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        "avi" => "video/x-msvideo",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "m4a" => "audio/mp4",
+        "flac" => "audio/flac",
+        "aac" => "audio/aac",
+        "pdf" => "application/pdf",
+        "md" | "markdown" => "text/markdown",
+        "html" | "htm" => "text/html",
+        "txt" | "log" => "text/plain",
+        "csv" => "text/csv",
+        "tsv" => "text/tab-separated-values",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "yaml" | "yml" => "application/yaml",
+        "js" | "mjs" | "cjs" => "text/javascript",
+        "ts" | "tsx" => "text/typescript",
+        "css" => "text/css",
+        "rtf" => "application/rtf",
+        "zip" => "application/zip",
+        "gz" => "application/gzip",
+        "tar" => "application/x-tar",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => "application/octet-stream",
+    }
+}
+
+fn artifact_kind(mime: &str) -> &'static str {
+    if mime.starts_with("image/") {
+        "image"
+    } else if mime.starts_with("video/") {
+        "video"
+    } else if mime.starts_with("audio/") {
+        "audio"
+    } else if mime == "application/pdf" {
+        "pdf"
+    } else if mime == "text/markdown" {
+        "markdown"
+    } else if mime == "text/html" {
+        "html"
+    } else if mime.starts_with("text/")
+        || matches!(mime, "application/json" | "application/xml" | "application/yaml")
+    {
+        "text"
+    } else {
+        "other"
+    }
+}
+
+fn artifact_details(path: &Path, mime_override: Option<&str>, caption: Option<&str>) -> Option<Value> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let mime = mime_override
+        .filter(|mime| !mime.trim().is_empty())
+        .unwrap_or_else(|| mime_for_path(&path));
+    Some(json!({
+        "kind": "artifact",
+        "artifactKind": artifact_kind(mime),
+        "path": path.to_string_lossy(),
+        "name": path.file_name().and_then(|n| n.to_str()).unwrap_or("artifact"),
+        "mimeType": mime,
+        "caption": caption.filter(|s| !s.trim().is_empty()),
+        "sizeBytes": metadata.len(),
+    }))
+}
+
+fn extension_for_mime(mime: &str) -> &'static str {
+    match mime {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        "application/pdf" => "pdf",
+        "text/plain" => "txt",
+        "text/markdown" => "md",
+        "text/html" => "html",
+        "application/json" => "json",
+        "text/csv" => "csv",
+        "audio/mpeg" => "mp3",
+        "audio/wav" => "wav",
+        "video/mp4" => "mp4",
+        _ => "bin",
+    }
+}
+
+fn persist_inline_artifact(data: &str, mime: &str, dir: &Path) -> Option<Value> {
+    if data.trim().is_empty() {
+        return None;
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).ok()?;
+    std::fs::create_dir_all(dir).ok()?;
+    let millis = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_millis();
+    let sequence = ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = dir.join(format!(
+        "runtime-artifact-{millis}-{sequence}.{}",
+        extension_for_mime(mime)
+    ));
+    std::fs::write(&path, bytes).ok()?;
+    artifact_details(&path, Some(mime), None)
+}
+
+fn resolve_file_path(raw: &str, cwd: Option<&Path>) -> Option<PathBuf> {
+    let raw = raw.trim().trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | '<' | '>' | '(' | ')' | '[' | ']' | ',' | ';'));
+    if raw.is_empty() || raw.starts_with("data:") || raw.contains("\0") {
+        return None;
+    }
+    let path = PathBuf::from(raw);
+    let path = if path.is_absolute() { path } else { cwd?.join(path) };
+    path.is_file().then_some(path)
+}
+
+fn paths_from_text(text: &str, cwd: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for line in text.lines() {
+        if let Some(json) = line.strip_prefix("CETUS_ARTIFACT:") {
+            if let Ok(value) = serde_json::from_str::<Value>(json.trim()) {
+                if let Some(path) = value.get("path").and_then(Value::as_str).and_then(|p| resolve_file_path(p, cwd)) {
+                    paths.push(path);
+                }
+            }
+        }
+        // Common tool wording keeps the path as the remainder, which also
+        // preserves spaces in filenames ("saved to /Users/me/My File.pdf").
+        for marker in [" saved to ", " written to ", " created at ", " file: ", " path: "] {
+            if let Some((_, tail)) = line.to_ascii_lowercase().split_once(marker) {
+                let offset = line.len().saturating_sub(tail.len());
+                if let Some(path) = resolve_file_path(&line[offset..], cwd) {
+                    paths.push(path);
+                }
+            }
+        }
+    }
+    paths
+}
+
+fn collect_artifacts(
+    value: &Value,
+    artifact_dir: Option<&Path>,
+    cwd: Option<&Path>,
+    out: &mut Vec<Value>,
+) {
+    match value {
+        Value::String(text) => {
+            if let Some(rest) = text.strip_prefix("data:") {
+                if let Some((meta, data)) = rest.split_once(',') {
+                    if meta.ends_with(";base64") {
+                        if let Some(dir) = artifact_dir {
+                            if let Some(artifact) = persist_inline_artifact(data, meta.trim_end_matches(";base64"), dir) {
+                                out.push(artifact);
+                            }
+                        }
+                    }
+                }
+            } else {
+                out.extend(paths_from_text(text, cwd).into_iter().filter_map(|path| artifact_details(&path, None, None)));
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_artifacts(item, artifact_dir, cwd, out);
+            }
+        }
+        Value::Object(object) => {
+            if object.get("kind").and_then(Value::as_str) == Some("artifact") {
+                out.push(value.clone());
+                return;
+            }
+            let mime = object
+                .get("mimeType")
+                .or_else(|| object.get("mime_type"))
+                .or_else(|| object.get("media_type"))
+                .and_then(Value::as_str);
+            let caption = object.get("caption").and_then(Value::as_str);
+            for key in ["path", "file_path", "filePath", "output_path", "outputPath", "local_path", "localPath"] {
+                if let Some(path) = object.get(key).and_then(Value::as_str).and_then(|p| resolve_file_path(p, cwd)) {
+                    if let Some(artifact) = artifact_details(&path, mime, caption) {
+                        out.push(artifact);
+                    }
+                }
+            }
+            let block_type = object.get("type").and_then(Value::as_str).unwrap_or("");
+            if matches!(block_type, "image" | "input_image" | "inputImage" | "input_file" | "inputFile" | "file") {
+                if let Some(url) = object.get("image_url").or_else(|| object.get("imageUrl")).or_else(|| object.get("url")) {
+                    collect_artifacts(url, artifact_dir, cwd, out);
+                }
+                if let (Some(data), Some(dir)) = (object.get("data").and_then(Value::as_str), artifact_dir) {
+                    if let Some(artifact) = persist_inline_artifact(data, mime.unwrap_or("application/octet-stream"), dir) {
+                        out.push(artifact);
+                    }
+                }
+                if let Some(source) = object.get("source") {
+                    collect_artifacts(source, artifact_dir, cwd, out);
+                }
+            }
+            for (key, child) in object {
+                if !matches!(key.as_str(), "path" | "file_path" | "filePath" | "output_path" | "outputPath" | "local_path" | "localPath" | "data" | "image_url" | "imageUrl" | "url" | "source") {
+                    collect_artifacts(child, artifact_dir, cwd, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extracted_artifact_details(value: &Value, artifact_dir: Option<&Path>, cwd: Option<&Path>) -> Option<Value> {
+    let mut artifacts = Vec::new();
+    collect_artifacts(value, artifact_dir, cwd, &mut artifacts);
+    let mut seen = HashSet::new();
+    artifacts.retain(|artifact| {
+        artifact.get("path").and_then(Value::as_str).map(|path| seen.insert(path.to_string())).unwrap_or(false)
+    });
+    match artifacts.len() {
+        0 => None,
+        1 => artifacts.pop(),
+        _ => Some(json!({ "kind": "artifact_collection", "artifacts": artifacts })),
     }
 }
 
@@ -275,6 +542,11 @@ fn is_background_launch_ack(content: &Value) -> bool {
 /// the `tool_use` card the frontend already created.
 pub struct EventTranslator {
     backend: CliBackend,
+    /// Runtime-produced inline files are materialized here. Local file results
+    /// stay at their original path so large media is never copied eagerly.
+    artifact_dir: Option<PathBuf>,
+    /// Resolves relative file paths returned by a tool.
+    cwd: Option<PathBuf>,
     next_index: usize,
     /// Resume token discovered from the stream (claude `session_id`, codex
     /// `thread_id`). Returned to the caller for the next turn.
@@ -294,6 +566,19 @@ pub struct EventTranslator {
     /// API's content index. Built from `stream_event` partials; cleared on
     /// each message_start.
     live_blocks: std::collections::HashMap<u64, LiveBlock>,
+    /// In-flight Codex agent-message / reasoning blocks. App-server emits
+    /// these as separate delta notifications rather than `item/completed`;
+    /// retaining them here lets the UI paint tokens immediately and lets an
+    /// interrupted turn persist the partial text.
+    codex_live_blocks: std::collections::HashMap<String, CodexLiveBlock>,
+    /// Cumulative command output, used for running tool-card updates. The
+    /// frontend replaces (rather than appends) partialResult on each update.
+    codex_tool_output: std::collections::HashMap<String, String>,
+    /// Whether the current Claude API message delivered content through
+    /// stream_event partials. Older/changed CLI builds can omit partials even
+    /// when requested; the cumulative assistant snapshot then becomes the
+    /// lossless fallback instead of leaving the turn blank.
+    claude_streamed_content: bool,
     /// True once the terminal `result` event arrived (claude bidirectional
     /// mode: the process idles for more stdin after this — the runner uses
     /// this flag to close the turn).
@@ -315,6 +600,13 @@ pub struct EventTranslator {
     /// system events. The runner must not close the turn on a `result` while
     /// any of these are still pending (see `has_pending_tasks`).
     background_tasks: std::collections::HashMap<String, BackgroundTask>,
+    /// claude only: steered user messages written to stdin mid-turn, awaiting
+    /// their merge point. Claude folds a mid-turn stdin message into the NEXT
+    /// API request it makes — at that `message_start` the transcript splits:
+    /// the open assistant bubble closes, these rows splice in, and subsequent
+    /// content opens a fresh bubble. Without this the steer would render (and
+    /// persist) outside the turn it actually landed in.
+    pending_steer: Vec<Value>,
 }
 
 /// One background subagent tracked from `task_started` to its
@@ -390,6 +682,18 @@ struct LiveBlock {
     /// tool_use only: (id, name).
     tool: Option<(String, String)>,
     closed: bool,
+    /// Whether the block's `*_start` event has been emitted (and `our_index`
+    /// allocated). Thinking blocks defer this to their first delta: sessions
+    /// whose thinking display is omitted stream signature-only blocks with no
+    /// text, and opening those would leave empty "Thinking" steps in the UI.
+    started: bool,
+}
+
+struct CodexLiveBlock {
+    item_id: String,
+    our_index: usize,
+    kind: LiveKind,
+    buffer: String,
 }
 
 #[derive(PartialEq)]
@@ -403,6 +707,8 @@ impl EventTranslator {
     pub fn new(backend: CliBackend) -> Self {
         Self {
             backend,
+            artifact_dir: None,
+            cwd: None,
             next_index: 0,
             resume_id: None,
             finished: false,
@@ -410,12 +716,22 @@ impl EventTranslator {
             messages: Vec::new(),
             tool_names: std::collections::HashMap::new(),
             live_blocks: std::collections::HashMap::new(),
+            codex_live_blocks: std::collections::HashMap::new(),
+            codex_tool_output: std::collections::HashMap::new(),
+            claude_streamed_content: false,
             saw_result: false,
             result_error: None,
             started_items: std::collections::HashSet::new(),
             opened: false,
             background_tasks: std::collections::HashMap::new(),
+            pending_steer: Vec::new(),
         }
+    }
+
+    pub fn with_artifact_storage(mut self, artifact_dir: PathBuf, cwd: PathBuf) -> Self {
+        self.artifact_dir = Some(artifact_dir);
+        self.cwd = Some(cwd);
+        self
     }
 
     /// True while any background subagent launched this turn is still running.
@@ -450,6 +766,13 @@ impl EventTranslator {
         std::mem::take(&mut self.messages)
     }
 
+    /// Queue a steered user message (already written to the child's stdin).
+    /// It splices into the transcript at the next API `message_start` — see
+    /// `pending_steer`.
+    pub fn queue_steer(&mut self, message: Value) {
+        self.pending_steer.push(message);
+    }
+
     /// Re-arm the per-turn portions of a translator while retaining Claude's
     /// conversation-scoped background-task registry. A persistent stream-json
     /// child uses one translator across many turns so task notifications can
@@ -460,6 +783,9 @@ impl EventTranslator {
         self.assistant_blocks.clear();
         self.messages.clear();
         self.live_blocks.clear();
+        self.codex_live_blocks.clear();
+        self.codex_tool_output.clear();
+        self.claude_streamed_content = false;
         self.saw_result = false;
         self.result_error = None;
         self.opened = false;
@@ -546,10 +872,15 @@ impl EventTranslator {
     /// visible assistant text block so a crashed turn isn't a blank bubble.
     pub fn finish(&mut self, error: Option<&str>) -> Vec<Value> {
         let mut out = self.close_live_blocks();
+        out.extend(self.close_all_codex_blocks());
         if let Some(msg) = error {
             out.extend(self.emit_text(&format!("⚠️ agent error: {msg}")));
         }
         self.flush_assistant();
+        // A steer the model never consumed (the turn's result raced the stdin
+        // write) still belongs in the transcript — claude answers it as a
+        // self-started continuation turn, so the row precedes that reply.
+        self.messages.append(&mut self.pending_steer);
         let mut out = self.with_open(out);
         // message_end only makes sense for a bubble that was opened; a turn
         // that produced nothing closes with agent_end alone (the reducer
@@ -624,6 +955,107 @@ impl EventTranslator {
         out
     }
 
+    fn emit_codex_delta(
+        &mut self,
+        key: String,
+        item_id: &str,
+        kind: LiveKind,
+        delta: &str,
+    ) -> Vec<Value> {
+        if delta.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        if !self.codex_live_blocks.contains_key(&key) {
+            let our_index = self.alloc_index();
+            let start = match kind {
+                LiveKind::Text => "text_start",
+                LiveKind::Thinking => "thinking_start",
+                LiveKind::ToolUse => return Vec::new(),
+            };
+            self.codex_live_blocks.insert(
+                key.clone(),
+                CodexLiveBlock {
+                    item_id: item_id.to_string(),
+                    our_index,
+                    kind,
+                    buffer: String::new(),
+                },
+            );
+            out.push(am(json!({ "type": start, "contentIndex": our_index })));
+        }
+        let block = self.codex_live_blocks.get_mut(&key).expect("block inserted");
+        block.buffer.push_str(delta);
+        let event = match block.kind {
+            LiveKind::Text => "text_delta",
+            LiveKind::Thinking => "thinking_delta",
+            LiveKind::ToolUse => return Vec::new(),
+        };
+        out.push(am(json!({
+            "type": event,
+            "contentIndex": block.our_index,
+            "delta": delta,
+        })));
+        out
+    }
+
+    /// Settle all streamed blocks for one completed Codex item. For a
+    /// single-block item, `authoritative` is the completed text: text_end
+    /// replaces the live buffer if a proposed/experimental delta stream did
+    /// not concatenate to exactly the final item.
+    fn close_codex_item(&mut self, item_id: &str, authoritative: Option<&str>) -> Vec<Value> {
+        let mut keys: Vec<String> = self
+            .codex_live_blocks
+            .iter()
+            .filter(|(_, block)| block.item_id == item_id)
+            .map(|(key, _)| key.clone())
+            .collect();
+        keys.sort_by_key(|key| self.codex_live_blocks[key].our_index);
+        let single = keys.len() == 1;
+        let mut out = Vec::new();
+        for key in keys {
+            let mut block = self.codex_live_blocks.remove(&key).expect("live block exists");
+            if single {
+                if let Some(final_text) = authoritative.filter(|text| !text.is_empty()) {
+                    block.buffer = final_text.to_string();
+                }
+            }
+            let (end, persisted) = match block.kind {
+                LiveKind::Text => (
+                    "text_end",
+                    json!({ "type": "text", "text": block.buffer }),
+                ),
+                LiveKind::Thinking => (
+                    "thinking_end",
+                    json!({ "type": "thinking", "thinking": block.buffer }),
+                ),
+                LiveKind::ToolUse => continue,
+            };
+            self.assistant_blocks.push(persisted);
+            out.push(am(json!({
+                "type": end,
+                "contentIndex": block.our_index,
+                "content": block.buffer,
+            })));
+        }
+        out
+    }
+
+    fn close_all_codex_blocks(&mut self) -> Vec<Value> {
+        let mut item_ids: Vec<String> = self
+            .codex_live_blocks
+            .values()
+            .map(|block| block.item_id.clone())
+            .collect();
+        item_ids.sort();
+        item_ids.dedup();
+        let mut out = Vec::new();
+        for item_id in item_ids {
+            out.extend(self.close_codex_item(&item_id, None));
+        }
+        out
+    }
+
     /// Emit a complete text block (start+delta+end) at a fresh index.
     fn emit_text(&mut self, text: &str) -> Vec<Value> {
         let i = self.alloc_index();
@@ -684,6 +1116,16 @@ impl EventTranslator {
         details: Value,
         is_error: bool,
     ) -> Vec<Value> {
+        let artifact_details = extracted_artifact_details(
+            content,
+            self.artifact_dir.as_deref(),
+            self.cwd.as_deref(),
+        );
+        let details = match artifact_details {
+            Some(artifacts) if details.is_null() => artifacts,
+            Some(artifacts) => json!({ "artifacts": artifacts, "runtimeDetails": details }),
+            None => details,
+        };
         let content = normalize_content(content);
         // A result closes the assistant segment that issued the call, matching
         // the assistant / toolResult interleaving of a pi transcript.
@@ -1070,10 +1512,9 @@ impl EventTranslator {
                 self.on_claude_stream_event(event)
             }
             // Cumulative snapshots — normally redundant with stream_event
-            // partials and ignored. The exception is synthetic messages
-            // (model "<synthetic>"): output of locally-handled slash commands
-            // (/usage, /context, /compact, …) and CLI-side notices, which never
-            // stream partials. Emit their text so those turns aren't blank.
+            // partials. They are also our compatibility fallback when a CLI
+            // version accepts --include-partial-messages but emits no partial
+            // content, plus the only output for synthetic slash commands.
             "assistant" => {
                 // Sidechain snapshots (a subagent's own turns) feed the
                 // launching card's step list instead of the main transcript.
@@ -1082,7 +1523,7 @@ impl EventTranslator {
                 }
                 let msg = v.get("message");
                 let model = msg.and_then(|m| m.get("model")).and_then(|m| m.as_str());
-                if model != Some("<synthetic>") {
+                if model != Some("<synthetic>") && self.claude_streamed_content {
                     return Vec::new();
                 }
                 let mut out = Vec::new();
@@ -1091,13 +1532,31 @@ impl EventTranslator {
                     .and_then(|c| c.as_array());
                 if let Some(blocks) = blocks {
                     for b in blocks {
-                        if b.get("type").and_then(|t| t.as_str()) == Some("text") {
-                            let t = b.get("text").and_then(|t| t.as_str()).unwrap_or("");
-                            if !t.is_empty() {
-                                out.extend(self.emit_text(t));
+                        match b.get("type").and_then(Value::as_str).unwrap_or("") {
+                            "text" => {
+                                let text = b.get("text").and_then(Value::as_str).unwrap_or("");
+                                if !text.is_empty() {
+                                    out.extend(self.emit_text(text));
+                                }
                             }
+                            "thinking" => {
+                                let thinking = b.get("thinking").and_then(Value::as_str).unwrap_or("");
+                                if !thinking.is_empty() {
+                                    out.extend(self.emit_thinking(thinking));
+                                }
+                            }
+                            "tool_use" => {
+                                let id = b.get("id").and_then(Value::as_str).unwrap_or("tool");
+                                let name = b.get("name").and_then(Value::as_str).unwrap_or("tool");
+                                let input = b.get("input").cloned().unwrap_or(Value::Null);
+                                out.extend(self.emit_tool_call(id, name, &input));
+                            }
+                            _ => {}
                         }
                     }
+                }
+                if !out.is_empty() {
+                    self.claude_streamed_content = true;
                 }
                 out
             }
@@ -1179,7 +1638,22 @@ impl EventTranslator {
                         }
                     }
                 }
+                // A main-chain tool result separates Claude API messages. If
+                // the next response again lacks stream_event partials, allow
+                // its cumulative assistant snapshot to act as fallback.
+                self.claude_streamed_content = false;
                 out
+            }
+            // Account-level quota heartbeat: claude reports the unified
+            // rate-limit status after each API call (status allowed /
+            // allowed_warning / rejected, utilization near the warning
+            // threshold, reset epoch). Forwarded verbatim for the runtime
+            // picker's quota line — it is not turn content and opens nothing.
+            "rate_limit_event" => {
+                let Some(info) = v.get("rate_limit_info") else {
+                    return Vec::new();
+                };
+                vec![json!({ "type": "cli_rate_limit", "info": info })]
             }
             // Terminal event of the turn. In bidirectional mode the process
             // then idles for more stdin — the runner watches `saw_result` to
@@ -1209,7 +1683,25 @@ impl EventTranslator {
                 // New API message: any straggler blocks are closed by their
                 // own content_block_stop; just reset the index map.
                 self.live_blocks.clear();
-                Vec::new()
+                self.claude_streamed_content = false;
+                if self.pending_steer.is_empty() {
+                    return Vec::new();
+                }
+                // A steered user message merges into the turn on this API
+                // request. Split the turn here: settle the open assistant
+                // bubble, splice the user row(s) in at their real position,
+                // and let the next content event open a fresh bubble (indices
+                // restart with it) — so live view and reloaded transcript both
+                // show the steer where it landed, not after the whole turn.
+                self.flush_assistant();
+                self.messages.append(&mut self.pending_steer);
+                let mut out = Vec::new();
+                if self.opened {
+                    out.push(json!({ "type": "message_end" }));
+                    self.opened = false;
+                }
+                self.next_index = 0;
+                out
             }
             "content_block_start" => {
                 let idx = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
@@ -1217,38 +1709,70 @@ impl EventTranslator {
                     return Vec::new();
                 };
                 let kind = cb.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                let our_index = self.alloc_index();
                 match kind {
                     "text" => {
+                        let our_index = self.alloc_index();
+                        let initial = cb.get("text").and_then(Value::as_str).unwrap_or("");
+                        if !initial.is_empty() {
+                            self.claude_streamed_content = true;
+                        }
                         self.live_blocks.insert(idx, LiveBlock {
                             our_index,
                             kind: LiveKind::Text,
-                            buffer: String::new(),
+                            buffer: initial.to_string(),
                             tool: None,
                             closed: false,
+                            started: true,
                         });
-                        vec![am(json!({ "type": "text_start", "contentIndex": our_index }))]
+                        let mut out = vec![am(json!({ "type": "text_start", "contentIndex": our_index }))];
+                        if !initial.is_empty() {
+                            out.push(am(json!({
+                                "type": "text_delta",
+                                "contentIndex": our_index,
+                                "delta": initial,
+                            })));
+                        }
+                        out
                     }
                     "thinking" => {
+                        let initial = cb.get("thinking").and_then(Value::as_str).unwrap_or("");
+                        if !initial.is_empty() {
+                            self.claude_streamed_content = true;
+                        }
+                        // thinking_start (and the index) waits for the first
+                        // thinking_delta — see LiveBlock::started.
+                        let started = !initial.is_empty();
+                        let our_index = if started { self.alloc_index() } else { 0 };
                         self.live_blocks.insert(idx, LiveBlock {
                             our_index,
                             kind: LiveKind::Thinking,
-                            buffer: String::new(),
+                            buffer: initial.to_string(),
                             tool: None,
                             closed: false,
+                            started,
                         });
-                        vec![am(json!({ "type": "thinking_start", "contentIndex": our_index }))]
+                        if started {
+                            vec![
+                                am(json!({ "type": "thinking_start", "contentIndex": our_index })),
+                                am(json!({ "type": "thinking_delta", "contentIndex": our_index, "delta": initial })),
+                            ]
+                        } else {
+                            Vec::new()
+                        }
                     }
                     "tool_use" => {
+                        self.claude_streamed_content = true;
                         let id = cb.get("id").and_then(|t| t.as_str()).unwrap_or("");
                         let name = cb.get("name").and_then(|t| t.as_str()).unwrap_or("tool");
                         self.tool_names.insert(id.to_string(), name.to_string());
+                        let our_index = self.alloc_index();
                         self.live_blocks.insert(idx, LiveBlock {
                             our_index,
                             kind: LiveKind::ToolUse,
                             buffer: String::new(),
                             tool: Some((id.to_string(), name.to_string())),
                             closed: false,
+                            started: true,
                         });
                         vec![am(json!({ "type": "toolcall_start", "contentIndex": our_index }))]
                     }
@@ -1270,6 +1794,7 @@ impl EventTranslator {
                         if t.is_empty() {
                             return Vec::new();
                         }
+                        self.claude_streamed_content = true;
                         block.buffer.push_str(t);
                         vec![am(json!({
                             "type": "text_delta",
@@ -1282,12 +1807,24 @@ impl EventTranslator {
                         if t.is_empty() {
                             return Vec::new();
                         }
+                        self.claude_streamed_content = true;
                         block.buffer.push_str(t);
-                        vec![am(json!({
+                        let mut out = Vec::new();
+                        if !block.started {
+                            block.started = true;
+                            block.our_index = self.next_index;
+                            self.next_index += 1;
+                            out.push(am(json!({
+                                "type": "thinking_start",
+                                "contentIndex": block.our_index,
+                            })));
+                        }
+                        out.push(am(json!({
                             "type": "thinking_delta",
                             "contentIndex": block.our_index,
                             "delta": t,
-                        }))]
+                        })));
+                        out
                     }
                     "input_json_delta" => {
                         let t = delta
@@ -1322,6 +1859,12 @@ impl EventTranslator {
                         }))]
                     }
                     LiveKind::Thinking => {
+                        // Never started: signature-only block (thinking
+                        // display omitted) — nothing was opened, nothing to
+                        // close or persist.
+                        if !block.started {
+                            return Vec::new();
+                        }
                         let text = std::mem::take(&mut block.buffer);
                         self.assistant_blocks
                             .push(json!({ "type": "thinking", "thinking": text }));
@@ -1358,6 +1901,65 @@ impl EventTranslator {
                     self.resume_id = Some(tid.to_string());
                 }
                 Vec::new()
+            }
+            "item.agent_message.delta" => {
+                let id = v.get("item_id").and_then(Value::as_str).unwrap_or("message");
+                let delta = v.get("delta").and_then(Value::as_str).unwrap_or("");
+                self.emit_codex_delta(
+                    format!("message:{id}"),
+                    id,
+                    LiveKind::Text,
+                    delta,
+                )
+            }
+            "item.reasoning.summary_delta" => {
+                let id = v.get("item_id").and_then(Value::as_str).unwrap_or("reasoning");
+                let part = v.get("summary_index").and_then(Value::as_i64).unwrap_or(0);
+                let delta = v.get("delta").and_then(Value::as_str).unwrap_or("");
+                self.emit_codex_delta(
+                    format!("reasoning-summary:{id}:{part}"),
+                    id,
+                    LiveKind::Thinking,
+                    delta,
+                )
+            }
+            "item.reasoning.text_delta" => {
+                let id = v.get("item_id").and_then(Value::as_str).unwrap_or("reasoning");
+                let part = v.get("content_index").and_then(Value::as_i64).unwrap_or(0);
+                let delta = v.get("delta").and_then(Value::as_str).unwrap_or("");
+                self.emit_codex_delta(
+                    format!("reasoning-text:{id}:{part}"),
+                    id,
+                    LiveKind::Thinking,
+                    delta,
+                )
+            }
+            "item.plan.delta" => {
+                let id = v.get("item_id").and_then(Value::as_str).unwrap_or("plan");
+                let delta = v.get("delta").and_then(Value::as_str).unwrap_or("");
+                self.emit_codex_delta(
+                    format!("plan:{id}"),
+                    id,
+                    LiveKind::Thinking,
+                    delta,
+                )
+            }
+            "item.tool_output.delta" => {
+                let id = v.get("item_id").and_then(Value::as_str).unwrap_or("item");
+                let delta = v.get("delta").and_then(Value::as_str).unwrap_or("");
+                if delta.is_empty() || !self.started_items.contains(id) {
+                    return Vec::new();
+                }
+                let output = self.codex_tool_output.entry(id.to_string()).or_default();
+                output.push_str(delta);
+                vec![json!({
+                    "type": "tool_execution_update",
+                    "toolCallId": id,
+                    "partialResult": {
+                        "content": normalize_content(&json!(output)),
+                        "details": Value::Null,
+                    },
+                })]
             }
             // A command starts executing: show its tool card immediately (with
             // a running spinner via tool_execution_start) instead of waiting
@@ -1416,6 +2018,48 @@ impl EventTranslator {
                     }));
                     return out;
                 }
+                if matches!(item_ty, "dynamic_tool_call" | "image_generation" | "mcp_tool_call") {
+                    let id = item.get("id").and_then(Value::as_str).unwrap_or("item");
+                    let name = if item_ty == "image_generation" {
+                        "image_generation"
+                    } else {
+                        item.get("tool").and_then(Value::as_str).unwrap_or("tool")
+                    };
+                    let args = item.get("arguments").cloned().unwrap_or(Value::Null);
+                    self.started_items.insert(id.to_string());
+                    let mut out = self.emit_tool_call(id, name, &args);
+                    out.push(json!({ "type": "tool_execution_start", "toolCallId": id }));
+                    return out;
+                }
+                if item_ty == "file_change" {
+                    let id = item.get("id").and_then(Value::as_str).unwrap_or("item");
+                    let changes = item.get("changes").cloned().unwrap_or(Value::Null);
+                    self.started_items.insert(id.to_string());
+                    let mut out = self.emit_tool_call(id, "apply_patch", &changes);
+                    out.push(json!({ "type": "tool_execution_start", "toolCallId": id }));
+                    return out;
+                }
+                if matches!(item_ty, "web_search" | "image_view" | "sleep") {
+                    let id = item.get("id").and_then(Value::as_str).unwrap_or("item");
+                    let (name, args) = match item_ty {
+                        "web_search" => (
+                            "web_search",
+                            json!({ "query": item.get("query").cloned().unwrap_or(Value::Null) }),
+                        ),
+                        "image_view" => (
+                            "view_image",
+                            json!({ "path": item.get("path").cloned().unwrap_or(Value::Null) }),
+                        ),
+                        _ => (
+                            "wait",
+                            json!({ "durationMs": item.get("durationMs").or_else(|| item.get("duration_ms")).cloned().unwrap_or(Value::Null) }),
+                        ),
+                    };
+                    self.started_items.insert(id.to_string());
+                    let mut out = self.emit_tool_call(id, name, &args);
+                    out.push(json!({ "type": "tool_execution_start", "toolCallId": id }));
+                    return out;
+                }
                 if item_ty != "command_execution" {
                     return Vec::new();
                 }
@@ -1436,21 +2080,48 @@ impl EventTranslator {
                 match item_ty {
                     "agent_message" => {
                         let t = item.get("text").and_then(|t| t.as_str()).unwrap_or("");
-                        if t.is_empty() {
-                            Vec::new()
-                        } else {
+                        let streamed = self.close_codex_item(id, Some(t));
+                        if !streamed.is_empty() {
+                            streamed
+                        } else if !t.is_empty() {
                             self.emit_text(t)
+                        } else {
+                            Vec::new()
                         }
                     }
                     "reasoning" => {
-                        let t = item.get("text").and_then(|t| t.as_str()).unwrap_or("");
-                        if t.is_empty() {
-                            Vec::new()
+                        let completed = item
+                            .get("summary")
+                            .and_then(Value::as_array)
+                            .filter(|parts| !parts.is_empty())
+                            .or_else(|| item.get("content").and_then(Value::as_array))
+                            .map(|parts| {
+                                parts.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n")
+                            })
+                            .or_else(|| item.get("text").and_then(Value::as_str).map(str::to_string))
+                            .unwrap_or_default();
+                        let streamed = self.close_codex_item(id, Some(&completed));
+                        if !streamed.is_empty() {
+                            streamed
+                        } else if !completed.is_empty() {
+                            self.emit_thinking(&completed)
                         } else {
-                            self.emit_thinking(t)
+                            Vec::new()
+                        }
+                    }
+                    "plan" => {
+                        let completed = item.get("text").and_then(Value::as_str).unwrap_or("");
+                        let streamed = self.close_codex_item(id, Some(completed));
+                        if !streamed.is_empty() {
+                            streamed
+                        } else if !completed.is_empty() {
+                            self.emit_thinking(completed)
+                        } else {
+                            Vec::new()
                         }
                     }
                     "command_execution" => {
+                        self.codex_tool_output.remove(id);
                         let output = item
                             .get("aggregated_output")
                             .or_else(|| item.get("output"))
@@ -1474,9 +2145,13 @@ impl EventTranslator {
                     }
                     "file_change" => {
                         let changes = item.get("changes").cloned().unwrap_or(Value::Null);
-                        let mut out = self.emit_tool_call(id, "apply_patch", &changes);
-                        out.extend(self.emit_tool_result(id, &json!("applied"), false));
-                        out
+                        if self.started_items.remove(id) {
+                            self.emit_tool_result_end(id, &json!("applied"), false)
+                        } else {
+                            let mut out = self.emit_tool_call(id, "apply_patch", &changes);
+                            out.extend(self.emit_tool_result(id, &json!("applied"), false));
+                            out
+                        }
                     }
                     "mcp_tool_call" => {
                         let name = item
@@ -1484,10 +2159,77 @@ impl EventTranslator {
                             .and_then(|t| t.as_str())
                             .unwrap_or("mcp_tool");
                         let args = item.get("arguments").cloned().unwrap_or(Value::Null);
-                        let mut out = self.emit_tool_call(id, name, &args);
                         let result = item.get("result").cloned().unwrap_or(Value::Null);
+                        if self.started_items.remove(id) {
+                            self.emit_tool_result_end(id, &result, false)
+                        } else {
+                            let mut out = self.emit_tool_call(id, name, &args);
+                            out.extend(self.emit_tool_result(id, &result, false));
+                            out
+                        }
+                    }
+                    "dynamic_tool_call" => {
+                        let name = item
+                            .get("tool")
+                            .and_then(Value::as_str)
+                            .unwrap_or("tool");
+                        let args = item.get("arguments").cloned().unwrap_or(Value::Null);
+                        let result = item
+                            .get("content_items")
+                            .or_else(|| item.get("result"))
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        let is_err = item.get("success").and_then(Value::as_bool) == Some(false);
+                        if self.started_items.remove(id) {
+                            return self.emit_tool_result_end(id, &result, is_err);
+                        }
+                        let mut out = self.emit_tool_call(id, name, &args);
+                        out.extend(self.emit_tool_result(id, &result, is_err));
+                        out
+                    }
+                    "image_generation" => {
+                        let result = if let Some(path) = item.get("saved_path").and_then(Value::as_str) {
+                            json!({ "type": "file", "path": path, "mimeType": "image/png" })
+                        } else {
+                            json!({
+                                "type": "image",
+                                "data": item.get("result").and_then(Value::as_str).unwrap_or(""),
+                                "mimeType": "image/png"
+                            })
+                        };
+                        if self.started_items.remove(id) {
+                            return self.emit_tool_result_end(id, &result, false);
+                        }
+                        let mut out = self.emit_tool_call(id, "image_generation", &Value::Null);
                         out.extend(self.emit_tool_result(id, &result, false));
                         out
+                    }
+                    "web_search" | "image_view" | "sleep" => {
+                        let result = match item_ty {
+                            "web_search" => json!(item
+                                .get("query")
+                                .and_then(Value::as_str)
+                                .map(|query| format!("Search completed: {query}"))
+                                .unwrap_or_else(|| "Search completed".to_string())),
+                            "image_view" => json!(item
+                                .get("path")
+                                .and_then(Value::as_str)
+                                .map(|path| format!("Viewed {path}"))
+                                .unwrap_or_else(|| "Image viewed".to_string())),
+                            _ => json!("Wait completed"),
+                        };
+                        if self.started_items.remove(id) {
+                            self.emit_tool_result_end(id, &result, false)
+                        } else {
+                            let name = match item_ty {
+                                "web_search" => "web_search",
+                                "image_view" => "view_image",
+                                _ => "wait",
+                            };
+                            let mut out = self.emit_tool_call(id, name, &Value::Null);
+                            out.extend(self.emit_tool_result(id, &result, false));
+                            out
+                        }
                     }
                     "collab_agent_tool_call" => {
                         let Some(states) = item.get("agents_states").and_then(Value::as_object)
@@ -1671,6 +2413,10 @@ enum ClaudeSessionCommand {
         outcome: tokio::sync::oneshot::Sender<CliTurnOutcome>,
     },
     Input(String),
+    /// A mid-turn user message: `line` goes to stdin like Input, and
+    /// `message` (the PiMessage-shaped user row) is queued on the translator
+    /// to splice into the transcript at its merge point.
+    Steer { line: String, message: Value },
     Abort,
     Shutdown,
 }
@@ -1698,6 +2444,14 @@ impl ClaudeSessionHandle {
             .map_err(|_| anyhow::anyhow!("Claude Code session has exited"))
     }
 
+    /// Inject a mid-turn user message: writes `line` to stdin and queues
+    /// `message` for transcript splicing at the steer's merge point.
+    pub fn steer(&self, line: String, message: Value) -> Result<()> {
+        self.tx
+            .send(ClaudeSessionCommand::Steer { line, message })
+            .map_err(|_| anyhow::anyhow!("Claude Code session has exited"))
+    }
+
     pub fn abort(&self) {
         let _ = self.tx.send(ClaudeSessionCommand::Abort);
     }
@@ -1722,6 +2476,7 @@ pub fn spawn_claude_session(
     base_sink: Arc<dyn EventSink>,
     bin: &str,
     cwd: &Path,
+    artifact_dir: Option<PathBuf>,
     conversation_id: Option<String>,
     extra_env: Vec<(String, String)>,
     opts: CliRunOpts,
@@ -1731,6 +2486,7 @@ pub fn spawn_claude_session(
     // CLI's own session file and vanish from Cetus on restart).
     orphan_messages: Option<tokio::sync::mpsc::UnboundedSender<Vec<Value>>>,
 ) -> Result<ClaudeSessionHandle> {
+    let translator_cwd = cwd.to_path_buf();
     let args = CliBackend::ClaudeCode.turn_args("", &opts);
     let mut cmd = TokioCommand::new(bin);
     cmd.args(&args)
@@ -1785,6 +2541,9 @@ pub fn spawn_claude_session(
 
         let mut reader = BufReader::new(stdout).lines();
         let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        if let Some(dir) = artifact_dir {
+            tr = tr.with_artifact_storage(dir, translator_cwd);
+        }
         let mut active: Option<ActiveClaudeTurn> = None;
         let mut killed = false;
         let mut interrupted = false;
@@ -1833,6 +2592,12 @@ pub fn spawn_claude_session(
                         let _ = stdin.write_all(line.as_bytes()).await;
                         let _ = stdin.write_all(b"\n").await;
                         let _ = stdin.flush().await;
+                    }
+                    Some(ClaudeSessionCommand::Steer { line, message }) => {
+                        let _ = stdin.write_all(line.as_bytes()).await;
+                        let _ = stdin.write_all(b"\n").await;
+                        let _ = stdin.flush().await;
+                        tr.queue_steer(message);
                     }
                     Some(ClaudeSessionCommand::Abort) => {
                         // Agent SDK streaming mode supports an out-of-band
@@ -2039,7 +2804,15 @@ fn normalize_codex_app_item(mut item: Value) -> Value {
             "agentMessage" => "agent_message",
             "fileChange" => "file_change",
             "mcpToolCall" => "mcp_tool_call",
+            "dynamicToolCall" => "dynamic_tool_call",
+            "imageGeneration" => "image_generation",
             "collabAgentToolCall" => "collab_agent_tool_call",
+            "webSearch" => "web_search",
+            "imageView" => "image_view",
+            "subAgentActivity" => "subagent_activity",
+            "enteredReviewMode" => "entered_review_mode",
+            "exitedReviewMode" => "exited_review_mode",
+            "contextCompaction" => "context_compaction",
             other => other,
         };
         if normalized != kind {
@@ -2052,12 +2825,39 @@ fn normalize_codex_app_item(mut item: Value) -> Value {
         ("agentsStates", "agents_states"),
         ("receiverThreadIds", "receiver_thread_ids"),
         ("senderThreadId", "sender_thread_id"),
+        ("contentItems", "content_items"),
+        ("savedPath", "saved_path"),
     ] {
         if let Some(value) = object.remove(camel) {
             object.insert(snake.to_string(), value);
         }
     }
     item
+}
+
+fn normalize_codex_app_delta(method: &str, params: &Value) -> Option<Value> {
+    let item_id = params
+        .get("itemId")
+        .or_else(|| params.get("item_id"))
+        .and_then(Value::as_str)?;
+    let delta = params.get("delta").and_then(Value::as_str).unwrap_or("");
+    let ty = match method {
+        "item/agentMessage/delta" => "item.agent_message.delta",
+        "item/reasoning/summaryTextDelta" => "item.reasoning.summary_delta",
+        "item/reasoning/textDelta" => "item.reasoning.text_delta",
+        "item/plan/delta" => "item.plan.delta",
+        "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
+            "item.tool_output.delta"
+        }
+        _ => return None,
+    };
+    Some(json!({
+        "type": ty,
+        "item_id": item_id,
+        "delta": delta,
+        "summary_index": params.get("summaryIndex").or_else(|| params.get("summary_index")),
+        "content_index": params.get("contentIndex").or_else(|| params.get("content_index")),
+    }))
 }
 
 /// Spawn Codex's persistent app-server embedding surface and create or resume
@@ -2067,10 +2867,12 @@ pub fn spawn_codex_session(
     base_sink: Arc<dyn EventSink>,
     bin: &str,
     cwd: &Path,
+    artifact_dir: Option<PathBuf>,
     conversation_id: Option<String>,
     extra_env: Vec<(String, String)>,
     opts: CliRunOpts,
 ) -> Result<CodexSessionHandle> {
+    let translator_cwd = cwd.to_path_buf();
     let mut cmd = TokioCommand::new(bin);
     cmd.args(["app-server", "--listen", "stdio://"])
         .current_dir(cwd)
@@ -2143,6 +2945,9 @@ pub fn spawn_codex_session(
             Err(error) => {
                 if let Some(CodexSessionCommand::StartTurn { sink, outcome, .. }) = rx.recv().await {
                     let mut tr = EventTranslator::new(CliBackend::Codex);
+                    if let Some(dir) = artifact_dir.clone() {
+                        tr = tr.with_artifact_storage(dir, translator_cwd.clone());
+                    }
                     emit(&sink, tr.start());
                     emit(&sink, tr.finish(Some(&error.to_string())));
                     let _ = outcome.send(CliTurnOutcome {
@@ -2158,6 +2963,9 @@ pub fn spawn_codex_session(
 
         let mut next_id = 10u64;
         let mut tr = EventTranslator::new(CliBackend::Codex);
+        if let Some(dir) = artifact_dir {
+            tr = tr.with_artifact_storage(dir, translator_cwd);
+        }
         tr.resume_id = Some(thread_id.clone());
         let mut active: Option<ActiveClaudeTurn> = None;
         let mut active_turn_id: Option<String> = None;
@@ -2222,6 +3030,17 @@ pub fn spawn_codex_session(
                             let item = normalize_codex_app_item(params.get("item").cloned().unwrap_or(Value::Null));
                             let events = tr.on_line(&json!({ "type": ty, "item": item }).to_string());
                             if !events.is_empty() { emit(sink, events); }
+                        }
+                        "item/agentMessage/delta"
+                        | "item/reasoning/summaryTextDelta"
+                        | "item/reasoning/textDelta"
+                        | "item/plan/delta"
+                        | "item/commandExecution/outputDelta"
+                        | "item/fileChange/outputDelta" => {
+                            if let Some(delta) = normalize_codex_app_delta(method, &params) {
+                                let events = tr.on_line(&delta.to_string());
+                                if !events.is_empty() { emit(sink, events); }
+                            }
                         }
                         "turn/completed" => {
                             let Some(turn) = active.take() else { continue };
@@ -2745,6 +3564,76 @@ mod tests {
     }
 
     #[test]
+    fn claude_steer_splits_turn_at_merge_point() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        // Pre-steer content: one streamed text block.
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant","content":[]}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"before"}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+
+        // The user steers mid-turn; claude merges it on its NEXT API request.
+        let steer = json!({ "role": "user", "content": [{ "type": "text", "text": "授权了" }] });
+        tr.queue_steer(steer.clone());
+
+        // That next message_start closes the open bubble and splices the row.
+        let ev = tr.on_line(r#"{"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant","content":[]}}}"#);
+        assert_eq!(types(&ev), vec!["message_end"]);
+        assert_eq!(tr.messages.len(), 2);
+        assert_eq!(tr.messages[0]["role"], json!("assistant"));
+        assert_eq!(tr.messages[0]["content"][0]["text"], json!("before"));
+        assert_eq!(tr.messages[1], steer);
+
+        // Post-steer content opens a fresh bubble with indices from 0.
+        let mut ev = Vec::new();
+        ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#));
+        ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"after"}}}"#));
+        ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#));
+        assert_eq!(
+            types(&ev),
+            vec![
+                "message_start",
+                "message_update:text_start",
+                "message_update:text_delta",
+                "message_update:text_end"
+            ]
+        );
+        assert_eq!(
+            ev[1]["assistantMessageEvent"]["contentIndex"],
+            json!(0)
+        );
+
+        tr.on_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"after"}"#);
+        tr.finish(None);
+        // Transcript order: pre-steer segment, user row, post-steer segment.
+        let msgs = tr.take_messages();
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[1]["role"], json!("user"));
+        assert_eq!(msgs[2]["role"], json!("assistant"));
+        assert_eq!(msgs[2]["content"][0]["text"], json!("after"));
+    }
+
+    #[test]
+    fn claude_steer_never_consumed_still_persists_on_finish() {
+        // A steer written just as the turn's result raced it is read by claude
+        // as a self-started continuation turn — the row must still land in the
+        // transcript, after the turn's own content.
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant","content":[]}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"answer"}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        let steer = json!({ "role": "user", "content": [{ "type": "text", "text": "late" }] });
+        tr.queue_steer(steer.clone());
+        tr.on_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"answer"}"#);
+        tr.finish(None);
+        let msgs = tr.take_messages();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], json!("assistant"));
+        assert_eq!(msgs[1], steer);
+    }
+
+    #[test]
     fn claude_error_result_with_no_content_is_not_spurious() {
         // A turn that fails before streaming anything (API refusal etc.) must
         // still close and surface the error, not spin waiting for more.
@@ -2804,8 +3693,17 @@ mod tests {
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["content"][0]["text"], json!("Current session: 28% used"));
 
-        // Real-model snapshots stay ignored (partials already streamed them).
+        // A real-model snapshot is a fallback when this CLI emitted no
+        // stream_event content at all.
         let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        let fallback = tr.on_line(r#"{"type":"assistant","message":{"model":"claude-fable-5","content":[{"type":"text","text":"fallback"}]}}"#);
+        assert_eq!(fallback[2]["assistantMessageEvent"]["delta"], json!("fallback"));
+
+        // Once partial content was observed, its cumulative snapshot remains
+        // redundant and must not duplicate the visible response.
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"dup"}}}"#);
         assert!(tr
             .on_line(r#"{"type":"assistant","message":{"model":"claude-fable-5","content":[{"type":"text","text":"dup"}]}}"#)
             .is_empty());
@@ -2815,10 +3713,63 @@ mod tests {
     fn claude_content_indices_are_monotonic() {
         let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
         tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hm"}}}"#);
         tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
         // the API reuses low indices across messages; ours must stay monotonic
         let ev = tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}}"#);
         assert_eq!(ev[0]["assistantMessageEvent"]["contentIndex"], json!(1));
+    }
+
+    /// Adaptive-thinking sessions with display omitted stream signature-only
+    /// thinking blocks (start + signature_delta + stop, no thinking_delta).
+    /// Those must not open a block, emit events, or persist an empty
+    /// `thinking` entry — the UI would show a dead "Thinking, 0 chars" step.
+    #[test]
+    fn claude_signature_only_thinking_is_suppressed() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        assert!(tr
+            .on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}}"#)
+            .is_empty());
+        assert!(tr
+            .on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}}"#)
+            .is_empty());
+        assert!(tr
+            .on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#)
+            .is_empty());
+        // the next block still takes index 0 — the ghost consumed nothing
+        let ev = tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}}"#);
+        assert_eq!(ev.last().unwrap()["assistantMessageEvent"]["contentIndex"], json!(0));
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hi"}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":1}}"#);
+        tr.finish(None);
+        let msgs = tr.take_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["content"], json!([{ "type": "text", "text": "hi" }]));
+    }
+
+    /// With a thinking display active the deltas carry text: thinking_start is
+    /// deferred to the first delta, then streams and persists normally.
+    #[test]
+    fn claude_thinking_with_text_streams_and_persists() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        assert!(tr
+            .on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}}"#)
+            .is_empty());
+        let ev = tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"let me see"}}}"#);
+        let kinds: Vec<&str> = ev
+            .iter()
+            .filter_map(|e| e["assistantMessageEvent"]["type"].as_str())
+            .collect();
+        assert_eq!(kinds, vec!["thinking_start", "thinking_delta"]);
+        let ev = tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        assert_eq!(ev[0]["assistantMessageEvent"]["type"], json!("thinking_end"));
+        assert_eq!(ev[0]["assistantMessageEvent"]["content"], json!("let me see"));
+        tr.finish(None);
+        let msgs = tr.take_messages();
+        assert_eq!(
+            msgs[0]["content"],
+            json!([{ "type": "thinking", "thinking": "let me see" }])
+        );
     }
 
     #[test]
@@ -2836,6 +3787,23 @@ mod tests {
         assert!(tr
             .on_line(r#"{"type":"control_response","response":{"subtype":"success","request_id":"init-1","response":{}}}"#)
             .is_empty());
+    }
+
+    /// The quota heartbeat surfaces as a `cli_rate_limit` event carrying the
+    /// CLI's rate_limit_info verbatim — and, as housekeeping, must neither
+    /// open the assistant bubble nor count as turn activity.
+    #[test]
+    fn claude_rate_limit_event_forwards_info() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        // Captured from claude 2.1.208.
+        let line = r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1784008800,"rateLimitType":"five_hour","utilization":0.85,"overageStatus":"rejected","isUsingOverage":false}}"#;
+        let ev = tr.on_line(line);
+        assert_eq!(types(&ev), vec!["cli_rate_limit"]);
+        assert_eq!(ev[0]["info"]["status"], json!("allowed_warning"));
+        assert_eq!(ev[0]["info"]["utilization"], json!(0.85));
+        assert_eq!(ev[0]["info"]["resetsAt"], json!(1784008800i64));
+        assert!(!tr.opened, "quota heartbeat must not open the bubble");
+        assert!(!is_turn_activity(line));
     }
 
     /// The initialize ack's `commands` catalog (built-ins + skills, captured
@@ -2927,6 +3895,86 @@ mod tests {
         );
         assert_eq!(types(&ev), vec!["tool_execution_end"]);
         assert_eq!(ev[0]["result"]["content"][0]["text"], json!("done"));
+    }
+
+    #[test]
+    fn codex_app_server_deltas_stream_and_complete_without_duplicates() {
+        let mut tr = EventTranslator::new(CliBackend::Codex);
+        let mut ev = Vec::new();
+        ev.extend(tr.on_line(
+            r#"{"type":"item.reasoning.summary_delta","item_id":"r1","summary_index":0,"delta":"Checking "}"#,
+        ));
+        ev.extend(tr.on_line(
+            r#"{"type":"item.reasoning.summary_delta","item_id":"r1","summary_index":0,"delta":"the repo"}"#,
+        ));
+        assert_eq!(
+            types(&ev),
+            vec![
+                "message_start",
+                "message_update:thinking_start",
+                "message_update:thinking_delta",
+                "message_update:thinking_delta",
+            ]
+        );
+        let end = tr.on_line(
+            r#"{"type":"item.completed","item":{"id":"r1","type":"reasoning","summary":["Checking the repo"],"content":[]}}"#,
+        );
+        assert_eq!(types(&end), vec!["message_update:thinking_end"]);
+        assert_eq!(end[0]["assistantMessageEvent"]["content"], json!("Checking the repo"));
+
+        let first = tr.on_line(
+            r#"{"type":"item.agent_message.delta","item_id":"m1","delta":"partial"}"#,
+        );
+        assert_eq!(
+            types(&first),
+            vec!["message_update:text_start", "message_update:text_delta"]
+        );
+        // Completed text is authoritative and replaces a divergent partial.
+        let end = tr.on_line(
+            r#"{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"final answer"}}"#,
+        );
+        assert_eq!(types(&end), vec!["message_update:text_end"]);
+        assert_eq!(end[0]["assistantMessageEvent"]["content"], json!("final answer"));
+
+        tr.finish(None);
+        let messages = tr.take_messages();
+        let content = messages[0]["content"].as_array().unwrap();
+        assert_eq!(content.iter().filter(|b| b["type"] == "text").count(), 1);
+    }
+
+    #[test]
+    fn codex_command_output_delta_updates_running_card_cumulatively() {
+        let mut tr = EventTranslator::new(CliBackend::Codex);
+        tr.on_line(
+            r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","command":"build"}}"#,
+        );
+        let first = tr.on_line(
+            r#"{"type":"item.tool_output.delta","item_id":"cmd1","delta":"line 1\n"}"#,
+        );
+        let second = tr.on_line(
+            r#"{"type":"item.tool_output.delta","item_id":"cmd1","delta":"line 2"}"#,
+        );
+        assert_eq!(types(&first), vec!["tool_execution_update"]);
+        assert_eq!(
+            second[0]["partialResult"]["content"][0]["text"],
+            json!("line 1\nline 2")
+        );
+    }
+
+    #[test]
+    fn codex_finish_preserves_an_interrupted_partial_message() {
+        let mut tr = EventTranslator::new(CliBackend::Codex);
+        tr.on_line(
+            r#"{"type":"item.agent_message.delta","item_id":"m1","delta":"still working"}"#,
+        );
+        let end = tr.finish(None);
+        assert_eq!(types(&end)[0], "message_update:text_end");
+        assert_eq!(
+            end[0]["assistantMessageEvent"]["content"],
+            json!("still working")
+        );
+        let messages = tr.take_messages();
+        assert_eq!(messages[0]["content"][0]["text"], json!("still working"));
     }
 
     #[test]
@@ -3118,6 +4166,7 @@ mod tests {
             &script.to_string_lossy(),
             &dir,
             None,
+            None,
             Vec::new(),
             CliRunOpts::default(),
             None,
@@ -3202,6 +4251,7 @@ mod tests {
             &script.to_string_lossy(),
             &dir,
             None,
+            None,
             Vec::new(),
             CliRunOpts::default(),
             Some(orphan_tx),
@@ -3261,6 +4311,7 @@ mod tests {
                    if [ \"$n\" -eq 1 ]; then\n\
                      echo '{\"method\":\"item/started\",\"params\":{\"threadId\":\"thread-persistent\",\"turnId\":\"turn-1\",\"item\":{\"type\":\"commandExecution\",\"id\":\"server-1\",\"command\":\"pnpm dev\",\"processId\":\"process-1\",\"status\":\"inProgress\",\"aggregatedOutput\":\"\",\"exitCode\":null}}}' ;\n\
                    fi;\n\
+                   echo \"{\\\"method\\\":\\\"item/agentMessage/delta\\\",\\\"params\\\":{\\\"threadId\\\":\\\"thread-persistent\\\",\\\"turnId\\\":\\\"turn-$n\\\",\\\"itemId\\\":\\\"answer-$n\\\",\\\"delta\\\":\\\"turn-$n\\\"}}\";\n\
                    echo \"{\\\"method\\\":\\\"item/completed\\\",\\\"params\\\":{\\\"threadId\\\":\\\"thread-persistent\\\",\\\"turnId\\\":\\\"turn-$n\\\",\\\"item\\\":{\\\"type\\\":\\\"agentMessage\\\",\\\"id\\\":\\\"answer-$n\\\",\\\"text\\\":\\\"turn-$n\\\"}}}\";\n\
                    echo \"{\\\"method\\\":\\\"turn/completed\\\",\\\"params\\\":{\\\"threadId\\\":\\\"thread-persistent\\\",\\\"turn\\\":{\\\"id\\\":\\\"turn-$n\\\",\\\"status\\\":\\\"completed\\\",\\\"error\\\":null}}}\" ;;\n\
                esac\n\
@@ -3279,6 +4330,7 @@ mod tests {
             &script.to_string_lossy(),
             &dir,
             None,
+            None,
             Vec::new(),
             CliRunOpts::default(),
         )
@@ -3293,6 +4345,10 @@ mod tests {
             message["content"]
                 .as_array()
                 .is_some_and(|content| content.iter().any(|block| block["text"] == json!("turn-1")))
+        }));
+        assert!(sink.0.lock().unwrap().iter().any(|event| {
+            event["assistantMessageEvent"]["type"] == json!("text_delta")
+                && event["assistantMessageEvent"]["delta"] == json!("turn-1")
         }));
         assert!(session.is_alive(), "turn/completed must not stop app-server");
 
@@ -4118,5 +5174,156 @@ mod tests {
         assert!(args.contains(&"-i".to_string()));
         assert!(args.contains(&"/tmp/shot.png".to_string()));
         assert_eq!(args.last().unwrap(), "hello");
+    }
+
+    fn artifact_test_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-artifact-{label}-{}",
+            ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn unknown_local_file_type_is_promoted_to_artifact() {
+        let dir = artifact_test_dir("unknown");
+        let file = dir.join("scene.blend");
+        std::fs::write(&file, b"blend-data").unwrap();
+        let details = extracted_artifact_details(
+            &json!(format!("Created file: {}", file.display())),
+            Some(&dir),
+            Some(&dir),
+        )
+        .unwrap();
+        assert_eq!(details["artifactKind"], json!("other"));
+        assert_eq!(details["mimeType"], json!("application/octet-stream"));
+        assert_eq!(details["name"], json!("scene.blend"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn inline_file_data_is_materialized_in_managed_storage() {
+        let dir = artifact_test_dir("inline");
+        let details = extracted_artifact_details(
+            &json!({
+                "type": "input_file",
+                "data": base64::engine::general_purpose::STANDARD.encode(b"hello"),
+                "mimeType": "text/plain"
+            }),
+            Some(&dir),
+            Some(&dir),
+        )
+        .unwrap();
+        let path = PathBuf::from(details["path"].as_str().unwrap());
+        assert_eq!(std::fs::read(path).unwrap(), b"hello");
+        assert_eq!(details["artifactKind"], json!("text"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn codex_image_generation_becomes_answer_artifact() {
+        let dir = artifact_test_dir("codex-image");
+        let mut tr = EventTranslator::new(CliBackend::Codex)
+            .with_artifact_storage(dir.clone(), dir.clone());
+        let encoded = base64::engine::general_purpose::STANDARD.encode(b"fake-png");
+        let item = normalize_codex_app_item(
+            json!({ "type": "imageGeneration", "id": "img-1", "result": encoded }),
+        );
+        let events = tr.on_line(&json!({ "type": "item.completed", "item": item }).to_string());
+        let end = events
+            .iter()
+            .find(|event| event["type"] == "tool_execution_end")
+            .unwrap();
+        assert_eq!(end["result"]["details"]["artifactKind"], json!("image"));
+        assert!(Path::new(end["result"]["details"]["path"].as_str().unwrap()).is_file());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dynamic_tool_can_deliver_multiple_file_types() {
+        let dir = artifact_test_dir("collection");
+        let pdf = dir.join("report.pdf");
+        let archive = dir.join("bundle.xyz");
+        std::fs::write(&pdf, b"pdf").unwrap();
+        std::fs::write(&archive, b"other").unwrap();
+        let mut tr = EventTranslator::new(CliBackend::Codex)
+            .with_artifact_storage(dir.clone(), dir.clone());
+        let item = normalize_codex_app_item(json!({
+            "type": "dynamicToolCall",
+            "id": "tool-1",
+            "tool": "export",
+            "arguments": {},
+            "contentItems": [
+                { "type": "file", "path": pdf },
+                { "type": "file", "path": archive }
+            ],
+            "success": true
+        }));
+        let events = tr.on_line(&json!({ "type": "item.completed", "item": item }).to_string());
+        let end = events
+            .iter()
+            .find(|event| event["type"] == "tool_execution_end")
+            .unwrap();
+        let artifacts = end["result"]["details"]["artifacts"].as_array().unwrap();
+        assert_eq!(artifacts.len(), 2);
+        assert_eq!(artifacts[0]["artifactKind"], json!("pdf"));
+        assert_eq!(artifacts[1]["artifactKind"], json!("other"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn claude_artifact_marker_is_promoted_from_bash_result() {
+        let dir = artifact_test_dir("claude-marker");
+        let file = dir.join("deck.pptx");
+        std::fs::write(&file, b"slides").unwrap();
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode)
+            .with_artifact_storage(dir.clone(), dir.clone());
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"bash-1","name":"Bash","input":{}}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        let marker = format!(
+            "CETUS_ARTIFACT:{}",
+            json!({ "path": file.to_string_lossy() })
+        );
+        let events = tr.on_line(
+            &json!({
+                "type": "user",
+                "message": { "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "bash-1",
+                    "content": marker,
+                    "is_error": false
+                }]}
+            })
+            .to_string(),
+        );
+        let end = events
+            .iter()
+            .find(|event| event["type"] == "tool_execution_end")
+            .unwrap();
+        assert_eq!(end["result"]["details"]["name"], json!("deck.pptx"));
+        assert_eq!(end["result"]["details"]["artifactKind"], json!("other"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn every_preview_category_and_unknown_extension_is_supported() {
+        let dir = artifact_test_dir("kinds");
+        for (name, expected) in [
+            ("image.png", "image"),
+            ("movie.mp4", "video"),
+            ("sound.wav", "audio"),
+            ("paper.pdf", "pdf"),
+            ("notes.md", "markdown"),
+            ("page.html", "html"),
+            ("data.csv", "text"),
+            ("workbook.xlsx", "other"),
+            ("anything.custom", "other"),
+        ] {
+            let path = dir.join(name);
+            std::fs::write(&path, b"x").unwrap();
+            assert_eq!(artifact_details(&path, None, None).unwrap()["artifactKind"], json!(expected));
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

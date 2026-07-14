@@ -19,7 +19,7 @@ import type {
 export type BashExecResult = BashResult;
 import { stripAttachmentRefs } from "./attachments";
 import { userTextBlocks } from "./quick-context";
-import { isArtifactDetails } from "./artifact";
+import { artifactsFromDetails } from "./artifact";
 
 export interface ChatState {
   messages: RenderedMessage[];
@@ -71,9 +71,8 @@ export function computeHasArtifacts(messages: RenderedMessage[]): boolean {
     for (const b of m.blocks) {
       if (
         b.kind === "tool_use" &&
-        b.name === "send_artifact" &&
         b.result &&
-        isArtifactDetails(b.result.details)
+        artifactsFromDetails(b.result.details).length > 0
       ) {
         return true;
       }
@@ -448,7 +447,9 @@ function assistantHasVisibleContent(m: RenderedMessage): boolean {
   return m.blocks.some(
     (b) =>
       (b.kind === "text" && b.text.trim().length > 0) ||
-      b.kind === "tool_use" ||
+      (b.kind === "tool_use" &&
+        !!b.result &&
+        artifactsFromDetails(b.result.details).length > 0) ||
       b.kind === "image" ||
       b.kind === "file" ||
       b.kind === "custom",
@@ -684,14 +685,13 @@ function reduceToolExec(
     };
   }
   messages[loc.messageIdx] = m;
-  // Flip the sticky hasArtifacts flag the moment a send_artifact result settles,
+  // Flip the sticky flag whenever any runtime delivers a normalized artifact,
   // so useHasArtifacts never has to scan the transcript per tick.
   const updated = m.blocks[loc.blockIdx];
   const hasArtifacts =
     state.hasArtifacts ||
     (updated.kind === "tool_use" &&
-      updated.name === "send_artifact" &&
       !!updated.result &&
-      isArtifactDetails(updated.result.details));
+      artifactsFromDetails(updated.result.details).length > 0);
   return { ...state, messages, hasArtifacts };
 }

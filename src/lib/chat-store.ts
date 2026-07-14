@@ -23,6 +23,7 @@ import type {
   BashResult,
   CliBackgroundTask,
   CliControlRequest,
+  CliRateLimitInfo,
   CliSlashCommand,
   PiEvent,
   PiMessage,
@@ -71,6 +72,11 @@ interface ChatsStore {
    *  (initialize ack). Refreshed on every session (re)spawn. */
   cliCommands: Record<string, CliSlashCommand[]>;
   setCliCommands: (id: string, commands: CliSlashCommand[]) => void;
+  /** Latest account-level quota snapshot per CLI runtime (backend id →
+   *  rate_limit_info), from `cli_rate_limit` events. Only claude-code emits
+   *  these today; the runtime picker renders them as a quota line. */
+  cliRateLimits: Record<string, CliRateLimitInfo>;
+  setCliRateLimit: (backend: string, info: CliRateLimitInfo) => void;
   /** Append a "running" breadcrumb for a local `!` bash command. */
   bashStart: (id: string, key: string, command: string, cwd?: string) => void;
   /** Settle a bash breadcrumb (by key) with its captured output. */
@@ -260,6 +266,7 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   controlRequests: {},
   backgroundTasks: {},
   cliCommands: {},
+  cliRateLimits: {},
   ensure: (id) => {
     flushPiEvents();
     set((s) => {
@@ -354,6 +361,9 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   },
   setCliCommands: (id, commands) => {
     set((s) => ({ cliCommands: { ...s.cliCommands, [id]: commands } }));
+  },
+  setCliRateLimit: (backend, info) => {
+    set((s) => ({ cliRateLimits: { ...s.cliRateLimits, [backend]: info } }));
   },
   bashStart: (id, key, command, cwd) => {
     flushPiEvents();

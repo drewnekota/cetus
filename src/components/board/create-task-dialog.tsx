@@ -33,7 +33,7 @@ interface Props {
 }
 
 /** Linear-style quick-create task dialog. Compact centered modal; opens with
- *  ⌘N on the Kanban view. Embeds the same <Composer> as the chat hero so the
+ *  ⌘N from anywhere. Embeds the same <Composer> as the chat hero so the
  *  two "start something new" surfaces feel identical to compose in (attachments,
  *  slash menu, runtime picker, Ultra toggle all shared). ⏎ submits and closes
  *  (or resets when "Create more" is on); Esc closes via Radix Dialog. */
@@ -139,6 +139,7 @@ export function CreateTaskDialog({
             workspaceDir={workspaceDir}
             defaultWorkspace={defaultWorkspace}
             onWorkspaceChange={onWorkspaceChange}
+            requireRepository
             onSend={handleSend}
             onAbort={() => {}}
             ultra={ultra}

@@ -14,6 +14,7 @@ use std::io::{BufRead, BufReader, Write};
 const HELP: &str = r#"cetus — control CLI for the running Cetus app
 
 USAGE
+  cetus artifact <path>                Deliver any local file to the Cetus chat
   cetus cron list                      List scheduled automations
   cetus cron get <id>
   cetus cron create '<input-json>'
@@ -60,6 +61,7 @@ fn run_inner(args: &[String]) -> Result<String, String> {
         [] | ["help" | "--help" | "-h"] | ["cron"] | ["cron", "help"] => Ok(HELP.to_string()),
         ["ping"] => request(&json!({ "op": "ping" })).map(|_| "ok".to_string()),
         ["version"] => request(&json!({ "op": "version" })).map(pretty),
+        ["artifact", path] => artifact_marker(path),
         ["cron", "list"] => request(&json!({ "op": "automation.list" })).map(pretty),
         ["cron", "get", id] => {
             request(&json!({ "op": "automation.get", "automationId": id })).map(pretty)
@@ -93,6 +95,25 @@ fn run_inner(args: &[String]) -> Result<String, String> {
             other.join(" ")
         )),
     }
+}
+
+fn artifact_marker(raw: &str) -> Result<String, String> {
+    let path = std::path::PathBuf::from(raw);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?.join(path)
+    };
+    let metadata = std::fs::metadata(&path)
+        .map_err(|e| format!("cannot read artifact {}: {e}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("artifact is not a regular file: {}", path.display()));
+    }
+    let path = path.canonicalize().unwrap_or(path);
+    Ok(format!(
+        "CETUS_ARTIFACT:{}",
+        json!({ "path": path.to_string_lossy(), "sizeBytes": metadata.len() })
+    ))
 }
 
 fn parse_json(s: &str) -> Result<Value, String> {
@@ -214,8 +235,19 @@ mod tests {
 
     #[test]
     fn help_covers_every_subcommand() {
-        for cmd in ["list", "get", "create", "edit", "rm", "enable", "disable", "run"] {
+        for cmd in ["artifact", "list", "get", "create", "edit", "rm", "enable", "disable", "run"] {
             assert!(HELP.contains(cmd), "help is missing `{cmd}`");
         }
+    }
+
+    #[test]
+    fn artifact_command_emits_machine_readable_marker_for_any_file_type() {
+        let path = std::env::temp_dir().join("cetus-cli-artifact.unknown-extension");
+        std::fs::write(&path, b"payload").unwrap();
+        let marker = artifact_marker(path.to_str().unwrap()).unwrap();
+        let payload: Value = serde_json::from_str(marker.strip_prefix("CETUS_ARTIFACT:").unwrap()).unwrap();
+        assert_eq!(payload["path"], json!(path.canonicalize().unwrap().to_string_lossy()));
+        assert_eq!(payload["sizeBytes"], json!(7));
+        let _ = std::fs::remove_file(path);
     }
 }

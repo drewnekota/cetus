@@ -121,6 +121,8 @@ interface Props {
   workspaceDir: string | null;
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
+  /** Require a real repository instead of the repository-free Chat workspace. */
+  requireRepository?: boolean;
   onSend: (text: string, attachments: ComposerAttachment[]) => void;
   /** Called instead of onSend when the agent is mid-run: the message is parked
    *  in a follow-up queue (shown above the composer) and delivered when the run
@@ -228,6 +230,7 @@ export function Composer({
   workspaceDir,
   defaultWorkspace,
   onWorkspaceChange,
+  requireRepository = false,
   onSend,
   onQueue,
   onBash,
@@ -770,6 +773,7 @@ export function Composer({
 
   async function submit() {
     if (disabled) return;
+    if (requireRepository && (!workspaceDir || workspaceDir === defaultWorkspace)) return;
     // Terminal mode: hand the command to the right-side Terminal surface and
     // bypass the agent entirely. An empty command (`!` alone) is a no-op.
     if (bashMode) {
@@ -1114,6 +1118,7 @@ export function Composer({
             defaultWorkspace={defaultWorkspace}
             onChange={onWorkspaceChange}
             disabled={disabled}
+            excludeDefault={requireRepository}
           />
           {/* Runtime on the left, its model/effort tuning on the right — the
               BackendPicker renders the CLI tuning menu itself; the pi model
@@ -1189,7 +1194,11 @@ export function Composer({
             type="button"
             size="icon-sm"
             onClick={submit}
-            disabled={disabled || (!text.trim() && attachments.length === 0)}
+            disabled={
+              disabled ||
+              (requireRepository && (!workspaceDir || workspaceDir === defaultWorkspace)) ||
+              (!text.trim() && attachments.length === 0)
+            }
             title={t("composer.send")}
           >
             <ArrowUp className="h-4 w-4" />

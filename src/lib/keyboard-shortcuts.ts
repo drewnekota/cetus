@@ -50,14 +50,14 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: "newChat",
-    label: "New chat",
-    description: "Start a new chat, or create a board task from Kanban",
+    label: "New task",
+    description: "Start a new task in a repository",
     defaultAccelerator: "Cmd+N",
   },
   {
     id: "newDefaultChat",
-    label: "New chat in Chat",
-    description: "Start a new chat in Chat, wherever you are",
+    label: "New chat",
+    description: "Start a repository-free chat, wherever you are",
     defaultAccelerator: "Alt+Cmd+N",
   },
   {
