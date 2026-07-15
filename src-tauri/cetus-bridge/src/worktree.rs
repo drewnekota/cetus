@@ -53,6 +53,30 @@ pub fn is_git_repo(dir: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// The branch checked out at `dir`. Detached HEADs still get a useful, stable
+/// label instead of disappearing from the UI.
+pub fn current_branch(dir: &Path) -> Option<String> {
+    let branch = Command::new("git")
+        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+    branch.or_else(|| {
+        let commit = Command::new("git")
+            .args(["rev-parse", "--short", "HEAD"])
+            .current_dir(dir)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())?;
+        Some(format!("detached@{commit}"))
+    })
+}
+
 fn run_git(repo: &Path, args: &[&str]) -> Result<String> {
     let out = Command::new("git")
         .args(args)

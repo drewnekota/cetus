@@ -183,6 +183,9 @@ export const api = {
    *  conversations and non-git workspaces). */
   conversationWorktree: (id: string) =>
     invoke<WorktreeInfo | null>("conversation_worktree", { id }),
+  /** Branch checked out in a local workspace; null for non-git/remote dirs. */
+  workspaceGitBranch: (workspaceDir: string) =>
+    invoke<string | null>("workspace_git_branch", { workspaceDir }),
   /** The CLI's own configured defaults (model / effort / codex model catalog),
    *  read from the vendor config on disk — lets the tuning menu echo what
    *  "Default" resolves to. */

@@ -778,6 +778,18 @@ pub async fn conversation_worktree(
     }))
 }
 
+/// Branch checked out in a local workspace. Non-git and remote workspaces do
+/// not render a branch indicator.
+#[tauri::command]
+pub async fn workspace_git_branch(workspace_dir: String) -> CmdResult<Option<String>> {
+    if cetus_bridge::remote::parse_remote_workspace(&workspace_dir).is_some() {
+        return Ok(None);
+    }
+    Ok(cetus_bridge::worktree::current_branch(Path::new(
+        &workspace_dir,
+    )))
+}
+
 #[tauri::command]
 pub async fn rename_conversation(
     state: State<'_, AppState>,

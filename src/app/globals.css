@@ -240,6 +240,19 @@
   animation: shake 0.3s ease;
 }
 
+/* Keep a message toolbar scoped to its own turn. A named Tailwind group uses
+   an ancestor selector, which can leak across the wrappers maintained by the
+   virtualized transcript and leave several timestamps visible at once. The
+   direct-child relationship makes the hover owner unambiguous. */
+[data-message-hover-target] > [data-message-actions] {
+  opacity: 0;
+}
+
+[data-message-hover-target]:hover > [data-message-actions],
+[data-message-hover-target] > [data-message-actions]:focus-within {
+  opacity: 1;
+}
+
 /* Move a highlight around an otherwise stationary circle. Unlike rotating a
    tiny asymmetric SVG, this keeps the rasterized outline and centre fixed. */
 @keyframes spinner-dash {
@@ -302,8 +315,8 @@
 }
 
 /* Hallmark · component: composer running state · genre: modern-minimal
- * Motion is the status cue: one restrained highlight circles the frame while
- * the agent is working, layered over the normal runtime border. */
+ * Motion is the status cue: one clear highlight circles the frame while the
+ * agent is working, layered over the normal runtime border. */
 @property --composer-border-angle {
   syntax: "<angle>";
   inherits: false;
@@ -323,17 +336,17 @@
 [data-chat-composer][data-streaming="true"]::after {
   content: "";
   position: absolute;
-  inset: -1px;
+  inset: -2px;
   z-index: 20;
   pointer-events: none;
-  padding: 1px;
+  padding: 2px;
   border-radius: inherit;
   background: conic-gradient(
     from var(--composer-border-angle),
-    transparent 0% 62%,
-    color-mix(in oklab, var(--composer-runner) 22%, transparent) 74%,
-    var(--composer-runner) 88%,
-    color-mix(in oklab, var(--composer-runner) 28%, transparent) 95%,
+    transparent 0% 48%,
+    color-mix(in oklab, var(--composer-runner) 35%, transparent) 62%,
+    var(--composer-runner) 80%,
+    color-mix(in oklab, var(--composer-runner) 45%, transparent) 92%,
     transparent 100%
   );
   -webkit-mask:
@@ -341,7 +354,8 @@
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: composer-border-spin 4s linear infinite;
+  filter: drop-shadow(0 0 2px color-mix(in oklab, var(--composer-runner) 55%, transparent));
+  animation: composer-border-spin 2.8s linear infinite;
 }
 
 [data-chat-composer][data-streaming="true"][data-backend="claude-code"] {

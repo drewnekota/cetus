@@ -98,8 +98,9 @@ function MessageBubbleView({
       data-testid={`message-${message.role}`}
     >
       <div
+        data-message-hover-target
         className={cn(
-          "group/msg flex max-w-[88%] flex-col gap-2",
+          "flex max-w-[88%] flex-col gap-2",
           isUser ? "items-end" : "items-start",
         )}
       >

@@ -122,7 +122,10 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork }: Props) {
 
   return (
     <div className="flex w-full justify-start py-3">
-      <div className="group/msg flex w-full max-w-[88%] flex-col gap-2 items-start">
+      <div
+        data-message-hover-target
+        className="flex w-full max-w-[88%] flex-col gap-2 items-start"
+      >
         <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           {t("pane.assistant")}
         </div>

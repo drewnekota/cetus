@@ -1432,7 +1432,12 @@ export default function Home() {
         );
       } else if (shortcut("newChat")) {
         e.preventDefault();
-        setNewTaskOpen(true);
+        if (view === "board") {
+          setNewTaskOpen(true);
+        } else {
+          // Outside Kanban, Cmd+N starts a fresh chat on the chat page.
+          onNew();
+        }
       } else if (shortcut("newDefaultChat")) {
         e.preventDefault();
         // ⌥⌘N always lands a new chat in Chat (the default workspace), even

@@ -334,8 +334,9 @@ export function MessageActions({
 
   return (
     <div
+      data-message-actions
       className={cn(
-        "flex items-center gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100",
+        "flex items-center gap-1 transition-opacity",
         isUser ? "justify-end" : "justify-start",
       )}
     >

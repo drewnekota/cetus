@@ -24,6 +24,84 @@ import {
 } from "@/lib/draft-store";
 import type { BackendId, ModelChoice } from "@/lib/types";
 
+function GitBranchIndicator({
+  conversationId,
+  workspaceDir,
+  defaultWorkspace,
+  streaming,
+}: {
+  conversationId: string | null;
+  workspaceDir: string | null;
+  defaultWorkspace: string;
+  streaming: boolean;
+}) {
+  const { t } = useTranslation("chat");
+  const [git, setGit] = useState<{ branch: string; path: string; worktree: boolean } | null>(null);
+  const workspace = workspaceDir ?? defaultWorkspace;
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        if (conversationId) {
+          const worktree = await api.conversationWorktree(conversationId);
+          if (worktree?.exists) {
+            if (!cancelled) setGit({ branch: worktree.branch, path: worktree.path, worktree: true });
+            return;
+          }
+        }
+        const branch = workspace ? await api.workspaceGitBranch(workspace) : null;
+        if (!cancelled) setGit(branch ? { branch, path: workspace, worktree: false } : null);
+      } catch {
+        if (!cancelled) setGit(null);
+      }
+    };
+    void refresh();
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    // Branches can also be switched from Cetus's terminal, which does not
+    // blur/refocus the app window. Keep the small label honest without polling
+    // while the app is in the background.
+    const poll = window.setInterval(refreshVisible, 5_000);
+    window.addEventListener("focus", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+      window.removeEventListener("focus", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
+  }, [conversationId, workspace, streaming]);
+
+  if (!git) return null;
+  const content = (
+    <>
+      <span className="shrink-0 font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+        git /
+      </span>
+      <span className="max-w-28 truncate">{git.branch}</span>
+    </>
+  );
+  return git.worktree ? (
+    <button
+      type="button"
+      onClick={() => api.openPath(git.path).catch(() => {})}
+      title={t("pane.worktree.tooltip", { path: git.path })}
+      className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+    >
+      {content}
+    </button>
+  ) : (
+    <span
+      title={`${git.branch}\n${git.path}`}
+      className="inline-flex h-7 items-center gap-1.5 px-1 text-xs text-muted-foreground"
+    >
+      {content}
+    </span>
+  );
+}
+
 /** Walk back from the caret to find an open `/<token>` the user is typing: a `/`
  *  at line start or after whitespace, with no whitespace between it and the
  *  caret. Returns the slash index + the text after it, or null when the caret
@@ -1119,6 +1197,12 @@ export function Composer({
             onChange={onWorkspaceChange}
             disabled={disabled}
             excludeDefault={requireRepository}
+          />
+          <GitBranchIndicator
+            conversationId={conversationId ?? null}
+            workspaceDir={workspaceDir}
+            defaultWorkspace={defaultWorkspace}
+            streaming={!!streaming}
           />
           {/* Runtime on the left, its model/effort tuning on the right — the
               BackendPicker renders the CLI tuning menu itself; the pi model
