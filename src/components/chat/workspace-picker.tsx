@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Folder, FolderPlus, MessageSquare, Server } from "lucide-react";
 import { api } from "@/lib/tauri";
 import {
@@ -29,6 +29,8 @@ interface Props {
   /** Fires true/false around the native "Add folder…" dialog. The quick panel
    *  uses it to suppress its blur-to-dismiss while the OS picker has focus. */
   onNativePick?: (active: boolean) => void;
+  /** Optional context rendered after the folder name and before the chevron. */
+  context?: ReactNode;
 }
 
 /** Sentinel value for the "Add folder…" row — handled in onValueChange instead
@@ -36,7 +38,15 @@ interface Props {
 const ADD_FOLDER = "__add_folder__";
 const ADD_REMOTE = "__add_remote__";
 
-export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disabled, excludeDefault = false, onNativePick }: Props) {
+export function WorkspacePicker({
+  workspaceDir,
+  defaultWorkspace,
+  onChange,
+  disabled,
+  excludeDefault = false,
+  onNativePick,
+  context,
+}: Props) {
   const { t } = useTranslation("chat");
   // The default workspace surfaces as "Chat" (never its on-disk folder name) —
   // users aren't meant to perceive it as a folder.
@@ -120,6 +130,7 @@ export function WorkspacePicker({ workspaceDir, defaultWorkspace, onChange, disa
             <Folder className="size-3" />
           )}
           <span className="truncate">{current ? displayName(current) : t("workspace.label")}</span>
+          {context}
         </SelectTrigger>
         <SelectContent align="start" className="max-w-[22rem]">
           {options.map((dir) => (

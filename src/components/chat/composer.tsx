@@ -35,8 +35,7 @@ function GitBranchIndicator({
   defaultWorkspace: string;
   streaming: boolean;
 }) {
-  const { t } = useTranslation("chat");
-  const [git, setGit] = useState<{ branch: string; path: string; worktree: boolean } | null>(null);
+  const [git, setGit] = useState<{ branch: string; path: string } | null>(null);
   const workspace = workspaceDir ?? defaultWorkspace;
 
   useEffect(() => {
@@ -46,12 +45,12 @@ function GitBranchIndicator({
         if (conversationId) {
           const worktree = await api.conversationWorktree(conversationId);
           if (worktree?.exists) {
-            if (!cancelled) setGit({ branch: worktree.branch, path: worktree.path, worktree: true });
+            if (!cancelled) setGit({ branch: worktree.branch, path: worktree.path });
             return;
           }
         }
         const branch = workspace ? await api.workspaceGitBranch(workspace) : null;
-        if (!cancelled) setGit(branch ? { branch, path: workspace, worktree: false } : null);
+        if (!cancelled) setGit(branch ? { branch, path: workspace } : null);
       } catch {
         if (!cancelled) setGit(null);
       }
@@ -75,29 +74,13 @@ function GitBranchIndicator({
   }, [conversationId, workspace, streaming]);
 
   if (!git) return null;
-  const content = (
-    <>
-      <span className="shrink-0 font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-        git /
-      </span>
-      <span className="max-w-28 truncate">{git.branch}</span>
-    </>
-  );
-  return git.worktree ? (
-    <button
-      type="button"
-      onClick={() => api.openPath(git.path).catch(() => {})}
-      title={t("pane.worktree.tooltip", { path: git.path })}
-      className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-    >
-      {content}
-    </button>
-  ) : (
+  return (
     <span
       title={`${git.branch}\n${git.path}`}
-      className="inline-flex h-7 items-center gap-1.5 px-1 text-xs text-muted-foreground"
+      className="inline-flex min-w-0 items-center gap-1 text-muted-foreground/70"
     >
-      {content}
+      <span aria-hidden="true">/</span>
+      <span className="max-w-28 truncate">{git.branch}</span>
     </span>
   );
 }
@@ -1207,12 +1190,14 @@ export function Composer({
             onChange={onWorkspaceChange}
             disabled={disabled}
             excludeDefault={requireRepository}
-          />
-          <GitBranchIndicator
-            conversationId={conversationId ?? null}
-            workspaceDir={workspaceDir}
-            defaultWorkspace={defaultWorkspace}
-            streaming={!!streaming}
+            context={
+              <GitBranchIndicator
+                conversationId={conversationId ?? null}
+                workspaceDir={workspaceDir}
+                defaultWorkspace={defaultWorkspace}
+                streaming={!!streaming}
+              />
+            }
           />
           {/* Runtime on the left, its model/effort tuning on the right — the
               BackendPicker renders the CLI tuning menu itself; the pi model
