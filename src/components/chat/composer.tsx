@@ -207,6 +207,9 @@ interface Props {
    *  ends, unless the user promotes it to a steer. Omit to fall back to onSend
    *  (immediate steer) while streaming. */
   onQueue?: (text: string, attachments: ComposerAttachment[]) => void;
+  /** Send the first queued follow-up when Enter is pressed with an otherwise
+   *  empty composer. Omit when there is no queued message to send. */
+  onSendFirstQueued?: () => void;
   /** Send a shell command to the Terminal surface (the `!` mode). Receives the
    *  command with the leading `!` already stripped. Omit to disable this mode
    *  (the `!` is then just a normal character). */
@@ -311,6 +314,7 @@ export function Composer({
   requireRepository = false,
   onSend,
   onQueue,
+  onSendFirstQueued,
   onBash,
   onAbort,
   ultra,
@@ -864,8 +868,14 @@ export function Composer({
     }
     // Expand any `@goal` token into its full directive before sending. Empty
     // when the user typed only `@goal` with no objective — treated as no message.
-    let outgoing = expandGoalDirective(text.trim());
-    if (!outgoing && attachments.length === 0) return;
+    const trimmedText = text.trim();
+    let outgoing = expandGoalDirective(trimmedText);
+    if (!outgoing && attachments.length === 0) {
+      // Only a truly blank draft triggers the queue shortcut. A visible token
+      // that happens to expand to nothing should remain a no-op.
+      if (!trimmedText) onSendFirstQueued?.();
+      return;
+    }
     // Lead with the rolling ambient-context fence when the chip is on. Captured
     // at compose time — "what I was looking at when I wrote this" — so a queued
     // message keeps the context of its writing moment. Best-effort: a failed

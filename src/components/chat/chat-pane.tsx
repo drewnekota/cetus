@@ -279,6 +279,11 @@ export function ChatPane({
             onWorkspaceChange={onWorkspaceChange}
             onSend={sendFromComposer}
             onQueue={onQueue ? queueFromComposer : undefined}
+            onSendFirstQueued={
+              queued?.[0] && onSteerQueued
+                ? () => onSteerQueued(queued[0].id)
+                : undefined
+            }
             onBash={onBash}
             onAbort={onAbort}
             draftRequest={queuedDraft?.request}
