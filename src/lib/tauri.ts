@@ -40,6 +40,8 @@ import type {
   VoiceInsertMode,
   VoicePermissions,
   WorkspaceFileEntry,
+  WorkspaceDirectoryListing,
+  WorkspaceTextPreview,
   WorktreeInfo,
   CliAgentSettings,
   CliDefaults,
@@ -194,11 +196,21 @@ export const api = {
   getCliAgentSettings: () => invoke<CliAgentSettings>("get_cli_agent_settings"),
   setCliAgentSettings: (settings: CliAgentSettings) =>
     invoke<void>("set_cli_agent_settings", { settings }),
-  /** Answer a claude control_request (permission prompt / AskUserQuestion).
-   *  `response` is `{behavior:"allow", updatedInput?}` or
-   *  `{behavior:"deny", message}`. */
-  cliControlRespond: (id: string, requestId: string, response: unknown) =>
-    invoke<void>("cli_control_respond", { id, requestId, response }),
+  /** Answer a blocking CLI-host request. Claude responses use the stream-json
+   *  permission shape; Codex responses are reverse JSON-RPC results. */
+  cliControlRespond: (
+    id: string,
+    requestId: string | number,
+    response: unknown,
+    source?: "claude-code" | "codex",
+    installPluginId?: string,
+  ) => invoke<void>("cli_control_respond", {
+    id,
+    requestId,
+    response,
+    source: source ?? null,
+    installPluginId: installPluginId ?? null,
+  }),
   deleteConversation: (id: string) => invoke<void>("delete_conversation", { id }),
   renameConversation: (id: string, title: string) =>
     invoke<Conversation>("rename_conversation", { id, title }),
@@ -249,7 +261,23 @@ export const api = {
   pickWorkspaceDir: () => invoke<string | null>("pick_workspace_dir"),
   listWorkspaceFiles: (workspaceDir?: string | null) =>
     invoke<WorkspaceFileEntry[]>("list_workspace_files", { workspaceDir: workspaceDir ?? null }),
+  listWorkspaceDirectory: (workspaceDir: string, directoryPath?: string | null) =>
+    invoke<WorkspaceDirectoryListing>("list_workspace_directory", {
+      workspaceDir,
+      directoryPath: directoryPath ?? null,
+    }),
+  searchWorkspaceFiles: (workspaceDir: string, query: string) =>
+    invoke<WorkspaceDirectoryListing>("search_workspace_files", { workspaceDir, query }),
+  createWorkspaceEntry: (workspaceDir: string, parentPath: string, name: string, isDir: boolean) =>
+    invoke<string>("create_workspace_entry", { workspaceDir, parentPath, name, isDir }),
+  renameWorkspaceEntry: (workspaceDir: string, path: string, newName: string) =>
+    invoke<string>("rename_workspace_entry", { workspaceDir, path, newName }),
+  trashWorkspaceEntry: (workspaceDir: string, path: string) =>
+    invoke<void>("trash_workspace_entry", { workspaceDir, path }),
   readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  readWorkspaceTextFile: (workspaceDir: string, path: string) =>
+    invoke<WorkspaceTextPreview>("read_workspace_text_file", { workspaceDir, path }),
+  revealInFinder: (path: string) => invoke<void>("reveal_in_finder", { path }),
   /** Open an http(s)/mailto link in the user's default browser. */
   openExternal: (url: string) => invoke<void>("open_external", { url }),
   /** Open an http(s) URL in Cetus's own top-level browser webview window. */

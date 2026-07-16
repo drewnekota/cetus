@@ -828,6 +828,19 @@ export function Composer({
     insertTextAtCaret((needsLead ? "\n" : "") + paths.join("\n") + " ");
   }
 
+  useEffect(() => {
+    const onInsertFilePaths = (event: Event) => {
+      const paths = (event as CustomEvent<string[]>).detail;
+      if (!Array.isArray(paths) || paths.length === 0) return;
+      insertPaths(paths);
+      requestAnimationFrame(() => taRef.current?.focus());
+    };
+    window.addEventListener("cetus-insert-file-paths", onInsertFilePaths);
+    return () => window.removeEventListener("cetus-insert-file-paths", onInsertFilePaths);
+    // insertPaths intentionally tracks the current draft/caret.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+
   function removeAttachment(i: number) {
     updateAttachments((prev) => {
       const dropped = prev[i];

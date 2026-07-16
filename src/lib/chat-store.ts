@@ -11,7 +11,13 @@
 import { useMemo } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { get as idbGet, set as idbSet } from "idb-keyval";
+import {
+  delMany as idbDelMany,
+  get as idbGet,
+  getMany as idbGetMany,
+  keys as idbKeys,
+  setMany as idbSetMany,
+} from "idb-keyval";
 import {
   chatReducer,
   computeHasArtifacts,
@@ -19,6 +25,8 @@ import {
   type ChatAction,
   type ChatState,
 } from "./chat-state";
+import { artifactsFromDetails } from "./artifact";
+import { isReviewRequestDetails, type ReviewRequestDetails } from "./review";
 import type {
   BashResult,
   CliBackgroundTask,
@@ -40,6 +48,14 @@ interface ChatsStore {
   streamingIds: Set<string>;
   /** True once we've finished loading the IDB snapshot for the active conv. */
   hydrated: Record<string, boolean>;
+  /** Lightweight card previews (last reply / artifact count / review payload)
+   *  for conversations that are NOT resident in `chats`. Loaded from the small
+   *  `cetus:preview:*` IDB records so the board can light up its badges without
+   *  hydrating full message lists (which froze startup once the cache grew).
+   *  A resident ChatState always wins over its preview entry. */
+  previews: Record<string, ConvPreview>;
+  /** Merge a batch of loaded previews in one store tick. */
+  setPreviews: (entries: Record<string, ConvPreview>) => void;
   /** Pending claude-code control requests (permission prompts / AskUserQuestion)
    *  per conversation, awaiting the user's answer. Captured here — off the
    *  reducer's message list — by the app's single always-mounted event listener
@@ -65,7 +81,7 @@ interface ChatsStore {
   pushControlRequest: (id: string, req: CliControlRequest) => void;
   /** Drop one answered control request; also used to clear all of a
    *  conversation's pending requests when its turn ends (`requestId` omitted). */
-  clearControlRequest: (id: string, requestId?: string) => void;
+  clearControlRequest: (id: string, requestId?: string | number) => void;
   /** Replace the conversation's live background-task list. */
   setBackgroundTasks: (id: string, tasks: CliBackgroundTask[]) => void;
   /** Native slash commands reported by the conversation's CLI session
@@ -263,6 +279,19 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   chats: {},
   streamingIds: new Set<string>(),
   hydrated: {},
+  previews: {},
+  setPreviews: (entries) =>
+    set((s) => {
+      let changed = false;
+      const next = { ...s.previews };
+      for (const [id, p] of Object.entries(entries)) {
+        if (next[id] !== p) {
+          next[id] = p;
+          changed = true;
+        }
+      }
+      return changed ? { previews: next } : s;
+    }),
   controlRequests: {},
   backgroundTasks: {},
   cliCommands: {},
@@ -279,6 +308,11 @@ export const useChatStore = create<ChatsStore>()((set) => ({
       for (const d of drops) {
         delete nextChats[d];
         streamingIds = withoutStreaming(streamingIds, d);
+        // Release the persist bookkeeping's refs into the evicted arrays —
+        // otherwise the evicted conversation's messages stay reachable and
+        // eviction frees nothing.
+        lastPersisted.delete(d);
+        segState.delete(d);
       }
       return { chats: nextChats, streamingIds };
     });
@@ -287,6 +321,8 @@ export const useChatStore = create<ChatsStore>()((set) => ({
     flushPiEvents();
     const i = accessOrder.indexOf(id);
     if (i !== -1) accessOrder.splice(i, 1);
+    lastPersisted.delete(id);
+    segState.delete(id);
     set((s) => {
       if (!(id in s.chats)) return s;
       const next = { ...s.chats };
@@ -332,7 +368,7 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   pushControlRequest: (id, req) => {
     set((s) => {
       const cur = s.controlRequests[id] ?? [];
-      if (cur.some((r) => r.requestId === req.requestId)) return s;
+      if (cur.some((r) => String(r.requestId) === String(req.requestId))) return s;
       return { controlRequests: { ...s.controlRequests, [id]: [...cur, req] } };
     });
   },
@@ -341,7 +377,7 @@ export const useChatStore = create<ChatsStore>()((set) => ({
       const cur = s.controlRequests[id];
       if (!cur || cur.length === 0) return s;
       const next = requestId
-        ? cur.filter((r) => r.requestId !== requestId)
+        ? cur.filter((r) => String(r.requestId) !== String(requestId))
         : [];
       if (next.length === cur.length) return s;
       const controlRequests = { ...s.controlRequests };
@@ -388,6 +424,21 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   hydrate: (id, messages) => {
     flushPiEvents();
     touchAccess(id);
+    // This exact array just came out of the IDB cache — mark it as already
+    // persisted so the write-through subscriber doesn't re-serialize the whole
+    // conversation straight back into IDB (a pure-waste full-cache rewrite
+    // that froze startup when many conversations hydrated at once).
+    lastPersisted.set(id, messages);
+    // Adopt the loaded array's segment layout so the first persist after
+    // rehydration stays incremental. Unknown provenance (legacy v1 record or
+    // a backend render) drops the bookkeeping → next persist re-splits.
+    const counts = loadedCounts.get(messages);
+    if (counts) {
+      const sealed = messages.length - counts[counts.length - 1];
+      segState.set(id, { counts, sealedRefs: messages.slice(0, sealed) });
+    } else {
+      segState.delete(id);
+    }
     return set((s) => ({
       chats: {
         ...s.chats,
@@ -705,12 +756,138 @@ export function useRunningSubagents(
 
 const STREAM_PERSIST_THROTTLE_MS = 2000;
 
+/** Messages per sealed segment record. Sealed segments are immutable on disk:
+ *  a persist rewrites only the open tail segment (plus the tiny index), so the
+ *  cost of caching a conversation is bounded by the tail size, not the
+ *  conversation length. Rewriting the whole array on every settle is what
+ *  ground the app down once a conversation grew past ~1000 messages. */
+const SEGMENT_SIZE = 100;
+
 const IDB_PREFIX = "cetus:chat:";
 const idbKey = (convId: string) => `${IDB_PREFIX}${convId}`;
+const segKey = (convId: string, index: number) =>
+  `${IDB_PREFIX}${convId}:s${index}`;
+const PREVIEW_PREFIX = "cetus:preview:";
+const previewKey = (convId: string) => `${PREVIEW_PREFIX}${convId}`;
 
-interface CachedShape {
+/** Conversation id a cache key belongs to (index, segment, or preview key),
+ *  or null for keys outside the cache's namespaces. */
+function convIdOfCacheKey(key: string): string | null {
+  const body = key.startsWith(IDB_PREFIX)
+    ? key.slice(IDB_PREFIX.length)
+    : key.startsWith(PREVIEW_PREFIX)
+      ? key.slice(PREVIEW_PREFIX.length)
+      : null;
+  if (body === null) return null;
+  const colon = body.indexOf(":");
+  return colon === -1 ? body : body.slice(0, colon);
+}
+
+/** Last message-array reference persisted (or loaded — a cache read is by
+ *  definition already persisted) per convId, so the write-through subscriber
+ *  only writes on actual change. Module-scoped so `hydrate` can pre-mark the
+ *  arrays it loads from the cache. */
+const lastPersisted = new Map<string, RenderedMessage[]>();
+
+/** The index record under `cetus:chat:<id>`: per-segment message counts, with
+ *  the last entry describing the open (still-growing) segment. */
+interface CachedIndex {
+  v: 2;
+  counts: number[];
+}
+
+/** Pre-segmentation record shape: the whole conversation in one value. Still
+ *  readable so updating doesn't cold-start every cache; replaced by a v2
+ *  index + segments on the first persist after load. */
+interface LegacyCachedShape {
   v: 1;
   messages: RenderedMessage[];
+}
+
+/** Per-conversation segment bookkeeping for the write path. `counts` mirrors
+ *  the stored index; `sealedRefs` holds the store-side refs of every message
+ *  inside a sealed segment, so a persist can prove a sealed segment unchanged
+ *  by ref equality and skip re-serializing it. A ref mismatch (e.g. a tool
+ *  result landing in an old message) dirties just that segment. */
+const segState = new Map<
+  string,
+  { counts: number[]; sealedRefs: RenderedMessage[] }
+>();
+
+/** Segment counts of arrays returned by `loadCachedMessages`, keyed by the
+ *  array itself; `hydrate` transfers them into `segState` so the first persist
+ *  after rehydration stays incremental instead of re-splitting everything. */
+const loadedCounts = new WeakMap<RenderedMessage[], number[]>();
+
+/** Per-conversation promise chain so cache writes for one conversation never
+ *  interleave (segment bookkeeping assumes strictly ordered writes). */
+const writeChains = new Map<string, Promise<void>>();
+
+/** Small per-conversation record backing board cards for conversations that
+ *  aren't resident in memory. Written alongside the full message cache; read
+ *  in bulk by the board warm-up instead of hydrating full conversations. */
+export interface ConvPreview {
+  v: 1;
+  lastReply: string | null;
+  artifactCount: number;
+  review: ReviewRequestDetails | null;
+}
+
+/** Most recent assistant text, whitespace-collapsed and capped for card use. */
+export function computeLastReplyPreview(
+  messages: RenderedMessage[],
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "assistant") continue;
+    for (let j = m.blocks.length - 1; j >= 0; j--) {
+      const b = m.blocks[j];
+      if (b.kind === "text" && b.text.trim()) {
+        return b.text.replace(/\s+/g, " ").slice(0, 220);
+      }
+    }
+  }
+  return null;
+}
+
+export function computeArtifactCount(messages: RenderedMessage[]): number {
+  let n = 0;
+  for (const m of messages) {
+    for (const b of m.blocks) {
+      if (b.kind === "tool_use" && b.result) {
+        n += artifactsFromDetails(b.result.details).length;
+      }
+    }
+  }
+  return n;
+}
+
+export function computeLatestReviewRequest(
+  messages: RenderedMessage[],
+): ReviewRequestDetails | null {
+  let latest: ReviewRequestDetails | null = null;
+  for (const m of messages) {
+    for (const b of m.blocks) {
+      if (
+        b.kind === "tool_use" &&
+        b.name === "request_review" &&
+        b.result &&
+        isReviewRequestDetails(b.result.details)
+      ) {
+        latest = b.result.details as ReviewRequestDetails; // last one wins
+      }
+    }
+  }
+  return latest;
+}
+
+function computePreview(messages: RenderedMessage[]): ConvPreview {
+  return {
+    v: 1,
+    lastReply: computeLastReplyPreview(messages),
+    artifactCount: computeArtifactCount(messages),
+    review: computeLatestReviewRequest(messages),
+  };
 }
 
 function stripForPersist(messages: RenderedMessage[]): RenderedMessage[] {
@@ -734,9 +911,25 @@ export async function loadCachedMessages(
   convId: string,
 ): Promise<RenderedMessage[] | null> {
   try {
-    const raw = await idbGet<CachedShape>(idbKey(convId));
-    if (!raw || raw.v !== 1) return null;
-    return raw.messages;
+    const raw = await idbGet<CachedIndex | LegacyCachedShape>(idbKey(convId));
+    if (!raw) return null;
+    if (raw.v === 1) return raw.messages;
+    if (raw.v !== 2 || raw.counts.length === 0) return null;
+    const segments = await idbGetMany<RenderedMessage[] | undefined>(
+      raw.counts.map((_, i) => segKey(convId, i)),
+    );
+    const messages: RenderedMessage[] = [];
+    for (let i = 0; i < raw.counts.length; i++) {
+      const segment = segments[i];
+      // A missing or short segment means a torn write; treat the whole record
+      // as a cache miss and let the backend rebuild the render.
+      if (!Array.isArray(segment) || segment.length !== raw.counts[i]) {
+        return null;
+      }
+      messages.push(...segment);
+    }
+    loadedCounts.set(messages, raw.counts);
+    return messages;
   } catch {
     return null;
   }
@@ -752,17 +945,145 @@ export async function copyCachedMessages(
   return messages;
 }
 
-async function saveCachedMessages(
+function saveCachedMessages(
   convId: string,
   messages: RenderedMessage[],
-) {
+): Promise<void> {
+  const prev = writeChains.get(convId) ?? Promise.resolve();
+  const next = prev
+    .then(() => writeCacheRecords(convId, messages))
+    .catch(() => {
+      // best-effort; quota/private-mode failures are fine.
+    });
+  writeChains.set(convId, next);
+  return next;
+}
+
+/** Write one conversation's cache records. Incremental when the sealed prefix
+ *  is provably unchanged (ref equality against `segState`): rewrites only the
+ *  open tail segment, any dirtied sealed segments, and the index. Falls back
+ *  to a full re-split when the array shrank or has unknown provenance. Runs
+ *  inside the per-conversation write chain — never call directly. */
+async function writeCacheRecords(
+  convId: string,
+  messages: RenderedMessage[],
+): Promise<void> {
+  if (messages.length === 0) return;
+  const st = segState.get(convId);
+  const sealedCount = st ? st.sealedRefs.length : 0;
+  const incremental = st !== undefined && messages.length > sealedCount;
+
+  const entries: [string, unknown][] = [];
+  let counts: number[];
+  let staleSegKeys: string[] = [];
+
+  if (!incremental || !st) {
+    // Full split. Read the previous index (if any) so segment records beyond
+    // the new count don't linger as unreadable orphans.
+    const prev = await idbGet<CachedIndex | LegacyCachedShape>(
+      idbKey(convId),
+    ).catch(() => undefined);
+    counts = [];
+    for (let start = 0; start < messages.length; start += SEGMENT_SIZE) {
+      const chunk = stripForPersist(messages.slice(start, start + SEGMENT_SIZE));
+      entries.push([segKey(convId, counts.length), chunk]);
+      counts.push(chunk.length);
+    }
+    if (prev && prev.v === 2 && prev.counts.length > counts.length) {
+      staleSegKeys = prev.counts
+        .slice(counts.length)
+        .map((_, i) => segKey(convId, counts.length + i));
+    }
+  } else {
+    counts = st.counts.slice();
+    // Rewrite sealed segments whose message refs changed (late tool results).
+    let start = 0;
+    for (let seg = 0; seg < counts.length - 1; seg++) {
+      const end = start + counts[seg];
+      for (let i = start; i < end; i++) {
+        if (messages[i] !== st.sealedRefs[i]) {
+          entries.push([
+            segKey(convId, seg),
+            stripForPersist(messages.slice(start, end)),
+          ]);
+          break;
+        }
+      }
+      start = end;
+    }
+    // Seal full tail chunks, then rewrite the open segment.
+    let openStart = sealedCount;
+    while (messages.length - openStart > SEGMENT_SIZE) {
+      counts[counts.length - 1] = SEGMENT_SIZE;
+      entries.push([
+        segKey(convId, counts.length - 1),
+        stripForPersist(messages.slice(openStart, openStart + SEGMENT_SIZE)),
+      ]);
+      openStart += SEGMENT_SIZE;
+      counts.push(0);
+    }
+    counts[counts.length - 1] = messages.length - openStart;
+    entries.push([
+      segKey(convId, counts.length - 1),
+      stripForPersist(messages.slice(openStart)),
+    ]);
+  }
+
+  entries.push([idbKey(convId), { v: 2, counts } satisfies CachedIndex]);
+  // Keep the lightweight card preview in step with the full cache, so the
+  // board can read just this record instead of the whole conversation.
+  entries.push([previewKey(convId), computePreview(messages)]);
+
+  segState.set(convId, {
+    counts,
+    sealedRefs: messages.slice(0, messages.length - counts[counts.length - 1]),
+  });
   try {
-    await idbSet(idbKey(convId), {
-      v: 1,
-      messages: stripForPersist(messages),
-    } satisfies CachedShape);
+    // One transaction: segments, index, and preview land atomically.
+    await idbSetMany(entries);
+  } catch (error) {
+    // Bookkeeping may no longer match disk — force a full re-split next time.
+    segState.delete(convId);
+    throw error;
+  }
+  if (staleSegKeys.length > 0) await idbDelMany(staleSegKeys);
+}
+
+/** Bulk-load card previews. Returns only the ids that had a valid record. */
+export async function loadCachedPreviews(
+  convIds: string[],
+): Promise<Record<string, ConvPreview>> {
+  const out: Record<string, ConvPreview> = {};
+  if (convIds.length === 0) return out;
+  try {
+    const values = await idbGetMany<ConvPreview | undefined>(
+      convIds.map(previewKey),
+    );
+    values.forEach((v, i) => {
+      if (v && v.v === 1) out[convIds[i]] = v;
+    });
   } catch {
-    // best-effort; quota/private-mode failures are fine.
+    // best-effort; a dark preview is fine.
+  }
+  return out;
+}
+
+/** Drop cache + preview records whose conversation is no longer live (deleted
+ *  or archived). The cache is purely a render accelerator — evicted ids fall
+ *  back to the backend on open — but without pruning it grows without bound
+ *  (hundreds of MB), and hydrating against it froze startup. */
+export async function pruneMessageCache(liveIds: Iterable<string>) {
+  const keep = new Set<string>(liveIds);
+  try {
+    const all = await idbKeys();
+    const stale = all.filter((k): k is string => {
+      if (typeof k !== "string") return false;
+      const conv = convIdOfCacheKey(k);
+      return conv !== null && !keep.has(conv);
+    });
+    if (stale.length > 0) await idbDelMany(stale);
+  } catch {
+    // best-effort; a fat cache is a perf bug, not a correctness bug.
   }
 }
 
@@ -771,8 +1092,6 @@ let persistInstalled = false;
 export function installChatPersistence() {
   if (persistInstalled) return;
   persistInstalled = true;
-  // Track last persisted reference per convId so we only write on actual change.
-  const lastSeen = new Map<string, RenderedMessage[]>();
   // Last write timestamp per conv, to throttle mid-stream writes.
   const lastWriteAt = new Map<string, number>();
   // Convs with messages buffered but not yet flushed (throttle window open) —
@@ -780,7 +1099,7 @@ export function installChatPersistence() {
   const dirty = new Map<string, RenderedMessage[]>();
 
   const persist = (id: string, messages: RenderedMessage[]) => {
-    lastSeen.set(id, messages);
+    lastPersisted.set(id, messages);
     lastWriteAt.set(id, Date.now());
     dirty.delete(id);
     void saveCachedMessages(id, messages);
@@ -791,7 +1110,10 @@ export function installChatPersistence() {
       // Fast path: chat ref unchanged from previous tick → skip.
       if (prev && c === prev.chats[id]) continue;
       if (c.messages.length === 0) continue;
-      if (lastSeen.get(id) === c.messages) continue;
+      // Skips both already-written arrays and arrays freshly loaded from the
+      // cache (`hydrate` pre-marks those) — hydration must never bounce the
+      // whole conversation back into IDB.
+      if (lastPersisted.get(id) === c.messages) continue;
       if (c.isStreaming) {
         // Throttle while streaming so we don't thrash IDB on every token, but
         // still capture progress so an interrupted run survives a reload.

@@ -4,10 +4,15 @@ import { Archive, ArchiveRestore, Check, Clock, Folder, Images, MessageCircleQue
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/lib/format";
-import { useChatStore, loadCachedMessages } from "@/lib/chat-store";
+import {
+  computeArtifactCount,
+  computeLastReplyPreview,
+  computeLatestReviewRequest,
+  loadCachedPreviews,
+  useChatStore,
+} from "@/lib/chat-store";
 import type { ChatState } from "@/lib/chat-state";
-import { artifactsFromDetails } from "@/lib/artifact";
-import { isReviewRequestDetails, type ReviewRequestDetails } from "@/lib/review";
+import type { ReviewRequestDetails } from "@/lib/review";
 import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
 import { useTranslation } from "@/lib/i18n";
 import { workspaceName } from "@/lib/paths";
@@ -41,9 +46,10 @@ const COLUMNS: {
   { id: "done", labelKey: "column.done", pill: "bg-success/15 text-success" },
 ];
 
-// Cap on how many cards the board warms from the IDB cache on mount (newest
-// first). Beyond this, a card's artifact badge / reply preview lights up when
-// it's opened — avoids a hundreds-deep read storm on board open.
+// Cap on how many cards the board warms from the IDB preview records on mount
+// (newest first). Beyond this, a card's artifact badge / reply preview lights
+// up when it's opened. Previews are a few hundred bytes each, so this is a
+// bound on IDB round-trips, not on memory.
 const WARMUP_CAP = 90;
 
 function bucket(c: Conversation, streamingIds: Set<string>): ColumnId {
@@ -76,31 +82,27 @@ export const BoardView = memo(function BoardView({
   // Conversation whose artifacts the viewer dialog is showing (null = closed).
   const [artifactsForId, setArtifactsForId] = useState<string | null>(null);
 
-  // Warm the chat store from the IDB cache for cards we haven't opened this
-  // session, so the artifact badge + last-reply preview light up without
-  // having to open each task first. Guarded to never clobber a live/streaming
-  // conversation (those already sit in the store) and attempted at most once
-  // per id. The reducer treats these hydrated entries as the source of truth,
-  // exactly like opening the card would.
+  // Warm the card badges from the small `cetus:preview:*` IDB records for
+  // cards we haven't loaded this session. Deliberately NOT a full-conversation
+  // hydrate: pulling 90 complete message lists through structured clone +
+  // reducer on every launch is what froze the app once the cache grew to
+  // hundreds of MB. Cards for conversations resident in the chat store derive
+  // their preview from live state and ignore these records entirely.
   const attempted = useRef<Set<string>>(new Set());
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Bound the warm-up to the most-recent cards instead of hydrating the
-      // whole (potentially hundreds-long) board from IDB on every open — that
-      // storm of reads is what made opening the board hitch. `filtered` is
-      // updated_at-desc, so the slice is what's most likely on screen anyway.
-      for (const c of filtered.slice(0, WARMUP_CAP)) {
-        if (cancelled) return;
-        if (attempted.current.has(c.id)) continue;
-        attempted.current.add(c.id);
-        if (c.id in useChatStore.getState().chats) continue;
-        const cached = await loadCachedMessages(c.id);
-        if (cancelled) return;
-        if (cached && cached.length > 0 && !(c.id in useChatStore.getState().chats)) {
-          useChatStore.getState().hydrate(c.id, cached);
-        }
-      }
+      // `filtered` is updated_at-desc, so the slice is what's most likely on
+      // screen anyway.
+      const ids = filtered
+        .slice(0, WARMUP_CAP)
+        .map((c) => c.id)
+        .filter((id) => !attempted.current.has(id));
+      if (ids.length === 0) return;
+      for (const id of ids) attempted.current.add(id);
+      const previews = await loadCachedPreviews(ids);
+      if (cancelled || Object.keys(previews).length === 0) return;
+      useChatStore.getState().setPreviews(previews);
     })();
     return () => {
       cancelled = true;
@@ -368,53 +370,12 @@ const previewCache = new WeakMap<ChatState, string | null>();
 const artifactCountCache = new WeakMap<ChatState, number>();
 const reviewCache = new WeakMap<ChatState, ReviewRequestDetails | null>();
 
-function computeLastReplyPreview(c: ChatState): string | null {
-  // Walk backwards: most recent assistant text wins.
-  for (let i = c.messages.length - 1; i >= 0; i--) {
-    const m = c.messages[i];
-    if (m.role !== "assistant") continue;
-    for (let j = m.blocks.length - 1; j >= 0; j--) {
-      const b = m.blocks[j];
-      if (b.kind === "text" && b.text.trim()) {
-        return b.text.replace(/\s+/g, " ").slice(0, 220);
-      }
-    }
-  }
-  return null;
-}
-
-function computeArtifactCount(c: ChatState): number {
-  let n = 0;
-  for (const m of c.messages) {
-    for (const b of m.blocks) {
-      if (
-        b.kind === "tool_use" &&
-        b.result &&
-        artifactsFromDetails(b.result.details).length > 0
-      ) {
-        n += artifactsFromDetails(b.result.details).length;
-      }
-    }
-  }
-  return n;
-}
-
-function computeLatestReviewRequest(c: ChatState): ReviewRequestDetails | null {
-  let latest: ReviewRequestDetails | null = null;
-  for (const m of c.messages) {
-    for (const b of m.blocks) {
-      if (
-        b.kind === "tool_use" &&
-        b.name === "request_review" &&
-        b.result &&
-        isReviewRequestDetails(b.result.details)
-      ) {
-        latest = b.result.details as ReviewRequestDetails; // last one wins
-      }
-    }
-  }
-  return latest;
-}
+// Derivations shared with the persistence layer (chat-store computes the same
+// values into each conversation's `cetus:preview:*` record); here they run
+// against live ChatState for resident conversations only.
+const deriveLastReply = (c: ChatState) => computeLastReplyPreview(c.messages);
+const deriveArtifactCount = (c: ChatState) => computeArtifactCount(c.messages);
+const deriveReview = (c: ChatState) => computeLatestReviewRequest(c.messages);
 
 function cachedDerive<T>(
   cache: WeakMap<ChatState, T>,
@@ -427,14 +388,14 @@ function cachedDerive<T>(
   return value;
 }
 
-/** Pulls the last assistant text block from the in-memory chat (if any) and
- *  renders a 2-line preview. Conversations not yet opened this session show
- *  nothing — opening the card via SessionDetailDialog will populate the store
- *  and the preview lights up after that. */
+/** Pulls the last assistant text block from the in-memory chat when the
+ *  conversation is resident, else from its warmed preview record. Cards with
+ *  neither show nothing until opened. */
 function LastReplyPreview({ convId }: { convId: string }) {
   const preview = useChatStore((s) => {
     const c = s.chats[convId];
-    return c ? cachedDerive(previewCache, c, computeLastReplyPreview) : null;
+    if (c) return cachedDerive(previewCache, c, deriveLastReply);
+    return s.previews[convId]?.lastReply ?? null;
   });
   if (!preview) return null;
   return (
@@ -444,25 +405,27 @@ function LastReplyPreview({ convId }: { convId: string }) {
   );
 }
 
-/** Number of send_artifact results in a conversation's in-store render. Reads 0
- *  for conversations not yet hydrated (the board warms these from cache on
- *  mount, so the badge appears shortly after the board opens). */
+/** Number of send_artifact results in a conversation — live render when
+ *  resident, warmed preview record otherwise (the board loads those on mount,
+ *  so the badge appears shortly after the board opens). */
 function useArtifactCount(convId: string): number {
   return useChatStore((s) => {
     const c = s.chats[convId];
-    return c ? cachedDerive(artifactCountCache, c, computeArtifactCount) : 0;
+    if (c) return cachedDerive(artifactCountCache, c, deriveArtifactCount);
+    return s.previews[convId]?.artifactCount ?? 0;
   });
 }
 
 /** Latest request_review tool payload for a conversation (summary + questions),
- *  or null. Drives the "Needs your review" banner on the card. Returns null for
- *  conversations not yet hydrated — the board warms these from cache on mount.
- *  The WeakMap cache keeps the returned object identity-stable across ticks, so
- *  a plain selector (no useShallow) suffices. */
+ *  or null. Drives the "Needs your review" banner on the card. Falls back to
+ *  the warmed preview record for non-resident conversations. The WeakMap cache
+ *  (and the identity-stable preview record) keeps the returned object stable
+ *  across ticks, so a plain selector (no useShallow) suffices. */
 function useLatestReviewRequest(convId: string): ReviewRequestDetails | null {
   return useChatStore((s) => {
     const c = s.chats[convId];
-    return c ? cachedDerive(reviewCache, c, computeLatestReviewRequest) : null;
+    if (c) return cachedDerive(reviewCache, c, deriveReview);
+    return s.previews[convId]?.review ?? null;
   });
 }
 

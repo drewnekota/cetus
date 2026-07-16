@@ -526,9 +526,22 @@ function MessageList({
 
     let prevDist = Number.NaN;
     let stable = 0;
-    let budget = 120; // safety cap (~2s at 60fps)
+    let budget = 120; // frame cap
+    // Wall-clock cap. The scrollHeight probe forces a style resolve whenever
+    // style is dirty; on a conversation with a huge DOM that's hundreds of ms
+    // PER FRAME, so a frame budget alone lets this loop freeze the app for
+    // minutes. Past the deadline the residual-offset correction is cosmetic —
+    // give it up.
+    const deadline = performance.now() + 2000;
     let frame = requestAnimationFrame(function step() {
-      if (--budget <= 0) return;
+      if (--budget <= 0 || performance.now() > deadline) {
+        // Mark the open as done even though we never settled: leaving the ref
+        // armed re-runs this whole loop on every items.length change (streamed
+        // or hydrated items), which re-freezes a pathological conversation
+        // indefinitely.
+        pendingInitialBottomRef.current = null;
+        return;
+      }
       if (stable < 3) {
         // "Settled" = the distance to the bottom stopped moving — true both for
         // the normal landing AND when the user immediately scrolled elsewhere.

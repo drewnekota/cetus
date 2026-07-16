@@ -1002,7 +1002,9 @@ const ConversationRow = memo(function ConversationRow({
         // the menu-item group hover instead so it persists while the cursor is
         // anywhere in the row, including over the archive action.
         className={cn(
-          "relative pr-12",
+          // Leave a little more breathing room between long titles and the
+          // absolutely positioned relative-time / unread indicator.
+          "relative pr-14",
           !active &&
             "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
         )}

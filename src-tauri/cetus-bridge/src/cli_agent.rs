@@ -19,7 +19,7 @@ use crate::pi_rpc::EventSink;
 use anyhow::{Context, Result};
 use base64::Engine as _;
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -2733,6 +2733,17 @@ enum CodexSessionCommand {
         sink: Arc<dyn EventSink>,
         outcome: tokio::sync::oneshot::Sender<CliTurnOutcome>,
     },
+    RespondToServerRequest {
+        request_id: Value,
+        response: Value,
+    },
+    InstallPluginAndRespond {
+        request_id: Value,
+        response: Value,
+        plugin_name: String,
+        remote_marketplace_name: String,
+        outcome: tokio::sync::oneshot::Sender<std::result::Result<(), String>>,
+    },
     AbortTurn,
     Shutdown,
 }
@@ -2758,6 +2769,44 @@ impl CodexSessionHandle {
 
     pub fn abort_turn(&self) {
         let _ = self.tx.send(CodexSessionCommand::AbortTurn);
+    }
+
+    /// Answer a JSON-RPC request initiated by Codex app-server. Unlike normal
+    /// item notifications these requests block the active turn until the host
+    /// sends a response with the same (string or numeric) id.
+    pub fn respond_to_server_request(&self, request_id: Value, response: Value) -> Result<()> {
+        self.tx
+            .send(CodexSessionCommand::RespondToServerRequest {
+                request_id,
+                response,
+            })
+            .map_err(|_| anyhow::anyhow!("Codex app-server has exited"))
+    }
+
+    /// Install a remote Codex plugin, then accept the elicitation that asked
+    /// for it. Keeping both operations on this session preserves JSON-RPC
+    /// ordering and prevents the model from verifying before installation has
+    /// actually completed.
+    pub async fn install_plugin_and_respond(
+        &self,
+        request_id: Value,
+        response: Value,
+        plugin_name: String,
+        remote_marketplace_name: String,
+    ) -> Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(CodexSessionCommand::InstallPluginAndRespond {
+                request_id,
+                response,
+                plugin_name,
+                remote_marketplace_name,
+                outcome: tx,
+            })
+            .map_err(|_| anyhow::anyhow!("Codex app-server has exited"))?;
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Codex app-server exited during plugin installation"))?
+            .map_err(anyhow::Error::msg)
     }
 
     pub fn shutdown(&self) {
@@ -2969,6 +3018,14 @@ pub fn spawn_codex_session(
         tr.resume_id = Some(thread_id.clone());
         let mut active: Option<ActiveClaudeTurn> = None;
         let mut active_turn_id: Option<String> = None;
+        let mut pending_plugin_installs: HashMap<
+            u64,
+            (
+                Value,
+                Value,
+                tokio::sync::oneshot::Sender<std::result::Result<(), String>>,
+            ),
+        > = HashMap::new();
 
         loop {
             tokio::select! {
@@ -2998,6 +3055,46 @@ pub fn spawn_codex_session(
                         }
                         active = Some(ActiveClaudeTurn { sink, outcome });
                     }
+                    Some(CodexSessionCommand::RespondToServerRequest { request_id, response }) => {
+                        // Server requests are ordinary JSON-RPC in the reverse
+                        // direction: echo the original id and place the user's
+                        // answer under `result`.
+                        if let Err(error) = write_json_line(
+                            &mut stdin,
+                            &json!({ "id": request_id, "result": response }),
+                        ).await {
+                            tracing::warn!("failed to answer Codex server request: {error}");
+                        }
+                    }
+                    Some(CodexSessionCommand::InstallPluginAndRespond {
+                        request_id,
+                        response,
+                        plugin_name,
+                        remote_marketplace_name,
+                        outcome,
+                    }) => {
+                        let id = next_id;
+                        next_id += 1;
+                        let request = json!({
+                            "id": id,
+                            "method": "plugin/install",
+                            "params": {
+                                "pluginName": plugin_name,
+                                "remoteMarketplaceName": remote_marketplace_name,
+                            },
+                        });
+                        match write_json_line(&mut stdin, &request).await {
+                            Ok(()) => {
+                                pending_plugin_installs.insert(
+                                    id,
+                                    (request_id, response, outcome),
+                                );
+                            }
+                            Err(error) => {
+                                let _ = outcome.send(Err(error.to_string()));
+                            }
+                        }
+                    }
                     Some(CodexSessionCommand::AbortTurn) => {
                         if let Some(turn_id) = &active_turn_id {
                             let id = next_id; next_id += 1;
@@ -3015,6 +3112,102 @@ pub fn spawn_codex_session(
                 line = reader.next_line() => {
                     let line = match line { Ok(Some(line)) => line, _ => break };
                     let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
+                    // app-server can initiate JSON-RPC requests that require a
+                    // client response. Dropping one silently wedges the turn:
+                    // request_plugin_install, for example, arrives as an MCP
+                    // elicitation and waits indefinitely for accept/decline.
+                    if let (Some(request_id), Some(method)) = (
+                        value.get("id").cloned(),
+                        value.get("method").and_then(Value::as_str),
+                    ) {
+                        let params = value.get("params").cloned().unwrap_or(Value::Null);
+                        let sink = active.as_ref().map(|a| &a.sink).unwrap_or(&base_sink);
+                        match method {
+                            "item/tool/requestUserInput" => {
+                                let tool_use_id = params
+                                    .get("itemId")
+                                    .cloned()
+                                    .unwrap_or(Value::Null);
+                                emit(sink, vec![json!({
+                                    "type": "cli_control_request",
+                                    "requestId": request_id,
+                                    "source": "codex",
+                                    "requestKind": "request_user_input",
+                                    "toolName": "request_user_input",
+                                    "input": params,
+                                    "toolUseId": tool_use_id,
+                                })]);
+                            }
+                            "mcpServer/elicitation/request" => {
+                                let tool_name = params
+                                    .pointer("/_meta/tool_name")
+                                    .or_else(|| params.pointer("/_meta/toolName"))
+                                    .or_else(|| params.get("serverName"))
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("Codex")
+                                    .to_string();
+                                emit(sink, vec![json!({
+                                    "type": "cli_control_request",
+                                    "requestId": request_id,
+                                    "source": "codex",
+                                    "requestKind": "mcp_elicitation",
+                                    "toolName": tool_name,
+                                    "input": params,
+                                    "toolUseId": Value::Null,
+                                })]);
+                            }
+                            "currentTime/read" => {
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|duration| duration.as_secs())
+                                    .unwrap_or_default();
+                                let _ = write_json_line(
+                                    &mut stdin,
+                                    &json!({ "id": request_id, "result": { "currentTimeAt": now } }),
+                                ).await;
+                            }
+                            _ => {
+                                // Never leave a new protocol request pending
+                                // forever. A JSON-RPC error lets Codex fail the
+                                // tool cleanly and finish the turn.
+                                let _ = write_json_line(
+                                    &mut stdin,
+                                    &json!({
+                                        "id": request_id,
+                                        "error": {
+                                            "code": -32601,
+                                            "message": format!("Cetus does not support Codex server request `{method}`"),
+                                        },
+                                    }),
+                                ).await;
+                            }
+                        }
+                        continue;
+                    }
+                    if let Some(response_id) = value.get("id").and_then(Value::as_u64) {
+                        if let Some((request_id, response, outcome)) =
+                            pending_plugin_installs.remove(&response_id)
+                        {
+                            if let Some(error) = value.get("error") {
+                                let _ = outcome.send(Err(format!(
+                                    "Codex plugin installation failed: {error}"
+                                )));
+                            } else {
+                                match write_json_line(
+                                    &mut stdin,
+                                    &json!({ "id": request_id, "result": response }),
+                                ).await {
+                                    Ok(()) => {
+                                        let _ = outcome.send(Ok(()));
+                                    }
+                                    Err(error) => {
+                                        let _ = outcome.send(Err(error.to_string()));
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                    }
                     if let Some(result) = value.get("result") {
                         if let Some(id) = result.pointer("/turn/id").and_then(Value::as_str) {
                             active_turn_id = Some(id.to_string());
@@ -3055,6 +3248,19 @@ pub fn spawn_codex_session(
                                 aborted: status == "interrupted", streamed, resume_rejected: false,
                             });
                             active_turn_id = None;
+                        }
+                        "serverRequest/resolved" => {
+                            if let Some(request_id) = params
+                                .get("requestId")
+                                .or_else(|| params.get("request_id"))
+                                .cloned()
+                            {
+                                emit(sink, vec![json!({
+                                    "type": "cli_control_resolved",
+                                    "requestId": request_id,
+                                    "source": "codex",
+                                })]);
+                            }
                         }
                         _ => {}
                     }
@@ -4365,6 +4571,109 @@ mod tests {
         assert!(session.is_alive());
 
         session.shutdown();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn codex_app_server_surfaces_and_answers_reverse_rpc_requests() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-codex-server-request-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-codex.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             while IFS= read -r line; do\n\
+               case \"$line\" in\n\
+                 *'\"method\":\"initialize\"'*) echo '{\"id\":1,\"result\":{}}' ;;\n\
+                 *'\"method\":\"thread/start\"'*) echo '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-rpc\"}}}' ;;\n\
+                 *'\"method\":\"turn/start\"'*)\n\
+                   echo '{\"id\":10,\"result\":{\"turn\":{\"id\":\"turn-rpc\"}}}';\n\
+                   echo '{\"method\":\"mcpServer/elicitation/request\",\"id\":\"request-1\",\"params\":{\"threadId\":\"thread-rpc\",\"turnId\":\"turn-rpc\",\"serverName\":\"codex_apps\",\"mode\":\"form\",\"message\":\"Read repository PRs directly\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{}},\"_meta\":{\"codex_approval_kind\":\"tool_suggestion\",\"tool_type\":\"plugin\",\"tool_id\":\"github@openai-curated-remote\",\"tool_name\":\"GitHub\",\"install_url\":\"https://example.test/install\"}}}' ;;\n\
+                 *'\"method\":\"plugin/install\"'*) echo '{\"id\":11,\"result\":{\"authPolicy\":\"NONE\",\"appsNeedingAuth\":[]}}' ;;\n\
+                 *'\"id\":\"request-1\",\"result\"'*)\n\
+                   echo '{\"method\":\"serverRequest/resolved\",\"params\":{\"threadId\":\"thread-rpc\",\"requestId\":\"request-1\"}}';\n\
+                   echo '{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"answer-rpc\",\"text\":\"continued\"}}}';\n\
+                   echo '{\"method\":\"turn/completed\",\"params\":{\"turn\":{\"id\":\"turn-rpc\",\"status\":\"completed\",\"error\":null}}}' ;;\n\
+               esac\n\
+             done\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let session = spawn_codex_session(
+            sink.clone() as Arc<dyn EventSink>,
+            &script.to_string_lossy(),
+            &dir,
+            None,
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+        )
+        .unwrap();
+        let outcome = session
+            .start_turn("suggest a plugin".into(), Vec::new(), sink.clone() as Arc<dyn EventSink>)
+            .unwrap();
+
+        let responder = session.clone();
+        let observed = sink.clone();
+        tokio::spawn(async move {
+            loop {
+                let ready = observed.0.lock().unwrap().iter().any(|event| {
+                    event["type"] == json!("cli_control_request")
+                        && event["requestId"] == json!("request-1")
+                });
+                if ready {
+                    responder
+                        .install_plugin_and_respond(
+                            json!("request-1"),
+                            json!({ "action": "accept", "content": {}, "_meta": null }),
+                            "github".to_string(),
+                            "openai-curated-remote".to_string(),
+                        )
+                        .await
+                        .unwrap();
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        });
+
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), outcome)
+            .await
+            .expect("turn should continue after the host response")
+            .unwrap();
+        let events = sink.0.lock().unwrap();
+        let request = events
+            .iter()
+            .find(|event| event["type"] == json!("cli_control_request"))
+            .expect("reverse request should reach the UI");
+        assert_eq!(request["requestKind"], json!("mcp_elicitation"));
+        assert_eq!(request["input"]["_meta"]["tool_name"], json!("GitHub"));
+        assert!(events.iter().any(|event| {
+            event["type"] == json!("cli_control_resolved")
+                && event["requestId"] == json!("request-1")
+        }));
+        assert!(outcome.messages.iter().any(|message| {
+            message["content"]
+                .as_array()
+                .is_some_and(|content| content.iter().any(|block| block["text"] == "continued"))
+        }));
+
+        session.shutdown();
+        drop(events);
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let _ = std::fs::remove_dir_all(&dir);
     }

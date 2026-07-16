@@ -58,6 +58,7 @@ jieba-rs = "0.7"
 # never breaks type unification.
 xcap = "0.4"
 image = "0.25"
+ignore = "0.4"
 tracing-appender = "0.2.5"
 sysinfo = "0.33"
 # Workspace Terminal tabs are real, long-lived pseudo terminals.  This keeps

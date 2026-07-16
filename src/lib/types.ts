@@ -178,14 +178,18 @@ export interface CliAskQuestion {
   multiSelect: boolean;
 }
 
-/** A claude-code control_request surfaced in the chat: a permission prompt
- *  (any tool) or an AskUserQuestion. Answered via api.cliControlRespond. */
+/** A blocking CLI-host request surfaced in the chat. Claude Code sends its
+ *  stream-json control_request shape; Codex app-server sends reverse JSON-RPC
+ *  requests such as request_user_input and MCP elicitations. Both are answered
+ *  via api.cliControlRespond. */
 export interface CliControlRequest {
   type: "cli_control_request";
-  requestId: string;
+  requestId: string | number;
+  source?: "claude-code" | "codex";
+  requestKind?: "request_user_input" | "mcp_elicitation";
   toolName: string;
   input: Record<string, unknown> & { questions?: CliAskQuestion[] };
-  toolUseId: string;
+  toolUseId: string | number | null;
   suggestions?: unknown;
 }
 
@@ -944,8 +948,24 @@ export interface WorkspaceFileEntry {
   path: string;
   relativePath: string;
   isDir: boolean;
+  isIgnored: boolean;
+  gitStatus: "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflict" | "ignored" | null;
+  isSymlink: boolean;
+  symlinkTarget: string | null;
   sizeBytes: number | null;
   modifiedMs: number | null;
+}
+
+export interface WorkspaceDirectoryListing {
+  entries: WorkspaceFileEntry[];
+  truncated: boolean;
+  isRemote: boolean;
+}
+
+export interface WorkspaceTextPreview {
+  text: string;
+  truncated: boolean;
+  totalBytes: number;
 }
 
 export interface RenderedMessage {

@@ -62,6 +62,7 @@ import {
   installChatPersistence,
   loadCachedMessages,
   loadLastActive,
+  pruneMessageCache,
   saveLastActive,
 } from "@/lib/chat-store";
 import { useZoom } from "@/hooks/use-zoom";
@@ -795,6 +796,21 @@ export default function Home() {
     installChatPersistence();
   }, []);
 
+  // Prune cache records for conversations that no longer exist or were
+  // archived — the cache is a render accelerator, but left unpruned it grows
+  // by hundreds of MB and startup hydration against it froze the app. Runs
+  // once per session, well off the startup path; ids are read from the ref at
+  // fire time so conversations created in the meantime are kept.
+  useEffect(() => {
+    if (!conversationsLoaded) return;
+    const timer = window.setTimeout(() => {
+      const keep = conversationsRef.current.map((c) => c.id);
+      if (activeIdRef.current) keep.push(activeIdRef.current);
+      void pruneMessageCache(keep);
+    }, 15_000);
+    return () => window.clearTimeout(timer);
+  }, [conversationsLoaded]);
+
   // Populate the cached OS notification permission without prompting. The
   // prompt itself is deferred to the first real notification or the settings
   // page, so launch stays quiet.
@@ -1006,6 +1022,7 @@ export default function Home() {
             if (
               evt.event.type !== "extension_ui_request" &&
               eventType !== "cli_control_request" &&
+              eventType !== "cli_control_resolved" &&
               eventType !== "cli_background_tasks" &&
               eventType !== "cli_commands" &&
               eventType !== "cli_rate_limit" &&
@@ -1056,6 +1073,15 @@ export default function Home() {
                 suppressWhenFocused: true,
                 conversationId: cid,
               });
+            }
+            // Codex confirms reverse JSON-RPC requests when they are answered
+            // or invalidated by turn cleanup. Remove a stale card even when
+            // the resolution did not originate from this window.
+            if (cid && eventType === "cli_control_resolved") {
+              const resolved = evt.event as unknown as { requestId?: string | number };
+              if (resolved.requestId != null) {
+                store.clearControlRequest(cid, resolved.requestId);
+              }
             }
             if (cid && eventType === "agent_end") {
               store.clearControlRequest(cid);
@@ -1876,6 +1902,7 @@ export default function Home() {
           await onSend(message);
           setView("chat");
         }}
+        onOpenTerminalCommand={openTerminalWithCommand}
       />
     );
   }

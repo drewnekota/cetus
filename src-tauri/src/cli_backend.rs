@@ -5,6 +5,7 @@
 
 use crate::store::{now_ms, Conversation, Store};
 use crate::AppState;
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -138,6 +139,48 @@ pub async fn get_cli_runtime_status() -> Result<CliRuntimeStatus, String> {
         claude_code: executable_on_path("claude"),
         codex: executable_on_path("codex"),
     })
+}
+
+/// Mirror Cetus's archive state into Codex's own saved-thread inventory so
+/// clients backed by the same CODEX_HOME (including the Codex app) put the
+/// conversation in the same bucket. This is deliberately best-effort at the
+/// call sites: a missing/older CLI must not make a local Cetus archive fail.
+///
+/// Claude Code has no corresponding archive API/CLI command. Its session
+/// picker therefore remains independent of Cetus's archive state.
+pub(crate) async fn sync_codex_archive_state(
+    conversation: &Conversation,
+    archive: bool,
+) -> anyhow::Result<()> {
+    if conversation.backend != "codex" || conversation.session_file.trim().is_empty() {
+        return Ok(());
+    }
+
+    let action = if archive { "archive" } else { "unarchive" };
+    let mut command = TokioCommand::new("codex");
+    command
+        .arg(action)
+        .arg(conversation.session_file.trim())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(10), command.output())
+        .await
+        .with_context(|| format!("`codex {action}` timed out"))?
+        .with_context(|| format!("failed to launch `codex {action}`"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let detail = if stderr.is_empty() {
+        output.status.to_string()
+    } else {
+        stderr
+    };
+    anyhow::bail!("`codex {action}` failed: {detail}")
 }
 
 fn executable_on_path(name: &str) -> bool {
@@ -347,10 +390,39 @@ fn toml_str_value(line: &str, key: &str) -> Option<String> {
 pub async fn cli_control_respond(
     state: State<'_, AppState>,
     id: String,
-    request_id: String,
+    request_id: Value,
     response: Value,
+    source: Option<String>,
+    install_plugin_id: Option<String>,
 ) -> Result<(), String> {
-    let line = cetus_bridge::cli_agent::claude_control_response_line(&request_id, &response);
+    if source.as_deref() == Some("codex") {
+        let session = state
+            .codex_session(&id)
+            .ok_or_else(|| "Codex app-server session is no longer running".to_string())?;
+        if let Some(plugin_id) = install_plugin_id {
+            let (plugin_name, marketplace_name) = plugin_id
+                .rsplit_once('@')
+                .filter(|(plugin, marketplace)| !plugin.is_empty() && !marketplace.is_empty())
+                .ok_or_else(|| format!("invalid Codex plugin id: {plugin_id}"))?;
+            return session
+                .install_plugin_and_respond(
+                    request_id,
+                    response,
+                    plugin_name.to_string(),
+                    marketplace_name.to_string(),
+                )
+                .await
+                .map_err(|e| e.to_string());
+        }
+        return session
+            .respond_to_server_request(request_id, response)
+            .map_err(|e| e.to_string());
+    }
+
+    let request_id = request_id
+        .as_str()
+        .ok_or_else(|| "Claude control request id must be a string".to_string())?;
+    let line = cetus_bridge::cli_agent::claude_control_response_line(request_id, &response);
     let turn_err = match state.cli_send_input(&id, line.clone()) {
         Ok(()) => return Ok(()),
         Err(e) => e,

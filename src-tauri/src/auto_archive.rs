@@ -194,13 +194,23 @@ async fn sweep(state: &AppState, handle: &AppHandle, settings: &AutoArchiveSetti
                 continue;
             }
         }
+        if state.cli_turn_active(&c.id) {
+            continue;
+        }
 
         if let Err(e) = state.store.set_archived(&c.id, true, now) {
             tracing::warn!("auto-archive: failed to archive {}: {e}", c.id);
             continue;
         }
-        // Free any (cold) pi we may still hold for it.
+        // Free any idle runtime we may still hold for it, matching the manual
+        // archive lifecycle rather than leaving third-party sessions warm.
         state.kill_pi(&c.id).await;
+        state.abort_cli_turn(&c.id);
+        state.kill_claude_session(&c.id);
+        state.kill_codex_session(&c.id);
+        if let Err(e) = crate::cli_backend::sync_codex_archive_state(&c, true).await {
+            tracing::warn!("auto-archive: failed to sync Codex archive state for {}: {e}", c.id);
+        }
 
         // Tell the frontend so the sidebar drops it. Re-read the row so the
         // emitted conversation carries the fresh `archived_at`/`updated_at`.

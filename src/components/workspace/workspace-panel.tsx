@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -12,18 +13,27 @@ import {
   ChevronDown,
   ChevronRight,
   Code,
+  Copy,
   ExternalLink,
   File,
+  FilePlus,
   FileText,
   Folder,
   FolderOpen,
+  FolderPlus,
   Globe,
   ImageIcon,
+  Link2,
   Loader2,
+  MoreHorizontal,
+  Paperclip,
+  Pencil,
   Plus,
   RefreshCw,
+  Search,
   Table,
   Terminal,
+  Trash2,
   Video,
   X,
 } from "lucide-react";
@@ -37,6 +47,13 @@ import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   BrowserView,
   createBrowserViewState,
@@ -87,6 +104,7 @@ interface Props {
   onUpdateTerminalTab: (id: string, state: TerminalViewState) => void;
   onUpdateBrowserTab: (id: string, state: BrowserViewState) => void;
   onAnnotate: (message: string) => Promise<void>;
+  onOpenTerminalCommand?: (command: string) => void;
   motionState?: "open" | "closed";
   hidden?: boolean;
 }
@@ -104,6 +122,7 @@ export function WorkspacePanel({
   onUpdateTerminalTab,
   onUpdateBrowserTab,
   onAnnotate,
+  onOpenTerminalCommand,
   motionState,
   hidden,
 }: Props) {
@@ -290,7 +309,7 @@ export function WorkspacePanel({
         {!active ? (
           <EmptyPanel onNewTab={onNewTab} />
         ) : active.kind === "files" ? (
-          <FilesPanel workspaceDir={cwd} />
+          <FilesPanel workspaceDir={cwd} onOpenTerminalCommand={onOpenTerminalCommand} />
         ) : active.kind === "browser" ? (
           <BrowserView
             key={active.id}
@@ -364,257 +383,434 @@ function EmptyPanel({ onNewTab }: { onNewTab: (kind: WorkspaceTabKind) => void }
   );
 }
 
-function FilesPanel({ workspaceDir }: { workspaceDir: string }) {
+interface DirectoryState {
+  entries: WorkspaceFileEntry[];
+  truncated: boolean;
+  loading: boolean;
+  error: string | null;
+}
+
+interface VisibleFileRow {
+  entry: WorkspaceFileEntry;
+  depth: number;
+  parentPath: string;
+}
+
+function FilesPanel({
+  workspaceDir,
+  onOpenTerminalCommand,
+}: {
+  workspaceDir: string;
+  onOpenTerminalCommand?: (command: string) => void;
+}) {
   const { t } = useTranslation("chat");
-  const [files, setFiles] = useState<WorkspaceFileEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [directories, setDirectories] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const tree = useMemo(() => buildWorkspaceTree(files ?? []), [files]);
-  const selected = useMemo(
-    () => files?.find((entry) => entry.path === selectedPath) ?? null,
-    [files, selectedPath],
-  );
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<WorkspaceFileEntry[] | null>(null);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [isRemote, setIsRemote] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
-  async function load() {
-    setError(null);
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [contextMenu]);
+
+  const loadDirectory = useCallback(async (path: string, quiet = false) => {
+    if (!quiet) {
+      setDirectories((current) => ({
+        ...current,
+        [path]: {
+          entries: current[path]?.entries ?? [],
+          truncated: current[path]?.truncated ?? false,
+          loading: true,
+          error: null,
+        },
+      }));
+    }
     try {
-      const nextFiles = await api.listWorkspaceFiles(workspaceDir);
-      setFiles(nextFiles);
-      setExpanded(defaultExpandedPaths(nextFiles));
-      setSelectedPath((current) => {
-        if (current && nextFiles.some((entry) => entry.path === current)) return current;
-        return nextFiles.find((entry) => !entry.isDir)?.path ?? null;
-      });
-    } catch (e) {
-      setFiles([]);
-      setError(String(e));
-      setSelectedPath(null);
+      const listing = await api.listWorkspaceDirectory(workspaceDir, path);
+      setIsRemote(listing.isRemote);
+      setDirectories((current) => ({
+        ...current,
+        [path]: {
+          entries: listing.entries,
+          truncated: listing.truncated,
+          loading: false,
+          error: null,
+        },
+      }));
+      if (path === workspaceDir) {
+        setSelectedPath((current) => current ?? listing.entries.find((entry) => !entry.isDir)?.path ?? listing.entries[0]?.path ?? null);
+      }
+    } catch (error) {
+      setDirectories((current) => ({
+        ...current,
+        [path]: {
+          entries: current[path]?.entries ?? [],
+          truncated: current[path]?.truncated ?? false,
+          loading: false,
+          error: String(error),
+        },
+      }));
+    }
+  }, [workspaceDir]);
+
+  useEffect(() => {
+    setDirectories({});
+    setExpanded(new Set());
+    setSelectedPath(null);
+    setQuery("");
+    setSearchResults(null);
+    void loadDirectory(workspaceDir);
+  }, [workspaceDir, loadDirectory]);
+
+  const loadedDirectoryPaths = Object.keys(directories);
+  const loadedDirectoryKey = loadedDirectoryPaths.sort().join("\n");
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      for (const path of loadedDirectoryPaths) void loadDirectory(path, true);
+    }, 3000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedDirectoryKey, loadDirectory]);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setSearchResults(null);
+      setSearchTruncated(false);
+      setSearching(false);
+      return;
+    }
+    let alive = true;
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      api.searchWorkspaceFiles(workspaceDir, trimmed)
+        .then((listing) => {
+          if (!alive) return;
+          setSearchResults(listing.entries);
+          setSearchTruncated(listing.truncated);
+          setSearching(false);
+        })
+        .catch((error) => {
+          if (!alive) return;
+          setActionError(String(error));
+          setSearchResults([]);
+          setSearching(false);
+        });
+    }, 180);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [query, workspaceDir]);
+
+  const visibleRows = useMemo(() => {
+    if (searchResults) {
+      return searchResults.map((entry) => ({ entry, depth: 0, parentPath: parentFilesystemPath(entry.path) }));
+    }
+    const rows: VisibleFileRow[] = [];
+    const visited = new Set<string>();
+    const append = (parentPath: string, depth: number) => {
+      if (visited.has(parentPath)) return;
+      visited.add(parentPath);
+      for (const entry of directories[parentPath]?.entries ?? []) {
+        rows.push({ entry, depth, parentPath });
+        if (entry.isDir && expanded.has(entry.path)) append(entry.path, depth + 1);
+      }
+    };
+    append(workspaceDir, 0);
+    return rows;
+  }, [directories, expanded, searchResults, workspaceDir]);
+
+  const selectedRow = visibleRows.find((row) => row.entry.path === selectedPath) ?? null;
+  const selected = selectedRow?.entry ?? null;
+
+  const toggleDirectory = useCallback((entry: WorkspaceFileEntry) => {
+    if (!entry.isDir) return;
+    setSelectedPath(entry.path);
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(entry.path)) next.delete(entry.path);
+      else {
+        next.add(entry.path);
+        if (!directories[entry.path]) void loadDirectory(entry.path);
+      }
+      return next;
+    });
+  }, [directories, loadDirectory]);
+
+  function refreshLoaded() {
+    setActionError(null);
+    for (const path of loadedDirectoryPaths.length ? loadedDirectoryPaths : [workspaceDir]) {
+      void loadDirectory(path);
     }
   }
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceDir]);
+  function onTreeKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (!visibleRows.length) return;
+    const index = Math.max(0, visibleRows.findIndex((row) => row.entry.path === selectedPath));
+    const row = visibleRows[index];
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      setSelectedPath(visibleRows[Math.max(0, Math.min(visibleRows.length - 1, index + delta))].entry.path);
+    } else if (event.key === "ArrowRight" && row.entry.isDir) {
+      event.preventDefault();
+      if (!expanded.has(row.entry.path)) toggleDirectory(row.entry);
+      else if (visibleRows[index + 1]?.depth > row.depth) setSelectedPath(visibleRows[index + 1].entry.path);
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (row.entry.isDir && expanded.has(row.entry.path)) toggleDirectory(row.entry);
+      else if (row.depth > 0) setSelectedPath(row.parentPath);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      if (row.entry.isDir) toggleDirectory(row.entry);
+      else if (!isRemote) void api.openPath(row.entry.path);
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      setSelectedPath(visibleRows[event.key === "Home" ? 0 : visibleRows.length - 1].entry.path);
+    }
+  }
 
+  async function createEntry(isDir: boolean) {
+    if (isRemote) return;
+    const parent = selected?.isDir ? selected.path : selectedRow?.parentPath ?? workspaceDir;
+    const name = window.prompt(t(isDir ? "workspacePanel.folderName" : "workspacePanel.fileName"));
+    if (!name) return;
+    try {
+      const path = await api.createWorkspaceEntry(workspaceDir, parent, name, isDir);
+      await loadDirectory(parent);
+      setSelectedPath(path);
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  async function renameSelected() {
+    if (!selected || isRemote) return;
+    const name = window.prompt(t("workspacePanel.newName"), selected.name);
+    if (!name || name === selected.name) return;
+    try {
+      const path = await api.renameWorkspaceEntry(workspaceDir, selected.path, name);
+      await loadDirectory(selectedRow?.parentPath ?? workspaceDir);
+      setSelectedPath(path);
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  async function trashSelected() {
+    if (!selected || isRemote || !window.confirm(t("workspacePanel.confirmTrash", { name: selected.name }))) return;
+    try {
+      await api.trashWorkspaceEntry(workspaceDir, selected.path);
+      await loadDirectory(selectedRow?.parentPath ?? workspaceDir);
+      setSelectedPath(null);
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  const rootState = directories[workspaceDir];
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+    <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] overflow-hidden">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-        <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
-          {workspaceDir}
-        </p>
-        <Button type="button" size="icon-xs" variant="ghost" onClick={load} aria-label={t("workspacePanel.refresh")}>
-          <RefreshCw className="size-3.5" />
+        <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{workspaceDir}</p>
+        {isRemote && <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">SSH</span>}
+        <Button type="button" size="icon-xs" variant="ghost" onClick={refreshLoaded} aria-label={t("workspacePanel.refresh")}>
+          <RefreshCw className={cn("size-3.5", rootState?.loading && "animate-spin")} />
         </Button>
       </div>
-      {error && (
-        <p className="m-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {error}
-        </p>
-      )}
-      <div className="grid min-h-0 grid-cols-[minmax(180px,34%)_1fr] overflow-hidden">
-        <div className="min-h-0 min-w-0 overflow-hidden border-r border-border">
-          <div className="h-full min-h-0 overflow-y-auto py-1">
-            {!files ? (
-              <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" />
-                {t("workspacePanel.loading")}
-              </div>
-            ) : files.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-muted-foreground">
-                {t("workspacePanel.noFiles")}
-              </p>
-            ) : (
-              <FileTree
-                nodes={tree}
-                expanded={expanded}
-                selectedPath={selectedPath}
-                onSelect={(entry) => {
-                  if (!entry.isDir) setSelectedPath(entry.path);
-                }}
-                onToggle={(path) =>
-                  setExpanded((current) => {
-                    const next = new Set(current);
-                    if (next.has(path)) next.delete(path);
-                    else next.add(path);
-                    return next;
-                  })
-                }
-              />
-            )}
-          </div>
-        </div>
-        <FilePreview file={selected} />
-      </div>
-    </div>
-  );
-}
-
-interface WorkspaceTreeNode {
-  entry: WorkspaceFileEntry;
-  children: WorkspaceTreeNode[];
-}
-
-function buildWorkspaceTree(entries: WorkspaceFileEntry[]): WorkspaceTreeNode[] {
-  const roots: WorkspaceTreeNode[] = [];
-  const byPath = new Map<string, WorkspaceTreeNode>();
-
-  for (const entry of entries) {
-    byPath.set(entry.relativePath, { entry, children: [] });
-  }
-
-  for (const node of byPath.values()) {
-    const parentPath = parentRelativePath(node.entry.relativePath);
-    const parent = parentPath ? byPath.get(parentPath) : null;
-    if (parent) parent.children.push(node);
-    else roots.push(node);
-  }
-
-  sortTreeNodes(roots);
-  return roots;
-}
-
-function sortTreeNodes(nodes: WorkspaceTreeNode[]) {
-  nodes.sort((a, b) => {
-    if (a.entry.isDir !== b.entry.isDir) return a.entry.isDir ? -1 : 1;
-    return a.entry.name.localeCompare(b.entry.name, undefined, { sensitivity: "base" });
-  });
-  for (const node of nodes) sortTreeNodes(node.children);
-}
-
-function parentRelativePath(path: string): string | null {
-  const normalized = path.replace(/\\/g, "/");
-  const index = normalized.lastIndexOf("/");
-  return index > 0 ? normalized.slice(0, index) : null;
-}
-
-function defaultExpandedPaths(entries: WorkspaceFileEntry[]): Set<string> {
-  const expanded = new Set<string>();
-  for (const entry of entries) {
-    if (!entry.isDir) continue;
-    const depth = entry.relativePath.split(/[\\/]/).length - 1;
-    if (depth <= 1) expanded.add(entry.relativePath);
-  }
-  return expanded;
-}
-
-function FileTree({
-  nodes,
-  expanded,
-  selectedPath,
-  onSelect,
-  onToggle,
-  depth = 0,
-}: {
-  nodes: WorkspaceTreeNode[];
-  expanded: Set<string>;
-  selectedPath: string | null;
-  onSelect: (entry: WorkspaceFileEntry) => void;
-  onToggle: (path: string) => void;
-  depth?: number;
-}) {
-  return (
-    <div role={depth === 0 ? "tree" : "group"}>
-      {nodes.map((node) => (
-        <FileTreeNode
-          key={node.entry.path}
-          node={node}
-          depth={depth}
-          expanded={expanded}
-          selectedPath={selectedPath}
-          onSelect={onSelect}
-          onToggle={onToggle}
+      <div className="flex h-9 items-center gap-1 border-b border-border px-2">
+        <Search className="size-3.5 shrink-0 text-muted-foreground" />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={t("workspacePanel.searchFiles")}
+          className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+          aria-label={t("workspacePanel.searchFiles")}
         />
-      ))}
+        {searching && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" size="icon-xs" variant="ghost" aria-label={t("workspacePanel.fileActions")}><MoreHorizontal className="size-3.5" /></Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onSelect={() => void createEntry(false)} disabled={isRemote}><FilePlus />{t("workspacePanel.newFile")}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void createEntry(true)} disabled={isRemote}><FolderPlus />{t("workspacePanel.newFolder")}</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={!selected || selected.isDir}
+              onSelect={() => selected && window.dispatchEvent(new CustomEvent("cetus-insert-file-paths", { detail: [selected.path] }))}
+            ><Paperclip />{t("workspacePanel.addToChat")}</DropdownMenuItem>
+            <DropdownMenuItem disabled={!selected} onSelect={() => selected && void navigator.clipboard.writeText(selected.relativePath)}><Copy />{t("workspacePanel.copyRelativePath")}</DropdownMenuItem>
+            <DropdownMenuItem disabled={!selected} onSelect={() => selected && void navigator.clipboard.writeText(selected.path)}><Copy />{t("workspacePanel.copyAbsolutePath")}</DropdownMenuItem>
+            <DropdownMenuItem disabled={!selected || isRemote} onSelect={() => selected && void api.revealInFinder(selected.path)}><ExternalLink />{t("workspacePanel.revealFinder")}</DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!selected || !onOpenTerminalCommand}
+              onSelect={() => selected && onOpenTerminalCommand?.(`cd '${(selected.isDir ? selected.path : selectedRow?.parentPath ?? workspaceDir).replaceAll("'", "'\\''")}'`)}
+            ><Terminal />{t("workspacePanel.openTerminal")}</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={!selected || isRemote} onSelect={() => void renameSelected()}><Pencil />{t("workspacePanel.rename")}</DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" disabled={!selected || isRemote} onSelect={() => void trashSelected()}><Trash2 />{t("workspacePanel.moveTrash")}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <div className={cn(actionError ? "border-b border-destructive/20 bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive" : "h-0")}>
+        {actionError}
+      </div>
+      <div className="grid min-h-0 grid-cols-[minmax(210px,36%)_1fr] overflow-hidden">
+        <div className="min-h-0 min-w-0 overflow-y-auto border-r border-border py-1" role="tree" tabIndex={0} onKeyDown={onTreeKeyDown}>
+          {!rootState && !searchResults ? (
+            <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />{t("workspacePanel.loading")}</div>
+          ) : rootState?.error && !rootState.entries.length ? (
+            <p className="px-3 py-3 text-xs text-destructive">{rootState.error}</p>
+          ) : !visibleRows.length ? (
+            <p className="px-3 py-3 text-xs text-muted-foreground">{query ? t("workspacePanel.noMatches") : t("workspacePanel.noFiles")}</p>
+          ) : (
+            visibleRows.map((row) => (
+              <FileTreeRow
+                key={row.entry.path}
+                row={row}
+                selected={row.entry.path === selectedPath}
+                expanded={expanded.has(row.entry.path)}
+                state={directories[row.entry.path]}
+                onSelect={() => setSelectedPath(row.entry.path)}
+                onToggle={() => toggleDirectory(row.entry)}
+                isRemote={isRemote}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setSelectedPath(row.entry.path);
+                  setContextMenu({ x: event.clientX, y: event.clientY });
+                }}
+              />
+            ))
+          )}
+          {(searchResults ? searchTruncated : rootState?.truncated) && (
+            <p className="px-3 py-2 text-[10px] text-amber-600 dark:text-amber-400">{t("workspacePanel.moreFiles")}</p>
+          )}
+        </div>
+        <FilePreview file={selected?.isDir ? null : selected} workspaceDir={workspaceDir} isRemote={isRemote} />
+      </div>
+      {contextMenu && selected && (
+        <div
+          role="menu"
+          className="fixed z-100 min-w-44 rounded-md bg-popover p-1 text-xs text-popover-foreground shadow-lg ring-1 ring-foreground/10"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {!selected.isDir && (
+            <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-accent" onClick={() => { window.dispatchEvent(new CustomEvent("cetus-insert-file-paths", { detail: [selected.path] })); setContextMenu(null); }}><Paperclip className="size-3.5" />{t("workspacePanel.addToChat")}</button>
+          )}
+          <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-accent" onClick={() => { void navigator.clipboard.writeText(selected.relativePath); setContextMenu(null); }}><Copy className="size-3.5" />{t("workspacePanel.copyRelativePath")}</button>
+          {!isRemote && <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-accent" onClick={() => { void api.revealInFinder(selected.path); setContextMenu(null); }}><ExternalLink className="size-3.5" />{t("workspacePanel.revealFinder")}</button>}
+          {!isRemote && <div className="my-1 h-px bg-border" />}
+          {!isRemote && <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-accent" onClick={() => { setContextMenu(null); void renameSelected(); }}><Pencil className="size-3.5" />{t("workspacePanel.rename")}</button>}
+          {!isRemote && <button className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-destructive hover:bg-destructive/10" onClick={() => { setContextMenu(null); void trashSelected(); }}><Trash2 className="size-3.5" />{t("workspacePanel.moveTrash")}</button>}
+        </div>
+      )}
     </div>
   );
 }
 
-function FileTreeNode({
-  node,
-  depth,
+function parentFilesystemPath(path: string): string {
+  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  if (slash <= 0) return path;
+  return path.slice(0, slash);
+}
+
+function FileTreeRow({
+  row,
+  selected,
   expanded,
-  selectedPath,
+  state,
   onSelect,
   onToggle,
+  isRemote,
+  onContextMenu,
 }: {
-  node: WorkspaceTreeNode;
-  depth: number;
-  expanded: Set<string>;
-  selectedPath: string | null;
-  onSelect: (entry: WorkspaceFileEntry) => void;
-  onToggle: (path: string) => void;
+  row: VisibleFileRow;
+  selected: boolean;
+  expanded: boolean;
+  state?: DirectoryState;
+  onSelect: () => void;
+  onToggle: () => void;
+  isRemote: boolean;
+  onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
-  const isExpanded = expanded.has(node.entry.relativePath);
-  const hasChildren = node.children.length > 0;
-  const isSelected = selectedPath === node.entry.path;
-
+  const { t } = useTranslation("chat");
+  const { entry, depth } = row;
   return (
     <div>
       <button
         type="button"
         role="treeitem"
-        aria-expanded={node.entry.isDir ? isExpanded : undefined}
-        data-selected={isSelected ? "true" : "false"}
-        className="flex h-7 w-full items-center gap-1.5 pr-3 text-left text-xs hover:bg-muted data-[selected=true]:bg-muted data-[selected=true]:text-foreground"
+        aria-level={depth + 1}
+        aria-expanded={entry.isDir ? expanded : undefined}
+        data-selected={selected ? "true" : "false"}
+        className={cn(
+          "flex h-7 w-full items-center gap-1.5 pr-2 text-left text-xs hover:bg-muted data-[selected=true]:bg-muted data-[selected=true]:text-foreground",
+          entry.isIgnored && "text-muted-foreground/50",
+        )}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
-        onClick={() => {
-          if (node.entry.isDir) onToggle(node.entry.relativePath);
-          else onSelect(node.entry);
-        }}
-        onDoubleClick={() => {
-          api.openPath(node.entry.path).catch(console.error);
-        }}
-        title={node.entry.path}
+        onClick={() => { onSelect(); if (entry.isDir) onToggle(); }}
+        onDoubleClick={() => { if (!entry.isDir && !isRemote) void api.openPath(entry.path); }}
+        onContextMenu={onContextMenu}
+        title={`${entry.path}${entry.symlinkTarget ? ` → ${entry.symlinkTarget}` : ""}`}
       >
         <span className="grid size-4 shrink-0 place-items-center text-muted-foreground">
-          {node.entry.isDir && hasChildren ? (
-            isExpanded ? (
-              <ChevronDown className="size-3.5" />
-            ) : (
-              <ChevronRight className="size-3.5" />
-            )
-          ) : null}
+          {entry.isDir ? state?.loading ? <Loader2 className="size-3 animate-spin" /> : expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" /> : null}
         </span>
-        {node.entry.isDir ? (
-          isExpanded ? (
-            <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <Folder className="size-3.5 shrink-0 text-muted-foreground" />
-          )
-        ) : (
-          <File className="size-3.5 shrink-0 text-muted-foreground" />
-        )}
-        <span className="min-w-0 flex-1 truncate">{node.entry.name}</span>
-        {!node.entry.isDir && (
-          <span className="shrink-0 tabular-nums text-muted-foreground">
-            {formatBytes(node.entry.sizeBytes ?? 0)}
-          </span>
-        )}
+        {entry.isDir ? expanded ? <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" /> : <Folder className="size-3.5 shrink-0 text-muted-foreground" /> : <File className="size-3.5 shrink-0 text-muted-foreground" />}
+        {entry.isSymlink && <Link2 className="-ml-2 mt-2 size-2.5 shrink-0 text-muted-foreground" />}
+        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+        {entry.gitStatus && entry.gitStatus !== "ignored" && <GitStatusBadge status={entry.gitStatus} />}
+        {!entry.isDir && entry.sizeBytes != null && <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">{formatBytes(entry.sizeBytes)}</span>}
       </button>
-      {node.entry.isDir && isExpanded && hasChildren && (
-        <FileTree
-          nodes={node.children}
-          expanded={expanded}
-          selectedPath={selectedPath}
-          onSelect={onSelect}
-          onToggle={onToggle}
-          depth={depth + 1}
-        />
+      {expanded && state?.error && (
+        <p className="py-1 pr-2 text-[10px] text-destructive" style={{ paddingLeft: `${36 + (depth + 1) * 14}px` }}>{state.error}</p>
+      )}
+      {expanded && state?.truncated && (
+        <p className="py-1 pr-2 text-[10px] text-amber-600 dark:text-amber-400" style={{ paddingLeft: `${36 + (depth + 1) * 14}px` }}>{t("workspacePanel.firstEntries")}</p>
       )}
     </div>
   );
 }
 
-function FilePreview({ file }: { file: WorkspaceFileEntry | null }) {
+function GitStatusBadge({ status }: { status: NonNullable<WorkspaceFileEntry["gitStatus"]> }) {
+  const labels: Record<string, string> = { modified: "M", added: "A", deleted: "D", renamed: "R", untracked: "U", conflict: "!" };
+  return <span className={cn("w-3 shrink-0 text-center text-[10px] font-semibold", status === "conflict" || status === "deleted" ? "text-red-500" : status === "untracked" || status === "added" ? "text-emerald-500" : "text-amber-500")}>{labels[status] ?? ""}</span>;
+}
+
+function FilePreview({
+  file,
+  workspaceDir,
+  isRemote,
+}: {
+  file: WorkspaceFileEntry | null;
+  workspaceDir: string;
+  isRemote: boolean;
+}) {
   const { t } = useTranslation("chat");
   const [text, setText] = useState<string | null>(null);
   const [textError, setTextError] = useState<string | null>(null);
+  const [textTruncated, setTextTruncated] = useState<number | null>(null);
   const [modeByPath, setModeByPath] = useState<Record<string, "preview" | "source">>({});
   const ext = file ? fileExtension(file.name) : "";
   const kind = file ? previewKind(file.name) : "empty";
-  const assetUrl = file ? convertFileSrc(file.path) : "";
+  const assetUrl = file && !isRemote ? convertFileSrc(file.path) : "";
   const hasSourceMode = file ? canToggleSource(kind, ext) : false;
   const mode = file && hasSourceMode ? (modeByPath[file.path] ?? "preview") : "preview";
 
@@ -622,11 +818,15 @@ function FilePreview({ file }: { file: WorkspaceFileEntry | null }) {
     let alive = true;
     setText(null);
     setTextError(null);
+    setTextTruncated(null);
     if (!file || !needsText(kind, mode, ext)) return;
     api
-      .readTextFile(file.path)
+      .readWorkspaceTextFile(workspaceDir, file.path)
       .then((value) => {
-        if (alive) setText(value);
+        if (alive) {
+          setText(value.text);
+          setTextTruncated(value.truncated ? value.totalBytes : null);
+        }
       })
       .catch((err) => {
         if (alive) setTextError(String(err));
@@ -634,7 +834,7 @@ function FilePreview({ file }: { file: WorkspaceFileEntry | null }) {
     return () => {
       alive = false;
     };
-  }, [file?.path, kind, mode, ext]);
+  }, [file?.path, kind, mode, ext, workspaceDir]);
 
   if (!file) {
     return (
@@ -680,10 +880,16 @@ function FilePreview({ file }: { file: WorkspaceFileEntry | null }) {
             </button>
           </div>
         )}
+        {textTruncated != null && (
+          <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-700 dark:text-amber-300">
+            {t("workspacePanel.previewTruncated", { size: formatBytes(textTruncated) })}
+          </span>
+        )}
         <Button
           type="button"
           size="icon-xs"
           variant="ghost"
+          disabled={isRemote}
           onClick={() => api.openPath(file.path).catch(console.error)}
           title={t("artifact.openExternal")}
           aria-label={t("artifact.openExternal")}
@@ -692,7 +898,9 @@ function FilePreview({ file }: { file: WorkspaceFileEntry | null }) {
         </Button>
       </div>
       <div className={cn("min-h-0", (mode === "source" || kind === "text") ? "overflow-hidden" : "overflow-auto")}>
-        {mode === "source" ? (
+        {isRemote && !needsText(kind, mode, ext) ? (
+          <FileDetails file={file} ext={ext} kind={kind} />
+        ) : mode === "source" ? (
           <TextPreview text={text} error={textError}>
             {(value) => <SourcePreview text={value} ext={ext} />}
           </TextPreview>
@@ -709,7 +917,12 @@ function FilePreview({ file }: { file: WorkspaceFileEntry | null }) {
             <audio src={assetUrl} controls className="w-full max-w-xl" />
           </div>
         ) : kind === "html" || kind === "pdf" ? (
-          <iframe title={file.name} src={assetUrl} className="h-full min-h-[480px] w-full" />
+          <iframe
+            title={file.name}
+            src={assetUrl}
+            sandbox={kind === "html" ? "" : undefined}
+            className="h-full min-h-[480px] w-full"
+          />
         ) : kind === "markdown" ? (
           <TextPreview text={text} error={textError}>
             {(value) => (
@@ -899,6 +1112,7 @@ function OfficePreview({
     return (
       <iframe
         title={file.name}
+        sandbox=""
         className="h-full min-h-[520px] w-full bg-white"
         srcDoc={`<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.5;padding:24px;color:#1f2328}img{max-width:100%;height:auto}table{border-collapse:collapse}td,th{border:1px solid #d0d7de;padding:4px 6px}</style></head><body>${docHtml}</body></html>`}
       />
@@ -972,6 +1186,18 @@ function FileDetails({
           <dd>{formatBytes(file.sizeBytes ?? 0)}</dd>
           <dt className="text-muted-foreground">Modified</dt>
           <dd>{file.modifiedMs ? new Date(file.modifiedMs).toLocaleString() : "-"}</dd>
+          {file.symlinkTarget && (
+            <>
+              <dt className="text-muted-foreground">Link target</dt>
+              <dd className="break-all font-mono">{file.symlinkTarget}</dd>
+            </>
+          )}
+          {file.gitStatus && (
+            <>
+              <dt className="text-muted-foreground">Git status</dt>
+              <dd className="capitalize">{file.gitStatus}</dd>
+            </>
+          )}
         </dl>
       </div>
     </div>

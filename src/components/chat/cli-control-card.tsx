@@ -1,10 +1,12 @@
 "use client";
-// Inline cards for claude-code control requests, rendered above the composer —
-// the same surface the native desktop app uses (not a modal):
+// Inline cards for blocking CLI-host requests, rendered above the composer —
+// the same surface native desktop agents use (not a modal):
 //
 // - AskUserQuestion → option buttons with descriptions, multi-select chips, and
 //   a free-text "Other" input; answers flow back as the tool's `answers` map.
-// - any other tool  → an Allow / Deny approval card showing the tool call.
+// - Codex plugin suggestion → install card with provider handoff + confirmation.
+// - Codex request_user_input → protocol-native question cards.
+// - any other tool → an Allow / Deny approval card showing the tool call.
 //
 // Pending requests live in the chat store (populated by the app's single
 // always-mounted event listener), keyed by conversation. Reading them from the
@@ -16,7 +18,14 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Check, MessageCircleQuestion, ShieldQuestion } from "lucide-react";
+import {
+  Blocks,
+  Check,
+  ExternalLink,
+  KeyRound,
+  MessageCircleQuestion,
+  ShieldQuestion,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/tauri";
 import { useChatStore, useControlRequests } from "@/lib/chat-store";
@@ -30,13 +39,19 @@ export function CliControlCard({ convId }: { convId: string }) {
   const current = queue[0] ?? null;
   if (!current) return null;
 
-  async function respond(response: unknown) {
+  async function respond(response: unknown, installPluginId?: string) {
     const req = current!;
     // Drop it from the store first so the card advances immediately, then
     // answer the running turn over stdin.
     useChatStore.getState().clearControlRequest(convId, req.requestId);
     try {
-      await api.cliControlRespond(convId, req.requestId, response);
+      await api.cliControlRespond(
+        convId,
+        req.requestId,
+        response,
+        req.source,
+        installPluginId,
+      );
     } catch (e) {
       // The answer never reached the CLI, which is still blocked waiting on
       // it — silently eating this leaves the conversation wedged on a request
@@ -45,6 +60,42 @@ export function CliControlCard({ convId }: { convId: string }) {
       useChatStore.getState().pushControlRequest(convId, req);
       toast.error(t("cliControl.respondFailed"));
     }
+  }
+
+  if (current.source === "codex") {
+    if (current.requestKind === "mcp_elicitation" && isToolSuggestion(current)) {
+      return (
+        <PluginSuggestionCard
+          key={current.requestId}
+          request={current}
+          onAccept={() => respond({ action: "accept", content: {}, _meta: null })}
+          onInstall={(pluginId) =>
+            respond(
+              { action: "accept", content: {}, _meta: null },
+              pluginId,
+            )
+          }
+          onDecline={() => respond({ action: "decline", content: null, _meta: null })}
+        />
+      );
+    }
+    if (current.requestKind === "request_user_input") {
+      return (
+        <CodexQuestionCard
+          key={current.requestId}
+          request={current}
+          onSubmit={(answers) => respond({ answers })}
+        />
+      );
+    }
+    return (
+      <ApprovalCard
+        key={current.requestId}
+        request={current}
+        onAllow={() => respond({ action: "accept", content: {}, _meta: null })}
+        onDeny={() => respond({ action: "decline", content: null, _meta: null })}
+      />
+    );
   }
 
   if (current.toolName === "AskUserQuestion") {
@@ -70,6 +121,232 @@ export function CliControlCard({ convId }: { convId: string }) {
         respond({ behavior: "deny", message: t("cliControl.denyMessage") })
       }
     />
+  );
+}
+
+interface CodexQuestion {
+  id: string;
+  header?: string;
+  question: string;
+  isOther?: boolean;
+  isSecret?: boolean;
+  options?: { label: string; description?: string }[] | null;
+}
+
+interface ToolSuggestionMeta {
+  codex_approval_kind?: string;
+  tool_type?: string;
+  suggest_reason?: string;
+  tool_id?: string;
+  tool_name?: string;
+  install_url?: string;
+}
+
+function suggestionMeta(request: CliControlRequest): ToolSuggestionMeta {
+  const meta = request.input._meta;
+  return meta && typeof meta === "object" ? (meta as ToolSuggestionMeta) : {};
+}
+
+function isToolSuggestion(request: CliControlRequest): boolean {
+  return suggestionMeta(request).codex_approval_kind === "tool_suggestion";
+}
+
+/** Codex request_plugin_install is an MCP elicitation carrying structured
+ *  plugin metadata. URL-backed installs finish in the provider's page; other
+ *  remote plugins are installed through app-server before we accept. */
+function PluginSuggestionCard({
+  request,
+  onAccept,
+  onInstall,
+  onDecline,
+}: {
+  request: CliControlRequest;
+  onAccept: () => void;
+  onInstall: (pluginId: string) => void;
+  onDecline: () => void;
+}) {
+  const { t } = useTranslation("chat");
+  const meta = suggestionMeta(request);
+  const name = meta.tool_name || meta.tool_id || request.toolName;
+  const reason =
+    (typeof request.input.message === "string" && request.input.message) ||
+    meta.suggest_reason ||
+    "";
+  const installUrl = meta.install_url;
+  const [installOpened, setInstallOpened] = useState(false);
+
+  async function openInstall() {
+    if (!installUrl) {
+      if (meta.tool_id) onInstall(meta.tool_id);
+      else onAccept();
+      return;
+    }
+    try {
+      await api.openExternal(installUrl);
+      setInstallOpened(true);
+    } catch (error) {
+      console.error("open plugin install failed:", error);
+      toast.error(t("cliControl.pluginOpenFailed"));
+    }
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-[#d97757]/45 bg-card shadow-sm">
+      <div className="absolute inset-y-0 left-0 w-1 bg-[#d97757]" />
+      <div className="p-3 pl-4">
+        <div className="flex items-start gap-2.5">
+          <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#d97757]/10 text-[#d97757] ring-1 ring-[#d97757]/20">
+            <Blocks className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-sm font-semibold text-foreground">{name}</span>
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                {meta.tool_type || t("cliControl.pluginBadge")}
+              </span>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {reason || t("cliControl.pluginFallbackReason")}
+            </p>
+            {installOpened && (
+              <p className="mt-2 rounded-md bg-[#d97757]/8 px-2 py-1.5 text-[11px] leading-relaxed text-foreground/80">
+                {t("cliControl.pluginFinishHint")}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onDecline}>
+            {t("cliControl.notNow")}
+          </Button>
+          {installOpened ? (
+            <Button size="sm" className="h-7 text-xs" onClick={onAccept}>
+              <Check className="mr-1 size-3.5" />
+              {t("cliControl.pluginInstalled")}
+            </Button>
+          ) : (
+            <Button size="sm" className="h-7 text-xs" onClick={openInstall}>
+              {installUrl && <ExternalLink className="mr-1 size-3.5" />}
+              {t("cliControl.installPlugin")}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Generic Codex request_user_input flow. Answers are keyed by stable question
+ *  id and always returned as string arrays, exactly matching app-server v2. */
+function CodexQuestionCard({
+  request,
+  onSubmit,
+}: {
+  request: CliControlRequest;
+  onSubmit: (answers: Record<string, { answers: string[] }>) => void;
+}) {
+  const { t } = useTranslation("chat");
+  const questions = useMemo<CodexQuestion[]>(
+    () => (Array.isArray(request.input.questions) ? request.input.questions as unknown as CodexQuestion[] : []),
+    [request],
+  );
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, string[]>>({});
+  const [other, setOther] = useState("");
+  const q = questions[step];
+  if (!q) return null;
+
+  const selected = answers[q.id] ?? [];
+  const isLast = step === questions.length - 1;
+  const canContinue = selected.length > 0 || other.trim().length > 0;
+
+  function finish(next: Record<string, string[]>) {
+    onSubmit(Object.fromEntries(Object.entries(next).map(([id, value]) => [id, { answers: value }])));
+  }
+
+  function choose(label: string) {
+    const next = { ...answers, [q.id]: [label] };
+    setAnswers(next);
+    if (isLast) finish(next);
+    else {
+      setOther("");
+      setStep((value) => value + 1);
+    }
+  }
+
+  function advanceWithText() {
+    const value = other.trim();
+    if (!value) return;
+    const next = { ...answers, [q.id]: [value] };
+    setAnswers(next);
+    if (isLast) finish(next);
+    else {
+      setOther("");
+      setStep((current) => current + 1);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-[#d97757]/50 bg-card p-3 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-[#d97757]">
+        <span className="flex items-center gap-1.5">
+          <MessageCircleQuestion className="size-3.5" />
+          {t("cliControl.codexQuestionTitle")}
+        </span>
+        {questions.length > 1 && (
+          <span className="text-[11px] tabular-nums text-muted-foreground">{step + 1} / {questions.length}</span>
+        )}
+      </div>
+      <div className="flex items-baseline gap-2">
+        {q.header && (
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {q.header}
+          </span>
+        )}
+        <span className="text-sm font-medium">{q.question}</span>
+      </div>
+      {!!q.options?.length && (
+        <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+          {q.options.map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              onClick={() => choose(option.label)}
+              className="rounded-lg border border-border px-2.5 py-2 text-left text-xs transition-colors hover:border-[#d97757]/50 hover:bg-[#d97757]/5"
+            >
+              <span className="font-medium">{option.label}</span>
+              {option.description && <span className="mt-0.5 block text-[11px] text-muted-foreground">{option.description}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {(q.isOther || !q.options?.length) && (
+        <div className="relative mt-2">
+          {q.isSecret && <KeyRound className="absolute left-2 top-2 size-3 text-muted-foreground" />}
+          <input
+            type={q.isSecret ? "password" : "text"}
+            value={other}
+            onChange={(event) => setOther(event.target.value)}
+            onKeyDown={(event) => {
+              const composing = event.nativeEvent.isComposing || event.keyCode === 229;
+              if (event.key === "Enter" && !composing) advanceWithText();
+            }}
+            placeholder={t("cliControl.otherPlaceholder")}
+            className={cn(
+              "h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:border-[#d97757]/60",
+              q.isSecret && "pl-7",
+            )}
+          />
+        </div>
+      )}
+      {(q.isOther || !q.options?.length) && (
+        <div className="mt-2 flex justify-end">
+          <Button size="sm" className="h-7 text-xs" disabled={!canContinue} onClick={advanceWithText}>
+            {isLast ? t("cliControl.submit") : t("cliControl.next")}
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
