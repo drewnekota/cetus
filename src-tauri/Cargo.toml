@@ -85,6 +85,21 @@ objc2 = { version = "0.6", features = ["exception"] }
 # Objective-C blocks (paired with objc2 0.6) — used for the global NSEvent
 # mouse-down monitor that dismisses the launcher on an outside click.
 block2 = "0.6"
+# Native Artifact thumbnails. Quick Look understands the same common media
+# formats as Finder, so video cards get a representative frame without making
+# WebKit download/decode the full file first.
+objc2-foundation = "0.3"
+objc2-core-foundation = "0.3"
+objc2-uniform-type-identifiers = "0.3"
+objc2-quick-look-thumbnailing = { version = "0.3", default-features = false, features = [
+  "std",
+  "QLThumbnailGenerationRequest",
+  "QLThumbnailGenerator",
+  "QLThumbnailRepresentation",
+  "block2",
+  "objc2-core-foundation",
+  "objc2-uniform-type-identifiers",
+] }
 # Only for its bundle hook (`set_application`): it lets NSUserNotificationCenter
 # deliver from the unbundled `tauri dev` binary. We drive the notification +
 # click-routing delegate ourselves (see notify.rs) instead of its blocking send.

@@ -78,7 +78,31 @@ import { workspaceName } from "@/lib/paths";
 import { formatFullDateTime } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/conversation-search";
 import { useConversationAutoSort } from "@/lib/conversation-order";
-import type { Conversation } from "@/lib/types";
+import { useChatStore } from "@/lib/chat-store";
+import { api } from "@/lib/tauri";
+import type {
+  BackendId,
+  CliDefaults,
+  CliRateLimitInfo,
+  Conversation,
+} from "@/lib/types";
+
+type CliBackendId = Exclude<BackendId, "pi">;
+
+const sidebarCliDefaultsCache = new Map<CliBackendId, Promise<CliDefaults>>();
+
+function fetchSidebarCliDefaults(backend: CliBackendId): Promise<CliDefaults> {
+  let pending = sidebarCliDefaultsCache.get(backend);
+  if (!pending) {
+    pending = api.getCliDefaults(backend).catch(() => ({
+      model: null,
+      effort: null,
+      models: null,
+    }));
+    sidebarCliDefaultsCache.set(backend, pending);
+  }
+  return pending;
+}
 
 interface Props {
   conversations: Conversation[];
@@ -958,6 +982,68 @@ function SidebarResizeHandle({
  *  doesn't reconcile every other row. Bites only because the parent passes
  *  identity-stable onSelect/onArchive (see page.tsx useCallback wrappers) and
  *  the `conversation` ref is stable unless that row actually changed. */
+function normalizedBackend(conversation: Conversation): BackendId {
+  return conversation.backend === "claude-code" || conversation.backend === "codex"
+    ? conversation.backend
+    : "pi";
+}
+
+function runtimeLabel(backend: BackendId): string {
+  return backend === "claude-code"
+    ? "Claude Code"
+    : backend === "codex"
+      ? "Codex"
+      : "Cetus";
+}
+
+function displayModelName(raw: string): string {
+  const claude = raw.match(/^claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d+))?/i);
+  if (!claude) return raw;
+  const family = claude[1][0].toUpperCase() + claude[1].slice(1).toLowerCase();
+  const version = claude[3] ? `${claude[2]}.${claude[3]}` : claude[2];
+  return `${family} ${version}`;
+}
+
+function runtimeTuning(
+  conversation: Conversation,
+  defaults: CliDefaults | null,
+): { model: string; effort: string | null } {
+  const backend = normalizedBackend(conversation);
+  if (backend === "pi") {
+    const efforts = {
+      non_think: "Quick",
+      think_high: "High",
+      think_max: "Max",
+    } as const;
+    return {
+      model: "DeepSeek V4 Pro",
+      effort: efforts[conversation.model.reasoning] ?? null,
+    };
+  }
+  const model = conversation.cliModel || defaults?.model || "Default";
+  const effort = conversation.cliEffort || defaults?.effort || null;
+  return { model: displayModelName(model), effort };
+}
+
+/** Compact quota text for the row tooltip. A healthy heartbeat without a
+ * utilization value stays quiet, matching the runtime picker. */
+function runtimeQuota(q: CliRateLimitInfo | undefined): string | null {
+  if (!q) return null;
+  const pct = q.utilization == null ? null : `${Math.round(q.utilization * 100)}%`;
+  const reset = q.resetsAt
+    ? new Date(q.resetsAt * 1000).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+  const window = q.rateLimitType?.replace("five_hour", "5h").replace("seven_day", "7d");
+  if (q.status === "rejected")
+    return [window, "limit reached", reset && `↻ ${reset}`].filter(Boolean).join(" · ");
+  if (q.status === "allowed_warning")
+    return [window, pct ?? "near limit", reset && `↻ ${reset}`].filter(Boolean).join(" · ");
+  return pct ? [window, pct].filter(Boolean).join(" · ") : null;
+}
+
 const ConversationRow = memo(function ConversationRow({
   conversation,
   active,
@@ -982,6 +1068,24 @@ const ConversationRow = memo(function ConversationRow({
   const archived = !!conversation.archivedAt;
   const title = conversation.title || t("conversation.untitled");
   const relativeTime = formatRelativeTime(conversation.updatedAt, nowMs);
+  const backend = normalizedBackend(conversation);
+  const [resolvedDefaults, setResolvedDefaults] = useState<{
+    backend: CliBackendId;
+    value: CliDefaults;
+  } | null>(null);
+  const defaults = resolvedDefaults?.backend === backend ? resolvedDefaults.value : null;
+  const tuning = runtimeTuning(conversation, defaults);
+  const rateLimit = useChatStore((s) => s.cliRateLimits[backend]);
+  const quota = runtimeQuota(rateLimit);
+  const onDetailsOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open || backend === "pi" || resolvedDefaults?.backend === backend) return;
+      fetchSidebarCliDefaults(backend).then((value) => {
+        setResolvedDefaults({ backend, value });
+      });
+    },
+    [backend, resolvedDefaults?.backend],
+  );
   return (
     // NB: no `content-visibility:auto` here. It broke under the sidebar's old
     // `backdrop-blur` ancestor (containing block defeated in-viewport
@@ -989,52 +1093,88 @@ const ConversationRow = memo(function ConversationRow({
     // minute-clock scoping already removed the per-minute re-render cost, and
     // a long list would need a real virtualizer anyway.
     <SidebarMenuItem>
-      <SidebarMenuButton
-        onClick={() => onSelect(conversation.id)}
-        isActive={active}
-        // No `tooltip` prop: under collapsible="none" the SidebarMenuButton
-        // tooltip is always `hidden` (state is "expanded"), so it never showed —
-        // it just minted a dead Radix Tooltip per row. Dropped for the win.
-        //
-        // The archive button is an absolutely-positioned sibling of this row
-        // button, so moving the cursor onto it drops the row button's own
-        // `:hover` and the row would lose its highlight. Drive the highlight off
-        // the menu-item group hover instead so it persists while the cursor is
-        // anywhere in the row, including over the archive action.
-        className={cn(
-          // Leave a little more breathing room between long titles and the
-          // absolutely positioned relative-time / unread indicator.
-          "relative pr-14",
-          !active &&
-            "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
-        )}
-      >
-        {conversation.sourceAutomationId && (
-          <Clock className="size-3.5 shrink-0 text-muted-foreground" />
-        )}
-        <span className="min-w-0 flex-1 truncate">{title}</span>
-        <span
-          title={streaming ? t("conversation.inProgress") : formatFullDateTime(conversation.updatedAt)}
-          className={cn(
-            "absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center text-[11px] tabular-nums text-muted-foreground/70 transition-opacity",
-            "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
-            active && "text-sidebar-accent-foreground/70",
-          )}
-        >
-          {streaming ? (
+      <Tooltip delayDuration={0} onOpenChange={onDetailsOpenChange}>
+        <TooltipTrigger asChild>
+          <SidebarMenuButton
+            onClick={() => onSelect(conversation.id)}
+            isActive={active}
+            // The archive button is an absolutely-positioned sibling of this
+            // row button, so moving onto it closes this details tooltip and
+            // opens the archive action's own tooltip without nesting triggers.
+            className={cn(
+              // Leave a little more breathing room between long titles and the
+              // absolutely positioned relative-time / unread indicator.
+              "relative pr-14",
+              !active &&
+                "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
+            )}
+          >
+            {conversation.sourceAutomationId && (
+              <Clock className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span className="min-w-0 flex-1 truncate">{title}</span>
             <span
-              aria-label={t("conversation.inProgress")}
-              className="block size-3 animate-spin rounded-full border-2 border-current/35 border-t-current"
-            />
-          ) : unreadCompleted ? (
-            <span className="block size-2 rounded-full bg-primary">
-              <span className="sr-only">Unread</span>
+              className={cn(
+                "absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center text-[11px] tabular-nums text-muted-foreground/70 transition-opacity",
+                "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
+                active && "text-sidebar-accent-foreground/70",
+              )}
+            >
+              {streaming ? (
+                <span
+                  aria-label={t("conversation.inProgress")}
+                  className="block size-3 animate-spin rounded-full border-2 border-current/35 border-t-current"
+                />
+              ) : unreadCompleted ? (
+                <span className="block size-2 rounded-full bg-primary">
+                  <span className="sr-only">Unread</span>
+                </span>
+              ) : (
+                relativeTime
+              )}
             </span>
-          ) : (
-            relativeTime
+          </SidebarMenuButton>
+        </TooltipTrigger>
+        <TooltipContent
+          side="right"
+          align="start"
+          sideOffset={4}
+          className="w-64 items-stretch gap-1.5 px-2.5 py-2"
+        >
+          <div className="flex min-w-0 items-center gap-2 font-medium">
+            <span
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                backend === "claude-code"
+                  ? "bg-[#d97757]"
+                  : backend === "codex"
+                    ? "bg-[#10a37f]"
+                    : "bg-background/65",
+              )}
+            />
+            <span className="truncate">{runtimeLabel(backend)}</span>
+            {streaming && (
+              <span className="ml-auto shrink-0 font-normal text-background/65">
+                {t("conversation.inProgress")}
+              </span>
+            )}
+          </div>
+          <div className="truncate text-[11px] text-background/75">
+            {tuning.model}
+            {tuning.effort && ` · ${tuning.effort}`}
+          </div>
+          <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-background/65">
+            <Folder className="size-3 shrink-0" />
+            <span className="truncate">{workspaceName(conversation.workspaceDir)}</span>
+          </div>
+          {quota && (
+            <div className="text-[11px] tabular-nums text-amber-200">{quota}</div>
           )}
-        </span>
-      </SidebarMenuButton>
+          <div className="text-[10px] tabular-nums text-background/50">
+            {formatFullDateTime(conversation.updatedAt)}
+          </div>
+        </TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <SidebarMenuAction

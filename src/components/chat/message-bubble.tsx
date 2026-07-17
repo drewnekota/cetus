@@ -6,6 +6,7 @@ import { BACKENDS } from "./backend-picker";
 import { VisionCard } from "./vision-card";
 import { BashCard } from "./bash-card";
 import { AnswerBlock, MessageActions } from "./message-blocks";
+import { messageHoverProps } from "./hover-owner";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 
@@ -99,6 +100,7 @@ function MessageBubbleView({
     >
       <div
         data-message-hover-target
+        {...messageHoverProps}
         className={cn(
           "flex max-w-[88%] flex-col gap-2",
           isUser ? "items-end" : "items-start",

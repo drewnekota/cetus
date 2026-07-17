@@ -240,17 +240,28 @@
   animation: shake 0.3s ease;
 }
 
-/* Keep a message toolbar scoped to its own turn. A named Tailwind group uses
-   an ancestor selector, which can leak across the wrappers maintained by the
-   virtualized transcript and leave several timestamps visible at once. The
-   direct-child relationship makes the hover owner unambiguous. */
+/* Keep a message toolbar scoped to its own turn. Not `:hover`: WebKit only
+   recomputes hover on real mouse events, so when the streaming transcript
+   auto-scrolls turns under a stationary pointer, `:hover` latches on each one
+   that passes and several timestamps stay visible at once. `data-hovered` is
+   set by pointer events (hover-owner.ts) with single-owner semantics and is
+   cleared on scroll, so at most one toolbar can ever show. */
 [data-message-hover-target] > [data-message-actions] {
   opacity: 0;
 }
 
-[data-message-hover-target]:hover > [data-message-actions],
+[data-message-hover-target][data-hovered] > [data-message-actions],
 [data-message-hover-target] > [data-message-actions]:focus-within {
   opacity: 1;
+}
+
+/* List markers hang inside the list's start padding, and the typography
+   default (1.625em; ~1.57em at prose-sm) only fits one digit — an ordered
+   list numbered "10." onward already overflows and the digits get clipped by
+   the prose wrappers' overflow-x containment (chat bubbles, artifact views).
+   2.25em fits three-digit markers; ul matches so mixed lists share an indent. */
+.prose :is(ol, ul) {
+  padding-inline-start: 2.25em;
 }
 
 /* Move a highlight around an otherwise stationary circle. Unlike rotating a

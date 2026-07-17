@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -123,22 +123,7 @@ function Thumbnail({
         />
       );
     case "video":
-      return (
-        <>
-          <video
-            src={url}
-            preload="metadata"
-            muted
-            playsInline
-            className="h-full w-full object-cover transition-transform duration-500 group-hover/preview-card:scale-[1.03]"
-          />
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="rounded-full bg-background/80 p-2.5 shadow-md backdrop-blur-sm transition-transform duration-200 group-hover/preview-card:scale-110">
-              <Play className="size-5 fill-current" />
-            </div>
-          </div>
-        </>
-      );
+      return <VideoThumbnail artifact={artifact} url={url} />;
     case "audio":
       return <IconThumb Icon={Headphones} />;
     case "html":
@@ -191,6 +176,68 @@ function Thumbnail({
     default:
       return <IconThumb Icon={FileIcon} label={extLabel(artifact, t)} />;
   }
+}
+
+function VideoThumbnail({
+  artifact,
+  url,
+}: {
+  artifact: ArtifactDetails;
+  url: string;
+}) {
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setThumbnailUrl(null);
+    invoke<string | null>("get_artifact_thumbnail", { path: artifact.path })
+      .then((path) => {
+        if (!cancelled && path) setThumbnailUrl(artifactUrl(path));
+      })
+      // Quick Look may not support every codec. The video element below is the
+      // cross-platform fallback and seeks just far enough to paint a real frame.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact.path]);
+
+  const mediaClass =
+    "h-full w-full object-cover transition-transform duration-500 group-hover/preview-card:scale-[1.03]";
+
+  return (
+    <>
+      {thumbnailUrl ? (
+        <img
+          src={thumbnailUrl}
+          alt={artifact.caption ?? artifact.name}
+          className={mediaClass}
+          loading="lazy"
+          onError={() => setThumbnailUrl(null)}
+        />
+      ) : (
+        <video
+          ref={videoRef}
+          src={url}
+          preload="metadata"
+          muted
+          playsInline
+          className={mediaClass}
+          onLoadedMetadata={() => {
+            const video = videoRef.current;
+            if (!video || !Number.isFinite(video.duration) || video.duration <= 0) return;
+            video.currentTime = Math.min(0.1, video.duration / 10);
+          }}
+        />
+      )}
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <div className="rounded-full bg-background/80 p-2.5 shadow-md backdrop-blur-sm transition-transform duration-200 group-hover/preview-card:scale-110">
+          <Play className="size-5 fill-current" />
+        </div>
+      </div>
+    </>
+  );
 }
 
 function IconThumb({

@@ -1197,11 +1197,21 @@ impl EventTranslator {
             // Synchronous subagent: the result is the real report and also
             // ends the task — don't hold the turn open for it. Keep the step
             // trace on the settled card (and the persisted row).
-            let details = {
+            let mut details = {
                 let t = self.background_tasks.get_mut(&task_id).expect("task exists");
                 t.done = true;
                 t.details(if is_error { "failed" } else { "completed" })
             };
+            // The CLI also runs foreground Bash through the task lifecycle
+            // (task_type local_bash), so artifact markers in the result would
+            // otherwise be lost with the plain-result path's extraction.
+            if let Some(artifacts) = extracted_artifact_details(
+                content,
+                self.artifact_dir.as_deref(),
+                self.cwd.as_deref(),
+            ) {
+                details["artifacts"] = artifacts;
+            }
             let content = normalize_content(content);
             self.flush_assistant();
             self.messages.push(json!({
@@ -1438,7 +1448,16 @@ impl EventTranslator {
                     _ => format!("{} agent {} — {}", task.subagent_type, status, task.description),
                 };
                 let content = json!([{ "type": "text", "text": text }]);
-                let details = task.details(status);
+                let mut details = task.details(status);
+                // For async tasks this summary is the only place a produced
+                // file can surface — extract markers/paths like a plain result.
+                if let Some(artifacts) = extracted_artifact_details(
+                    &content,
+                    self.artifact_dir.as_deref(),
+                    self.cwd.as_deref(),
+                ) {
+                    details["artifacts"] = artifacts;
+                }
                 // Keep the persisted transcript in sync with what the card
                 // now shows (the launch-ack row was already pushed).
                 for m in self.messages.iter_mut().rev() {
@@ -2909,6 +2928,15 @@ fn normalize_codex_app_delta(method: &str, params: &Value) -> Option<Value> {
     }))
 }
 
+/// How long a Codex tool-suggestion elicitation (an optional plugin-install
+/// prompt) may hold a turn open before Cetus declines it on the user's behalf.
+/// Substantive requests (`request_user_input`, form elicitations) are never
+/// auto-answered — only suggestions Codex can proceed without.
+#[cfg(not(test))]
+const TOOL_SUGGESTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+#[cfg(test)]
+const TOOL_SUGGESTION_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(300);
+
 /// Spawn Codex's persistent app-server embedding surface and create or resume
 /// one thread. Unlike `codex exec`, app-server owns background terminals after
 /// `turn/completed`, which is the lifecycle the Codex desktop app uses.
@@ -3026,8 +3054,16 @@ pub fn spawn_codex_session(
                 tokio::sync::oneshot::Sender<std::result::Result<(), String>>,
             ),
         > = HashMap::new();
+        // Optional tool-suggestion elicitations (plugin-install prompts) block
+        // the whole turn until answered, but nobody may ever answer one: a
+        // scheduled run has no user watching, and an interactive card lives
+        // only in the webview's memory, so a reload loses it while Codex keeps
+        // waiting. Track each suggestion and auto-decline past its deadline —
+        // Codex then continues with its non-plugin fallback instead of wedging.
+        let mut pending_tool_suggestions: Vec<(Value, tokio::time::Instant)> = Vec::new();
 
         loop {
+            let suggestion_deadline = pending_tool_suggestions.iter().map(|(_, at)| *at).min();
             tokio::select! {
                 command = rx.recv() => match command {
                     Some(CodexSessionCommand::StartTurn { prompt, images, sink, outcome }) => {
@@ -3059,6 +3095,7 @@ pub fn spawn_codex_session(
                         // Server requests are ordinary JSON-RPC in the reverse
                         // direction: echo the original id and place the user's
                         // answer under `result`.
+                        pending_tool_suggestions.retain(|(id, _)| id != &request_id);
                         if let Err(error) = write_json_line(
                             &mut stdin,
                             &json!({ "id": request_id, "result": response }),
@@ -3073,6 +3110,7 @@ pub fn spawn_codex_session(
                         remote_marketplace_name,
                         outcome,
                     }) => {
+                        pending_tool_suggestions.retain(|(id, _)| id != &request_id);
                         let id = next_id;
                         next_id += 1;
                         let request = json!({
@@ -3109,6 +3147,40 @@ pub fn spawn_codex_session(
                         break;
                     }
                 },
+                // A tool suggestion went unanswered for its whole grace period:
+                // decline it so the turn resumes, and clear any visible card.
+                _ = async {
+                    match suggestion_deadline {
+                        Some(at) => tokio::time::sleep_until(at).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    let now = tokio::time::Instant::now();
+                    let mut expired = Vec::new();
+                    pending_tool_suggestions.retain(|(request_id, at)| {
+                        if *at <= now {
+                            expired.push(request_id.clone());
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                    for request_id in expired {
+                        tracing::info!(
+                            "auto-declining unanswered Codex tool suggestion {request_id}"
+                        );
+                        let _ = write_json_line(&mut stdin, &json!({
+                            "id": request_id,
+                            "result": { "action": "decline", "content": null, "_meta": null },
+                        })).await;
+                        let sink = active.as_ref().map(|a| &a.sink).unwrap_or(&base_sink);
+                        emit(sink, vec![json!({
+                            "type": "cli_control_resolved",
+                            "requestId": request_id,
+                            "source": "codex",
+                        })]);
+                    }
+                }
                 line = reader.next_line() => {
                     let line = match line { Ok(Some(line)) => line, _ => break };
                     let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
@@ -3146,6 +3218,18 @@ pub fn spawn_codex_session(
                                     .and_then(Value::as_str)
                                     .unwrap_or("Codex")
                                     .to_string();
+                                // Optional suggestion (Codex proceeds fine when
+                                // declined) → eligible for auto-decline if no
+                                // one answers the card in time.
+                                if params.pointer("/_meta/codex_approval_kind")
+                                    .and_then(Value::as_str)
+                                    == Some("tool_suggestion")
+                                {
+                                    pending_tool_suggestions.push((
+                                        request_id.clone(),
+                                        tokio::time::Instant::now() + TOOL_SUGGESTION_TIMEOUT,
+                                    ));
+                                }
                                 emit(sink, vec![json!({
                                     "type": "cli_control_request",
                                     "requestId": request_id,
@@ -3236,6 +3320,10 @@ pub fn spawn_codex_session(
                             }
                         }
                         "turn/completed" => {
+                            // Whatever suggestions the turn left open died with
+                            // it — Codex resolves them on interrupt, but don't
+                            // depend on that ordering.
+                            pending_tool_suggestions.clear();
                             let Some(turn) = active.take() else { continue };
                             let status = params.pointer("/turn/status").and_then(Value::as_str).unwrap_or("completed");
                             let error = params.pointer("/turn/error/message").and_then(Value::as_str)
@@ -3255,6 +3343,7 @@ pub fn spawn_codex_session(
                                 .or_else(|| params.get("request_id"))
                                 .cloned()
                             {
+                                pending_tool_suggestions.retain(|(id, _)| id != &request_id);
                                 emit(sink, vec![json!({
                                     "type": "cli_control_resolved",
                                     "requestId": request_id,
@@ -4678,6 +4767,87 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A tool-suggestion elicitation nobody answers (cron run, lost card) must
+    /// not wedge the turn: past TOOL_SUGGESTION_TIMEOUT the session declines it
+    /// on the user's behalf and the turn continues to completion.
+    #[tokio::test]
+    async fn codex_auto_declines_unanswered_tool_suggestion() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-codex-suggestion-timeout-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-codex.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             while IFS= read -r line; do\n\
+               case \"$line\" in\n\
+                 *'\"method\":\"initialize\"'*) echo '{\"id\":1,\"result\":{}}' ;;\n\
+                 *'\"method\":\"thread/start\"'*) echo '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-timeout\"}}}' ;;\n\
+                 *'\"method\":\"turn/start\"'*)\n\
+                   echo '{\"id\":10,\"result\":{\"turn\":{\"id\":\"turn-timeout\"}}}';\n\
+                   echo '{\"method\":\"mcpServer/elicitation/request\",\"id\":\"request-9\",\"params\":{\"threadId\":\"thread-timeout\",\"turnId\":\"turn-timeout\",\"serverName\":\"codex_apps\",\"mode\":\"form\",\"message\":\"Read repository PRs directly\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{}},\"_meta\":{\"codex_approval_kind\":\"tool_suggestion\",\"tool_type\":\"plugin\",\"tool_id\":\"github@openai-curated-remote\",\"tool_name\":\"GitHub\",\"install_url\":\"https://example.test/install\"}}}' ;;\n\
+                 *'\"id\":\"request-9\"'*'decline'*)\n\
+                   echo '{\"method\":\"serverRequest/resolved\",\"params\":{\"threadId\":\"thread-timeout\",\"requestId\":\"request-9\"}}';\n\
+                   echo '{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"answer-timeout\",\"text\":\"continued without plugin\"}}}';\n\
+                   echo '{\"method\":\"turn/completed\",\"params\":{\"turn\":{\"id\":\"turn-timeout\",\"status\":\"completed\",\"error\":null}}}' ;;\n\
+               esac\n\
+             done\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let session = spawn_codex_session(
+            sink.clone() as Arc<dyn EventSink>,
+            &script.to_string_lossy(),
+            &dir,
+            None,
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+        )
+        .unwrap();
+        // Nobody answers the suggestion — the session must decline it itself.
+        let outcome = session
+            .start_turn("suggest a plugin".into(), Vec::new(), sink.clone() as Arc<dyn EventSink>)
+            .unwrap();
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), outcome)
+            .await
+            .expect("turn should continue after the auto-decline")
+            .unwrap();
+
+        let events = sink.0.lock().unwrap();
+        assert!(events.iter().any(|event| {
+            event["type"] == json!("cli_control_request") && event["requestId"] == json!("request-9")
+        }));
+        assert!(events.iter().any(|event| {
+            event["type"] == json!("cli_control_resolved")
+                && event["requestId"] == json!("request-9")
+        }));
+        assert!(outcome.messages.iter().any(|message| {
+            message["content"].as_array().is_some_and(|content| {
+                content
+                    .iter()
+                    .any(|block| block["text"] == "continued without plugin")
+            })
+        }));
+
+        session.shutdown();
+        drop(events);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The abort switch kills a long-running CLI mid-turn: the turn closes
     /// promptly with whatever streamed instead of waiting out the child.
     #[tokio::test]
@@ -5612,6 +5782,58 @@ mod tests {
             .unwrap();
         assert_eq!(end["result"]["details"]["name"], json!("deck.pptx"));
         assert_eq!(end["result"]["details"]["artifactKind"], json!("other"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// claude ≥2.1.210 runs foreground Bash through the task lifecycle too
+    /// (task_started/task_notification with task_type local_bash, then the
+    /// real tool_result). The task-settle path must still promote artifact
+    /// markers, or a `cetus artifact` delivery renders no file card.
+    #[test]
+    fn claude_artifact_marker_survives_foreground_bash_task_lifecycle() {
+        let dir = artifact_test_dir("claude-task-marker");
+        let file = dir.join("deck.pdf");
+        std::fs::write(&file, b"%PDF-").unwrap();
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode)
+            .with_artifact_storage(dir.clone(), dir.clone());
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"bash-1","name":"Bash","input":{}}}}"#);
+        tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        // Real order captured from claude 2.1.211: both task events land
+        // before the main-chain tool_result.
+        tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"fg1","tool_use_id":"bash-1","description":"Deliver PDF","task_type":"local_bash"}"#);
+        tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"fg1","tool_use_id":"bash-1","status":"completed","summary":"Deliver PDF"}"#);
+        let marker = format!(
+            "CETUS_ARTIFACT:{}",
+            json!({ "path": file.to_string_lossy() })
+        );
+        let events = tr.on_line(
+            &json!({
+                "type": "user",
+                "message": { "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "bash-1",
+                    "content": marker,
+                    "is_error": false
+                }]}
+            })
+            .to_string(),
+        );
+        let end = events
+            .iter()
+            .find(|event| event["type"] == "tool_execution_end")
+            .unwrap();
+        assert_eq!(end["result"]["details"]["subagent"]["type"], json!("Bash"));
+        assert_eq!(
+            end["result"]["details"]["artifacts"]["artifactKind"],
+            json!("pdf")
+        );
+        // The persisted transcript row must match what the card shows.
+        let row = tr
+            .messages
+            .iter()
+            .find(|m| m["toolCallId"] == json!("bash-1"))
+            .unwrap();
+        assert_eq!(row["details"]["artifacts"]["name"], json!("deck.pdf"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

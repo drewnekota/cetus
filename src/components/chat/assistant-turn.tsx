@@ -5,6 +5,7 @@ import { useIsStreaming, useMessagesByKeys } from "@/lib/chat-store";
 import { artifactsFromDetails } from "@/lib/artifact";
 import { useTranslation } from "@/lib/i18n";
 import { AnswerBlock, MessageActions } from "./message-blocks";
+import { messageHoverProps } from "./hover-owner";
 import { ActivityGroup, type ProcessBlock } from "./activity-group";
 
 interface Props {
@@ -124,6 +125,7 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork }: Props) {
     <div className="flex w-full justify-start py-3">
       <div
         data-message-hover-target
+        {...messageHoverProps}
         className="flex w-full max-w-[88%] flex-col gap-2 items-start"
       >
         <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">

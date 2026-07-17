@@ -1,6 +1,7 @@
 mod agent;
 mod ambient;
 mod app_event;
+mod artifact_thumbnail;
 mod auto_archive;
 mod automation;
 mod automation_api;
@@ -1103,6 +1104,56 @@ pub fn run() {
                             MAIN_HOTKEY_HIDDEN.load(std::sync::atomic::Ordering::Relaxed),
                         );
                         focus_main(&app_active);
+                        // A summon that races a Spaces transition can be
+                        // swallowed: activating via Mission Control fires this
+                        // observer while the Space-switch animation is still in
+                        // flight, and the makeKeyAndOrderFront inside focus_main
+                        // lands on a busy Spaces manager — no jump happens, and
+                        // the user is left on the new Space with an active cetus
+                        // and no window in sight. Verify shortly after the
+                        // animation window and retry once; every guard is
+                        // re-checked so a deliberate close/hide/app-switch in
+                        // the meantime is respected.
+                        let app_retry = app_active.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(700));
+                            let app_check = app_retry.clone();
+                            let _ = app_retry.run_on_main_thread(move || {
+                                if !crate::panel::app_is_active()
+                                    || main_is_parked()
+                                    || MAIN_HOTKEY_HIDDEN
+                                        .load(std::sync::atomic::Ordering::Relaxed)
+                                {
+                                    return;
+                                }
+                                let showing = app_check
+                                    .get_webview_window("main")
+                                    .map(|w| {
+                                        w.is_visible().unwrap_or(false)
+                                            && w.ns_window()
+                                                .map(|p| crate::panel::is_on_active_space(p))
+                                                .unwrap_or(true)
+                                    })
+                                    .unwrap_or(true);
+                                let other_showing = app_check.webview_windows().into_iter().any(
+                                    |(label, w)| {
+                                        !matches!(
+                                            label.as_str(),
+                                            "main" | "quick" | "voice" | "meeting"
+                                        ) && w.is_visible().unwrap_or(false)
+                                            && w.ns_window()
+                                                .map(|p| crate::panel::is_on_active_space(p))
+                                                .unwrap_or(false)
+                                    },
+                                );
+                                if !showing && !other_showing {
+                                    tracing::debug!(
+                                        "app-active observer: summon didn't stick; retrying"
+                                    );
+                                    focus_main(&app_check);
+                                }
+                            });
+                        });
                     }
                 });
             }
@@ -1267,27 +1318,54 @@ pub fn run() {
                 // genuinely open (shown), and skip a window that isn't ordered
                 // in yet (never opened / mid-recapture) — park's
                 // orderFrontRegardless would show it.
+                //
+                // A display handshake (wake, plug/unplug) fires this
+                // notification in a storm — observed 299 times over 3s — and
+                // many of those instants carry a TRANSIENT layout. Parking
+                // synchronously against a mid-transition layout is how the
+                // sliver ended up a full window-height inside the second
+                // display's visible area (a 1pt × window-height white strip on
+                // its edge). Debounce: wait for the layout to settle, park
+                // once, then park once more a second later in case the window
+                // server shuffled windows after the last notification.
                 {
                     let app_handle = app.handle().clone();
+                    static REPARK_GEN: std::sync::atomic::AtomicU64 =
+                        std::sync::atomic::AtomicU64::new(0);
                     panel::install_screen_change_observer(move || {
-                        let state = app_handle.state::<AppState>();
-                        if state
-                            .quick
-                            .shown
-                            .load(std::sync::atomic::Ordering::Relaxed)
-                        {
-                            return;
-                        }
-                        if let Some(w) = app_handle.get_webview_window("quick") {
-                            if w.is_visible().unwrap_or(false) {
-                                if let Ok(ptr) = w.ns_window() {
-                                    tracing::debug!(
-                                        "screen layout changed: re-parking quick launcher"
-                                    );
-                                    panel::park(ptr);
+                        let gen = REPARK_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        let app_handle = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            for delay_ms in [600u64, 1500] {
+                                tokio::time::sleep(std::time::Duration::from_millis(delay_ms))
+                                    .await;
+                                // A newer notification restarted the debounce.
+                                if REPARK_GEN.load(std::sync::atomic::Ordering::Relaxed) != gen {
+                                    return;
                                 }
+                                let ah = app_handle.clone();
+                                let _ = app_handle.run_on_main_thread(move || {
+                                    let state = ah.state::<AppState>();
+                                    if state
+                                        .quick
+                                        .shown
+                                        .load(std::sync::atomic::Ordering::Relaxed)
+                                    {
+                                        return;
+                                    }
+                                    if let Some(w) = ah.get_webview_window("quick") {
+                                        if w.is_visible().unwrap_or(false) {
+                                            if let Ok(ptr) = w.ns_window() {
+                                                tracing::debug!(
+                                                    "screen layout settled: re-parking quick launcher"
+                                                );
+                                                panel::park(ptr);
+                                            }
+                                        }
+                                    }
+                                });
                             }
-                        }
+                        });
                     });
                 }
                 // The dictation HUD: a never-key panel so the app being dictated
@@ -1496,6 +1574,7 @@ pub fn run() {
         agent::get_agent_settings,
         agent::set_agent_settings,
         agent::agent_stop,
+        artifact_thumbnail::get_artifact_thumbnail,
         plugins::list_plugins,
         plugins::set_plugin_enabled,
         plugins::import_plugin,
@@ -1659,6 +1738,7 @@ pub fn run() {
         agent::get_agent_settings,
         agent::set_agent_settings,
         agent::agent_stop,
+        artifact_thumbnail::get_artifact_thumbnail,
         plugins::list_plugins,
         plugins::set_plugin_enabled,
         plugins::import_plugin,
@@ -1781,12 +1861,43 @@ pub(crate) fn park_main(app: &AppHandle) {
                 return;
             }
             if let Some(w) = app2.get_webview_window("main") {
-                // A native-fullscreen window has no frame to park (and
-                // stripping its style mask mid-fullscreen would wedge the
-                // Space) — just hide it; focus_main's non-parked branch
-                // shows it again.
+                // A native-fullscreen window can't be parked in place: hiding
+                // it orders it out but leaves its (now empty) fullscreen Space
+                // behind, so the red-dot close dumps the user onto a black
+                // screen — and the app stays active with no window and no
+                // parked/hidden flag, unreachable until the next activation.
+                // Do what macOS itself does for a fullscreen close: exit
+                // fullscreen first, then park once the exit animation lands.
                 if w.is_fullscreen().unwrap_or(false) {
-                    let _ = w.hide();
+                    drop(slot);
+                    let _ = w.set_fullscreen(false);
+                    let app3 = app2.clone();
+                    tauri::async_runtime::spawn(async move {
+                        // The exit animation takes ~0.5s; poll until the
+                        // fullscreen bit clears, bounded so a wedged exit
+                        // can't loop park_main forever.
+                        let mut exited = false;
+                        for _ in 0..60 {
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            let still_fs = app3
+                                .get_webview_window("main")
+                                .map(|w| w.is_fullscreen().unwrap_or(false))
+                                .unwrap_or(false);
+                            if !still_fs {
+                                exited = true;
+                                break;
+                            }
+                        }
+                        if exited {
+                            // Let AppKit settle the restored frame, then take
+                            // the normal warm-park path.
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            park_main(&app3);
+                        } else if let Some(w) = app3.get_webview_window("main") {
+                            tracing::warn!("park_main: fullscreen exit never landed; hiding");
+                            let _ = w.hide();
+                        }
+                    });
                     return;
                 }
                 if let Ok(ptr) = w.ns_window() {

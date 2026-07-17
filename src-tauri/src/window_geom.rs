@@ -76,6 +76,12 @@ fn read_live(win: &WebviewWindow) -> Option<Geom> {
     if win.is_minimized().unwrap_or(false) {
         return None;
     }
+    // A fullscreen window's frame is the whole display, and the enter/exit
+    // transitions fire Moved/Resized too — recording any of it would restore
+    // a display-sized window later. Keep the last real windowed geometry.
+    if win.is_fullscreen().unwrap_or(false) {
+        return None;
+    }
     let pos = win.outer_position().ok()?;
     let size = win.inner_size().ok()?;
     Some(Geom {

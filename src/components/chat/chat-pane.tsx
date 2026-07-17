@@ -12,6 +12,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { MessageListBoundary } from "@/components/chat/message-list-boundary";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
+import { clearHoverOwner } from "@/components/chat/hover-owner";
 import { AgentControlCard } from "@/components/chat/agent-control-card";
 import { CliControlCard } from "@/components/chat/cli-control-card";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
@@ -589,6 +590,15 @@ function MessageList({
       if (frame != null) cancelAnimationFrame(frame);
     };
   }, [isStreaming, scroller]);
+
+  // Any scroll invalidates the hovered turn: content moved under a stationary
+  // pointer, and no pointer event will fire to hand the toolbar off or hide
+  // it. The next real pointer move re-claims (hover-owner.ts).
+  useEffect(() => {
+    if (!scroller) return;
+    scroller.addEventListener("scroll", clearHoverOwner, { passive: true });
+    return () => scroller.removeEventListener("scroll", clearHoverOwner);
+  }, [scroller]);
 
   useEffect(() => {
     if (!scroller) return;
