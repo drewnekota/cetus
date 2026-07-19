@@ -85,8 +85,13 @@ pub fn build(app_data_dir: &Path, manual: &str) -> Corpus {
     }
     let n_memory = hotwords.len() - n_manual - n_corrections - n_learned;
 
-    // 5. Live context: what the user is writing in the focused field.
-    let context = focused_snippet(MAX_CONTEXT_CHARS);
+    // 5. Live context: cursor-aware text from the focused field. Keep the old
+    // subtree reader as a fallback while the richer snapshot handles standard
+    // ranges and Chromium/Electron TextMarkers first.
+    let context = crate::focused_text::capture(app_data_dir, MAX_CONTEXT_CHARS, false)
+        .map(|snapshot| snapshot.nearby(MAX_CONTEXT_CHARS))
+        .filter(|text| !text.is_empty())
+        .or_else(|| focused_snippet(MAX_CONTEXT_CHARS));
 
     tracing::debug!(
         "biasing: hotwords ({} = manual {n_manual} + corrections {n_corrections} + learned {n_learned} + memory {n_memory}): {hotwords:?}",
@@ -171,10 +176,15 @@ pub fn unlearn(app_data_dir: &Path, term: &str) {
     }
 }
 
-/// Tail of the focused field's text, for the post-insertion correction learner
-/// (`corrections.rs`). Same best-effort AX read as the biasing snippet.
-pub(crate) fn focused_tail(max_chars: usize) -> Option<String> {
-    focused_snippet(max_chars)
+/// Cursor-aware focused field snapshot for correction learning and devtools.
+/// OCR is an explicitly requested last resort and is marked in `source` so
+/// callers can apply stricter confidence rules.
+pub(crate) fn focused_snapshot(
+    app_data_dir: &Path,
+    max_chars: usize,
+    allow_ocr: bool,
+) -> Option<crate::focused_text::FocusedTextSnapshot> {
+    crate::focused_text::capture(app_data_dir, max_chars, allow_ocr)
 }
 
 /// Learned terms whose count cleared the threshold, most-heard first.

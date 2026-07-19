@@ -195,6 +195,7 @@ const PROVIDERS: { id: string; labelKey: string; envHint: string }[] = [
 
 type SectionId =
   | "general"
+  | "remote"
   | "api-keys"
   | "memory"
   | "dreaming"
@@ -226,6 +227,7 @@ const SECTION_GROUPS: { labelKey: string; sections: Section[] }[] = [
     labelKey: "group.general",
     sections: [
       { id: "general", labelKey: "nav.general" },
+      { id: "remote", labelKey: "nav.remote" },
       { id: "appearance", labelKey: "nav.appearance" },
       { id: "keyboard-shortcuts", labelKey: "nav.keyboard-shortcuts" },
       { id: "notifications", labelKey: "nav.notifications" },
@@ -381,6 +383,8 @@ export const SettingsPage = memo(function SettingsPage({
           <div className="mx-auto w-full max-w-3xl px-6 py-8">
             {section === "general" ? (
               <GeneralSection />
+            ) : section === "remote" ? (
+              <RemoteSection />
             ) : section === "api-keys" ? (
               <ApiKeysSection
                 storedProviders={storedProviders}
@@ -442,6 +446,75 @@ function SettingsRowsSkeleton({ rows = 3 }: { rows?: number }) {
         </div>
       ))}
     </SettingsList>
+  );
+}
+
+function RemoteSection() {
+  const { t } = useTranslation("settings");
+  const [remote, setRemote] = useState<Awaited<ReturnType<typeof api.getRemoteSettings>> | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.getRemoteSettings().then(setRemote).catch(() => {});
+  }, []);
+
+  async function toggle(enabled: boolean) {
+    setBusy(true);
+    try { setRemote(await api.setRemoteEnabled(enabled)); }
+    finally { setBusy(false); }
+  }
+
+  async function rotate() {
+    setBusy(true);
+    try { setRemote(await api.rotateRemoteAccess()); }
+    finally { setBusy(false); }
+  }
+
+  async function copyUrl() {
+    if (!remote) return;
+    await navigator.clipboard.writeText(remote.pairingUrl);
+  }
+
+  return (
+    <section>
+      <SectionHeading title={t("remote.title")} description={t("remote.description")} />
+      <div className="mt-6 overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex items-center justify-between gap-5 p-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
+              <Cloud className="size-4" />
+            </div>
+            <div>
+              <Label htmlFor="remote-access" className="font-medium">{t("remote.enable")}</Label>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{t("remote.enableDescription")}</p>
+            </div>
+          </div>
+          <Switch id="remote-access" checked={remote?.enabled ?? false} disabled={!remote || busy} onCheckedChange={toggle} />
+        </div>
+        {remote?.enabled ? (
+          <div className="border-t border-border bg-muted/15 p-4">
+            <div className="grid gap-5 sm:grid-cols-[180px_1fr]">
+              <div className="overflow-hidden rounded-xl bg-white p-3" dangerouslySetInnerHTML={{ __html: remote.pairingQrSvg }} />
+              <div className="min-w-0 space-y-4">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-medium"><span className={cn("size-2 rounded-full", remote.tailscaleReady ? "bg-emerald-500" : "bg-amber-500")} />{remote.tailscaleReady ? t("remote.ready") : t("remote.localOnly")}</div>
+                  <p className="mt-1 text-xs text-muted-foreground">{remote.tailscaleMessage}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-background p-3">
+                  <p className="truncate font-mono text-xs text-foreground/80">{remote.accessUrl}</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("remote.scanHint")}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={copyUrl}><Copy className="size-3.5" />{t("remote.copy")}</Button>
+                  <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground" disabled={busy} onClick={rotate}><KeyRound className="size-3.5" />{t("remote.rotate")}</Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <p className="mt-4 text-xs leading-relaxed text-muted-foreground">{t("remote.security")}</p>
+    </section>
   );
 }
 
@@ -1232,14 +1305,18 @@ function LauncherSection() {
     "double_opt",
   ];
 
-  // The no-screenshot launcher is the "primary" one shown in the enable hint;
-  // fall back to the screenshot one if it's off.
+  // Show the first enabled global gesture in the master-switch hint.
   const gestureLabel = gestureName(
-    settings.gesturePlain !== "off" ? settings.gesturePlain : settings.gestureShot,
+    settings.gesturePlain !== "off"
+      ? settings.gesturePlain
+      : settings.gestureShot !== "off"
+        ? settings.gestureShot
+        : settings.gestureReply,
   );
 
-  // Only the with-screenshot function needs Screen Recording permission.
-  const wantsScreenshot = settings.gestureShot !== "off";
+  // Screenshot launch and direct visual replies both need Screen Recording.
+  const wantsScreenshot =
+    settings.gestureShot !== "off" || settings.gestureReply !== "off";
 
   return (
     <section>
@@ -1314,9 +1391,7 @@ function LauncherSection() {
           !settings.enabled && "pointer-events-none opacity-50",
         )}
       >
-        {/* Two launchers, organized by function: each opens the same panel, one
-            with a screenshot attached and one without — assign any gesture (or
-            Off) to each. */}
+        {/* Each function owns one collision-free global modifier gesture. */}
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0 space-y-0.5">
             <Label className="font-medium">{t("launcher.fn.plain.label")}</Label>
@@ -1336,7 +1411,7 @@ function LauncherSection() {
                 (g) =>
                   g === "off" ||
                   g === settings.gesturePlain ||
-                  g !== settings.gestureShot,
+                  (g !== settings.gestureShot && g !== settings.gestureReply),
               ).map((g) => (
                 <SelectItem key={g} value={g}>
                   {gestureName(g)}
@@ -1365,7 +1440,36 @@ function LauncherSection() {
                 (g) =>
                   g === "off" ||
                   g === settings.gestureShot ||
-                  g !== settings.gesturePlain,
+                  (g !== settings.gesturePlain && g !== settings.gestureReply),
+              ).map((g) => (
+                <SelectItem key={g} value={g}>
+                  {gestureName(g)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 space-y-0.5">
+            <Label className="font-medium">{t("launcher.fn.reply.label")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("launcher.fn.reply.description")}
+            </p>
+          </div>
+          <Select
+            value={settings.gestureReply}
+            onValueChange={(v) => update({ gestureReply: v as QuickGesture })}
+          >
+            <SelectTrigger className="w-52 shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {GESTURE_OPTS.filter(
+                (g) =>
+                  g === "off" ||
+                  g === settings.gestureReply ||
+                  (g !== settings.gesturePlain && g !== settings.gestureShot),
               ).map((g) => (
                 <SelectItem key={g} value={g}>
                   {gestureName(g)}
@@ -1795,6 +1899,19 @@ function VoiceSection() {
               {t("voice.triggerKey.capsNote")}
             </p>
           )}
+        </div>
+
+        <div className="rounded-lg border border-border">
+          <ToggleRow
+            id="voice-handsfree-shortcut"
+            label={t("voice.handsfreeShortcut.label")}
+            description={t("voice.handsfreeShortcut.description", {
+              gesture: gestureLabel,
+            })}
+            checked={settings.voiceHandsfreeShortcut}
+            onCheckedChange={(v) => update({ voiceHandsfreeShortcut: v })}
+            boxed
+          />
         </div>
 
         <div className="rounded-lg border border-border">

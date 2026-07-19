@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AppWindow, CornerDownLeft, File, Globe, ImageOff, Loader2, Paperclip, TextSelect, X } from "lucide-react";
+import { AppWindow, Check, CornerDownLeft, File, Globe, ImageOff, Loader2, Paperclip, Sparkles, TextSelect, X } from "lucide-react";
 import { formatBytes } from "@/lib/artifact";
 import { Kbd } from "@/components/ui/kbd";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
@@ -31,6 +31,8 @@ import {
   type QuickAttachment,
   type QuickOpenPayload,
   type QuickOpenUrlPayload,
+  type QuickReplyOpenPayload,
+  type QuickReplyResultPayload,
   type QuickScreenshot,
   type QuickSessionMode,
 } from "@/lib/types";
@@ -93,6 +95,12 @@ export function QuickPanel() {
   const [submitting, setSubmitting] = useState(false);
   // Whether any non-archived chat exists — gates the "Last" session option.
   const [hasLastChat, setHasLastChat] = useState(true);
+  const [surface, setSurface] = useState<"launcher" | "reply">("launcher");
+  const [replyOpen, setReplyOpen] = useState<QuickReplyOpenPayload | null>(null);
+  const [replyResult, setReplyResult] = useState<QuickReplyResultPayload | null>(null);
+  const [replyIndex, setReplyIndex] = useState(0);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [insertingReply, setInsertingReply] = useState(false);
 
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -223,6 +231,7 @@ export function QuickPanel() {
     let cancelled = false;
     listen<QuickOpenPayload>("quick-open", (e) => {
       const p = e.payload;
+      setSurface("launcher");
       openIdRef.current = p.openId;
       setText("");
       setAttachments([]);
@@ -266,6 +275,50 @@ export function QuickPanel() {
       unlisten?.();
     };
   }, [focusSoon]);
+
+  // Direct visual reply is a separate state of the same warm, non-activating
+  // window. The open event paints a loading shell immediately; the model result
+  // arrives later and is accepted only for the matching capture token.
+  useEffect(() => {
+    let unlistenOpen: (() => void) | undefined;
+    let unlistenResult: (() => void) | undefined;
+    let cancelled = false;
+    Promise.all([
+      listen<QuickReplyOpenPayload>("quick-reply-open", (e) => {
+        setSurface("reply");
+        setReplyOpen(e.payload);
+        setReplyResult(null);
+        setReplyIndex(0);
+        setReplyDraft("");
+        setInsertingReply(false);
+        openingRef.current = true;
+        window.setTimeout(() => { openingRef.current = false; }, 400);
+      }),
+      listen<QuickReplyResultPayload>("quick-reply-result", (e) => {
+        setReplyOpen((current) => {
+          if (!current || current.openId !== e.payload.openId) return current;
+          setReplyResult(e.payload);
+          const first = e.payload.output?.candidates[0] ?? "";
+          setReplyIndex(0);
+          setReplyDraft(first);
+          return current;
+        });
+      }),
+    ]).then(([open, result]) => {
+      if (cancelled) {
+        open();
+        result();
+      } else {
+        unlistenOpen = open;
+        unlistenResult = result;
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlistenOpen?.();
+      unlistenResult?.();
+    };
+  }, []);
 
   // The browser URL is fetched after the panel presents (off the first-paint
   // path) and streamed in here. Merge it into the existing context only — if the
@@ -363,6 +416,29 @@ export function QuickPanel() {
     }
   }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, ultraEnabled, backend, cliModel, cliEffort]);
 
+  const insertReply = useCallback(async () => {
+    const value = replyDraft.trim();
+    if (!value || insertingReply) return;
+    setInsertingReply(true);
+    submittingRef.current = true;
+    try {
+      await api.quickReplyInsert(value);
+      setReplyDraft("");
+      setReplyResult(null);
+      setReplyOpen(null);
+    } catch {
+      setInsertingReply(false);
+      submittingRef.current = false;
+    }
+  }, [replyDraft, insertingReply]);
+
+  const chooseReply = useCallback((index: number) => {
+    const candidate = replyResult?.output?.candidates[index];
+    if (candidate === undefined) return;
+    setReplyIndex(index);
+    setReplyDraft(candidate);
+  }, [replyResult]);
+
   const addFiles = useCallback(async (files: FileList | File[]) => {
     setAttachError(null);
     const next: QuickAttachment[] = [];
@@ -422,6 +498,22 @@ export function QuickPanel() {
       e.preventDefault();
       void submit();
     }
+  }
+
+  if (surface === "reply") {
+    return (
+      <QuickReplySurface
+        open={replyOpen}
+        result={replyResult}
+        selectedIndex={replyIndex}
+        draft={replyDraft}
+        inserting={insertingReply}
+        onChoose={chooseReply}
+        onDraftChange={setReplyDraft}
+        onInsert={() => { void insertReply(); }}
+        onDismiss={() => { api.quickDismiss().catch(() => {}); }}
+      />
+    );
   }
 
   // Every action-strip control shares one quiet language: borderless ghost
@@ -591,6 +683,141 @@ export function QuickPanel() {
         </span>
       </div>
       {attachError && <div className="absolute bottom-12 left-4 text-[11px] text-destructive">{attachError}</div>}
+    </div>
+  );
+}
+
+function QuickReplySurface({
+  open,
+  result,
+  selectedIndex,
+  draft,
+  inserting,
+  onChoose,
+  onDraftChange,
+  onInsert,
+  onDismiss,
+}: {
+  open: QuickReplyOpenPayload | null;
+  result: QuickReplyResultPayload | null;
+  selectedIndex: number;
+  draft: string;
+  inserting: boolean;
+  onChoose: (index: number) => void;
+  onDraftChange: (value: string) => void;
+  onInsert: () => void;
+  onDismiss: () => void;
+}) {
+  const { t } = useTranslation("quick");
+  const candidates = result?.output?.candidates ?? [];
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.defaultPrevented) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onDismiss();
+      return;
+    }
+    if (e.key === "Tab" && candidates.length > 0) {
+      e.preventDefault();
+      const delta = e.shiftKey ? -1 : 1;
+      onChoose((selectedIndex + delta + candidates.length) % candidates.length);
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      if ((e.nativeEvent as KeyboardEvent).isComposing) return;
+      e.preventDefault();
+      onInsert();
+    }
+  }
+
+  return (
+    <div
+      tabIndex={-1}
+      autoFocus
+      onKeyDown={onKeyDown}
+      className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_30%)] font-medium text-foreground ring-1 ring-[var(--ink)]/[0.05] outline-none dark:bg-[color-mix(in_oklab,var(--card),transparent_32%)] dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)]"
+    >
+      <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-black/[0.06] px-5 dark:border-white/[0.06]">
+        <span className="flex size-7 items-center justify-center rounded-lg bg-violet-500/12 text-violet-600 dark:text-violet-300">
+          <Sparkles className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">{t("reply.title")}</div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {open?.app ? t("reply.readingApp", { app: open.app }) : t("reply.readingScreen")}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={t("footer.dismiss")}
+          className="ml-auto inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/[0.08]"
+        >
+          <X className="size-3.5" />
+        </button>
+      </header>
+
+      {!result ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+          <Loader2 className="size-5 animate-spin text-violet-500" />
+          <span>{open?.screenshotPermission === false ? t("reply.permission") : t("reply.generating")}</span>
+        </div>
+      ) : result.error ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-10 text-center">
+          <ImageOff className="size-5 text-warning" />
+          <div className="max-w-xl text-sm text-foreground">{result.error}</div>
+          <div className="text-xs text-muted-foreground">{t("reply.retryHint")}</div>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col gap-3 px-5 py-4">
+          {result.output?.context && (
+            <div className="truncate text-xs text-muted-foreground" title={result.output.context}>
+              {result.output.context}
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-2">
+            {candidates.map((candidate, index) => (
+              <button
+                type="button"
+                key={`${index}-${candidate}`}
+                onClick={() => onChoose(index)}
+                className={cn(
+                  "relative h-[86px] overflow-hidden rounded-xl border px-3 py-2.5 text-left text-[13px] leading-5 transition-colors",
+                  index === selectedIndex
+                    ? "border-violet-500/45 bg-violet-500/10 text-foreground"
+                    : "border-black/8 bg-black/[0.025] text-foreground/80 hover:bg-black/[0.05] dark:border-white/8 dark:bg-white/[0.035] dark:hover:bg-white/[0.07]",
+                )}
+              >
+                <span className="line-clamp-3">{candidate}</span>
+                {index === selectedIndex && (
+                  <Check className="absolute bottom-2 right-2 size-3.5 text-violet-500" />
+                )}
+              </button>
+            ))}
+          </div>
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => onDraftChange(e.target.value)}
+            onKeyDown={onKeyDown}
+            aria-label={t("reply.edit")}
+            className="min-h-0 flex-1 resize-none rounded-xl border border-black/8 bg-white/35 px-3.5 py-2.5 text-sm leading-5 outline-none focus:border-violet-500/40 focus:ring-2 focus:ring-violet-500/10 dark:border-white/8 dark:bg-black/15"
+          />
+        </div>
+      )}
+
+      <footer className="flex h-11 shrink-0 items-center border-t border-black/[0.06] px-5 text-xs text-muted-foreground dark:border-white/[0.06]">
+        <span>{result?.output ? t("reply.provider", { provider: result.output.provider }) : t("reply.visionDirect")}</span>
+        <span className="ml-auto flex items-center gap-2">
+          {candidates.length > 1 && <><Kbd>⇥</Kbd>{t("reply.switch")}</>}
+          <Kbd><CornerDownLeft className="size-2.5" /></Kbd>
+          {inserting ? t("reply.inserting") : t("reply.insert")}
+          <span className="text-muted-foreground/35">·</span>
+          <Kbd>esc</Kbd>
+          {t("footer.dismiss")}
+        </span>
+      </footer>
     </div>
   );
 }

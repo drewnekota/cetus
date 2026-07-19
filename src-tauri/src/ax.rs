@@ -6,9 +6,10 @@
 //! focused-field dictation context and the correction-mining re-reads.
 //! Electron documents `AXManualAccessibility` as the per-process attribute a
 //! third-party app sets to force the tree on (it resets when the app quits).
-//! Some builds hit electron#37465, where that attribute answers
-//! `kAXErrorAttributeUnsupported`; those still honor the legacy Chromium flag
-//! `AXEnhancedUserInterface`, so we fall back to it.
+//! Some editors (notably VS Code/Monaco) expose their text only after the
+//! assistive-client signal `AXEnhancedUserInterface`, so Electron processes get
+//! both flags. Builds affected by electron#37465 may reject the manual flag but
+//! still honor the enhanced-UI signal.
 //!
 //! Only apps that actually ship `Electron Framework.framework` are touched:
 //! `AXEnhancedUserInterface` doubles as the "VoiceOver is running" signal and
@@ -111,9 +112,10 @@ pub fn wake_frontmost_app() {
             AXUIElementSetAttributeValue(el, manual.as_concrete_TypeRef(), yes.as_CFTypeRef());
         if err == kAXErrorSuccess {
             tracing::debug!("ax: AXManualAccessibility enabled on Electron app pid {pid}");
-            return;
         }
-        // electron#37465 (and older Electrons): take the legacy Chromium flag.
+        // Also announce an active assistive client. Monaco/VS Code uses this to
+        // make the focused editor text accessible; older Electron builds use it
+        // as the fallback when AXManualAccessibility is unsupported.
         let legacy = CFString::new("AXEnhancedUserInterface");
         let err2 =
             AXUIElementSetAttributeValue(el, legacy.as_concrete_TypeRef(), yes.as_CFTypeRef());
@@ -124,6 +126,72 @@ pub fn wake_frontmost_app() {
             );
         } else {
             tracing::debug!("ax: could not wake Electron app pid {pid} (errors {err} / {err2})");
+        }
+    }
+}
+
+/// Targeted variant used by diagnostics and any caller that already has the
+/// application PID. This is also useful when an AX automation driver focuses an
+/// editor without changing NSWorkspace's frontmost application.
+#[cfg(target_os = "macos")]
+pub(crate) fn wake_app(pid: i32) {
+    use accessibility_sys::{
+        kAXErrorSuccess, AXIsProcessTrusted, AXUIElementCreateApplication,
+        AXUIElementSetAttributeValue,
+    };
+    use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::string::CFString;
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+    use std::ffi::CStr;
+
+    if pid <= 0 || !unsafe { AXIsProcessTrusted() } {
+        return;
+    }
+    let bundle_path = unsafe {
+        let Some(cls) = AnyClass::get(c"NSRunningApplication") else {
+            return;
+        };
+        let running: *mut AnyObject = msg_send![cls, runningApplicationWithProcessIdentifier: pid];
+        if running.is_null() {
+            return;
+        }
+        let url: *mut AnyObject = msg_send![running, bundleURL];
+        if url.is_null() {
+            return;
+        }
+        let path: *mut AnyObject = msg_send![url, path];
+        if path.is_null() {
+            return;
+        }
+        let raw: *const std::os::raw::c_char = msg_send![path, UTF8String];
+        if raw.is_null() {
+            return;
+        }
+        std::path::PathBuf::from(CStr::from_ptr(raw).to_string_lossy().into_owned())
+    };
+    if !bundle_path
+        .join("Contents/Frameworks/Electron Framework.framework")
+        .exists()
+    {
+        return;
+    }
+    unsafe {
+        let raw = AXUIElementCreateApplication(pid);
+        if raw.is_null() {
+            return;
+        }
+        let owner = CFType::wrap_under_create_rule(raw as CFTypeRef);
+        let el = owner.as_CFTypeRef() as accessibility_sys::AXUIElementRef;
+        let yes = CFBoolean::true_value();
+        for name in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
+            let key = CFString::new(name);
+            let err =
+                AXUIElementSetAttributeValue(el, key.as_concrete_TypeRef(), yes.as_CFTypeRef());
+            if err == kAXErrorSuccess {
+                tracing::debug!("ax: {name} enabled on targeted Electron app pid {pid}");
+            }
         }
     }
 }

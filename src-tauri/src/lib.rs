@@ -22,6 +22,7 @@ mod cua;
 mod devtest;
 mod discovery;
 mod doubao;
+mod focused_text;
 mod dream;
 #[cfg(target_os = "macos")]
 mod host_tunnel;
@@ -42,6 +43,8 @@ mod plugins;
 mod prompts;
 mod provider;
 mod quick;
+mod quick_reply;
+mod remote;
 mod resources;
 mod run_engine;
 mod scheduler;
@@ -124,8 +127,7 @@ pub struct AppState {
         std::sync::Mutex<HashMap<String, cetus_bridge::cli_agent::ClaudeSessionHandle>>,
     /// Conversation-scoped Codex app-server threads. Background terminals are
     /// owned here and therefore survive `turn/completed`.
-    codex_sessions:
-        std::sync::Mutex<HashMap<String, cetus_bridge::cli_agent::CodexSessionHandle>>,
+    codex_sessions: std::sync::Mutex<HashMap<String, cetus_bridge::cli_agent::CodexSessionHandle>>,
 }
 
 /// One line bound for a running CLI turn's stdin.
@@ -839,6 +841,7 @@ pub fn run() {
             // Quick-launcher config drives both the panel and the native gesture
             // listener; build the shared runtime from persisted settings.
             quick::migrate_voice_defaults(&store);
+            quick::migrate_shortcut_defaults(&store);
             let quick_settings = quick::load_settings(&store);
             let quick_runtime = quick::QuickRuntime::from_settings(&quick_settings);
             // If Caps Lock is the active voice trigger, (re)apply the HID remap
@@ -938,6 +941,9 @@ pub fn run() {
                 claude_sessions: std::sync::Mutex::new(HashMap::new()),
                 codex_sessions: std::sync::Mutex::new(HashMap::new()),
             });
+            let remote_runtime = remote::RemoteRuntime::new(&app.state::<AppState>().store);
+            app.manage(remote_runtime);
+            remote::initialize(app.handle().clone());
             app.manage(terminal::TerminalRuntime::default());
 
             // Meeting memory: the single in-flight capture session, shared by
@@ -1441,6 +1447,9 @@ pub fn run() {
         commands::conversation_worktree,
         commands::workspace_git_branch,
         commands::set_conversation_cli_model,
+        remote::get_remote_settings,
+        remote::set_remote_enabled,
+        remote::rotate_remote_access,
         resources::resources_snapshot,
         cli_backend::get_cli_agent_settings,
         cli_backend::set_cli_agent_settings,
@@ -1560,6 +1569,7 @@ pub fn run() {
         updater::relaunch_app,
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,
+        quick::quick_reply_insert,
         quick::quick_submit,
         quick::accessibility_trusted,
         quick::request_accessibility,
@@ -1605,6 +1615,9 @@ pub fn run() {
         commands::conversation_worktree,
         commands::workspace_git_branch,
         commands::set_conversation_cli_model,
+        remote::get_remote_settings,
+        remote::set_remote_enabled,
+        remote::rotate_remote_access,
         resources::resources_snapshot,
         cli_backend::get_cli_agent_settings,
         cli_backend::set_cli_agent_settings,
@@ -1724,6 +1737,7 @@ pub fn run() {
         updater::relaunch_app,
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,
+        quick::quick_reply_insert,
         quick::quick_submit,
         quick::accessibility_trusted,
         quick::request_accessibility,

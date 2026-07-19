@@ -94,6 +94,10 @@ interface Props {
   backendSwitch?: { token: number; backend: BackendId } | null;
   /** Tab-to-cycle-runtime request, forwarded to the Composer. */
   onRequestBackendSwitch?: (backend: BackendId) => void;
+  /** Nudge the reading column toward the sidebar on wide desktop layouts.
+   *  The main shell enables this only while the right workspace dock is closed;
+   *  embedded/detail chat surfaces keep true geometric centering. */
+  opticalCenter?: boolean;
 }
 
 /** The shared "chat experience" body — messages list + composer with
@@ -132,6 +136,7 @@ export function ChatPane({
   onPendingTuningChange,
   backendSwitch,
   onRequestBackendSwitch,
+  opticalCenter = false,
 }: Props) {
   const { locale } = useTranslation("chat");
   const hasMessages = useHasMessages(convId);
@@ -205,7 +210,11 @@ export function ChatPane({
     return (
       <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <GlyphBackdrop />
-        <div className="relative z-10 w-full max-w-2xl space-y-5">
+        <div
+          className={`relative z-10 w-full max-w-2xl space-y-5 ${
+            opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
+          }`}
+        >
           <h2 className="text-center font-serif text-3xl italic tracking-tight text-foreground">
             {headline}
           </h2>
@@ -251,10 +260,15 @@ export function ChatPane({
           onForkMessage={onForkMessage}
           retrying={retrying}
           onQuote={addQuote}
+          opticalCenter={opticalCenter}
         />
       </MessageListBoundary>
       <div className="relative z-10 bg-background px-4 pb-3 pt-2">
-        <div className="mx-auto max-w-3xl space-y-2">
+        <div
+          className={`mx-auto max-w-3xl space-y-2 ${
+            opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
+          }`}
+        >
           {convId ? <BackgroundAgentsBar convId={convId} /> : null}
           {convId ? <CliControlCard convId={convId} /> : null}
           {convId ? <AgentControlCard conversationId={convId} /> : null}
@@ -410,6 +424,7 @@ function MessageList({
   onForkMessage,
   retrying,
   onQuote,
+  opticalCenter,
 }: {
   convId: string | null;
   isStreaming: boolean;
@@ -418,6 +433,7 @@ function MessageList({
   onForkMessage?: (messageKey: string, messageIndex: number) => void;
   retrying?: boolean;
   onQuote: (text: string) => void;
+  opticalCenter: boolean;
 }) {
   const keys = useMessageKeys(convId);
   const roles = useMessageRoles(convId);
@@ -633,14 +649,22 @@ function MessageList({
     (index: number, item: MessageListItem) => {
       if (item.kind === "thinking") {
         return (
-          <div className="mx-auto max-w-3xl px-6">
+          <div
+            className={`mx-auto max-w-3xl px-6 ${
+              opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
+            }`}
+          >
             <ThinkingPlaceholder />
           </div>
         );
       }
       if (item.kind === "error") {
         return (
-          <div className="mx-auto max-w-3xl px-6">
+          <div
+            className={`mx-auto max-w-3xl px-6 ${
+              opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
+            }`}
+          >
             <MessageError convId={convId} onRetry={onRetry} retrying={retrying} />
           </div>
         );
@@ -686,7 +710,15 @@ function MessageList({
           />
         );
       // Center each turn on the reading column. Virtuoso measures this wrapper.
-      return <div className="mx-auto max-w-3xl px-6">{node}</div>;
+      return (
+        <div
+          className={`mx-auto max-w-3xl px-6 ${
+            opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
+          }`}
+        >
+          {node}
+        </div>
+      );
     },
     [
       items.length,
@@ -699,6 +731,7 @@ function MessageList({
       hasError,
       onRetry,
       retrying,
+      opticalCenter,
     ],
   );
 
@@ -743,7 +776,11 @@ function MessageList({
         atBottom={atBottom}
         virtuosoRef={virtuosoRef}
       />
-      <ScrollToBottomButton show={showScrollToBottom} virtuosoRef={virtuosoRef} />
+      <ScrollToBottomButton
+        show={showScrollToBottom}
+        virtuosoRef={virtuosoRef}
+        opticalCenter={opticalCenter}
+      />
     </div>
   );
 }
@@ -869,9 +906,11 @@ function TurnPreview({
 function ScrollToBottomButton({
   show,
   virtuosoRef,
+  opticalCenter,
 }: {
   show: boolean;
   virtuosoRef: RefObject<VirtuosoHandle | null>;
+  opticalCenter: boolean;
 }) {
   const { t } = useTranslation("chat");
 
@@ -889,7 +928,9 @@ function ScrollToBottomButton({
       aria-label={t("pane.scrollToBottom")}
       title={t("pane.scrollToBottom")}
       onClick={scrollToBottom}
-      className={`absolute bottom-4 left-1/2 z-30 flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] transition-all duration-150 hover:bg-muted ${
+      className={`absolute bottom-4 right-[max(1rem,calc((100%-48rem)/2))] z-30 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] transition-all duration-150 hover:bg-muted ${
+        opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
+      } ${
         show
           ? "pointer-events-auto translate-y-0 opacity-100"
           : "pointer-events-none translate-y-2 opacity-0"
@@ -925,7 +966,7 @@ function QuoteSelectionToolbar({
     setSelection(null);
   }, [scroller]);
 
-  const readSelection = useCallback(() => {
+  const readSelection = useCallback((trimTrailingBoundary = false) => {
     const root = scroller;
     const sel = window.getSelection();
     if (!root || !sel || sel.rangeCount === 0 || sel.isCollapsed) {
@@ -933,12 +974,27 @@ function QuoteSelectionToolbar({
       return;
     }
 
-    const range = sel.getRangeAt(0);
+    let range = sel.getRangeAt(0);
     const ancestor = range.commonAncestorContainer;
     const node = ancestor.nodeType === Node.ELEMENT_NODE ? ancestor : ancestor.parentNode;
     if (!node || !root.contains(node)) {
       setSelection(null);
       return;
+    }
+
+    // Dragging past the end of a markdown paragraph makes WebKit include the
+    // paragraph's block boundary in the Range. Its native ::selection paint
+    // then fills the otherwise-empty remainder of the row. Once the gesture is
+    // complete, move only that structural endpoint back to the final selected
+    // text node; endpoints already inside text (including deliberate spaces)
+    // are left untouched.
+    if (trimTrailingBoundary) {
+      const trimmed = trimTrailingBlockBoundary(range, root);
+      if (trimmed) {
+        sel.removeAllRanges();
+        sel.addRange(trimmed);
+        range = trimmed;
+      }
     }
 
     const text = sel.toString().trim();
@@ -988,9 +1044,9 @@ function QuoteSelectionToolbar({
       sel.removeAllRanges();
       setSelection(null);
     };
-    const onPointerUp = () => window.setTimeout(readSelection, 0);
-    const onKeyUp = () => readSelection();
-    const onSelectionChange = () => readSelection();
+    const onPointerUp = () => window.setTimeout(() => readSelection(true), 0);
+    const onKeyUp = () => readSelection(true);
+    const onSelectionChange = () => readSelection(false);
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") clearSelection();
     };
@@ -1042,6 +1098,23 @@ function QuoteSelectionToolbar({
     </div>,
     document.body,
   );
+}
+
+/** Remove a selected block boundary without altering a genuine text endpoint. */
+function trimTrailingBlockBoundary(range: Range, root: HTMLElement): Range | null {
+  if (range.endContainer.nodeType === Node.TEXT_NODE) return null;
+
+  let finalText: Text | null = null;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (node.data && range.intersectsNode(node)) finalText = node;
+  }
+  if (!finalText) return null;
+
+  const trimmed = range.cloneRange();
+  trimmed.setEnd(finalText, finalText.data.length);
+  return trimmed.collapsed ? null : trimmed;
 }
 
 function sameRangeBoundaries(a: Range, b: Range): boolean {

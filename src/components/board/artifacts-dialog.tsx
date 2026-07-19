@@ -51,7 +51,7 @@ export function ArtifactsDialog({ convId, title, open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[calc(100svh/var(--zoom,1)-6rem)] max-h-[calc(100svh/var(--zoom,1)-6rem)] w-[calc(100svw/var(--zoom,1)-6rem)] !max-w-5xl flex-col gap-0 overflow-hidden bg-background p-0">
+      <DialogContent className="flex h-[calc(100svh-6rem)] max-h-[calc(100svh-6rem)] w-[calc(100svw-6rem)] !max-w-5xl flex-col gap-0 overflow-hidden bg-background p-0">
         <DialogHeader className="shrink-0 border-b border-border px-6 py-4 pr-12 text-left">
           <DialogTitle className="flex items-center gap-2 text-base font-semibold">
             <Inbox className="size-4 shrink-0 text-muted-foreground" />

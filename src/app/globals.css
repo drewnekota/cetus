@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@xterm/xterm/css/xterm.css";
+@import "../styles/cetus-tokens.css";
 @plugin "@tailwindcss/typography";
 
 /* Make `.dark` an opt-in dark mode variant (layout.tsx sets it on <html>). */

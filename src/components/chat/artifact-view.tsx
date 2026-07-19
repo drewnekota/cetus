@@ -172,10 +172,67 @@ function Thumbnail({
         />
       );
     case "pdf":
-      return <IconThumb Icon={FileText} label="PDF" />;
+      return (
+        <NativeThumbnail
+          artifact={artifact}
+          fallback={<IconThumb Icon={FileText} label="PDF" />}
+        />
+      );
     default:
-      return <IconThumb Icon={FileIcon} label={extLabel(artifact, t)} />;
+      return (
+        <NativeThumbnail
+          artifact={artifact}
+          fallback={<IconThumb Icon={FileIcon} label={extLabel(artifact, t)} />}
+        />
+      );
   }
+}
+
+function useArtifactThumbnail(path: string) {
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setThumbnailUrl(null);
+    invoke<string | null>("get_artifact_thumbnail", { path })
+      .then((thumbnailPath) => {
+        if (!cancelled && thumbnailPath) {
+          setThumbnailUrl(artifactUrl(thumbnailPath));
+        }
+      })
+      // Quick Look may not support every file type. Callers retain their
+      // existing icon or media fallback on macOS and other platforms.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  return { thumbnailUrl, clearThumbnail: () => setThumbnailUrl(null) };
+}
+
+function NativeThumbnail({
+  artifact,
+  fallback,
+}: {
+  artifact: ArtifactDetails;
+  fallback: React.ReactNode;
+}) {
+  const { thumbnailUrl, clearThumbnail } = useArtifactThumbnail(artifact.path);
+
+  if (!thumbnailUrl) return <>{fallback}</>;
+
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-muted/20 p-3">
+      <img
+        src={thumbnailUrl}
+        alt={artifact.caption ?? artifact.name}
+        className="h-full w-full object-contain drop-shadow-sm transition-transform duration-500 group-hover/preview-card:scale-[1.02]"
+        loading="lazy"
+        onError={clearThumbnail}
+      />
+    </div>
+  );
 }
 
 function VideoThumbnail({
@@ -185,23 +242,8 @@ function VideoThumbnail({
   artifact: ArtifactDetails;
   url: string;
 }) {
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const { thumbnailUrl, clearThumbnail } = useArtifactThumbnail(artifact.path);
   const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setThumbnailUrl(null);
-    invoke<string | null>("get_artifact_thumbnail", { path: artifact.path })
-      .then((path) => {
-        if (!cancelled && path) setThumbnailUrl(artifactUrl(path));
-      })
-      // Quick Look may not support every codec. The video element below is the
-      // cross-platform fallback and seeks just far enough to paint a real frame.
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [artifact.path]);
 
   const mediaClass =
     "h-full w-full object-cover transition-transform duration-500 group-hover/preview-card:scale-[1.03]";
@@ -214,7 +256,7 @@ function VideoThumbnail({
           alt={artifact.caption ?? artifact.name}
           className={mediaClass}
           loading="lazy"
-          onError={() => setThumbnailUrl(null)}
+          onError={clearThumbnail}
         />
       ) : (
         <video
@@ -316,7 +358,7 @@ function ArtifactPreviewDialog({
       <DialogContent
         showCloseButton={false}
         aria-describedby={undefined}
-        className="flex h-[calc(100svh/var(--zoom,1)-4rem)] w-[calc(100svw/var(--zoom,1)-4rem)] max-w-none flex-col gap-0 overflow-hidden bg-background p-0 duration-200 data-[state=open]:slide-in-from-bottom-4 sm:max-w-none"
+        className="flex h-[calc(100svh-4rem)] w-[calc(100svw-4rem)] max-w-none flex-col gap-0 overflow-hidden bg-background p-0 duration-200 data-[state=open]:slide-in-from-bottom-4 sm:max-w-none"
       >
         <DialogTitle className="sr-only">{artifact.name}</DialogTitle>
         <header className="flex items-center justify-between gap-4 border-b border-border px-5 py-3">

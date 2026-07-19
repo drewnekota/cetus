@@ -1115,10 +1115,17 @@ pub(crate) fn preview(s: &str) -> String {
 
 // ---- Global dictation HUD -------------------------------------------------
 
+/// Invalidates delayed HUD hides. A dictionary toast can still be on its
+/// three-second timer when the user starts another dictation; the old timer
+/// must never hide the fresh recording capsule.
+#[cfg(target_os = "macos")]
+static HUD_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Float the dictation HUD over the current Space without stealing key focus
 /// from the app the user is dictating into. macOS only.
 #[cfg(target_os = "macos")]
 pub fn show_hud(app: &AppHandle) {
+    HUD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     // Stamp before ANY event/sound/window work. Some of those operations can make
     // macOS briefly mark cetus active; the activation observer must see this as a
     // voice-HUD open and leave the parked/hidden main window alone.
@@ -1163,6 +1170,42 @@ pub fn show_hud(app: &AppHandle) {
         }
     });
 }
+
+/// Re-use the non-activating voice panel as a brief, in-context confirmation
+/// that a spelling correction was saved. It stays over the app the user is
+/// typing in without stealing focus from that app.
+#[cfg(target_os = "macos")]
+pub fn show_dictionary_toast(app: &AppHandle, terms: Vec<String>) {
+    let gen = HUD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    app.state::<AppState>()
+        .quick
+        .last_open_ms
+        .store(crate::store::now_ms(), std::sync::atomic::Ordering::Relaxed);
+    let _ = app.emit(
+        "voice-dictionary-added",
+        serde_json::json!({ "target": "global", "terms": terms }),
+    );
+    let app_for_main = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(win) = app_for_main.get_webview_window("voice") else {
+            return;
+        };
+        if let Ok(ptr) = win.ns_window() {
+            crate::panel::bottom_center_on_mouse_screen(ptr);
+            crate::panel::present_inactive(ptr);
+        }
+    });
+    let app_for_hide = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        if HUD_GEN.load(std::sync::atomic::Ordering::Relaxed) == gen {
+            hide_hud(&app_for_hide);
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn show_dictionary_toast(_app: &AppHandle, _terms: Vec<String>) {}
 
 /// A soft "bubble" pop the moment the capsule appears, so the start of dictation
 /// has an audible cue. macOS system sound at low volume, on a detached thread so

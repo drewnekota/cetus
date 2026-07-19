@@ -565,6 +565,65 @@ async fn dispatch(app: &AppHandle, req: &Value) -> Value {
             None => Err("computerObserve requires `request`".to_string()),
         },
 
+        "voiceContext" => {
+            let state = app.state::<AppState>();
+            let app_data_dir = state.app_data_dir.clone();
+            let allow_ocr = req.get("ocr").and_then(|v| v.as_bool()).unwrap_or(true);
+            let target_pid = req.get("pid").and_then(|v| v.as_i64()).map(|v| v as i32);
+            let target_app = s("app").unwrap_or_default();
+            let target_bundle = s("bundle").unwrap_or_default();
+            match tokio::task::spawn_blocking(move || {
+                let identity = crate::ax::frontmost_identity();
+                #[cfg(target_os = "macos")]
+                let ax_trusted = unsafe { accessibility_sys::AXIsProcessTrusted() };
+                #[cfg(not(target_os = "macos"))]
+                let ax_trusted = false;
+                let captured = if let Some(pid) = target_pid {
+                    crate::focused_text::capture_pid(target_app, target_bundle, pid, 8_000)
+                } else {
+                    crate::biasing::focused_snapshot(&app_data_dir, 8_000, allow_ocr)
+                };
+                captured
+                    .map(|snapshot| serde_json::to_value(snapshot).map_err(|e| e.to_string()))
+                    .transpose()
+                    .map(|snapshot| {
+                        json!({
+                            "snapshot": snapshot,
+                            "frontmost": identity.map(|(app, bundle_id, pid)| json!({
+                                "app": app, "bundleId": bundle_id, "pid": pid
+                            })),
+                            "axTrusted": ax_trusted,
+                        })
+                    })
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(e) => Err(format!("voiceContext task failed: {e}")),
+            }
+        }
+
+        "watchCorrection" => match (s("text"), s("dir")) {
+            (Some(text), Some(dir)) => {
+                if let Some(pid) = req.get("pid").and_then(|v| v.as_i64()) {
+                    crate::corrections::watch_insertion_target(
+                        app.clone(),
+                        PathBuf::from(dir),
+                        text,
+                        (
+                            s("app").unwrap_or_default(),
+                            s("bundle").unwrap_or_default(),
+                            pid as i32,
+                        ),
+                    );
+                } else {
+                    crate::corrections::watch_insertion(app.clone(), PathBuf::from(dir), text);
+                }
+                Ok(json!({}))
+            }
+            _ => Err("watchCorrection requires `text` and `dir`".to_string()),
+        },
+
         "browserOpen" => match s("url") {
             Some(url) => {
                 let state = app.state::<AppState>();

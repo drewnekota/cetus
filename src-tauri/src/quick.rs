@@ -20,14 +20,20 @@ pub struct QuickSettings {
     pub enabled: bool,
     /// Gesture that opens the launcher *without* a screenshot. One of
     /// "off" | "both_cmd" (hold both ⌘) | "both_opt" (hold both ⌥) |
-    /// "double_cmd" (double-tap ⌘) | "double_opt" (double-tap ⌥). Defaults to
+    /// "double_cmd" (double-tap ⌘) | "double_opt" (double-tap right ⌥). Defaults to
     /// hold both ⌘.
     #[serde(default = "default_gesture_plain")]
     pub gesture_plain: String,
     /// Gesture that opens the launcher *with* a screenshot attached. Same option
-    /// set as `gesture_plain`. Defaults to hold both ⌥.
+    /// set as `gesture_plain`. Off by default; the compact launcher can attach a
+    /// screenshot interactively and visual quick reply already captures one.
     #[serde(default = "default_gesture_shot")]
     pub gesture_shot: String,
+    /// Gesture that captures the screen and asks a vision model for send-ready
+    /// replies without starting a full agent conversation. Defaults to
+    /// double-tap Option, mirroring the fastest common reply-assistant gesture.
+    #[serde(default = "default_gesture_reply")]
+    pub gesture_reply: String,
     /// Optional configurable global hotkey that brings the main cetus window to
     /// the front (switching to its Space/desktop if it's on another one). A
     /// Tauri accelerator string, e.g. "Cmd+Shift+K"; empty = no hotkey. Unlike
@@ -47,6 +53,11 @@ pub struct QuickSettings {
     /// "right_cmd" | "right_option" | "fn".
     #[serde(default = "default_voice_gesture")]
     pub voice_gesture: String,
+    /// Opt-in legacy shortcut: double-tap the voice trigger to toggle
+    /// hands-free dictation. Off by default so the same double-tap can belong
+    /// exclusively to visual quick reply.
+    #[serde(default)]
+    pub voice_handsfree_shortcut: bool,
     /// How the transcript is inserted into the focused app:
     /// "type" (Unicode key synthesis) | "paste" (clipboard + ⌘V).
     #[serde(default = "default_voice_insert_mode")]
@@ -115,11 +126,15 @@ fn default_gesture_plain() -> String {
 }
 
 fn default_gesture_shot() -> String {
-    "both_opt".into()
+    "off".into()
+}
+
+fn default_gesture_reply() -> String {
+    "double_opt".into()
 }
 
 fn default_voice_gesture() -> String {
-    "right_cmd".into()
+    "right_option".into()
 }
 
 fn default_voice_insert_mode() -> String {
@@ -136,10 +151,12 @@ impl Default for QuickSettings {
             enabled: true,
             gesture_plain: default_gesture_plain(),
             gesture_shot: default_gesture_shot(),
+            gesture_reply: default_gesture_reply(),
             summon_hotkey: String::new(),
             session_mode: "new".into(),
             voice_enabled: false,
             voice_gesture: default_voice_gesture(),
+            voice_handsfree_shortcut: false,
             voice_insert_mode: default_voice_insert_mode(),
             voice_cleanup: true,
             voice_cleanup_model: String::new(),
@@ -163,6 +180,7 @@ pub fn load_settings(store: &crate::store::Store) -> QuickSettings {
         .flatten()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    normalize_reply_gesture(&mut settings);
     settings.voice_cleanup = true;
     settings.voice_cleanup_model.clear();
     settings.voice_insert_mode = default_voice_insert_mode();
@@ -170,8 +188,28 @@ pub fn load_settings(store: &crate::store::Store) -> QuickSettings {
     settings
 }
 
+/// Older settings can already use the new default (double right Option) for one of
+/// the two launcher actions. Preserve those assignments and move quick reply to
+/// the first free gesture instead of silently stealing the user's shortcut.
+fn normalize_reply_gesture(settings: &mut QuickSettings) {
+    if settings.gesture_reply == "off"
+        || (settings.gesture_reply != settings.gesture_plain
+            && settings.gesture_reply != settings.gesture_shot)
+    {
+        return;
+    }
+    settings.gesture_reply = ["double_opt", "double_cmd", "both_opt", "both_cmd"]
+        .into_iter()
+        .find(|candidate| {
+            *candidate != settings.gesture_plain && *candidate != settings.gesture_shot
+        })
+        .unwrap_or("off")
+        .to_string();
+}
+
 fn save_settings(store: &crate::store::Store, s: &QuickSettings) -> anyhow::Result<()> {
     let mut s = s.clone();
+    normalize_reply_gesture(&mut s);
     s.voice_cleanup = true;
     s.voice_cleanup_model.clear();
     s.voice_insert_mode = default_voice_insert_mode();
@@ -202,18 +240,56 @@ pub fn migrate_voice_defaults(store: &crate::store::Store) {
     let _ = store.set_setting(MARKER, "1");
 }
 
+/// Move installations that still have the exact old shortcut set onto the new
+/// collision-free grammar. Any customization opts the user out: defaults must
+/// never overwrite a deliberate binding. Hands-free itself is independently
+/// default-off via serde for every existing settings blob.
+pub fn migrate_shortcut_defaults(store: &crate::store::Store) {
+    const MARKER: &str = "shortcut_defaults_v3_migrated";
+    if matches!(store.get_setting(MARKER), Ok(Some(_))) {
+        return;
+    }
+    let mut settings = load_settings(store);
+    if apply_shortcut_defaults_v3(&mut settings) {
+        if let Err(error) = save_settings(store, &settings) {
+            tracing::warn!("shortcut defaults migration failed: {error}");
+            return;
+        }
+        tracing::info!(
+            "shortcut defaults migration: launcher=both Cmd, reply=double right Option, voice=hold right Option"
+        );
+    }
+    let _ = store.set_setting(MARKER, "1");
+}
+
+fn apply_shortcut_defaults_v3(settings: &mut QuickSettings) -> bool {
+    let untouched_old_defaults = settings.gesture_plain == "both_cmd"
+        && settings.gesture_shot == "both_opt"
+        && settings.gesture_reply == "double_opt"
+        && settings.voice_gesture == "right_cmd";
+    if !untouched_old_defaults {
+        return false;
+    }
+    settings.gesture_shot = "off".into();
+    settings.voice_gesture = "right_option".into();
+    settings.voice_handsfree_shortcut = false;
+    true
+}
+
 // ---- Gesture runtime ------------------------------------------------------
 
-/// What a detected gesture should do. Each of the three gestures (both-⌘,
-/// double-⌘, double-⌥) is independently mapped to one of these from the two
-/// per-function assignments (`gesture_plain` / `gesture_shot`).
+/// What a detected gesture should do. Each supported gesture (both-⌘,
+/// both-⌥, double-⌘, double-right-⌥) is independently mapped from the three
+/// per-function assignments (`gesture_plain` / `gesture_shot` /
+/// `gesture_reply`).
 pub const ACT_NONE: u8 = 0;
 pub const ACT_PLAIN: u8 = 1; // open the launcher without a screenshot
 pub const ACT_SHOT: u8 = 2; // open the launcher with a screenshot
+pub const ACT_REPLY: u8 = 3; // direct screenshot → vision model → reply candidates
 
-/// Resolve the two per-function gesture assignments into a per-gesture action
-/// table: `(both_cmd, both_opt, double_cmd, double_opt)`. The screenshot
-/// function is applied last, so it wins if the same gesture is assigned to both.
+/// Resolve the three per-function gesture assignments into a per-gesture action
+/// table: `(both_cmd, both_opt, double_cmd, double_opt)`. Reply is applied last
+/// as a safety fallback, though the settings UI prevents duplicate assignments.
 pub fn gesture_actions(s: &QuickSettings) -> (u8, u8, u8, u8) {
     fn assign(g: &str, act: u8, bcmd: &mut u8, bopt: &mut u8, dcmd: &mut u8, dopt: &mut u8) {
         match g {
@@ -236,6 +312,14 @@ pub fn gesture_actions(s: &QuickSettings) -> (u8, u8, u8, u8) {
     assign(
         &s.gesture_shot,
         ACT_SHOT,
+        &mut bcmd,
+        &mut bopt,
+        &mut dcmd,
+        &mut dopt,
+    );
+    assign(
+        &s.gesture_reply,
+        ACT_REPLY,
         &mut bcmd,
         &mut bopt,
         &mut dcmd,
@@ -314,6 +398,9 @@ pub struct QuickRuntime {
     // ---- Global voice dictation (read live by the hotkey thread) ----
     pub voice_enabled: Arc<AtomicBool>,
     pub voice_gesture: Arc<AtomicU8>,
+    /// Whether clean double-taps of `voice_gesture` may toggle hands-free.
+    /// Disabled by default; quick reply owns double right-Option instead.
+    pub voice_handsfree_shortcut: Arc<AtomicBool>,
     pub voice_insert_mode: Arc<AtomicU8>,
     pub voice_cleanup: Arc<AtomicBool>,
     /// Recognition engine, read at start: [`ASR_APPLE`] | [`ASR_DOUBAO`].
@@ -350,6 +437,7 @@ impl QuickRuntime {
             last_open_ms: Arc::new(AtomicI64::new(0)),
             voice_enabled: Arc::new(AtomicBool::new(s.voice_enabled)),
             voice_gesture: Arc::new(AtomicU8::new(voice_gesture_code(&s.voice_gesture))),
+            voice_handsfree_shortcut: Arc::new(AtomicBool::new(s.voice_handsfree_shortcut)),
             voice_insert_mode: Arc::new(AtomicU8::new(INSERT_TYPE)),
             voice_cleanup: Arc::new(AtomicBool::new(true)),
             voice_asr_engine: Arc::new(AtomicU8::new(asr_engine_code(&s.voice_asr_engine))),
@@ -369,6 +457,8 @@ impl QuickRuntime {
         self.act_double_cmd.store(dcmd, Ordering::Relaxed);
         self.act_double_opt.store(dopt, Ordering::Relaxed);
         self.voice_enabled.store(s.voice_enabled, Ordering::Relaxed);
+        self.voice_handsfree_shortcut
+            .store(s.voice_handsfree_shortcut, Ordering::Relaxed);
         let new_gesture = voice_gesture_code(&s.voice_gesture);
         if self.voice_gesture.swap(new_gesture, Ordering::Relaxed) != new_gesture {
             // Reconfiguring the trigger mid-hold would otherwise leave ptt_held
@@ -523,6 +613,9 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
         park_quick(app);
         return;
     }
+    // Reply mode grows this same warm window to fit its candidates. Restore the
+    // launcher's compact geometry on every normal open before centering it.
+    let _ = win.set_size(tauri::LogicalSize::new(800.0, 196.0));
     // Stamp the open so the reopen handler can ignore the activation this show
     // may cause (see the macOS Reopen branch in lib.rs). The same stamp doubles
     // as this open's token, threaded through both the `quick-open` event and the
@@ -676,6 +769,104 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
     }
 }
 
+/// Open the system-wide visual reply surface. Capture happens before the panel
+/// is presented so the screenshot contains the user's app, not Cetus. The panel
+/// appears immediately in a loading state; the one-shot vision request then
+/// streams back one result event. `open_id` makes late results harmless after a
+/// dismiss/reopen race.
+pub async fn open_reply(app: &AppHandle) {
+    let (recapturing, shown, last_open_ms) = {
+        let state = app.state::<AppState>();
+        (
+            state.quick.recapturing.clone(),
+            state.quick.shown.clone(),
+            state.quick.last_open_ms.clone(),
+        )
+    };
+    if recapturing.load(Ordering::Relaxed) {
+        return;
+    }
+    if shown.load(Ordering::Relaxed) {
+        park_quick(app);
+        return;
+    }
+    let Some(win) = app.get_webview_window("quick") else {
+        return;
+    };
+
+    let open_id = crate::store::now_ms();
+    last_open_ms.store(open_id, Ordering::Relaxed);
+    shown.store(true, Ordering::Relaxed);
+
+    let context_task = tauri::async_runtime::spawn_blocking(crate::ax::gather_pre_focus_context);
+    let screenshot_task = tauri::async_runtime::spawn_blocking(capture_screenshot);
+    let context = context_task.await.ok().flatten();
+    let screenshot = screenshot_task.await.ok().flatten();
+
+    // The reply surface needs room for three candidates and an editable draft.
+    let _ = win.set_size(tauri::LogicalSize::new(800.0, 382.0));
+    #[cfg(target_os = "macos")]
+    {
+        let app_for_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let main = app_for_main.get_webview_window("main");
+            let main_was_visible = main
+                .as_ref()
+                .and_then(|m| m.is_visible().ok())
+                .unwrap_or(false);
+            if let Some(w) = app_for_main.get_webview_window("quick") {
+                if let Ok(ptr) = w.ns_window() {
+                    crate::panel::center_on_mouse_screen(ptr);
+                    crate::panel::present(ptr);
+                }
+            }
+            if !main_was_visible {
+                if let Some(ptr) = main.as_ref().and_then(|m| m.ns_window().ok()) {
+                    crate::panel::order_out(ptr);
+                }
+            }
+            let monitor_app = app_for_main.clone();
+            crate::panel::install_outside_click_monitor(move || park_quick(&monitor_app));
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        center_on_cursor_monitor(&win);
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+
+    let _ = win.emit(
+        "quick-reply-open",
+        serde_json::json!({
+            "openId": open_id,
+            "app": context.as_ref().map(|c| c.app.as_str()).unwrap_or(""),
+            "screenshotPermission": screen_recording_granted(),
+        }),
+    );
+
+    let result = match screenshot {
+        Some(ref shot) => crate::quick_reply::generate(shot, context.as_ref()).await,
+        None if !screen_recording_granted() => Err(anyhow::anyhow!(
+            "Screen Recording permission is required for visual quick reply."
+        )),
+        None => Err(anyhow::anyhow!("Could not capture the current screen.")),
+    };
+    // Do not resurrect or overwrite a newer panel open with this late result.
+    if last_open_ms.load(Ordering::Relaxed) != open_id {
+        return;
+    }
+    let payload = match result {
+        Ok(output) => serde_json::json!({ "openId": open_id, "output": output, "error": null }),
+        Err(error) => serde_json::json!({
+            "openId": open_id,
+            "output": null,
+            "error": error.to_string(),
+        }),
+    };
+    let _ = win.emit("quick-reply-result", payload);
+}
+
 // ---- Commands -------------------------------------------------------------
 
 #[tauri::command]
@@ -687,8 +878,9 @@ pub async fn get_quick_settings(state: State<'_, AppState>) -> Result<QuickSetti
 pub async fn set_quick_settings(
     app: AppHandle,
     state: State<'_, AppState>,
-    settings: QuickSettings,
+    mut settings: QuickSettings,
 ) -> Result<(), String> {
+    normalize_reply_gesture(&mut settings);
     save_settings(&state.store, &settings).map_err(|e| e.to_string())?;
     state.quick.apply(&settings);
     // Caps Lock as the voice trigger needs an HID remap to suppress its system
@@ -768,6 +960,30 @@ fn park_quick(app: &AppHandle) {
 pub async fn quick_dismiss(app: AppHandle) -> Result<(), String> {
     park_quick(&app);
     Ok(())
+}
+
+/// Accept a visual reply candidate and type it into the app that owned focus
+/// before the non-activating panel appeared. Parking first lets AppKit restore
+/// that app's key window; the short delay avoids racing the window-order pass.
+#[tauri::command]
+pub async fn quick_reply_insert(app: AppHandle, text: String) -> Result<(), String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err("Reply is empty.".into());
+    }
+    if text.chars().count() > 4000 {
+        return Err("Reply is too long to insert.".into());
+    }
+    park_quick(&app);
+    tokio::time::sleep(std::time::Duration::from_millis(90)).await;
+    tauri::async_runtime::spawn_blocking(move || {
+        // Paste is the compatibility path for arbitrary targets (Electron,
+        // terminals, browser editors). text_input preserves and restores the
+        // user's previous clipboard around the synthetic Cmd+V.
+        crate::text_input::insert_text(&text, crate::text_input::InsertMode::Paste)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Deserialize)]
@@ -897,4 +1113,50 @@ pub async fn open_screen_recording_settings() -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        apply_shortcut_defaults_v3, gesture_actions, normalize_reply_gesture, QuickSettings,
+        ACT_NONE, ACT_PLAIN, ACT_REPLY,
+    };
+
+    #[test]
+    fn default_gestures_are_collision_free() {
+        let settings = QuickSettings::default();
+        let actions = gesture_actions(&settings);
+        // both Cmd, both Option, double Cmd, double right Option
+        assert_eq!(actions, (ACT_PLAIN, ACT_NONE, ACT_NONE, ACT_REPLY));
+        assert_eq!(settings.voice_gesture, "right_option");
+        assert!(!settings.voice_handsfree_shortcut);
+    }
+
+    #[test]
+    fn visual_reply_collision_moves_to_a_free_gesture() {
+        let mut settings = QuickSettings::default();
+        settings.gesture_reply = settings.gesture_plain.clone();
+        normalize_reply_gesture(&mut settings);
+        assert_eq!(settings.gesture_reply, "double_opt");
+        let (both_cmd, _, _, double_opt) = gesture_actions(&settings);
+        assert_eq!(both_cmd, ACT_PLAIN);
+        assert_eq!(double_opt, ACT_REPLY);
+    }
+
+    #[test]
+    fn migrates_only_the_untouched_old_shortcut_set() {
+        let mut old = QuickSettings::default();
+        old.gesture_shot = "both_opt".into();
+        old.voice_gesture = "right_cmd".into();
+        old.voice_handsfree_shortcut = true;
+        assert!(apply_shortcut_defaults_v3(&mut old));
+        assert_eq!(old.gesture_shot, "off");
+        assert_eq!(old.voice_gesture, "right_option");
+        assert!(!old.voice_handsfree_shortcut);
+
+        let mut customized = old.clone();
+        customized.gesture_plain = "double_cmd".into();
+        assert!(!apply_shortcut_defaults_v3(&mut customized));
+        assert_eq!(customized.gesture_plain, "double_cmd");
+    }
 }

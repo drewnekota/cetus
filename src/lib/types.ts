@@ -30,6 +30,9 @@ export interface QuickSettings {
   gesturePlain: QuickGesture;
   /** Gesture that opens the launcher *with* a screenshot attached. */
   gestureShot: QuickGesture;
+  /** Gesture that captures the current UI and directly drafts reply options
+   *  with a vision model. */
+  gestureReply: QuickGesture;
   /** Configurable global hotkey (Tauri accelerator, e.g. "Cmd+Shift+K") that
    *  brings cetus to the front, switching desktops if it's on another. Empty
    *  string = no hotkey. */
@@ -39,6 +42,9 @@ export interface QuickSettings {
   voiceEnabled: boolean;
   /** Push-to-talk modifier held while speaking. */
   voiceGesture: VoiceGesture;
+  /** Opt-in double-tap of the voice trigger for hands-free mode. Off by
+   *  default so double right-Option belongs to quick reply only. */
+  voiceHandsfreeShortcut: boolean;
   /** How a global transcript is inserted into the focused app. */
   voiceInsertMode: VoiceInsertMode;
   /** Clean the transcript (thought-to-text) before inserting (global only). */
@@ -66,11 +72,13 @@ export interface QuickSettings {
 export const DEFAULT_QUICK_SETTINGS: QuickSettings = {
   enabled: true,
   gesturePlain: "both_cmd",
-  gestureShot: "both_opt",
+  gestureShot: "off",
+  gestureReply: "double_opt",
   summonHotkey: "",
   sessionMode: "new",
   voiceEnabled: false,
-  voiceGesture: "right_cmd",
+  voiceGesture: "right_option",
+  voiceHandsfreeShortcut: false,
   voiceInsertMode: "type",
   voiceCleanup: true,
   voiceCleanupModel: "",
@@ -146,6 +154,26 @@ export interface QuickOpenUrlPayload {
   url: string;
   title: string;
   openId: number;
+}
+
+/** Initial loading event for the direct visual quick-reply surface. */
+export interface QuickReplyOpenPayload {
+  openId: number;
+  app: string;
+  screenshotPermission: boolean;
+}
+
+export interface QuickReplyOutput {
+  candidates: string[];
+  context: string;
+  provider: string;
+}
+
+/** One-shot completion for the matching quick-reply open. */
+export interface QuickReplyResultPayload {
+  openId: number;
+  output: QuickReplyOutput | null;
+  error: string | null;
 }
 
 /** Coding-agent runtime for a conversation. "pi" is the built-in Cetus
@@ -307,6 +335,11 @@ export interface VoiceEventPayload {
   message?: string;
   /** Live mic amplitude 0…1 (on `voice-level`), for the waveform indicator. */
   level?: number;
+}
+
+/** A spelling learned from the user's post-dictation edit. */
+export interface VoiceDictionaryEventPayload extends VoiceEventPayload {
+  terms: string[];
 }
 
 /** How global dictation inserts the transcript into the focused app. */

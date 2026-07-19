@@ -30,6 +30,7 @@
 //   node scripts/cetus-devtest.mjs dom --op eval --js "document.querySelector('h1')?.textContent"
 //   node scripts/cetus-devtest.mjs ax --request '{"action":"tree","params":{}}'
 //   node scripts/cetus-devtest.mjs computerObserve --request '{"op":"dump","includeScreenshot":true}'
+//   node scripts/cetus-devtest.mjs voiceContext --ocr
 //   node scripts/cetus-devtest.mjs chromeHostSelfTest
 //   node scripts/cetus-devtest.mjs chromeStatus
 //   node scripts/cetus-devtest.mjs browserOpen --url about:blank
@@ -67,6 +68,8 @@ const OPS = new Set([
   "screenshot",
   "ax",
   "computerObserve",
+  "voiceContext",
+  "watchCorrection",
   "chromeHostSelfTest",
   "chromeStatus",
   "dom",
@@ -130,6 +133,11 @@ function buildRequest(op, args) {
   if (args.js !== undefined) req.js = args.js;
   if (args.label !== undefined) req.label = args.label;
   if (args.url !== undefined) req.url = args.url;
+  if (args.ocr !== undefined) req.ocr = args.ocr !== "false";
+  if (args.pid !== undefined) req.pid = Number(args.pid);
+  if (args.app !== undefined) req.app = args.app;
+  if (args.bundle !== undefined) req.bundle = args.bundle;
+  if (args.dir !== undefined) req.dir = args.dir;
 
   // `dom` is a passthrough: the actual DOM op name comes from --op.
   if (op === "dom") {

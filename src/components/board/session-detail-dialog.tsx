@@ -288,7 +288,7 @@ export function SessionDetailDialog({
         // Stronger animation: a 92vw / 90vh dialog scaling from 95% looks
         // basically static — slide-up from -8 and fade with a longer duration
         // makes it read as a deliberate "card came up" gesture.
-        className="flex h-[calc(100svh/var(--zoom,1)-2rem)] w-[calc(100svw/var(--zoom,1)-2rem)] max-w-none flex-col gap-0 overflow-hidden bg-background p-0 duration-250 data-[state=open]:slide-in-from-bottom-8 data-[state=closed]:slide-out-to-bottom-8 sm:max-w-none"
+        className="flex h-[calc(100svh-2rem)] w-[calc(100svw-2rem)] max-w-none flex-col gap-0 overflow-hidden bg-background p-0 duration-250 data-[state=open]:slide-in-from-bottom-8 data-[state=closed]:slide-out-to-bottom-8 sm:max-w-none"
       >
         <DialogTitle className="sr-only">
           {conversation?.title || t("session.untitledTask")}

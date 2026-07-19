@@ -55,14 +55,30 @@ fn ptt_clean_held(bits: u64, gesture: u8) -> bool {
     }
 }
 
+/// A double-tap can belong to hands-free only when the user opted in AND no
+/// launcher action owns that same physical double-tap. This makes collision
+/// avoidance a backend invariant rather than relying on a settings warning.
+fn handsfree_tap_allowed(enabled: bool, gesture: u8, double_cmd: u8, double_opt: u8) -> bool {
+    if !enabled {
+        return false;
+    }
+    match gesture {
+        quick::VOICE_RIGHT_CMD => double_cmd == quick::ACT_NONE,
+        quick::VOICE_RIGHT_OPTION => double_opt == quick::ACT_NONE,
+        // Fn and remapped Caps Lock have no launcher double-tap binding.
+        _ => true,
+    }
+}
+
 /// Apply one rising/falling edge of the voice push-to-talk trigger to the shared
 /// tap state. Shared by the modifier-gesture path (FlagsChanged) and the Caps
 /// Lock path (F18 KeyDown/KeyUp): a clean press starts the hold timer; a brief
-/// clean release feeds the hands-free double-tap counter exactly as the inline
-/// modifier logic did. Returns the previous held state for caller-specific
-/// gap handling.
+/// clean release feeds the hands-free double-tap counter only when that optional
+/// shortcut is enabled. Returns the previous held state for caller-specific gap
+/// handling.
 fn voice_trigger_edge(
     held: bool,
+    handsfree_shortcut: bool,
     vtap: &RefCell<VoiceTap>,
     ptt_held: &AtomicBool,
     ptt_dirty: &AtomicBool,
@@ -83,7 +99,7 @@ fn voice_trigger_edge(
             .take()
             .map(|t| t.elapsed() < PTT_HOLD_THRESHOLD)
             .unwrap_or(false);
-        if brief && !v.dirty {
+        if handsfree_shortcut && brief && !v.dirty {
             let now = Instant::now();
             match v.last_tap.take() {
                 Some(prev) if now.duration_since(prev) < VOICE_DOUBLE_GAP => {
@@ -190,8 +206,9 @@ struct DoubleState {
 /// Event-tap-local tap/double-tap tracker for the *voice* trigger, mirroring
 /// [`DoubleState`] but keyed to the configured push-to-talk modifier. Lives in
 /// the callback (exact `Instant` timing per edge) — the polling monitor can't
-/// classify reliably. On a completed double-tap the callback bumps
-/// `voice_hf_gen`; the monitor turns that into a hands-free toggle.
+/// classify reliably. When the opt-in shortcut is enabled, a completed
+/// double-tap bumps `voice_hf_gen`; the monitor turns that into a hands-free
+/// toggle.
 #[derive(Default)]
 struct VoiceTap {
     /// When the current clean hold of the trigger began (None = not held).
@@ -215,6 +232,7 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
     let act_double_opt = runtime.act_double_opt.clone();
     let voice_enabled = runtime.voice_enabled.clone();
     let voice_gesture = runtime.voice_gesture.clone();
+    let voice_handsfree_shortcut = runtime.voice_handsfree_shortcut.clone();
     let voice_hf_gen = runtime.voice_hf_gen.clone();
     let ptt_held = runtime.ptt_held.clone();
     let ptt_dirty = runtime.ptt_dirty.clone();
@@ -279,6 +297,13 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
                 return None;
             }
 
+            if matches!(event_type, CGEventType::KeyDown) {
+                // Wake the post-dictation correction watcher. This is only a
+                // monotonic edit signal: no key code, character, or modifier
+                // is retained by the learning pipeline.
+                crate::corrections::note_user_input();
+            }
+
             if matches!(event_type, CGEventType::KeyDown | CGEventType::KeyUp) {
                 // Caps Lock (HID-remapped to F18) drives push-to-talk off its
                 // clean KeyDown/KeyUp edges, not modifier flags. Intercept its
@@ -290,6 +315,12 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
                 {
                     voice_trigger_edge(
                         matches!(event_type, CGEventType::KeyDown),
+                        handsfree_tap_allowed(
+                            voice_handsfree_shortcut.load(Ordering::Relaxed),
+                            quick::VOICE_CAPS_LOCK,
+                            act_double_cmd.load(Ordering::Relaxed),
+                            act_double_opt.load(Ordering::Relaxed),
+                        ),
                         &vtap,
                         &ptt_held,
                         &ptt_dirty,
@@ -327,15 +358,12 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
             }
             // FlagsChanged.
             let bits = event.get_flags().bits();
-            // Set to Some(capture) when a launcher gesture completes; capture =
-            // whether this gesture's function attaches a screenshot.
-            let mut fire: Option<bool> = None;
+            // Set to the resolved launcher action when a gesture completes.
+            let mut fire: Option<u8> = None;
 
-            // Voice trigger: maintain ptt_held for the hold (push-to-talk) path
-            // AND classify clean taps into a double-tap (hands-free toggle) right
-            // here, where each edge carries exact timing. The monitor only times
-            // the hold threshold and consumes double-tap pulses; it never has to
-            // infer a tap from 15ms samples.
+            // Voice trigger: maintain ptt_held for the hold (push-to-talk) path.
+            // If the user explicitly enabled the legacy hands-free shortcut,
+            // also classify clean taps here where each edge has exact timing.
             if voice_enabled.load(Ordering::Relaxed) {
                 let gesture = voice_gesture.load(Ordering::Relaxed);
                 if gesture == quick::VOICE_CAPS_LOCK {
@@ -347,7 +375,19 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
                     }
                 } else {
                     let held = ptt_clean_held(bits, gesture);
-                    let was = voice_trigger_edge(held, &vtap, &ptt_held, &ptt_dirty, &voice_hf_gen);
+                    let was = voice_trigger_edge(
+                        held,
+                        handsfree_tap_allowed(
+                            voice_handsfree_shortcut.load(Ordering::Relaxed),
+                            gesture,
+                            act_double_cmd.load(Ordering::Relaxed),
+                            act_double_opt.load(Ordering::Relaxed),
+                        ),
+                        &vtap,
+                        &ptt_held,
+                        &ptt_dirty,
+                        &voice_hf_gen,
+                    );
                     if !held && !was && (bits & M_ALL) != 0 && vtap.borrow().last_tap.is_some() {
                         // A *different* modifier became active between two taps —
                         // the gap is contaminated, so drop the pending first tap.
@@ -358,9 +398,7 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
                 ptt_held.store(false, Ordering::Relaxed);
             }
 
-            // Each gesture's action ([`ACT_NONE`] disarms its detector). The
-            // capture bool handed to the panel is "this gesture's action is the
-            // with-screenshot function".
+            // Each gesture's action ([`ACT_NONE`] disarms its detector).
             let act_both = act_both.load(Ordering::Relaxed);
             let act_bopt = act_both_opt.load(Ordering::Relaxed);
             let act_dcmd = act_double_cmd.load(Ordering::Relaxed);
@@ -371,7 +409,7 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
             if both && !was_both.get() {
                 was_both.set(true);
                 if act_both != quick::ACT_NONE {
-                    fire = Some(act_both == quick::ACT_SHOT);
+                    fire = Some(act_both);
                 }
             } else if !both {
                 was_both.set(false);
@@ -382,7 +420,7 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
             if both_opt && !was_both_opt.get() {
                 was_both_opt.set(true);
                 if act_bopt != quick::ACT_NONE {
-                    fire = Some(act_bopt == quick::ACT_SHOT);
+                    fire = Some(act_bopt);
                 }
             } else if !both_opt {
                 was_both_opt.set(false);
@@ -411,7 +449,7 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
                         let now = Instant::now();
                         match d.last_tap.take() {
                             Some(prev) if now.duration_since(prev) < MAX_TAP_GAP => {
-                                fire = Some(act_dcmd == quick::ACT_SHOT);
+                                fire = Some(act_dcmd);
                             }
                             _ => d.last_tap = Some(now),
                         }
@@ -425,12 +463,13 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
             }
 
             // --- double-tap ⌥ ---
-            // Same clean-double-tap logic as ⌘, keyed to the generic Option mask
-            // (either ⌥). If global voice is also bound to right-⌥, a right-⌥
-            // double-tap can satisfy both — by default voice is off and uses
-            // right-⌘, so there's no overlap out of the box.
+            // Same clean-double-tap logic as ⌘, but specifically keyed to right
+            // Option. Right Option is the shared quick-input key: double-tap is
+            // visual reply, while a hold is voice. The voice recognizer does not
+            // claim the double-tap unless its legacy hands-free shortcut is
+            // explicitly enabled.
             if act_dopt != quick::ACT_NONE {
-                let alt_any = (bits & M_ALT) != 0;
+                let alt_any = (bits & DEV_RALT) != 0;
                 let mut a = alt.borrow_mut();
                 // Holding *both* ⌥ keys is the both-⌥ gesture, not a single-⌥
                 // tap — dirty this hold so the two ⌥ gestures can coexist.
@@ -451,7 +490,7 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
                         let now = Instant::now();
                         match a.last_tap.take() {
                             Some(prev) if now.duration_since(prev) < MAX_TAP_GAP => {
-                                fire = Some(act_dopt == quick::ACT_SHOT);
+                                fire = Some(act_dopt);
                             }
                             _ => a.last_tap = Some(now),
                         }
@@ -463,8 +502,8 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
                 }
             }
 
-            if let Some(capture) = fire {
-                trigger(&cb_app, capture);
+            if let Some(action) = fire {
+                trigger(&cb_app, action);
             }
             None
         },
@@ -496,10 +535,14 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
     CFRunLoop::run_current();
 }
 
-fn trigger(app: &AppHandle, capture: bool) {
+fn trigger(app: &AppHandle, action: u8) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        quick::open_panel(&app, capture).await;
+        if action == quick::ACT_REPLY {
+            quick::open_reply(&app).await;
+        } else {
+            quick::open_panel(&app, action == quick::ACT_SHOT).await;
+        }
     });
 }
 
@@ -531,9 +574,10 @@ enum VoiceCmd {
 }
 
 /// Drive global dictation off the event tap's signals: hold the trigger to talk
-/// (release inserts the transcript), double-tap to toggle hands-free. The
-/// monitor only *produces* commands; one async worker consumes them in order and
-/// owns the session, so the monitor never blocks and lifecycle never races.
+/// (release inserts the transcript). An explicitly enabled double-tap shortcut
+/// may also toggle hands-free. The monitor only *produces* commands; one async
+/// worker consumes them in order and owns the session, so the monitor never
+/// blocks and lifecycle never races.
 pub fn spawn_voice_monitor(app: AppHandle, runtime: QuickRuntime) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<VoiceCmd>();
     // The worker awaits the dictation lifecycle on the Tauri async runtime; the
@@ -863,6 +907,64 @@ async fn finish_ptt(app: &AppHandle, runtime: &QuickRuntime) {
     } else if settings.voice_context_biasing {
         // Re-read the field in a few seconds and mine the user's manual fixes
         // (the correction-learning loop). Shares the screen-reading opt-in.
-        crate::corrections::watch_insertion(state.app_data_dir.clone(), text.clone());
+        crate::corrections::watch_insertion(app.clone(), state.app_data_dir.clone(), text.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{handsfree_tap_allowed, voice_trigger_edge, VoiceTap};
+    use crate::quick;
+    use std::cell::RefCell;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+    fn tap(
+        handsfree_shortcut: bool,
+        state: &RefCell<VoiceTap>,
+        held: &AtomicBool,
+        dirty: &AtomicBool,
+        generation: &AtomicU32,
+    ) {
+        voice_trigger_edge(true, handsfree_shortcut, state, held, dirty, generation);
+        voice_trigger_edge(false, handsfree_shortcut, state, held, dirty, generation);
+    }
+
+    #[test]
+    fn double_tap_does_not_toggle_handsfree_by_default() {
+        let state = RefCell::new(VoiceTap::default());
+        let held = AtomicBool::new(false);
+        let dirty = AtomicBool::new(false);
+        let generation = AtomicU32::new(0);
+        tap(false, &state, &held, &dirty, &generation);
+        tap(false, &state, &held, &dirty, &generation);
+        assert_eq!(generation.load(Ordering::Relaxed), 0);
+        assert!(state.borrow().last_tap.is_none());
+    }
+
+    #[test]
+    fn opted_in_double_tap_still_toggles_handsfree() {
+        let state = RefCell::new(VoiceTap::default());
+        let held = AtomicBool::new(false);
+        let dirty = AtomicBool::new(false);
+        let generation = AtomicU32::new(0);
+        tap(true, &state, &held, &dirty, &generation);
+        tap(true, &state, &held, &dirty, &generation);
+        assert_eq!(generation.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn quick_reply_owns_double_right_option_over_handsfree() {
+        assert!(!handsfree_tap_allowed(
+            true,
+            quick::VOICE_RIGHT_OPTION,
+            quick::ACT_NONE,
+            quick::ACT_REPLY,
+        ));
+        assert!(handsfree_tap_allowed(
+            true,
+            quick::VOICE_RIGHT_OPTION,
+            quick::ACT_NONE,
+            quick::ACT_NONE,
+        ));
     }
 }

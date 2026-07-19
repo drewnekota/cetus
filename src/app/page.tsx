@@ -3193,6 +3193,7 @@ export default function Home() {
             ) : hasMessages ? (
               <ChatPane
                 convId={activeId}
+                opticalCenter={!sideWorkspace.open}
                 draftKey={activeId ? `chat:${activeId}` : "chat:new"}
                 modelChoice={modelChoice}
                 onModelChange={onModelChange}
@@ -3243,7 +3244,13 @@ export default function Home() {
             ) : (
               <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
                 <GlyphBackdrop />
-                <div className="relative z-10 w-full max-w-2xl space-y-6">
+                <div
+                  className={`relative z-10 w-full max-w-2xl space-y-6 ${
+                    sideWorkspace.open
+                      ? ""
+                      : "xl:-translate-x-10 2xl:-translate-x-12"
+                  }`}
+                >
                   <h1 className="text-center font-serif text-4xl italic tracking-tight text-foreground">
                     {heroHeadline}
                   </h1>

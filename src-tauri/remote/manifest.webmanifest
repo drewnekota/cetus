@@ -1,0 +1,10 @@
+{
+  "name": "Cetus Remote",
+  "short_name": "Cetus",
+  "description": "Continue conversations running on your Mac.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fcfcfd",
+  "theme_color": "#827be6",
+  "icons": [{ "src": "/remote-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

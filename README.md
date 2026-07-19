@@ -23,6 +23,7 @@
 ## Why developers use Cetus
 
 - **One home for your agents.** Switch any conversation between Cetus's built-in runtime, Claude Code, and Codex without losing the desktop workflow around it.
+- **Continue from your phone.** The optional, Tailscale-backed mobile companion follows live runs, sends messages and images, switches runtimes, handles approvals, and archives chats without exposing a public Cetus service. See [Cetus Remote](docs/remote-access.md).
 - **Safe, parallel coding sessions.** Enable per-conversation git worktrees when you want agents to edit in isolation instead of touching the current checkout.
 - **Background work you can review.** Schedule a task, leave it running, and find the result waiting in **Needs review** instead of buried in a terminal session.
 - **Context that survives the chat.** Workspaces, durable notes, meeting memory, and optional on-device screen context help the next run pick up where the last one stopped.
@@ -69,7 +70,9 @@ Saved prompts that fire on a schedule (`at` / `every` / `cron` / `daily`). Each 
 
 ### Bring the current screen with you
 
-A global **double-⌘** panel: ask Cetus anything without leaving the app you're in. It reads what's in front of you and attaches it as removable context chips: a screenshot of your screen, the active app, the current browser URL, and any selected text. Keep what's useful, drop the rest, then start a new run or continue the last one.
+Hold **both ⌘ keys** to open the global panel: ask Cetus anything without leaving the app you're in. It reads what's in front of you and attaches it as removable context chips: a screenshot of your screen, the active app, the current browser URL, and any selected text. Keep what's useful, drop the rest, then start a new run or continue the last one.
+
+For messages and email, **double-tap right ⌥** opens visual quick reply: Cetus captures the current screen, asks the configured Gemini or Volcano Ark vision model for three send-ready replies, and lets you choose or edit one before inserting it back into the original app. This is a direct one-shot path rather than a full agent run; it never presses Send. Screen Recording and Accessibility permissions are required.
 
 ![Cetus quick launcher](docs/screenshot-launcher.png)
 

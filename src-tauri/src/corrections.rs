@@ -30,11 +30,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use tauri::AppHandle;
 
 const FILE: &str = "corrections.json";
-/// A pair must be observed this many times before it's applied/boosted, so a
-/// one-off edit (user changed their mind, not the recognition) never becomes a
-/// standing rewrite rule.
+/// A pair must be observed this many times before it's auto-applied. ASR hotword
+/// biasing starts after the first tightly-classified edit, while this higher bar
+/// prevents a one-off change of mind from becoming a standing rewrite rule.
 const MIN_COUNT: u32 = 2;
 /// Store ceiling; lowest-count, oldest pairs are dropped past this.
 const MAX_PAIRS: usize = 200;
@@ -44,9 +45,16 @@ const MAX_SIDE_CHARS: usize = 10;
 /// Most substitutions a single session may contribute — a heavily edited field
 /// means the user rewrote the text, not that recognition made 30 word errors.
 const MAX_PAIRS_PER_SESSION: usize = 5;
-/// How long after the fingerprint we re-read the field. Long enough for a
-/// quick manual fix, short enough that the user is probably still there.
-const RECHECK_DELAY_SECS: u64 = 10;
+/// Maximum time to establish the post-insertion fingerprint. Rich editors may
+/// need a beat to rebuild their accessibility tree after synthetic typing.
+const FINGERPRINT_WINDOW_MS: u64 = 3_000;
+/// Observe edits for this long after the field fingerprint is established.
+const WATCH_WINDOW_SECS: u64 = 18;
+/// Debounce after a real user key event so IME/autocorrect can finish committing.
+const EDIT_DEBOUNCE_MS: u64 = 450;
+/// Even when the global event tap is unavailable, periodically re-read so the
+/// feature still works with paste menus, dictation, or accessibility actions.
+const FALLBACK_RECHECK_MS: u64 = 2_000;
 /// How much of the field value we read (tail). Bounded so diffing stays cheap
 /// and we never sweep up a whole document.
 const FIELD_TAIL_CHARS: usize = 4000;
@@ -134,19 +142,16 @@ pub fn apply(app_data_dir: &Path, text: &str) -> String {
     out
 }
 
-/// Right-hand sides of active pairs, most recently confirmed first — these are
-/// the terms the user demonstrably cares about, fed into ASR hotword biasing
-/// at the highest learned priority.
+/// Right-hand sides of observed pairs, most recently confirmed first. A single
+/// tightly-classified edit is enough to bias ASR toward the user's spelling;
+/// replaying wrong→right in [`apply`] remains gated on [`MIN_COUNT`] so a
+/// one-off content edit can never become an automatic rewrite rule.
 pub fn terms(app_data_dir: &Path) -> Vec<String> {
     let store = read_store(&store_path(app_data_dir));
-    let mut active: Vec<&Pair> = store
-        .pairs
-        .iter()
-        .filter(|p| p.count >= MIN_COUNT)
-        .collect();
-    active.sort_by_key(|p| std::cmp::Reverse(p.last_ms));
+    let mut observed: Vec<&Pair> = store.pairs.iter().collect();
+    observed.sort_by_key(|p| std::cmp::Reverse(p.last_ms));
     let mut seen = HashSet::new();
-    active
+    observed
         .iter()
         .map(|p| p.right.clone())
         .filter(|w| seen.insert(w.to_lowercase()))
@@ -158,12 +163,39 @@ pub fn terms(app_data_dir: &Path) -> Vec<String> {
 /// otherwise diff two unrelated utterances into garbage pairs).
 static INSERT_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Watch one insertion: fingerprint the focused field shortly after the text
-/// lands, then after a delay re-read it and mine the user's edits. Aborts on
-/// any identity mismatch (different app focused, field never contained our
-/// text, another dictation happened). Fire-and-forget; the caller gates this
-/// on the context-biasing setting (it reads the screen).
-pub fn watch_insertion(app_data_dir: PathBuf, inserted: String) {
+/// Monotonic signal from the existing listen-only global event tap. It records
+/// no key code or text — it only wakes an active correction watcher so AX/OCR
+/// can be re-read promptly instead of waiting on a fixed ten-second timer.
+static USER_INPUT_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn note_user_input() {
+    USER_INPUT_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Watch one insertion: establish a cursor-aware field fingerprint, then re-read
+/// promptly after user input (plus a slow fallback poll) and mine only edits
+/// anchored to the inserted text. Fire-and-forget; the caller gates this on the
+/// context-biasing setting because AX and optional local OCR read screen text.
+pub fn watch_insertion(app: AppHandle, app_data_dir: PathBuf, inserted: String) {
+    watch_insertion_impl(app, app_data_dir, inserted, None);
+}
+
+#[cfg(feature = "devtest")]
+pub(crate) fn watch_insertion_target(
+    app: AppHandle,
+    app_data_dir: PathBuf,
+    inserted: String,
+    target: (String, String, i32),
+) {
+    watch_insertion_impl(app, app_data_dir, inserted, Some(target));
+}
+
+fn watch_insertion_impl(
+    app: AppHandle,
+    app_data_dir: PathBuf,
+    inserted: String,
+    target: Option<(String, String, i32)>,
+) {
     use std::sync::atomic::Ordering;
     let trimmed = inserted.trim().to_string();
     // Tiny insertions ("ok") produce noise pairs, not corrections.
@@ -172,72 +204,140 @@ pub fn watch_insertion(app_data_dir: PathBuf, inserted: String) {
     }
     let gen = INSERT_GEN.fetch_add(1, Ordering::Relaxed) + 1;
     tokio::spawn(async move {
-        // T0, a beat after insertion (paste/typing needs to land): fingerprint
-        // the target — which app, and does the field really hold our text.
-        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
-        let fp_dir = app_data_dir.clone();
-        let fp_text = trimmed.clone();
-        let Ok((app0, field_ok)) = tokio::task::spawn_blocking(move || {
-            let app = crate::ocr::frontmost_app(&fp_dir).map(|i| i.bundle_id);
-            let field = crate::biasing::focused_tail(FIELD_TAIL_CHARS);
-            let field_ok = field.as_deref().is_some_and(|f| f.contains(&fp_text));
-            if field.is_none() {
-                tracing::debug!("corrections: focused field unreadable at T0 (AX role/trust)");
-            } else if !field_ok {
-                tracing::debug!("corrections: field doesn't contain the inserted text at T0");
-            }
-            (app, field_ok)
-        })
-        .await
-        else {
-            return;
-        };
-        if app0.is_none() || !field_ok {
-            if app0.is_none() {
-                tracing::debug!("corrections: frontmost app unknown at T0; not mining");
-            }
-            return; // can't verify the target — never mine blind
-        }
-
-        tokio::time::sleep(std::time::Duration::from_secs(RECHECK_DELAY_SECS)).await;
-        if INSERT_GEN.load(Ordering::Relaxed) != gen {
-            tracing::debug!("corrections: another dictation landed in the window; not mining");
-            return;
-        }
-        let _ = tokio::task::spawn_blocking(move || {
-            let app1 = crate::ocr::frontmost_app(&app_data_dir).map(|i| i.bundle_id);
-            if app1.is_none() || app1 != app0 {
-                tracing::debug!("corrections: focus moved to another app; not mining");
+        let fingerprint_deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(FINGERPRINT_WINDOW_MS);
+        let initial = loop {
+            if INSERT_GEN.load(Ordering::Relaxed) != gen {
                 return;
             }
-            let Some(field) = crate::biasing::focused_tail(FIELD_TAIL_CHARS) else {
-                tracing::debug!("corrections: focused field unreadable at re-read; not mining");
-                return;
-            };
-            // The user's edited rendering is the version worth remembering:
-            // history feeds the next dictation's dialog context, and the
-            // user's hands are ground truth (same principle as the mining).
-            if let Some(edited) = edited_span(&trimmed, &field) {
-                tracing::info!(
-                    "corrections: history amended to the user's edited version ({} → {} chars)",
-                    trimmed.chars().count(),
-                    edited.chars().count()
+            let dir = app_data_dir.clone();
+            let target = target.clone();
+            let snapshot = tokio::task::spawn_blocking(move || {
+                if let Some((app, bundle, pid)) = target {
+                    crate::focused_text::capture_pid(app, bundle, pid, FIELD_TAIL_CHARS)
+                } else {
+                    crate::biasing::focused_snapshot(&dir, FIELD_TAIL_CHARS, true)
+                }
+            })
+            .await
+            .ok()
+            .flatten();
+            if let Some(snapshot) = snapshot {
+                if snapshot.text().contains(&trimmed) {
+                    tracing::debug!(
+                        "corrections: fingerprinted {} via {} ({})",
+                        snapshot.bundle_id,
+                        snapshot.source,
+                        snapshot.identifier
+                    );
+                    break snapshot;
+                }
+            }
+            if std::time::Instant::now() >= fingerprint_deadline {
+                tracing::debug!(
+                    "corrections: inserted text could not be fingerprinted via AX/OCR; not mining"
                 );
-                crate::transcripts::amend(&app_data_dir, &trimmed, &edited);
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        };
+
+        let watch_deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(WATCH_WINDOW_SECS);
+        let mut seen_input = USER_INPUT_GEN.load(Ordering::Relaxed);
+        let mut next_fallback =
+            std::time::Instant::now() + std::time::Duration::from_millis(FALLBACK_RECHECK_MS);
+        let mut last_edited: Option<String> = None;
+
+        loop {
+            if INSERT_GEN.load(Ordering::Relaxed) != gen {
+                tracing::debug!("corrections: another dictation landed; watcher cancelled");
+                return;
+            }
+            let now = std::time::Instant::now();
+            if now >= watch_deadline {
+                if let Some(edited) = last_edited {
+                    crate::transcripts::amend(&app_data_dir, &trimmed, &edited);
+                }
+                tracing::debug!("corrections: watch window ended without a safe word-level fix");
+                return;
+            }
+
+            let input = USER_INPUT_GEN.load(Ordering::Relaxed);
+            let input_changed = input != seen_input;
+            if !input_changed && now < next_fallback {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                continue;
+            }
+            if input_changed {
+                seen_input = input;
+                tokio::time::sleep(std::time::Duration::from_millis(EDIT_DEBOUNCE_MS)).await;
+                // More typing arrived during the debounce; wait for the new
+                // quiet edge instead of sampling a half-committed IME edit.
+                let latest = USER_INPUT_GEN.load(Ordering::Relaxed);
+                if latest != seen_input {
+                    seen_input = latest;
+                    continue;
+                }
+            }
+            next_fallback =
+                std::time::Instant::now() + std::time::Duration::from_millis(FALLBACK_RECHECK_MS);
+
+            let dir = app_data_dir.clone();
+            let target = target.clone();
+            let current = tokio::task::spawn_blocking(move || {
+                if let Some((app, bundle, pid)) = target {
+                    crate::focused_text::capture_pid(app, bundle, pid, FIELD_TAIL_CHARS)
+                } else {
+                    crate::biasing::focused_snapshot(&dir, FIELD_TAIL_CHARS, true)
+                }
+            })
+            .await
+            .ok()
+            .flatten();
+            let Some(current) = current else {
+                continue;
+            };
+            if current.bundle_id != initial.bundle_id {
+                tracing::debug!("corrections: focus moved to another app; watcher cancelled");
+                return;
+            }
+            let low_confidence = initial.source == "screen-ocr" || current.source == "screen-ocr";
+            if !low_confidence && !initial.same_target(&current) {
+                tracing::debug!("corrections: focus moved to another field; watcher cancelled");
+                return;
+            }
+
+            let field = current.text();
+            if let Some(edited) = edited_span(&trimmed, &field) {
+                last_edited = Some(edited);
             }
             let pairs = mine_pairs(&trimmed, &field);
             if pairs.is_empty() {
-                tracing::debug!("corrections: no word-level fixes found in the user's edits");
-                return;
+                continue;
+            }
+            // OCR is useful for otherwise invisible canvas/remote surfaces but
+            // a full-screen diff is weaker evidence: accept only one compact
+            // substitution, never a multi-pair rewrite.
+            if low_confidence && pairs.len() != 1 {
+                tracing::debug!("corrections: ambiguous OCR edit candidate rejected: {pairs:?}");
+                continue;
+            }
+            if let Some(edited) = last_edited.as_deref() {
+                crate::transcripts::amend(&app_data_dir, &trimmed, edited);
             }
             tracing::info!(
-                "corrections: learned {} pair(s) from user edits: {:?}",
+                "corrections: learned {} pair(s) via {}: {:?}",
                 pairs.len(),
+                current.source,
                 pairs
             );
-            record(&app_data_dir, &pairs);
-        })
-        .await;
+            let added = record(&app_data_dir, &pairs);
+            if !added.is_empty() {
+                crate::voice::show_dictionary_toast(&app, added);
+            }
+            return;
+        }
     });
 }
 
@@ -481,6 +581,11 @@ fn classify(
     }
     if wrong.is_ascii() && right.is_ascii() {
         // Spelling/casing/spacing/punctuation fixes stay textually close.
+        // One-character ASCII swaps are overwhelmingly content edits and are
+        // too short for the hotword API anyway.
+        if wrong.chars().count() < 2 || right.chars().count() < 2 {
+            return None;
+        }
         let dist = edit_distance(&wrong.to_lowercase(), &right.to_lowercase());
         let max_len = wrong.len().max(right.len());
         if dist <= (max_len / 2).max(2) {
@@ -511,10 +616,12 @@ fn edit_distance(a: &str, b: &str) -> usize {
 // Store maintenance
 // ---------------------------------------------------------------------------
 
-fn record(app_data_dir: &Path, pairs: &[(String, String)]) {
+fn record(app_data_dir: &Path, pairs: &[(String, String)]) -> Vec<String> {
     let path = store_path(app_data_dir);
     let _guard = file_lock().lock().unwrap();
     let mut store = read_store(&path);
+    let known_terms: HashSet<String> = store.pairs.iter().map(|p| p.right.to_lowercase()).collect();
+    let mut added = Vec::new();
     let now = crate::store::now_ms();
     for (wrong, right) in pairs {
         let existing = store.pairs.iter_mut().find(|p| {
@@ -531,12 +638,21 @@ fn record(app_data_dir: &Path, pairs: &[(String, String)]) {
                     crate::biasing::unlearn(app_data_dir, &p.wrong);
                 }
             }
-            None => store.pairs.push(Pair {
-                wrong: wrong.clone(),
-                right: right.clone(),
-                count: 1,
-                last_ms: now,
-            }),
+            None => {
+                if !known_terms.contains(&right.to_lowercase())
+                    && !added
+                        .iter()
+                        .any(|term: &String| term.eq_ignore_ascii_case(right))
+                {
+                    added.push(right.clone());
+                }
+                store.pairs.push(Pair {
+                    wrong: wrong.clone(),
+                    right: right.clone(),
+                    count: 1,
+                    last_ms: now,
+                });
+            }
         }
     }
     if store.pairs.len() > MAX_PAIRS {
@@ -545,9 +661,17 @@ fn record(app_data_dir: &Path, pairs: &[(String, String)]) {
             .sort_by(|x, y| y.count.cmp(&x.count).then(y.last_ms.cmp(&x.last_ms)));
         store.pairs.truncate(MAX_PAIRS);
     }
+    added.retain(|term| {
+        store
+            .pairs
+            .iter()
+            .any(|p| p.right.eq_ignore_ascii_case(term))
+    });
     if let Err(e) = write_store(&path, &store) {
         tracing::warn!("corrections store write failed: {e}");
+        return Vec::new();
     }
+    added
 }
 
 /// Word-boundary, case-insensitive replacement for ASCII terms. "eric" inside
@@ -627,6 +751,11 @@ mod tests {
             pairs,
             vec![("Deep Seek".to_string(), "DeepSeek".to_string())]
         );
+    }
+
+    #[test]
+    fn rejects_one_character_ascii_swap() {
+        assert!(mine_pairs("send it to A today", "send it to B today").is_empty());
     }
 
     #[test]

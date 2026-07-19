@@ -144,6 +144,16 @@ export interface MeetingSegment {
   text: string;
 }
 
+export interface RemoteSettings {
+  enabled: boolean;
+  port: number;
+  accessUrl: string;
+  pairingUrl: string;
+  pairingQrSvg: string;
+  tailscaleReady: boolean;
+  tailscaleMessage: string;
+}
+
 // --- Commands --------------------------------------------------------------
 
 export const api = {
@@ -181,6 +191,10 @@ export const api = {
    *  the CLI's own defaults. Applies from the next turn. */
   setConversationCliModel: (id: string, model: string, effort: string) =>
     invoke<void>("set_conversation_cli_model", { id, model, effort }),
+  getRemoteSettings: () => invoke<RemoteSettings>("get_remote_settings"),
+  setRemoteEnabled: (enabled: boolean) =>
+    invoke<RemoteSettings>("set_remote_enabled", { enabled }),
+  rotateRemoteAccess: () => invoke<RemoteSettings>("rotate_remote_access"),
   /** Worktree path + branch of a CLI-backend conversation (null for pi
    *  conversations and non-git workspaces). */
   conversationWorktree: (id: string) =>
@@ -488,6 +502,9 @@ export const api = {
   quickRecaptureScreenshot: () =>
     invoke<QuickScreenshot | null>("quick_recapture_screenshot"),
   quickDismiss: () => invoke<void>("quick_dismiss"),
+  /** Accept a direct visual reply and type it back into the previously focused app. */
+  quickReplyInsert: (text: string) =>
+    invoke<void>("quick_reply_insert", { text }),
   // Native notification: clicking it routes back as a `notification-activate`
   // event carrying `conversationId` (see notify.rs).
   postNotification: (p: {

@@ -1,0 +1,40 @@
+/* Shared Cetus product tokens. Keep native and remote surfaces visually aligned. */
+:root {
+  color-scheme: light;
+  --surface: #fcfcfd;
+  --ink: #1b1b1b;
+  --brand: #827be6;
+  --diff-added: #52a450;
+  --diff-removed: #c94446;
+  --runtime-codex: #10a37f;
+  --runtime-claude: #d97757;
+  --background: var(--surface);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --muted: color-mix(in oklab, var(--ink) 5%, var(--surface));
+  --muted-foreground: color-mix(in oklab, var(--ink) 52%, var(--surface));
+  --accent: color-mix(in oklab, var(--ink) 6%, var(--surface));
+  --border: color-mix(in oklab, var(--ink) 12%, var(--surface));
+  --popover: var(--surface);
+  --sidebar: #f8f8f9;
+  --sidebar-accent: color-mix(in oklab, var(--ink) 7%, var(--surface));
+  --radius: 0.625rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --surface: #0f0f11;
+    --ink: #e3e4e6;
+    --diff-added: #69c967;
+    --diff-removed: #ff7e78;
+    --card: color-mix(in oklab, var(--ink) 7%, var(--surface));
+    --muted: color-mix(in oklab, var(--ink) 13%, var(--surface));
+    --muted-foreground: color-mix(in oklab, var(--ink) 56%, var(--surface));
+    --accent: color-mix(in oklab, var(--ink) 14%, var(--surface));
+    --border: color-mix(in oklab, var(--ink) 14%, var(--surface));
+    --popover: color-mix(in oklab, var(--ink) 7%, var(--surface));
+    --sidebar: color-mix(in oklab, var(--ink) 4%, var(--surface));
+    --sidebar-accent: color-mix(in oklab, var(--ink) 17%, var(--surface));
+  }
+}

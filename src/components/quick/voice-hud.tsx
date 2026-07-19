@@ -1,8 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Loader } from "lucide-react";
-import type { VoiceEventPayload } from "@/lib/types";
+import { BookPlus, Loader } from "lucide-react";
+import type {
+  VoiceDictionaryEventPayload,
+  VoiceEventPayload,
+} from "@/lib/types";
+import { useTranslation } from "@/lib/i18n";
 
 const BARS = 15;
 const MIN_H = 3; // calm baseline height (px) — a flat row of dots when silent
@@ -26,8 +30,10 @@ const PHASE = Array.from({ length: BARS }, (_, i) => (i * 1.7) % (Math.PI * 2));
  *  them pulls the user into proofreading mid-sentence. While the cloud
  *  transcript + cleanup are in flight it shows a spinner. */
 export function VoiceHud() {
+  const { t } = useTranslation("quick");
   // True between release and insertion (cloud finalize + AI cleanup).
   const [busy, setBusy] = useState(false);
+  const [learnedTerms, setLearnedTerms] = useState<string[]>([]);
   // Mirror for the event closures: lets voice-level read the busy phase
   // without re-subscribing on every state change.
   const busyRef = useRef(false);
@@ -107,6 +113,7 @@ export function VoiceHud() {
       else unlisteners.push(un);
     };
     sub("voice-ready", () => {
+      setLearnedTerms([]);
       markBusy(false);
       targetRef.current = 0;
       startLoop(); // settle the bars to baseline, then self-park
@@ -115,6 +122,7 @@ export function VoiceHud() {
     // hidden between sessions, so the previous dictation's spinner state
     // must be wiped before it can flash.
     sub("voice-reset", () => {
+      setLearnedTerms([]);
       markBusy(false);
       targetRef.current = 0;
       startLoop();
@@ -122,6 +130,7 @@ export function VoiceHud() {
     // Post-release processing in flight: swap the equalizer for a spinner. The
     // loop self-parks on the next frame (busyRef gates it).
     sub("voice-transcribing", () => {
+      setLearnedTerms([]);
       markBusy(true);
       targetRef.current = 0;
     });
@@ -135,6 +144,15 @@ export function VoiceHud() {
       targetRef.current = Math.min(1, Math.max(0, p.level ?? 0));
       startLoop(); // wake the loop if it parked during silence
     });
+    void listen<VoiceDictionaryEventPayload>("voice-dictionary-added", (e) => {
+      if (e.payload.target !== "global") return;
+      markBusy(false);
+      targetRef.current = 0;
+      setLearnedTerms(e.payload.terms);
+    }).then((un) => {
+      if (cancelled) un();
+      else unlisteners.push(un);
+    });
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
@@ -145,8 +163,17 @@ export function VoiceHud() {
   return (
     // A clean black capsule, centered in the transparent voice window.
     <div className="flex h-screen w-screen items-center justify-center">
-      <div className="flex h-7 items-center justify-center gap-2 rounded-full bg-black px-3 shadow-[0_2px_10px_rgba(0,0,0,0.45)]">
-        {busy ? (
+      <div className="flex h-7 max-w-[368px] items-center justify-center gap-2 rounded-full bg-black px-3 shadow-[0_2px_10px_rgba(0,0,0,0.45)]">
+        {learnedTerms.length > 0 ? (
+          <>
+            <BookPlus className="size-3.5 shrink-0 text-emerald-300" />
+            <span className="truncate text-[11px] font-medium tracking-[0.01em] text-white">
+              {t("dictation.dictionaryAdded", {
+                term: learnedTerms.join(", "),
+              })}
+            </span>
+          </>
+        ) : busy ? (
           <Loader className="size-3.5 shrink-0 animate-spin text-white" />
         ) : (
           <span className="flex shrink-0 items-center gap-[2px]">
