@@ -19,6 +19,7 @@ import { composeWithAmbient } from "@/lib/quick-context";
 import {
   readDraft,
   readDraftAttachments,
+  readPersistedDraftAttachments,
   writeDraft,
   writeDraftAttachments,
 } from "@/lib/draft-store";
@@ -364,6 +365,31 @@ export function Composer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
     restoreAttachments(draftKey),
   );
+
+  // Attachment bytes live in IndexedDB across a renderer recovery. Hydrate
+  // them asynchronously, but never overwrite a newer in-memory user edit.
+  useEffect(() => {
+    if (!draftKey) return;
+    const key = draftKey;
+    let cancelled = false;
+    void readPersistedDraftAttachments(key).then((stored) => {
+      if (cancelled || draftKeyRef.current !== key || !stored.length) return;
+      setAttachments((current) => {
+        if (current.length) return current;
+        return stored.map((attachment) =>
+          attachment.type === "image"
+            ? {
+                ...attachment,
+                previewUrl: `data:${attachment.mimeType};base64,${attachment.data}`,
+              }
+            : attachment,
+        );
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [draftKey]);
 
   const updateAttachments = useCallback(
     (update: (previous: ComposerAttachment[]) => ComposerAttachment[]) => {

@@ -25,6 +25,18 @@ export function formatFullDateTime(ts: number): string {
   });
 }
 
+/** Full date at minute precision — for places where seconds are noise, like
+ *  the sidebar conversation tooltip. */
+export function formatDateTimeMinute(ts: number): string {
+  return new Date(ts).toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /** Elapsed `m:ss` since a start timestamp — the live recording clock shown in
  *  the meeting HUD and the Meetings settings section. */
 export function formatElapsed(startedTs: number): string {

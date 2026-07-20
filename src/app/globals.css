@@ -223,6 +223,12 @@
     opacity: 0.9999;
     transform: translateZ(0);
   }
+  /* Native wake recovery toggles this for two frames to make WebKit submit a
+     fresh composited layer without producing a visible flash. */
+  html.webview-repaint body {
+    opacity: 0.9999;
+    transform: translateZ(0);
+  }
 }
 
 /* Slim, unobtrusive scrollbar that replaces the chunky native macOS WebView

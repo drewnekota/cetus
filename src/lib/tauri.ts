@@ -157,6 +157,9 @@ export interface RemoteSettings {
 // --- Commands --------------------------------------------------------------
 
 export const api = {
+  webviewHeartbeat: (sequence: number) =>
+    invoke<number>("webview_heartbeat", { sequence }),
+  wakeMainWebview: () => invoke<void>("wake_main_webview"),
   listConversations: (includeArchived = false) =>
     invoke<Conversation[]>("list_conversations", { includeArchived }),
   newConversation: (workspaceDir?: string, model?: ModelChoice) =>

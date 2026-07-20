@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Cpu,
   Folder,
   FolderOpen,
   MessageSquare,
@@ -75,7 +76,7 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { shortcutDisplay, useKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import { workspaceName } from "@/lib/paths";
-import { formatFullDateTime } from "@/lib/format";
+import { formatDateTimeMinute } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/conversation-search";
 import { useConversationAutoSort } from "@/lib/conversation-order";
 import { useChatStore } from "@/lib/chat-store";
@@ -1138,10 +1139,10 @@ const ConversationRow = memo(function ConversationRow({
         <TooltipContent
           side="right"
           align="start"
-          sideOffset={4}
-          className="w-64 items-stretch gap-1.5 px-2.5 py-2"
+          sideOffset={6}
+          className="flex w-60 flex-col items-stretch gap-2 px-3 py-2.5"
         >
-          <div className="flex min-w-0 items-center gap-2 font-medium">
+          <div className="flex min-w-0 items-center gap-2">
             <span
               className={cn(
                 "size-1.5 shrink-0 rounded-full",
@@ -1152,26 +1153,40 @@ const ConversationRow = memo(function ConversationRow({
                     : "bg-background/65",
               )}
             />
-            <span className="truncate">{runtimeLabel(backend)}</span>
+            <span className="truncate font-medium">{runtimeLabel(backend)}</span>
             {streaming && (
-              <span className="ml-auto shrink-0 font-normal text-background/65">
+              <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-background/70">
+                <span className="size-1.5 animate-pulse rounded-full bg-current" />
                 {t("conversation.inProgress")}
               </span>
             )}
           </div>
-          <div className="truncate text-[11px] text-background/75">
-            {tuning.model}
-            {tuning.effort && ` · ${tuning.effort}`}
+          <div className="flex flex-col gap-1 text-[11px] text-background/70">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Cpu className="size-3 shrink-0 opacity-60" />
+              <span className="truncate">
+                {tuning.model}
+                {tuning.effort && ` · ${tuning.effort}`}
+              </span>
+            </div>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Folder className="size-3 shrink-0 opacity-60" />
+              <span className="truncate">
+                {workspaceName(conversation.workspaceDir)}
+              </span>
+            </div>
+            {/* The tooltip surface is inverted (bg-foreground), so the amber
+                needs to flip with the theme too: light amber on the dark
+                surface in light mode, dark amber on the light surface in dark
+                mode. */}
+            {quota && (
+              <div className="tabular-nums text-amber-300 dark:text-amber-700">
+                {quota}
+              </div>
+            )}
           </div>
-          <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-background/65">
-            <Folder className="size-3 shrink-0" />
-            <span className="truncate">{workspaceName(conversation.workspaceDir)}</span>
-          </div>
-          {quota && (
-            <div className="text-[11px] tabular-nums text-amber-200">{quota}</div>
-          )}
-          <div className="text-[10px] tabular-nums text-background/50">
-            {formatFullDateTime(conversation.updatedAt)}
+          <div className="border-t border-background/15 pt-1.5 text-[10px] tabular-nums text-background/50">
+            {formatDateTimeMinute(conversation.updatedAt)}
           </div>
         </TooltipContent>
       </Tooltip>

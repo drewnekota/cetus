@@ -70,6 +70,7 @@ import { dispatchNotification, refreshPermission } from "@/lib/notifications";
 import { tt, useLocale, useTranslation } from "@/lib/i18n";
 import { flavorHeadline } from "@/lib/chat-flavor";
 import { buildAttachmentRefs } from "@/lib/attachments";
+import { installWebviewHealthMonitor } from "@/lib/webview-health";
 import {
   DEFAULT_MODEL_CHOICE,
   type AppEvent,
@@ -354,6 +355,7 @@ function createInitialWorkspaceDocksByChat(): WorkspaceDocksByChatState {
 
 export default function Home() {
   useZoom();
+  useEffect(() => installWebviewHealthMonitor(), []);
   const autoSortConversations = useConversationAutoSort();
   const initialViewStateRef = useRef<PersistedAppViewState | null>(null);
   if (initialViewStateRef.current === null) {

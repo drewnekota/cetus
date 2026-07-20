@@ -22,8 +22,8 @@ mod cua;
 mod devtest;
 mod discovery;
 mod doubao;
-mod focused_text;
 mod dream;
+mod focused_text;
 #[cfg(target_os = "macos")]
 mod host_tunnel;
 mod hotkey;
@@ -63,6 +63,7 @@ mod transcripts;
 mod ultra;
 mod updater;
 mod voice;
+mod webview_health;
 mod window_geom;
 
 use std::collections::HashMap;
@@ -748,8 +749,20 @@ pub fn run() {
                     }
                 })
                 .build(),
-        )
-        .setup(|app| {
+        );
+
+    // WKWebView runs out-of-process. If macOS reclaims or crashes that content
+    // process, reload just the frontend; chats and drafts hydrate from durable
+    // stores on page load.
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(|webview| {
+        if webview.label() == "main" {
+            tracing::warn!("main WKWebView content process terminated; reloading UI");
+            let _ = webview.reload();
+        }
+    });
+
+    let builder = builder.setup(|app| {
             // Started as a login item (the autostart plugin appends `--autostart`):
             // keep cetus resident in the tray instead of popping the main window in
             // the user's face right after they log in.
@@ -1032,8 +1045,10 @@ pub fn run() {
                                 if let Ok(ptr) = w.ns_window() {
                                     crate::panel::enable_mouse_events(ptr);
                                     crate::panel::rearm_web_input(ptr);
+                                    crate::panel::refresh_webview_tracking(ptr);
                                 }
                             }
+                            crate::webview_health::arm_focus_watchdog(app_h);
                         });
                         updater::check_after_focus(app_handle.clone());
                     }
@@ -1415,11 +1430,45 @@ pub fn run() {
             }
             Ok(())
         })
-        // App menu bar. Keep the platform default (App / Edit / Window / Help)
-        // so copy, paste, select-all and the rest retain their accelerators.
-        // Deliberately omit Reload: refreshing destroys frontend session state.
+        // App menu bar. Keep the platform defaults so copy, paste, select-all
+        // and the rest retain their accelerators, then add Reload to View. The
+        // main UI hydrates conversations and drafts from durable stores after a
+        // frontend reload.
         .menu(|app| {
-            tauri::menu::Menu::default(app)
+            let menu = tauri::menu::Menu::default(app)?;
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{MenuItem, MenuItemKind};
+
+                let reload = MenuItem::with_id(
+                    app,
+                    "view_reload",
+                    "Reload",
+                    true,
+                    Some("CmdOrCtrl+R"),
+                )?;
+                if let Some(MenuItemKind::Submenu(view)) = menu
+                    .items()?
+                    .into_iter()
+                    .find(|item| {
+                        matches!(
+                            item,
+                            MenuItemKind::Submenu(submenu)
+                                if matches!(submenu.text().as_deref(), Ok("View"))
+                        )
+                    })
+                {
+                    view.prepend(&reload)?;
+                }
+            }
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "view_reload" {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.reload();
+                }
+            }
         });
 
     // Self-update plugin. Registered only in release builds so `tauri dev` never
@@ -1459,6 +1508,8 @@ pub fn run() {
         commands::retry_last_turn,
         commands::abort,
         commands::pi_ping,
+        webview_health::webview_heartbeat,
+        webview_health::wake_main_webview,
         commands::default_workspace,
         commands::pick_workspace_dir,
         commands::list_workspace_files,
@@ -1627,6 +1678,8 @@ pub fn run() {
         commands::retry_last_turn,
         commands::abort,
         commands::pi_ping,
+        webview_health::webview_heartbeat,
+        webview_health::wake_main_webview,
         commands::default_workspace,
         commands::pick_workspace_dir,
         commands::list_workspace_files,

@@ -893,6 +893,64 @@ pub fn rearm_web_input(ns_window: *mut c_void) {
     }
 }
 
+/// Refresh AppKit's cursor rectangles / tracking areas and dirty the WKWebView
+/// backing layer. This repairs the other half of a long-idle wake failure:
+/// keyboard routing can be healthy while hover styles, link cursors, and the
+/// text caret remain visually stale because WebKit resumed with old tracking
+/// geometry or never submitted a fresh composited frame.
+pub fn refresh_webview_tracking(ns_window: *mut c_void) {
+    if ns_window.is_null() {
+        return;
+    }
+    let obj = ns_window as *mut AnyObject;
+    unsafe {
+        let window: &AnyObject = &*obj;
+        let content: *mut AnyObject = msg_send![window, contentView];
+        if content.is_null() {
+            return;
+        }
+        let Some(webview) = find_wkwebview(content) else {
+            return;
+        };
+        let _: () = msg_send![webview, updateTrackingAreas];
+        let _: () = msg_send![window, invalidateCursorRectsForView: webview];
+        let _: () = msg_send![webview, setNeedsDisplay: Bool::YES];
+        let bounds: NSRect = msg_send![webview, bounds];
+        let _: () = msg_send![webview, setNeedsDisplayInRect: bounds];
+        let layer: *mut AnyObject = msg_send![webview, layer];
+        if !layer.is_null() {
+            let _: () = msg_send![layer, setNeedsDisplay];
+        }
+    }
+}
+
+/// Terminate the WKWebView's renderer and reset its UI-process state while
+/// keeping the native window alive. This private WebKit recovery selector is
+/// the macOS equivalent of Electron's force-crash-renderer + reload: it clears
+/// poisoned input queues that a normal repaint or same-process reload cannot.
+/// Returns false when the selector is unavailable so callers can fall back to
+/// an ordinary reload. Must run on the AppKit main thread.
+pub fn reset_web_content_process(ns_window: *mut c_void) -> bool {
+    if ns_window.is_null() {
+        return false;
+    }
+    let obj = ns_window as *mut AnyObject;
+    unsafe {
+        let window: &AnyObject = &*obj;
+        let content: *mut AnyObject = msg_send![window, contentView];
+        let Some(webview) = find_wkwebview(content) else {
+            return false;
+        };
+        let selector = sel!(_killWebContentProcessAndResetState);
+        let responds: Bool = msg_send![webview, respondsToSelector: selector];
+        if !responds.as_bool() {
+            return false;
+        }
+        let _: () = msg_send![webview, _killWebContentProcessAndResetState];
+        true
+    }
+}
+
 /// Depth-first search for the WKWebView under `view` (wry nests it inside its own
 /// container NSView). Returns the first match, or `None` if the hierarchy holds
 /// no web view.
