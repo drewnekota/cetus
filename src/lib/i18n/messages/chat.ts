@@ -113,6 +113,7 @@ export const chat = {
     "cliControl.respondFailed":
       "Couldn't deliver your answer to the agent — try again.",
     "cliControl.pluginBadge": "plugin",
+    "cliControl.pluginTitle": "Plugin suggestion",
     "cliControl.pluginFallbackReason": "Codex recommends this capability for the current task.",
     "cliControl.installPlugin": "Install",
     "cliControl.pluginInstalled": "I've installed it",
@@ -320,6 +321,7 @@ export const chat = {
     "cliControl.notifyTitle": "智能体需要你的输入",
     "cliControl.respondFailed": "答案没能送达智能体——请重试。",
     "cliControl.pluginBadge": "插件",
+    "cliControl.pluginTitle": "插件推荐",
     "cliControl.pluginFallbackReason": "Codex 建议为当前任务启用这项能力。",
     "cliControl.installPlugin": "安装",
     "cliControl.pluginInstalled": "我已完成安装",

@@ -649,6 +649,11 @@ export default function Home() {
    *  let a second retry fork away the message the first just re-sent and then hit
    *  "nothing to retry". This ref flips synchronously, so the second call bails. */
   const retryingRef = useRef(false);
+  /** Synchronous guards for optimistic archive mutations. The row disappears
+   *  before React commits the next render, so a rapid shortcut repeat could
+   *  otherwise dispatch the same backend mutation twice. */
+  const archivingIdsRef = useRef(new Set<string>());
+  const archivingWorkspacesRef = useRef(new Set<string>());
 
   // Refs that mirror state for the global app-event handler. That handler
   // subscribes once (deps: [chatStore]) and would otherwise close over stale
@@ -1205,30 +1210,64 @@ export default function Home() {
 
   const archiveConversation = useCallback(
     async (c: Conversation) => {
+      if (archivingIdsRef.current.has(c.id)) return;
+      archivingIdsRef.current.add(c.id);
+
       const archiving = !c.archivedAt;
       const isActive = c.id === activeIdRef.current;
       const ids = orderedChatIdsRef.current;
       const currentIndex = ids.indexOf(c.id);
+      const stateIndex = conversationsRef.current.findIndex((x) => x.id === c.id);
       const nextId = currentIndex >= 0 ? ids[currentIndex + 1] : undefined;
 
-      await api.archiveConversation(c.id, archiving);
-      await refreshList();
-      chatStore.getState().drop(c.id);
+      // Archiving is local, reversible, and overwhelmingly likely to succeed:
+      // remove the row and navigate immediately instead of waiting for process
+      // shutdown / Codex inventory sync. Keep the chat cache until the backend
+      // confirms so a failed mutation can be restored without reloading it.
+      if (archiving) {
+        setConversations((cs) => cs.filter((x) => x.id !== c.id));
+        if (isActive && nextId) {
+          selectChatRef.current(nextId);
+        } else if (isActive) {
+          // The archived chat was the last visible row. Start a fresh chat in
+          // the same repo instead of falling back to the repo-less default.
+          pendingSelectRef.current = null;
+          activeIdRef.current = null;
+          setView("chat");
+          setWorkspaceDir(c.workspaceDir);
+          saveLastActive(null);
+          setActiveId(null);
+          setFocusToken((t) => t + 1);
+        }
+      }
 
-      if (archiving && isActive && nextId) {
-        selectChatRef.current(nextId);
-      } else if (archiving && isActive) {
-        // The archived chat was the last visible row. Start a fresh chat in
-        // the same repo instead of falling back to the repo-less default.
-        pendingSelectRef.current = null;
-        setView("chat");
-        setWorkspaceDir(c.workspaceDir);
-        saveLastActive(null);
-        setActiveId(null);
-        setFocusToken((t) => t + 1);
+      try {
+        const updated = await api.archiveConversation(c.id, archiving);
+        if (archiving) {
+          chatStore.getState().drop(c.id);
+        } else {
+          setConversations((cs) => mergeConversation(cs, updated));
+        }
+      } catch (error) {
+        if (archiving) {
+          // Roll back only the missing row. Do not force navigation back to it:
+          // the user may already have moved elsewhere while the request ran.
+          setConversations((cs) => {
+            if (cs.some((x) => x.id === c.id)) return cs;
+            const insertionIndex = Math.min(Math.max(stateIndex, 0), cs.length);
+            return [
+              ...cs.slice(0, insertionIndex),
+              c,
+              ...cs.slice(insertionIndex),
+            ];
+          });
+        }
+        throw error;
+      } finally {
+        archivingIdsRef.current.delete(c.id);
       }
     },
-    [refreshList, chatStore],
+    [chatStore],
   );
 
   useEffect(() => {
@@ -2729,7 +2768,12 @@ export default function Home() {
 
   const onArchive = useCallback(
     async (c: Conversation) => {
-      await archiveConversation(c);
+      try {
+        await archiveConversation(c);
+      } catch (e) {
+        console.error("archiveConversation failed", e);
+        toast.error("Couldn't archive that conversation.");
+      }
     },
     [archiveConversation],
   );
@@ -2745,28 +2789,52 @@ export default function Home() {
 
   const onArchiveWorkspaceChats = useCallback(
     async (dir: string) => {
+      if (archivingWorkspacesRef.current.has(dir)) return;
       const targets = conversationsRef.current.filter(
-        (c) => c.workspaceDir === dir && !c.archivedAt,
+        (c) =>
+          c.workspaceDir === dir &&
+          !c.archivedAt &&
+          !archivingIdsRef.current.has(c.id),
       );
       if (targets.length === 0) return;
+      archivingWorkspacesRef.current.add(dir);
+      const targetIds = new Set(targets.map((c) => c.id));
+      for (const id of targetIds) archivingIdsRef.current.add(id);
+
+      // Match single-chat archive semantics: the workspace vanishes at click
+      // time, while the slower process cleanup / Codex sync finishes behind it.
+      setConversations((cs) => cs.filter((c) => !targetIds.has(c.id)));
+      setDetailId((id) => (id && targetIds.has(id) ? null : id));
+      if (activeIdRef.current && targetIds.has(activeIdRef.current)) {
+        pendingSelectRef.current = null;
+        activeIdRef.current = null;
+        saveLastActive(null);
+        setActiveId(null);
+      }
+      setBoardWorkspaceFilter((filter) => (filter === dir ? null : filter));
+
       try {
-        await Promise.all(
+        const results = await Promise.allSettled(
           targets.map((c) => api.archiveConversation(c.id, true)),
         );
         const store = chatStore.getState();
-        for (const c of targets) store.drop(c.id);
-        await refreshList();
-        setDetailId((id) =>
-          id && targets.some((c) => c.id === id) ? null : id,
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") store.drop(targets[index].id);
+        });
+        const failed = results.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
         );
-        if (targets.some((c) => c.id === activeIdRef.current)) {
-          saveLastActive(null);
-          setActiveId(null);
-        }
-        setBoardWorkspaceFilter((filter) => (filter === dir ? null : filter));
+        if (failed) throw failed.reason;
       } catch (e) {
         console.error("archive workspace chats failed", dir, e);
+        // Some rows may have committed, so query the backend instead of blindly
+        // restoring every optimistic removal. allSettled above guarantees the
+        // reconciliation cannot race the remaining archive commands.
+        await refreshList().catch(console.error);
         toast.error("Couldn't archive those chats.");
+      } finally {
+        for (const id of targetIds) archivingIdsRef.current.delete(id);
+        archivingWorkspacesRef.current.delete(dir);
       }
     },
     [chatStore, refreshList],
@@ -2840,11 +2908,26 @@ export default function Home() {
   /** Approve a pending-review task → it leaves "Needs review" for "Done". */
   const onApproveReview = useCallback(
     async (id: string) => {
+      const previous = conversationsRef.current.find((c) => c.id === id);
+      if (!previous) return;
+      setConversations((cs) =>
+        cs.map((c) => (c.id === id ? { ...c, reviewState: "approved" } : c)),
+      );
       try {
         const updated = await api.setReviewState(id, "approved");
         applyReviewedRow(updated);
       } catch (e) {
         console.error(e);
+        // Revert only if this optimistic value is still current; a newer event
+        // or user action wins over this failed request.
+        setConversations((cs) =>
+          cs.map((c) =>
+            c.id === id && c.reviewState === "approved"
+              ? { ...c, reviewState: previous.reviewState }
+              : c,
+          ),
+        );
+        toast.error("Couldn't approve that conversation.");
       }
     },
     [applyReviewedRow],

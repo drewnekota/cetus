@@ -2,6 +2,7 @@
 import {
   memo,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -1078,8 +1079,10 @@ const ConversationRow = memo(function ConversationRow({
   const tuning = runtimeTuning(conversation, defaults);
   const rateLimit = useChatStore((s) => s.cliRateLimits[backend]);
   const quota = runtimeQuota(rateLimit);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const onDetailsOpenChange = useCallback(
     (open: boolean) => {
+      setDetailsOpen(open);
       if (!open || backend === "pi" || resolvedDefaults?.backend === backend) return;
       fetchSidebarCliDefaults(backend).then((value) => {
         setResolvedDefaults({ backend, value });
@@ -1087,6 +1090,27 @@ const ConversationRow = memo(function ConversationRow({
     },
     [backend, resolvedDefaults?.backend],
   );
+  // A fast swipe off the window edge (the sidebar hugs the screen edge) can
+  // outrun WebKit's trailing pointer events, so Radix never hears a close
+  // signal and the details card latches open over other apps. While open,
+  // watch the window-level exits that still fire — losing key status and the
+  // document-level mouse-out — and force the card shut. Listeners exist only
+  // while a card is open, so the row list adds no idle cost.
+  useEffect(() => {
+    if (!detailsOpen) return;
+    const close = () => setDetailsOpen(false);
+    const onMouseOut = (e: MouseEvent) => {
+      if (!e.relatedTarget) close();
+    };
+    window.addEventListener("blur", close);
+    document.addEventListener("mouseleave", close);
+    document.addEventListener("mouseout", onMouseOut);
+    return () => {
+      window.removeEventListener("blur", close);
+      document.removeEventListener("mouseleave", close);
+      document.removeEventListener("mouseout", onMouseOut);
+    };
+  }, [detailsOpen]);
   return (
     // NB: no `content-visibility:auto` here. It broke under the sidebar's old
     // `backdrop-blur` ancestor (containing block defeated in-viewport
@@ -1094,7 +1118,7 @@ const ConversationRow = memo(function ConversationRow({
     // minute-clock scoping already removed the per-minute re-render cost, and
     // a long list would need a real virtualizer anyway.
     <SidebarMenuItem>
-      <Tooltip delayDuration={0} onOpenChange={onDetailsOpenChange}>
+      <Tooltip open={detailsOpen} delayDuration={0} onOpenChange={onDetailsOpenChange}>
         <TooltipTrigger asChild>
           <SidebarMenuButton
             onClick={() => onSelect(conversation.id)}

@@ -919,7 +919,7 @@ function Segmented<T extends string>({
   options: { value: T; label: string; disabled?: boolean; disabledTooltip?: string }[];
 }) {
   return (
-    <TooltipProvider>
+    <TooltipProvider disableHoverableContent>
       <div className="flex items-center gap-0.5">
         {options.map((o) => {
           const btn = (

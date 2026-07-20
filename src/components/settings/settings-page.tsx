@@ -2971,14 +2971,27 @@ function ArchivedChatsSection({
   }, [open]);
 
   async function restore(c: Conversation) {
+    const originalIndex = chats?.findIndex((x) => x.id === c.id) ?? -1;
     setBusy(c.id);
     setError(null);
+    // Restoring is the exact inverse of archive: local, reversible, and safe to
+    // reflect immediately. Keep the row snapshot so a backend failure can put
+    // it back without waiting for a full settings-page reload.
+    setChats((cs) => (cs ? cs.filter((x) => x.id !== c.id) : cs));
     try {
       await api.archiveConversation(c.id, false);
-      setChats((cs) => (cs ? cs.filter((x) => x.id !== c.id) : cs));
       onConversationsChanged?.();
     } catch (e) {
       setError(String(e));
+      setChats((cs) => {
+        if (!cs || cs.some((x) => x.id === c.id)) return cs;
+        const insertionIndex = Math.min(Math.max(originalIndex, 0), cs.length);
+        return [
+          ...cs.slice(0, insertionIndex),
+          c,
+          ...cs.slice(insertionIndex),
+        ];
+      });
     } finally {
       setBusy(null);
     }

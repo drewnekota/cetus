@@ -408,22 +408,23 @@ fn resolve_file_path(raw: &str, cwd: Option<&Path>) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
+/// Extract only Cetus's explicit CLI delivery markers from unstructured text.
+///
+/// Tool output often reports unrelated existing files (for example, `simctl`
+/// prints `Image Path: /.../runtime.dmg`). Treating generic `path:` / `file:` /
+/// `saved to` prose as delivery intent makes those files appear in chat even
+/// though the agent never sent them. Structured runtime file blocks are still
+/// handled by `collect_artifacts`; plain text must use `cetus artifact <path>`.
 fn paths_from_text(text: &str, cwd: Option<&Path>) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for line in text.lines() {
         if let Some(json) = line.strip_prefix("CETUS_ARTIFACT:") {
             if let Ok(value) = serde_json::from_str::<Value>(json.trim()) {
-                if let Some(path) = value.get("path").and_then(Value::as_str).and_then(|p| resolve_file_path(p, cwd)) {
-                    paths.push(path);
-                }
-            }
-        }
-        // Common tool wording keeps the path as the remainder, which also
-        // preserves spaces in filenames ("saved to /Users/me/My File.pdf").
-        for marker in [" saved to ", " written to ", " created at ", " file: ", " path: "] {
-            if let Some((_, tail)) = line.to_ascii_lowercase().split_once(marker) {
-                let offset = line.len().saturating_sub(tail.len());
-                if let Some(path) = resolve_file_path(&line[offset..], cwd) {
+                if let Some(path) = value
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .and_then(|p| resolve_file_path(p, cwd))
+                {
                     paths.push(path);
                 }
             }
@@ -5665,19 +5666,36 @@ mod tests {
     }
 
     #[test]
-    fn unknown_local_file_type_is_promoted_to_artifact() {
+    fn explicit_marker_promotes_unknown_local_file_type() {
         let dir = artifact_test_dir("unknown");
         let file = dir.join("scene.blend");
         std::fs::write(&file, b"blend-data").unwrap();
-        let details = extracted_artifact_details(
-            &json!(format!("Created file: {}", file.display())),
-            Some(&dir),
-            Some(&dir),
-        )
-        .unwrap();
+        let marker = format!(
+            "CETUS_ARTIFACT:{}",
+            json!({ "path": file.to_string_lossy() })
+        );
+        let details = extracted_artifact_details(&json!(marker), Some(&dir), Some(&dir)).unwrap();
         assert_eq!(details["artifactKind"], json!("other"));
         assert_eq!(details["mimeType"], json!("application/octet-stream"));
         assert_eq!(details["name"], json!("scene.blend"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn prose_paths_are_not_promoted_to_artifacts() {
+        let dir = artifact_test_dir("prose-path");
+        let file = dir.join("runtime.dmg");
+        std::fs::write(&file, b"disk-image").unwrap();
+        for text in [
+            format!("Image Path: {}", file.display()),
+            format!("Created file: {}", file.display()),
+            format!("Report saved to {}", file.display()),
+        ] {
+            assert!(
+                extracted_artifact_details(&json!(text), Some(&dir), Some(&dir)).is_none(),
+                "plain tool prose must not imply artifact delivery"
+            );
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 

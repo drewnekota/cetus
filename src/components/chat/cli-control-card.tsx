@@ -173,6 +173,14 @@ function PluginSuggestionCard({
     meta.suggest_reason ||
     "";
   const installUrl = meta.install_url;
+  const installHost = useMemo(() => {
+    if (!installUrl) return null;
+    try {
+      return new URL(installUrl).hostname.replace(/^www\./, "");
+    } catch {
+      return null;
+    }
+  }, [installUrl]);
   const [installOpened, setInstallOpened] = useState(false);
 
   async function openInstall() {
@@ -191,46 +199,43 @@ function PluginSuggestionCard({
   }
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-[#d97757]/45 bg-card shadow-sm">
-      <div className="absolute inset-y-0 left-0 w-1 bg-[#d97757]" />
-      <div className="p-3 pl-4">
-        <div className="flex items-start gap-2.5">
-          <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#d97757]/10 text-[#d97757] ring-1 ring-[#d97757]/20">
-            <Blocks className="size-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-sm font-semibold text-foreground">{name}</span>
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                {meta.tool_type || t("cliControl.pluginBadge")}
-              </span>
-            </div>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {reason || t("cliControl.pluginFallbackReason")}
-            </p>
-            {installOpened && (
-              <p className="mt-2 rounded-md bg-[#d97757]/8 px-2 py-1.5 text-[11px] leading-relaxed text-foreground/80">
-                {t("cliControl.pluginFinishHint")}
-              </p>
-            )}
-          </div>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onDecline}>
-            {t("cliControl.notNow")}
+    <div className="rounded-xl border bg-card p-3 shadow-sm">
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-primary">
+        <Blocks className="size-3.5" />
+        {t("cliControl.pluginTitle")}
+      </div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-sm font-semibold text-foreground">{name}</span>
+        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {meta.tool_type || t("cliControl.pluginBadge")}
+        </span>
+        {installHost && (
+          <span className="text-[11px] text-muted-foreground/70">{installHost}</span>
+        )}
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        {reason || t("cliControl.pluginFallbackReason")}
+      </p>
+      {installOpened && (
+        <p className="mt-2 rounded-md border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] leading-relaxed text-foreground/80">
+          {t("cliControl.pluginFinishHint")}
+        </p>
+      )}
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" onClick={onDecline}>
+          {t("cliControl.notNow")}
+        </Button>
+        {installOpened ? (
+          <Button size="sm" className="h-7 text-xs" onClick={onAccept}>
+            <Check className="mr-1 size-3.5" />
+            {t("cliControl.pluginInstalled")}
           </Button>
-          {installOpened ? (
-            <Button size="sm" className="h-7 text-xs" onClick={onAccept}>
-              <Check className="mr-1 size-3.5" />
-              {t("cliControl.pluginInstalled")}
-            </Button>
-          ) : (
-            <Button size="sm" className="h-7 text-xs" onClick={openInstall}>
-              {installUrl && <ExternalLink className="mr-1 size-3.5" />}
-              {t("cliControl.installPlugin")}
-            </Button>
-          )}
-        </div>
+        ) : (
+          <Button size="sm" className="h-7 text-xs" onClick={openInstall}>
+            {installUrl && <ExternalLink className="mr-1 size-3.5" />}
+            {t("cliControl.installPlugin")}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -287,8 +292,8 @@ function CodexQuestionCard({
   }
 
   return (
-    <div className="rounded-xl border border-[#d97757]/50 bg-card p-3 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-[#d97757]">
+    <div className="rounded-xl border bg-card p-3 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-primary">
         <span className="flex items-center gap-1.5">
           <MessageCircleQuestion className="size-3.5" />
           {t("cliControl.codexQuestionTitle")}
@@ -312,7 +317,7 @@ function CodexQuestionCard({
               key={option.label}
               type="button"
               onClick={() => choose(option.label)}
-              className="rounded-lg border border-border px-2.5 py-2 text-left text-xs transition-colors hover:border-[#d97757]/50 hover:bg-[#d97757]/5"
+              className="rounded-lg border border-border px-2.5 py-2 text-left text-xs transition-colors hover:border-primary/50 hover:bg-primary/5"
             >
               <span className="font-medium">{option.label}</span>
               {option.description && <span className="mt-0.5 block text-[11px] text-muted-foreground">{option.description}</span>}
@@ -333,7 +338,7 @@ function CodexQuestionCard({
             }}
             placeholder={t("cliControl.otherPlaceholder")}
             className={cn(
-              "h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:border-[#d97757]/60",
+              "h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:border-primary/60",
               q.isSecret && "pl-7",
             )}
           />
@@ -426,8 +431,8 @@ function AskQuestionCard({
   if (!q) return null;
 
   return (
-    <div className="rounded-xl border border-[#d97757]/50 bg-card p-3 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-[#d97757]">
+    <div className="rounded-xl border bg-card p-3 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-primary">
         <span className="flex items-center gap-1.5">
           <MessageCircleQuestion className="size-3.5" />
           {t("cliControl.questionTitle")}
@@ -459,15 +464,15 @@ function AskQuestionCard({
                 className={cn(
                   "flex max-w-full items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors",
                   on
-                    ? "border-[#d97757] bg-[#d97757]/10 text-foreground"
-                    : "border-border hover:border-[#d97757]/50 hover:bg-muted",
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border hover:border-primary/50 hover:bg-muted",
                 )}
               >
                 {q.multiSelect && (
                   <span
                     className={cn(
                       "flex size-3.5 shrink-0 items-center justify-center rounded border",
-                      on ? "border-[#d97757] bg-[#d97757] text-white" : "border-border",
+                      on ? "border-primary bg-primary text-primary-foreground" : "border-border",
                     )}
                   >
                     {on && <Check className="size-2.5" />}
@@ -497,7 +502,7 @@ function AskQuestionCard({
             if (e.key === "Enter" && !composing && stepAnswered) advance();
           }}
           placeholder={t("cliControl.otherPlaceholder")}
-          className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/60 focus-visible:border-[#d97757]/60"
+          className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/60 focus-visible:border-primary/60"
         />
       </div>
       <div className="mt-2 flex items-center justify-end gap-2">
@@ -537,8 +542,8 @@ function ApprovalCard({
   const { t } = useTranslation("chat");
   const preview = toolPreview(request);
   return (
-    <div className="rounded-xl border border-warning/50 bg-card p-3 shadow-sm">
-      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-warning">
+    <div className="rounded-xl border bg-card p-3 shadow-sm">
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
         <ShieldQuestion className="size-3.5" />
         {t("cliControl.approvalTitle", { tool: request.toolName })}
       </div>

@@ -31,8 +31,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ChunkReloadGuard />
         {/* Sidebar uses `tooltip` prop on SidebarMenuButton, which calls
             useContext on TooltipProvider. Hoist the provider to the root so
-            every sidebar item (and any future tooltips) finds it. */}
-        <TooltipProvider delayDuration={200}>
+            every sidebar item (and any future tooltips) finds it.
+
+            disableHoverableContent: no tooltip in the app has interactive
+            content, and the hover-grace polygon Radix keeps between trigger
+            and content otherwise delays closes — worse, it waits on a
+            document pointermove that never arrives once the cursor has left
+            the window, latching tooltips open. */}
+        <TooltipProvider delayDuration={200} disableHoverableContent>
           {/* Provides the active language + `t()` to every window. Wraps
               WindowRouter so the launcher/voice HUD are translated too; safe to
               read localStorage synchronously since the text-bearing tree only

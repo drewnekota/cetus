@@ -46,14 +46,42 @@ interface Props {
   variant?: "inline" | "compact";
 }
 
+/** Artifact kinds that render meaningful content in the aspect-square
+ *  preview tile. Everything else (archives, binaries, audio, …) would just
+ *  show a huge empty square with an icon, so those fall back to a compact
+ *  attachment row instead. */
+const RICH_PREVIEW_KINDS = new Set([
+  "image",
+  "video",
+  "html",
+  "markdown",
+  "text",
+  "pdf",
+]);
+
 /** Unified file-card used both inline in chat bubbles and in the artifacts
- *  panel. Modelled after nex-studio's PreviewCard: aspect-square preview on
- *  top, filename + metadata footer below, click to open a full preview. */
+ *  panel. Previewable kinds get an aspect-square preview on top with a
+ *  filename + metadata footer (modelled after nex-studio's PreviewCard);
+ *  non-previewable kinds get a compact attachment row. Click opens a full
+ *  preview either way. */
 export function ArtifactView({ artifact }: Props) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const url = artifactUrl(artifact.path);
   const kindLabel = labelFor(artifact, t);
+  const compact = !RICH_PREVIEW_KINDS.has(artifact.artifactKind);
+
+  const meta = (
+    <>
+      <p className="truncate text-[13px] font-semibold text-foreground">
+        {artifact.caption ?? artifact.name}
+      </p>
+      <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+        {artifact.caption ? `${artifact.name} · ` : ""}
+        {kindLabel} · {formatBytes(artifact.sizeBytes)}
+      </p>
+    </>
+  );
 
   return (
     <>
@@ -67,28 +95,35 @@ export function ArtifactView({ artifact }: Props) {
             setOpen(true);
           }
         }}
-        className="group/preview-card block w-96 max-w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn(
+          "group/preview-card block max-w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          compact ? "w-80" : "w-96",
+        )}
         aria-label={t("artifact.open", { name: artifact.name })}
       >
         <div
           className={cn(
-            "flex flex-col overflow-hidden rounded-xl border border-border/80 bg-card transition-all duration-200",
+            "overflow-hidden rounded-xl border border-border/80 bg-card transition-all duration-200",
             "shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)]",
             "group-hover/preview-card:border-border group-hover/preview-card:shadow-[0_12px_32px_rgba(0,0,0,0.10),0_2px_6px_rgba(0,0,0,0.06)]",
+            compact ? "flex items-center gap-3 px-3.5 py-3" : "flex flex-col",
           )}
         >
-          <div className="relative aspect-square w-full overflow-hidden bg-card">
-            <Thumbnail artifact={artifact} url={url} />
-          </div>
-          <div className="border-t border-border/60 bg-muted/40 px-3.5 py-2.5">
-            <p className="truncate text-[13px] font-semibold text-foreground">
-              {artifact.caption ?? artifact.name}
-            </p>
-            <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
-              {artifact.caption ? `${artifact.name} · ` : ""}
-              {kindLabel} · {formatBytes(artifact.sizeBytes)}
-            </p>
-          </div>
+          {compact ? (
+            <>
+              <CompactThumb artifact={artifact} />
+              <div className="min-w-0 flex-1">{meta}</div>
+            </>
+          ) : (
+            <>
+              <div className="relative aspect-square w-full overflow-hidden bg-card">
+                <Thumbnail artifact={artifact} url={url} />
+              </div>
+              <div className="border-t border-border/60 bg-muted/40 px-3.5 py-2.5">
+                {meta}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -279,6 +314,30 @@ function VideoThumbnail({
         </div>
       </div>
     </>
+  );
+}
+
+/** Small square tile for the compact attachment row. Tries the native
+ *  Quick Look thumbnail (e.g. album art, custom archive icons); falls back
+ *  to a kind icon. */
+function CompactThumb({ artifact }: { artifact: ArtifactDetails }) {
+  const { thumbnailUrl, clearThumbnail } = useArtifactThumbnail(artifact.path);
+  const Icon = artifact.artifactKind === "audio" ? Headphones : FileIcon;
+
+  return (
+    <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-muted/40">
+      {thumbnailUrl ? (
+        <img
+          src={thumbnailUrl}
+          alt=""
+          className="h-full w-full object-contain p-1"
+          loading="lazy"
+          onError={clearThumbnail}
+        />
+      ) : (
+        <Icon className="size-5 text-muted-foreground/60" />
+      )}
+    </div>
   );
 }
 
