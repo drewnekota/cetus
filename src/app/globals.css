@@ -95,7 +95,7 @@
   --accent-foreground: var(--ink);
   --destructive: var(--diff-removed);
   --destructive-foreground: var(--surface);
-  --border: color-mix(in oklab, var(--ink) 12%, var(--surface));
+  --border: color-mix(in oklab, var(--ink) 9%, var(--surface));
   --input: color-mix(in oklab, var(--ink) 12%, var(--surface));
   --ring: var(--brand);
   --radius: 0.625rem;
@@ -124,7 +124,7 @@
      Linear-style selection — no bold block). */
   --sidebar-accent: color-mix(in oklab, var(--ink) 7%, var(--surface));
   --sidebar-accent-foreground: var(--ink);
-  --sidebar-border: color-mix(in oklab, var(--ink) 12%, var(--surface));
+  --sidebar-border: color-mix(in oklab, var(--ink) 9%, var(--surface));
   --sidebar-ring: var(--brand);
 }
 
@@ -152,7 +152,7 @@
   --accent-foreground: var(--ink);
   --destructive: var(--diff-removed);
   --destructive-foreground: var(--surface);
-  --border: color-mix(in oklab, var(--ink) 14%, var(--surface));
+  --border: color-mix(in oklab, var(--ink) 11%, var(--surface));
   --input: color-mix(in oklab, var(--ink) 18%, var(--surface));
   --ring: var(--brand);
 
@@ -179,7 +179,7 @@
   /* Hover + selected row: a light neutral lift clearly above the dark surface. */
   --sidebar-accent: color-mix(in oklab, var(--ink) 17%, var(--surface));
   --sidebar-accent-foreground: var(--ink);
-  --sidebar-border: color-mix(in oklab, var(--ink) 14%, var(--surface));
+  --sidebar-border: color-mix(in oklab, var(--ink) 11%, var(--surface));
   --sidebar-ring: var(--brand);
 }
 
@@ -255,6 +255,14 @@
    cleared on scroll, so at most one toolbar can ever show. */
 [data-message-hover-target] > [data-message-actions] {
   opacity: 0;
+  /* Keep the row on its own compositor layer at all times. Without this,
+     WebKit promotes it when the hover fade starts and drops it when the fade
+     ends; each promote/demote re-rasterizes and re-rounds the layer to the
+     device-pixel grid, which at fractional page zoom (⌘+ = 1.1/1.25…) nudges
+     the row — and the activity bar right above it — by a subpixel and back.
+     Reads as the bar "twitching" on hover. The rows are small and the list is
+     virtualized, so the extra layers are a few MB at most. */
+  transform: translateZ(0);
 }
 
 [data-message-hover-target][data-hovered] > [data-message-actions],

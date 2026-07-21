@@ -42,6 +42,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -5043,7 +5044,7 @@ function ConnectorDetails({ connector }: { connector: McpConnector }) {
       )}
       {loading ? (
         <div className="flex items-center gap-1.5 text-muted-foreground">
-          <RotateCw className="size-3.5 animate-spin" />
+          <Spinner className="size-3.5" />
           {t("connectors.details.loading")}
         </div>
       ) : result && result.ok ? (
@@ -5511,7 +5512,7 @@ function ConnectorEditor({
           onClick={test}
           disabled={testing}
         >
-          <RotateCw className={cn("size-3.5", testing && "animate-spin")} />
+          {testing ? <Spinner className="size-3.5" /> : <RotateCw className="size-3.5" />}
           {testing ? t("connectors.testing") : t("connectors.test.button")}
         </Button>
         <Button size="sm" variant="ghost" onClick={onCancel} disabled={saving}>

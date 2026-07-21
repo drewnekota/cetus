@@ -24,7 +24,6 @@ import {
   Globe,
   ImageIcon,
   Link2,
-  Loader2,
   MoreHorizontal,
   Paperclip,
   Pencil,
@@ -37,6 +36,7 @@ import {
   Video,
   X,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
@@ -630,7 +630,7 @@ function FilesPanel({
         <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{workspaceDir}</p>
         {isRemote && <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">SSH</span>}
         <Button type="button" size="icon-xs" variant="ghost" onClick={refreshLoaded} aria-label={t("workspacePanel.refresh")}>
-          <RefreshCw className={cn("size-3.5", rootState?.loading && "animate-spin")} />
+          {rootState?.loading ? <Spinner className="size-3.5" /> : <RefreshCw className="size-3.5" />}
         </Button>
       </div>
       <div className="flex h-9 items-center gap-1 border-b border-border px-2">
@@ -642,7 +642,7 @@ function FilesPanel({
           className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
           aria-label={t("workspacePanel.searchFiles")}
         />
-        {searching && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+        {searching && <Spinner className="size-3 text-muted-foreground" />}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" size="icon-xs" variant="ghost" aria-label={t("workspacePanel.fileActions")}><MoreHorizontal className="size-3.5" /></Button>
@@ -674,7 +674,7 @@ function FilesPanel({
       <div className="grid min-h-0 grid-cols-[minmax(210px,36%)_1fr] overflow-hidden">
         <div className="min-h-0 min-w-0 overflow-y-auto border-r border-border py-1" role="tree" tabIndex={0} onKeyDown={onTreeKeyDown}>
           {!rootState && !searchResults ? (
-            <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />{t("workspacePanel.loading")}</div>
+            <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground"><Spinner className="size-3.5" />{t("workspacePanel.loading")}</div>
           ) : rootState?.error && !rootState.entries.length ? (
             <p className="px-3 py-3 text-xs text-destructive">{rootState.error}</p>
           ) : !visibleRows.length ? (
@@ -771,7 +771,7 @@ function FileTreeRow({
         title={`${entry.path}${entry.symlinkTarget ? ` → ${entry.symlinkTarget}` : ""}`}
       >
         <span className="grid size-4 shrink-0 place-items-center text-muted-foreground">
-          {entry.isDir ? state?.loading ? <Loader2 className="size-3 animate-spin" /> : expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" /> : null}
+          {entry.isDir ? state?.loading ? <Spinner className="size-3" /> : expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" /> : null}
         </span>
         {entry.isDir ? expanded ? <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" /> : <Folder className="size-3.5 shrink-0 text-muted-foreground" /> : <File className="size-3.5 shrink-0 text-muted-foreground" />}
         {entry.isSymlink && <Link2 className="-ml-2 mt-2 size-2.5 shrink-0 text-muted-foreground" />}
@@ -1014,7 +1014,7 @@ function TextPreview({
   if (text == null) {
     return (
       <div className="flex items-center gap-2 px-5 py-4 text-xs text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" />
+        <Spinner className="size-3.5" />
         {t("artifact.loading")}
       </div>
     );
@@ -1127,7 +1127,7 @@ function OfficeLoading() {
   const { t } = useTranslation("chat");
   return (
     <div className="flex items-center gap-2 px-5 py-4 text-xs text-muted-foreground">
-      <Loader2 className="size-3.5 animate-spin" />
+      <Spinner className="size-3.5" />
       {t("artifact.loading")}
     </div>
   );

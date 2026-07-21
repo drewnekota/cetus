@@ -16,7 +16,8 @@ import { clearHoverOwner } from "@/components/chat/hover-owner";
 import { AgentControlCard } from "@/components/chat/agent-control-card";
 import { CliControlCard } from "@/components/chat/cli-control-card";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
-import { AlertTriangle, ArrowDown, ArrowUp, Bot, Loader2, MessageCircle, Pencil, RotateCw, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Bot, MessageCircle, Pencil, RotateCw, X } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Composer,
   type ComposerAttachment,
@@ -342,7 +343,7 @@ function BackgroundAgentsBar({ convId }: { convId: string }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-[#d97757]/30 bg-[#d97757]/5 px-2.5 py-1.5 text-[11px] text-muted-foreground">
       <Bot className="size-3.5 shrink-0 text-[#d97757]" />
-      <Loader2 className="size-3 shrink-0 animate-spin text-[#d97757]" />
+      <Spinner className="size-3 text-[#d97757]" />
       <span className="shrink-0 font-medium text-foreground">
         {t("pane.backgroundAgents.title", { count: labels.length })}
       </span>
@@ -683,6 +684,7 @@ function MessageList({
           <AssistantGroup
             convId={convId}
             keys={g.keys}
+            active={isStreaming && isLast}
             onRegenerate={onRegenerate && !isStreaming && isLast ? onRegenerate : undefined}
             onFork={
               onForkMessage && messageIndex >= 0
@@ -1251,7 +1253,7 @@ function MessageError({
               disabled={retrying}
               className="inline-flex w-fit items-center gap-1 rounded-md border border-destructive/30 px-2 py-0.5 text-xs font-medium transition-colors hover:bg-destructive/10 disabled:opacity-50"
             >
-              <RotateCw className={`size-3 ${retrying ? "animate-spin" : ""}`} />
+              {retrying ? <Spinner className="size-3" /> : <RotateCw className="size-3" />}
               {retrying ? t("pane.retrying") : t("pane.retry")}
             </button>
           )}

@@ -687,56 +687,6 @@ pub fn unpark_main_window(ns_window: *mut c_void, x: f64, y: f64, style_mask: us
     }
 }
 
-/// Install a one-shot observer that runs `cb` on the main thread every time cetus
-/// becomes the active application — by ANY route (Cmd-Tab, Mission Control /
-/// three-finger-swipe, App Exposé, clicking the app), not just a Dock reopen.
-///
-/// [`park_main_window`] leaves a closed main window fully ordered-out (so Mission
-/// Control stays clean). The price is that such a window is unreachable through
-/// the normal channels: it's gone from Mission Control, it can't receive a Tauri
-/// `Focused` event, and Tauri's `Reopen` only fires for a Dock-icon click. This
-/// observer is the catch-all that brings it back on whatever activation the user
-/// performs; the callback decides whether anything is actually parked.
-///
-/// The observer (and its copied block) is intentionally leaked — it lives for the
-/// whole process and is never removed.
-pub fn install_app_active_observer<F: Fn() + 'static>(cb: F) {
-    static INSTALLED: OnceLock<()> = OnceLock::new();
-    if INSTALLED.set(()).is_err() {
-        return; // already installed
-    }
-    unsafe {
-        let Some(center_cls) = AnyClass::get(c"NSNotificationCenter") else {
-            return;
-        };
-        let center: *mut AnyObject = msg_send![center_cls, defaultCenter];
-        let Some(str_cls) = AnyClass::get(c"NSString") else {
-            return;
-        };
-        // A freshly built NSString with the same characters matches the
-        // NSApplicationDidBecomeActiveNotification constant: the center compares
-        // names by string equality.
-        let name_c = c"NSApplicationDidBecomeActiveNotification";
-        let name: *mut AnyObject = msg_send![str_cls, stringWithUTF8String: name_c.as_ptr()];
-        let block = RcBlock::new(move |_note: *mut AnyObject| {
-            cb();
-        });
-        let null: *mut AnyObject = std::ptr::null_mut();
-        // queue: nil → the block runs on the posting thread, which for app
-        // activation is the main thread. object: nil → any sender.
-        let token: *mut AnyObject = msg_send![
-            center,
-            addObserverForName: name,
-            object: null,
-            queue: null,
-            usingBlock: &*block,
-        ];
-        // Keep the token (and thus the system's copied block) alive forever.
-        let _: *mut AnyObject = msg_send![token, retain];
-        std::mem::forget(block);
-    }
-}
-
 /// First half of a paint-synced show: make `ns_window` fully transparent WITHOUT
 /// changing its order, so it can be ordered front and activated while the user
 /// sees nothing. Pair with [`reveal_after_paint`].
@@ -1086,8 +1036,8 @@ pub fn install_screen_change_observer<F: Fn() + 'static>(cb: F) {
 /// active Space?"), so pair it with a visibility check when the question is
 /// "can the user actually see this window right now".
 ///
-/// A window that is visible but on ANOTHER Space is the blind spot both the
-/// summon toggle and the activation observer used to have: `isVisible` says
+/// A window that is visible but on ANOTHER Space is the blind spot the
+/// summon toggle used to have: `isVisible` says
 /// YES (it is ordered in — just on a desktop the user isn't looking at), so
 /// "visible" checks alone mistake it for on-screen, and the summon hotkey
 /// would *hide* the app instead of jumping to it.

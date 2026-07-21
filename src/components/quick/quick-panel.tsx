@@ -2,9 +2,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AppWindow, Check, CornerDownLeft, File, Globe, ImageOff, Loader2, Paperclip, Sparkles, TextSelect, X } from "lucide-react";
+import { AppWindow, Check, CornerDownLeft, File, Globe, ImageOff, Paperclip, Sparkles, TextSelect, X } from "lucide-react";
 import { formatBytes } from "@/lib/artifact";
 import { Kbd } from "@/components/ui/kbd";
+import { Spinner } from "@/components/ui/spinner";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { ModelPicker } from "@/components/chat/model-picker";
 import {
@@ -522,7 +523,7 @@ export function QuickPanel() {
   // normalize the shared pickers (workspace/model) that carry their own
   // solid-token hover styles; alpha overlays keep the vibrancy visible.
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground ring-1 ring-[var(--ink)]/[0.04] dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-white/[0.06] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:border-black/10 [&_kbd]:bg-black/5 [&_kbd]:text-[11px] dark:[&_kbd]:border-white/10 dark:[&_kbd]:bg-white/[0.06]">
+    <div className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-[11px] dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]">
       {/* The input owns the whole region above the action strip: the textarea
           fills it so typing wraps and uses the full height, and the screenshot
           chip (when present) tucks in at the bottom of the same region. */}
@@ -538,7 +539,7 @@ export function QuickPanel() {
           className="w-full flex-1 resize-none overflow-x-hidden overflow-y-auto bg-transparent text-lg font-medium leading-7 text-foreground outline-none placeholder:font-medium placeholder:text-muted-foreground/60"
         />
         {submitting && (
-          <Loader2 className="absolute right-4 top-4 size-4 shrink-0 animate-spin text-muted-foreground" />
+          <Spinner className="absolute right-4 top-4 size-4 text-muted-foreground" />
         )}
 
         {/* Attachments band — screenshot thumbnail (or its denied hint) and the
@@ -554,9 +555,9 @@ export function QuickPanel() {
               <div key={`${attachment.name}-${index}`} className="group/shot relative inline-block">
                 {attachment.type === "image" ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={`data:${attachment.mimeType};base64,${attachment.data}`} alt={attachment.name} className="size-14 rounded-md border border-black/10 object-cover dark:border-white/10" />
+                  <img src={`data:${attachment.mimeType};base64,${attachment.data}`} alt={attachment.name} className="size-14 rounded-md border border-black/[0.06] object-cover dark:border-white/[0.08]" />
                 ) : (
-                  <div className="flex h-14 max-w-44 items-center gap-2 rounded-md border border-black/10 bg-black/[0.03] px-2.5 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="flex h-14 max-w-44 items-center gap-2 rounded-md border border-black/[0.06] bg-black/[0.03] px-2.5 dark:border-white/[0.08] dark:bg-white/[0.04]">
                     <File className="size-4 shrink-0" />
                     <div className="min-w-0"><div className="truncate text-xs">{attachment.name}</div><div className="text-[10px] opacity-60">{formatBytes(attachment.sizeBytes)}</div></div>
                   </div>
@@ -570,7 +571,7 @@ export function QuickPanel() {
                 <img
                   src={`data:${screenshot.mimeType};base64,${screenshot.data}`}
                   alt={t("screenshot.alt")}
-                  className="h-14 rounded-md border border-black/10 object-cover dark:border-white/10"
+                  className="h-14 rounded-md border border-black/[0.06] object-cover dark:border-white/[0.08]"
                 />
                 <button
                   type="button"
@@ -736,7 +737,7 @@ function QuickReplySurface({
       tabIndex={-1}
       autoFocus
       onKeyDown={onKeyDown}
-      className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_30%)] font-medium text-foreground ring-1 ring-[var(--ink)]/[0.05] outline-none dark:bg-[color-mix(in_oklab,var(--card),transparent_32%)] dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)]"
+      className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_30%)] font-medium text-foreground outline-none dark:bg-[color-mix(in_oklab,var(--card),transparent_32%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)]"
     >
       <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-black/[0.06] px-5 dark:border-white/[0.06]">
         <span className="flex size-7 items-center justify-center rounded-lg bg-violet-500/12 text-violet-600 dark:text-violet-300">
@@ -760,7 +761,7 @@ function QuickReplySurface({
 
       {!result ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-          <Loader2 className="size-5 animate-spin text-violet-500" />
+          <Spinner className="size-5 text-violet-500" />
           <span>{open?.screenshotPermission === false ? t("reply.permission") : t("reply.generating")}</span>
         </div>
       ) : result.error ? (
@@ -892,7 +893,7 @@ function ContextChip({
   return (
     <span
       title={title}
-      className="group/ctx inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-black/10 bg-black/5 py-1 pl-2 pr-1 text-xs text-muted-foreground dark:border-white/10 dark:bg-white/[0.06]"
+      className="group/ctx inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-black/[0.06] bg-black/5 py-1 pl-2 pr-1 text-xs text-muted-foreground dark:border-white/[0.08] dark:bg-white/[0.06]"
     >
       <span className="shrink-0 opacity-70">{icon}</span>
       <span className="truncate">{label}</span>

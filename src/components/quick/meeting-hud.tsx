@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Loader, Square } from "lucide-react";
+import { Square } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { api, onAppEvent } from "@/lib/tauri";
 import { formatElapsed } from "@/lib/format";
 import { tt } from "@/lib/i18n";
@@ -98,7 +99,7 @@ export function MeetingHud() {
           className="flex size-5.5 shrink-0 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 hover:text-white"
         >
           {stopping ? (
-            <Loader className="size-3 animate-spin" />
+            <Spinner className="size-3" />
           ) : (
             <Square className="size-2.5 fill-current" />
           )}

@@ -519,9 +519,9 @@ fn spawn_pill_watcher(app: AppHandle, session_id: String) {
 /// without stealing key focus from the meeting app.
 #[cfg(target_os = "macos")]
 fn show_pill(app: &AppHandle) {
-    // Stamp the open so the app-activation observer / Dock-`Reopen` handler ignore
-    // the activation presenting the pill can cause — otherwise a closed (parked)
-    // or ⌘H-hidden main window gets yanked forward when a meeting auto-starts.
+    // Stamp the open so the Dock-`Reopen` handler ignores the reopen that
+    // presenting the pill can cause — otherwise a closed (parked) main window
+    // gets yanked forward when a meeting auto-starts.
     // Same guard the launcher and the voice HUD use (see `quick::open_panel`).
     app.state::<AppState>()
         .quick

@@ -1127,8 +1127,8 @@ static HUD_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new
 pub fn show_hud(app: &AppHandle) {
     HUD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     // Stamp before ANY event/sound/window work. Some of those operations can make
-    // macOS briefly mark cetus active; the activation observer must see this as a
-    // voice-HUD open and leave the parked/hidden main window alone.
+    // macOS deliver a spurious Dock-`Reopen`; the handler must see this as a
+    // voice-HUD open and leave the parked main window alone.
     app.state::<AppState>()
         .quick
         .last_open_ms

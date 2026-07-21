@@ -3197,7 +3197,7 @@ export default function Home() {
           so a translucent+blurred card only re-blurred a flat color — at the cost
           of a full-window GPU recomposite on every repaint. */}
       <SidebarInset
-        className="m-2 flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-background shadow-[inset_0_1px_0_rgb(255_255_255_/_0.45),0_3px_16px_rgb(0_0_0_/_0.045)] dark:shadow-[inset_0_1px_0_rgb(255_255_255_/_0.10),0_4px_18px_rgb(0_0_0_/_0.14)]"
+        className="m-2 flex min-h-0 flex-col overflow-hidden rounded-xl border-[0.5px] border-border bg-background shadow-[inset_0_1px_0_rgb(255_255_255_/_0.45),0_3px_16px_rgb(0_0_0_/_0.045)] dark:shadow-[inset_0_1px_0_rgb(255_255_255_/_0.10),0_4px_18px_rgb(0_0_0_/_0.14)]"
       >
         <div className="flex min-h-0 flex-1 flex-row">
           <div className="flex min-w-0 flex-1 flex-col">

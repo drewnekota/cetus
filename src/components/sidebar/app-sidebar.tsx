@@ -45,6 +45,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Kbd } from "@/components/ui/kbd";
+import { Spinner } from "@/components/ui/spinner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1146,10 +1147,10 @@ const ConversationRow = memo(function ConversationRow({
               )}
             >
               {streaming ? (
-                <span
-                  aria-label={t("conversation.inProgress")}
-                  className="block size-3 animate-spin rounded-full border-2 border-current/35 border-t-current"
-                />
+                <>
+                  <Spinner className="size-3" />
+                  <span className="sr-only">{t("conversation.inProgress")}</span>
+                </>
               ) : unreadCompleted ? (
                 <span className="block size-2 rounded-full bg-primary">
                   <span className="sr-only">Unread</span>

@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, CheckCircle2, AlertCircle } from "lucide-rea
 import type { RenderedBlock } from "@/lib/types";
 import { useTranslation } from "@/lib/i18n";
 import { useDisclosure } from "@/lib/disclosure";
+import { Spinner } from "@/components/ui/spinner";
 import { ToolUseCard, summarizeArgs, subagentInfo } from "./tool-use-card";
 import { ThinkingBlock } from "./thinking-block";
 
@@ -17,17 +18,22 @@ export function ActivityGroup({
   id,
   steps,
   durationMs,
+  active,
 }: {
   /** Stable id (conversation + turn + segment) so the expanded state and the
    *  per-step expanders survive the virtualized list unmounting this turn. */
   id?: string;
   steps: ProcessBlock[];
   durationMs: number;
+  /** The whole agent turn is still open and this is its trailing activity.
+   *  Individual tool blocks settle between calls, so their `streaming` flag
+   *  alone is not a reliable indication that the agent has finished. */
+  active: boolean;
 }) {
   const { t } = useTranslation("chat");
   const [open, toggle] = useDisclosure(id);
 
-  const running = steps.some((s) => s.streaming === true);
+  const running = active || steps.some((s) => s.streaming === true);
   const hasError = steps.some((s) => s.kind === "tool_use" && s.result?.isError);
   const toolCount = steps.reduce((n, s) => (s.kind === "tool_use" ? n + 1 : n), 0);
   const dur = formatDuration(durationMs);
@@ -36,7 +42,11 @@ export function ActivityGroup({
   const current = running ? currentAction(steps) : null;
 
   return (
-    <div className="w-full rounded-md border border-border/60 bg-muted/30">
+    <div
+      className={`w-full rounded-md border transition-colors ${
+        running ? "border-primary/25 bg-primary/[0.04]" : "border-border/60 bg-muted/30"
+      }`}
+    >
       <button
         onClick={toggle}
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
@@ -47,7 +57,7 @@ export function ActivityGroup({
           <ChevronRight className="h-3.5 w-3.5 shrink-0" />
         )}
         {running ? (
-          <ActivitySpinner />
+          <Spinner className="size-3.5 text-primary" />
         ) : hasError ? (
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning" />
         ) : (
@@ -56,6 +66,11 @@ export function ActivityGroup({
         {running ? (
           <>
             <span className="shrink-0 font-medium text-foreground">{t("activity.working")}</span>
+            {toolCount > 0 && (
+              <span className="shrink-0">
+                · {t(toolCount === 1 ? "agent.step" : "agent.step_plural", { count: toolCount })}
+              </span>
+            )}
             {current && (
               <span className="min-w-0 truncate font-mono text-[11px]">· {current}</span>
             )}
@@ -83,32 +98,6 @@ export function ActivityGroup({
         </div>
       )}
     </div>
-  );
-}
-
-/** Keep the circular silhouette stationary and rotate only its highlight.
- *  Rotating Lucide's asymmetric 14px arc makes its rasterized visual centre
- *  appear to orbit, which reads as a subtle vertical wobble. */
-function ActivitySpinner() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="h-3.5 w-3.5 shrink-0"
-      fill="none"
-    >
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
-      <circle
-        cx="12"
-        cy="12"
-        r="9"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeDasharray="14 43"
-        className="animate-spinner-dash"
-      />
-    </svg>
   );
 }
 

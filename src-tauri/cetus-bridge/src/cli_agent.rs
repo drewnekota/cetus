@@ -2358,6 +2358,21 @@ fn is_turn_activity(line: &str) -> bool {
     }
 }
 
+/// True for lines that carry actual model-turn content — the signal that the
+/// CLI began a SELF-STARTED continuation turn (a background task completed and
+/// re-invoked the model). Narrower than [`is_turn_activity`]: system task_*
+/// events also fire while the session idles (a monitor updating, a card
+/// settling) and must not open a turn in the UI.
+fn is_continuation_content(line: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    matches!(
+        v.get("type").and_then(|t| t.as_str()).unwrap_or(""),
+        "assistant" | "user" | "stream_event" | "control_request"
+    )
+}
+
 /// Condense an auth-expiry stderr dump into one actionable line. codex logs
 /// every 401 retry (`token_invalidated`, `refresh_token_invalidated`) before
 /// exiting; none of that wall helps the user beyond "sign in again".
@@ -2568,6 +2583,11 @@ pub fn spawn_claude_session(
         let mut killed = false;
         let mut interrupted = false;
         let mut control_id = 2u64;
+        // True while a SELF-STARTED continuation turn we announced with
+        // agent_start is streaming (no registered turn owns it). Its close —
+        // on its result, on a user StartTurn arriving mid-flight, or on
+        // process exit — must emit the matching message_end/agent_end.
+        let mut continuation = false;
 
         loop {
             tokio::select! {
@@ -2582,8 +2602,13 @@ pub fn spawn_claude_session(
                         }
                         // A continuation turn may still be mid-flight (e.g.
                         // blocked on an AskUserQuestion) — begin_next_turn
-                        // would wipe whatever it accumulated. Settle the
-                        // completed blocks and ship them for persistence.
+                        // would wipe whatever it accumulated. Close its stream
+                        // if we opened one, settle the completed blocks, and
+                        // ship them for persistence.
+                        if continuation {
+                            emit(&base_sink, tr.finish(None));
+                            continuation = false;
+                        }
                         if let Some(orphan) = &orphan_messages {
                             tr.flush_assistant();
                             let msgs = tr.take_messages();
@@ -2643,6 +2668,25 @@ pub fn spawn_claude_session(
                 },
                 line = reader.next_line() => {
                     let line = match line { Ok(Some(line)) => line, _ => break };
+                    // A completed background task re-invokes the model: the CLI
+                    // starts a continuation turn no StartTurn ever announced.
+                    // Without re-arming here, the previous turn's `opened` flag
+                    // suppresses the fresh message_start and the frontend
+                    // reducer drops every delta (no assistant slot) — the reply
+                    // would persist via the orphan channel yet never render
+                    // live. Re-open the stream on the turn's first content line.
+                    if active.is_none() && tr.finished && is_continuation_content(&line) {
+                        if let Some(orphan) = &orphan_messages {
+                            tr.flush_assistant();
+                            let msgs = tr.take_messages();
+                            if !msgs.is_empty() {
+                                let _ = orphan.send(msgs);
+                            }
+                        }
+                        tr.begin_next_turn();
+                        continuation = true;
+                        emit(&base_sink, tr.start());
+                    }
                     let sink = active.as_ref().map(|a| &a.sink).unwrap_or(&base_sink);
                     let events = tr.on_line(&line);
                     if !events.is_empty() { emit(sink, events); }
@@ -2669,13 +2713,18 @@ pub fn spawn_claude_session(
                     }
                     if tr.saw_result {
                         let Some(turn) = active.take() else {
-                            // A self-started continuation turn settled: its
-                            // text-only reply is still sitting in the open
-                            // assistant segment (only tool results flush it
-                            // mid-turn) — settle and persist it now, nothing
-                            // else will.
-                            if let Some(orphan) = &orphan_messages {
+                            // A self-started continuation turn settled: close
+                            // its stream the way a registered turn closes
+                            // (message_end/agent_end — only if we opened it
+                            // with agent_start above) and persist what it
+                            // produced, nothing else will.
+                            if continuation {
+                                emit(&base_sink, tr.finish(None));
+                                continuation = false;
+                            } else {
                                 tr.flush_assistant();
+                            }
+                            if let Some(orphan) = &orphan_messages {
                                 let msgs = tr.take_messages();
                                 if !msgs.is_empty() {
                                     let _ = orphan.send(msgs);
@@ -2721,8 +2770,14 @@ pub fn spawn_claude_session(
             });
         } else if let Some(orphan) = &orphan_messages {
             // No active turn to carry them: settle and ship whatever a
-            // continuation turn accumulated before the process died.
-            tr.flush_assistant();
+            // continuation turn accumulated before the process died — closing
+            // its stream if we announced one, so the frontend isn't left on a
+            // forever-streaming bubble.
+            if continuation {
+                emit(&base_sink, tr.finish(None));
+            } else {
+                tr.flush_assistant();
+            }
             let msgs = tr.take_messages();
             if !msgs.is_empty() {
                 let _ = orphan.send(msgs);
@@ -4575,6 +4630,127 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.messages.len(), 1);
         assert_eq!(outcome.messages[0]["content"][0]["text"], json!("real turn"));
+
+        session.shutdown();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A background task completing re-invokes the model: the CLI streams a
+    /// self-started continuation turn after the previous turn's result. That
+    /// turn must be announced to the frontend as a full stream — agent_start,
+    /// a fresh message_start (the previous turn's `opened` flag must not
+    /// suppress it), the reply deltas, and a closing agent_end — not just
+    /// silently persisted (observed: the reply only appeared after reopening
+    /// the conversation, reading as "Cetus never auto-responds").
+    #[tokio::test]
+    async fn continuation_turn_after_finished_turn_streams_to_base_sink() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-claude-continuation-stream-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-bg-continuation-claude.sh");
+        // Turn 1 answers normally; right after its result the CLI reports the
+        // background task settling and self-starts a continuation turn.
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             echo '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"bg-cont-1\"}'\n\
+             while IFS= read -r line; do\n\
+               case \"$line\" in *'\"type\":\"user\"'*)\n\
+                 echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}'\n\
+                 echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"launched\"}}}'\n\
+                 echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}'\n\
+                 echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"launched\"}'\n\
+                 echo '{\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"bg1\",\"tool_use_id\":\"tA\",\"status\":\"completed\",\"summary\":\"done\"}'\n\
+                 echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}}'\n\
+                 echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}'\n\
+                 echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"task finished, continuing\"}}}'\n\
+                 echo '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}'\n\
+                 echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"task finished, continuing\"}'\n\
+               ;; esac\n\
+             done\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let (orphan_tx, mut orphan_rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = spawn_claude_session(
+            sink.clone() as Arc<dyn EventSink>,
+            &script.to_string_lossy(),
+            &dir,
+            None,
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+            Some(orphan_tx),
+        )
+        .unwrap();
+
+        let outcome = session
+            .start_turn(
+                claude_user_message_line("run it in the background", &[]),
+                sink.clone() as Arc<dyn EventSink>,
+            )
+            .unwrap()
+            .await
+            .unwrap();
+        assert_eq!(outcome.messages[0]["content"][0]["text"], json!("launched"));
+
+        // The continuation turn's reply still reaches the orphan channel.
+        let orphaned =
+            tokio::time::timeout(std::time::Duration::from_secs(5), orphan_rx.recv())
+                .await
+                .expect("continuation message not shipped")
+                .unwrap();
+        assert_eq!(
+            orphaned[0]["content"][0]["text"],
+            json!("task finished, continuing")
+        );
+
+        // And it streamed live as a full second turn: agent_start,
+        // message_start, the delta, message_end, agent_end — in order,
+        // after the first turn's agent_end.
+        let events = sink.0.lock().unwrap().clone();
+        let first_end = events
+            .iter()
+            .position(|e| e["type"] == "agent_end")
+            .expect("first turn closed");
+        let tail = &events[first_end + 1..];
+        let ty = |e: &Value| e["type"].as_str().unwrap_or("").to_string();
+        let order: Vec<String> = tail
+            .iter()
+            .map(|e| ty(e))
+            .filter(|t| {
+                matches!(
+                    t.as_str(),
+                    "agent_start" | "message_start" | "message_update" | "message_end" | "agent_end"
+                )
+            })
+            .collect();
+        assert_eq!(order.first().map(String::as_str), Some("agent_start"), "{order:?}");
+        assert_eq!(order.get(1).map(String::as_str), Some("message_start"), "{order:?}");
+        assert_eq!(order.last().map(String::as_str), Some("agent_end"), "{order:?}");
+        assert!(
+            order[..order.len() - 1].contains(&"message_end".to_string()),
+            "{order:?}"
+        );
+        let delta_text: String = tail
+            .iter()
+            .filter(|e| e["type"] == "message_update")
+            .filter_map(|e| e["assistantMessageEvent"]["delta"].as_str())
+            .collect();
+        assert_eq!(delta_text, "task finished, continuing");
 
         session.shutdown();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

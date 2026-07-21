@@ -1055,129 +1055,13 @@ pub fn run() {
                     _ => {}
                 });
             }
-            // Bring a parked main window back on ANY activation of cetus — Cmd-Tab,
-            // Mission Control / three-finger-swipe, App Exposé, or a click on the
-            // app — not just a Dock reopen. A closed main window is parked fully
-            // ordered-out (clean Mission Control), so it can't receive a `Focused`
-            // event and the Dock-only `Reopen` handler never sees these routes;
-            // without this catch-all the only way back was the summon hotkey/tray.
-            #[cfg(target_os = "macos")]
-            {
-                let app_active = app.handle().clone();
-                crate::panel::install_app_active_observer(move || {
-                    updater::check_after_focus(app_active.clone());
-                    // Only act when the user would otherwise be left staring at
-                    // an active cetus with no window: parked off-screen by a ⌘W
-                    // close, hidden ⌘H-style by the summon hotkey, ordered out
-                    // (e.g. the launcher's push-back on a hidden app), or
-                    // visible-but-on-another-Space. Plain activation orders
-                    // nothing front, so macOS won't switch to the window's
-                    // Space on its own — without this the menu bar flips to
-                    // "Cetus" and nothing appears, which reads as "the app hid
-                    // itself". A normal activation of an already-showing cetus
-                    // must not disturb it.
-                    let main_showing = app_active
-                        .get_webview_window("main")
-                        .map(|w| {
-                            w.is_visible().unwrap_or(false)
-                                && w.ns_window()
-                                    .map(|p| crate::panel::is_on_active_space(p))
-                                    .unwrap_or(true)
-                        })
-                        .unwrap_or(true);
-                    if main_showing
-                        && !main_is_parked()
-                        && !MAIN_HOTKEY_HIDDEN.load(std::sync::atomic::Ordering::Relaxed)
-                    {
-                        return;
-                    }
-                    // The activation may have come through another regular
-                    // cetus window (the browser / annotation windows are
-                    // normal, activating NSWindows). If one of those is
-                    // showing on the active Space, the user is working in it —
-                    // don't yank them to the main window's Space.
-                    let other_window_showing =
-                        app_active.webview_windows().into_iter().any(|(label, w)| {
-                            !matches!(label.as_str(), "main" | "quick" | "voice" | "meeting")
-                                && w.is_visible().unwrap_or(false)
-                                && w.ns_window()
-                                    .map(|p| crate::panel::is_on_active_space(p))
-                                    .unwrap_or(false)
-                        });
-                    if other_window_showing {
-                        return;
-                    }
-                    // A launcher gesture momentarily activates cetus before its
-                    // non-activating panel is up, which would otherwise yank the
-                    // parked window onscreen — same guard the Reopen handler uses.
-                    let recent_launch = {
-                        let st = app_active.state::<AppState>();
-                        let last = st
-                            .quick
-                            .last_open_ms
-                            .load(std::sync::atomic::Ordering::Relaxed);
-                        last > 0 && store::now_ms() - last < 1500
-                    };
-                    if !recent_launch {
-                        tracing::debug!(
-                            "app-active observer: summoning main (parked={}, hotkey_hidden={}, main_showing={main_showing})",
-                            main_is_parked(),
-                            MAIN_HOTKEY_HIDDEN.load(std::sync::atomic::Ordering::Relaxed),
-                        );
-                        focus_main(&app_active);
-                        // A summon that races a Spaces transition can be
-                        // swallowed: activating via Mission Control fires this
-                        // observer while the Space-switch animation is still in
-                        // flight, and the makeKeyAndOrderFront inside focus_main
-                        // lands on a busy Spaces manager — no jump happens, and
-                        // the user is left on the new Space with an active cetus
-                        // and no window in sight. Verify shortly after the
-                        // animation window and retry once; every guard is
-                        // re-checked so a deliberate close/hide/app-switch in
-                        // the meantime is respected.
-                        let app_retry = app_active.clone();
-                        std::thread::spawn(move || {
-                            std::thread::sleep(std::time::Duration::from_millis(700));
-                            let app_check = app_retry.clone();
-                            let _ = app_retry.run_on_main_thread(move || {
-                                if !crate::panel::app_is_active()
-                                    || main_is_parked()
-                                    || MAIN_HOTKEY_HIDDEN
-                                        .load(std::sync::atomic::Ordering::Relaxed)
-                                {
-                                    return;
-                                }
-                                let showing = app_check
-                                    .get_webview_window("main")
-                                    .map(|w| {
-                                        w.is_visible().unwrap_or(false)
-                                            && w.ns_window()
-                                                .map(|p| crate::panel::is_on_active_space(p))
-                                                .unwrap_or(true)
-                                    })
-                                    .unwrap_or(true);
-                                let other_showing = app_check.webview_windows().into_iter().any(
-                                    |(label, w)| {
-                                        !matches!(
-                                            label.as_str(),
-                                            "main" | "quick" | "voice" | "meeting"
-                                        ) && w.is_visible().unwrap_or(false)
-                                            && w.ns_window()
-                                                .map(|p| crate::panel::is_on_active_space(p))
-                                                .unwrap_or(false)
-                                    },
-                                );
-                                if !showing && !other_showing {
-                                    tracing::debug!(
-                                        "app-active observer: summon didn't stick; retrying"
-                                    );
-                                    focus_main(&app_check);
-                                }
-                            });
-                        });
-                    }
-                });
-            }
+            // NOTE: there used to be an NSApplicationDidBecomeActive observer
+            // here that summoned a parked/hidden/off-Space main window on ANY
+            // activation (Cmd-Tab, Mission Control, App Exposé). It fought
+            // Mission Control's own raise (window landed under others) and was
+            // removed in favor of stock macOS behavior: activation alone brings
+            // nothing back; recall paths are the Dock click (`Reopen` handler),
+            // the summon hotkey, and the tray.
             for label in ["quick", "voice"] {
                 if let Some(win) = app.get_webview_window(label) {
                     let win_for_hide = win.clone();
@@ -1884,20 +1768,10 @@ pub fn run() {
 static MAIN_PARKED_ORIGIN: std::sync::Mutex<Option<(f64, f64, usize)>> =
     std::sync::Mutex::new(None);
 
-/// Whether the main window was hidden ⌘H-style by the summon hotkey
-/// ([`toggle_main`]) rather than parked off-screen by a ⌘W close. `NSApplication
-/// hide:` leaves no parked geometry, so the activation observer can't lean on
-/// [`main_is_parked`] to know it must summon the window back on the next Cmd-Tab
-/// / activation — this flag fills that gap. Cleared whenever [`focus_main`]
-/// brings the window forward again.
-#[cfg(target_os = "macos")]
-static MAIN_HOTKEY_HIDDEN: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
 /// Whether the main window is currently parked (closed → tucked away warm and
-/// ordered out). Read by the app-activation observer and the Dock-reopen handler
-/// to decide whether an activation needs to summon the window back, and by
-/// `toggle_main` to choose summon-vs-hide.
+/// ordered out). Read by the Dock-reopen handler to decide whether a Dock click
+/// needs to summon the window back, and by `toggle_main` to choose
+/// summon-vs-hide.
 #[cfg(target_os = "macos")]
 fn main_is_parked() -> bool {
     MAIN_PARKED_ORIGIN.lock().unwrap().is_some()
@@ -2000,9 +1874,6 @@ pub(crate) fn focus_main(app: &AppHandle) {
             let parked = MAIN_PARKED_ORIGIN.lock().unwrap().take();
             let was_parked = parked.is_some();
             tracing::debug!("focus_main: was_parked={was_parked}");
-            // Window is coming forward — clear the ⌘H-hotkey-hidden flag the
-            // activation observer watches so a later activation won't re-summon.
-            MAIN_HOTKEY_HIDDEN.store(false, std::sync::atomic::Ordering::Relaxed);
             if let Some(w) = app2.get_webview_window("main") {
                 if let Ok(ptr) = w.ns_window() {
                     match parked {
@@ -2080,9 +1951,6 @@ fn toggle_main(app: &AppHandle) {
                     .unwrap_or(false);
             if crate::panel::app_is_active() && showing {
                 crate::panel::hide_app();
-                // ⌘H-style hide parks no geometry, so flag it for the activation
-                // observer to summon the window back on the next Cmd-Tab.
-                MAIN_HOTKEY_HIDDEN.store(true, std::sync::atomic::Ordering::Relaxed);
             } else {
                 focus_main(&app);
             }

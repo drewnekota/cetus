@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useMemo } from "react";
 import type { RenderedBlock, RenderedMessage } from "@/lib/types";
-import { useIsStreaming, useMessagesByKeys } from "@/lib/chat-store";
+import { useMessagesByKeys } from "@/lib/chat-store";
 import { artifactsFromDetails } from "@/lib/artifact";
 import { useTranslation } from "@/lib/i18n";
 import { AnswerBlock, MessageActions } from "./message-blocks";
@@ -16,6 +16,8 @@ interface Props {
   onRegenerate?: () => void;
   /** Copy this conversation through this assistant turn into a new conversation. */
   onFork?: () => void;
+  /** This is the trailing assistant group of an agent turn that is still open. */
+  active?: boolean;
 }
 
 type Segment =
@@ -80,7 +82,7 @@ function answerText(messages: RenderedMessage[]): string {
 /** A whole assistant turn — one or more consecutive assistant messages rendered
  *  under a single ASSISTANT header. Tool calls + thinking collapse into compact
  *  activity widgets; the natural-language answer stays expanded below. */
-export function AssistantGroup({ convId, keys, onRegenerate, onFork }: Props) {
+export function AssistantGroup({ convId, keys, onRegenerate, onFork, active = false }: Props) {
   const { t } = useTranslation("chat");
   const messages = useMessagesByKeys(convId, keys);
   // Recompute segments only when the merged messages actually change (the array
@@ -97,14 +99,13 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork }: Props) {
   );
   // Built only when the user actually copies (see MessageActions.getText).
   const getAnswerText = useCallback(() => answerText(messages), [messages]);
-  const isStreaming = useIsStreaming(convId);
   if (messages.length === 0) return null;
 
   // No visible content yet: mid-run this is the gap between the message
   // opening and the first block streaming in — hold the shimmer instead of a
   // bare ASSISTANT header. A settled empty turn renders nothing at all.
   if (segments.length === 0) {
-    if (!isStreaming) return null;
+    if (!active) return null;
     return (
       <div className="flex w-full justify-start py-3">
         <div className="flex max-w-[88%] flex-col gap-2 items-start">
@@ -139,6 +140,7 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork }: Props) {
                 id={`${convId ?? ""}:${keys[0]}:a${i}`}
                 steps={seg.steps}
                 durationMs={seg.durationMs}
+                active={active && i === segments.length - 1}
               />
             ) : (
               <AnswerBlock key={i} block={seg.block} isUser={false} />

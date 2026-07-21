@@ -14,11 +14,11 @@ import {
   ExternalLink,
   Globe,
   Highlighter,
-  Loader2,
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { ZOOM_EVENT } from "@/hooks/use-zoom";
 import { useTranslation } from "@/lib/i18n";
 import { api } from "@/lib/tauri";
@@ -537,7 +537,7 @@ export function BrowserView({ state, onStateChange, onAnnotate, visible = true }
       <div className="relative min-h-0 flex-1 bg-background">
         {loading && (
           <div className="pointer-events-none absolute left-3 top-3 z-20 inline-flex items-center gap-2 rounded-md border border-border bg-background/95 px-2.5 py-1.5 text-xs text-muted-foreground shadow-sm">
-            <Loader2 className="size-3.5 animate-spin" />
+            <Spinner className="size-3.5" />
             {displayHost}
           </div>
         )}

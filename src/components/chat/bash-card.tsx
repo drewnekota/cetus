@@ -1,5 +1,6 @@
 "use client";
-import { Terminal, Loader2 } from "lucide-react";
+import { Terminal } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import type { BashResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
@@ -34,7 +35,7 @@ export function BashCard({ command, details }: Props) {
           {command}
         </span>
         {d.status === "running" ? (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+          <Spinner className="size-3.5 text-muted-foreground" />
         ) : (
           <span
             className={cn(

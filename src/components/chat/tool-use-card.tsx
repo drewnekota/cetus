@@ -1,6 +1,7 @@
 "use client";
 import { memo } from "react";
-import { ChevronDown, ChevronRight, Wrench, AlertCircle, Loader2, CheckCircle2, CircleSlash, Bot, Check } from "lucide-react";
+import { ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle2, CircleSlash, Bot, Check } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import type { PiContentBlock, RenderedBlock } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
@@ -152,7 +153,7 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
           {isError ? (
             <AlertCircle className="h-3 w-3 text-warning" />
           ) : isRunning ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Spinner className="size-3" />
           ) : isIncomplete ? (
             <CircleSlash className="h-3 w-3 text-muted-foreground" />
           ) : (
@@ -172,7 +173,7 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
               {s.done ? (
                 <Check className="h-2.5 w-2.5 shrink-0 text-success/80" />
               ) : isRunning ? (
-                <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" />
+                <Spinner className="size-2.5" />
               ) : (
                 <CircleSlash className="h-2.5 w-2.5 shrink-0" />
               )}

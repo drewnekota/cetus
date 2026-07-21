@@ -7,9 +7,10 @@
 // also be done later from Settings.
 
 import { useEffect, useState } from "react";
-import { ArrowRight, Bot, Check, LoaderCircle } from "lucide-react";
+import { ArrowRight, Bot, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { useTranslation } from "@/lib/i18n";
 import { api } from "@/lib/tauri";
 import { ClaudeCodeIcon, CodexIcon } from "@/components/brand-icons";
@@ -164,7 +165,7 @@ export function Onboarding() {
                     onClick={saveDeepseekKey}
                     disabled={!deepseekKey.trim() || savingKey}
                   >
-                    {savingKey && <LoaderCircle className="size-4 animate-spin" />}
+                    {savingKey && <Spinner className="size-4" />}
                     {t("onboarding.runtime.save")}
                   </Button>
                 </div>
@@ -256,7 +257,7 @@ function RuntimeCard({
           <Icon className="size-5" />
         </div>
         {ready === null ? (
-          <LoaderCircle className="mt-1 size-3.5 animate-spin text-muted-foreground" />
+          <Spinner className="mt-1 size-3.5 text-muted-foreground" />
         ) : (
           <span className={cn("flex items-center gap-1 text-[11px] font-medium", ready ? "text-success" : "text-muted-foreground")}>
             {ready && <Check className="size-3" />}

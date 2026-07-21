@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { BookPlus, Loader } from "lucide-react";
+import { BookPlus } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import type {
   VoiceDictionaryEventPayload,
   VoiceEventPayload,
@@ -174,7 +175,7 @@ export function VoiceHud() {
             </span>
           </>
         ) : busy ? (
-          <Loader className="size-3.5 shrink-0 animate-spin text-white" />
+          <Spinner className="size-3.5 text-white" />
         ) : (
           <span className="flex shrink-0 items-center gap-[2px]">
             {Array.from({ length: BARS }).map((_, i) => (
