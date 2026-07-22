@@ -925,9 +925,9 @@ pub async fn quick_recapture_screenshot(
     Ok(shot)
 }
 
-/// Park the launcher off-screen (keeping its webview warm) instead of hiding it.
-/// Clears the `shown` flag and, on macOS, parks the native window on the main
-/// thread; elsewhere there is no warm-park trick, so just hide it.
+/// Dismiss the launcher. Clears the `shown` flag and, on macOS, orders the native
+/// panel fully out on the main thread so it cannot interfere with Mission
+/// Control's ordering of the main window; elsewhere, use Tauri's hide path.
 fn park_quick(app: &AppHandle) {
     app.state::<AppState>()
         .quick

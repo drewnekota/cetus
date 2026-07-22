@@ -127,7 +127,7 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork, active = fa
       <div
         data-message-hover-target
         {...messageHoverProps}
-        className="flex w-full max-w-[88%] flex-col gap-2 items-start"
+        className="flex w-full flex-col gap-2 items-start"
       >
         <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           {t("pane.assistant")}
@@ -143,7 +143,11 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork, active = fa
                 active={active && i === segments.length - 1}
               />
             ) : (
-              <AnswerBlock key={i} block={seg.block} isUser={false} />
+              // Answer content keeps the bubble-ish 88% reading width; only
+              // activity bars span the full column to line up with the composer.
+              <div key={i} className="w-full max-w-[88%]">
+                <AnswerBlock block={seg.block} isUser={false} />
+              </div>
             ),
           )}
         </div>

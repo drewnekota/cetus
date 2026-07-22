@@ -270,12 +270,37 @@
   opacity: 1;
 }
 
-/* List markers hang inside the list's start padding, and the typography
-   default (1.625em; ~1.57em at prose-sm) only fits one digit — an ordered
-   list numbered "10." onward already overflows and the digits get clipped by
-   the prose wrappers' overflow-x containment (chat bubbles, artifact views).
-   2.25em fits three-digit markers; ul matches so mixed lists share an indent. */
-.prose :is(ol, ul) {
+/* WebKit can paint an outside ::marker beyond an ol's scrollable overflow
+   area even when the list has ample start padding. The first digit of wider
+   markers is then clipped (most visibly from 20 onward). Keep the native
+   list-item counter -- so start/value attributes still work -- but render the
+   number in an in-flow grid column. A fixed column also keeps wrapped and
+   loose-list content aligned. */
+.prose ol {
+  list-style: none;
+  padding-inline-start: 0;
+}
+
+.prose ol > li {
+  display: grid;
+  grid-template-columns: 4ch minmax(0, 1fr);
+  column-gap: 0.75em;
+  padding-inline-start: 0;
+}
+
+.prose ol > li::before {
+  content: counter(list-item) ".";
+  color: var(--tw-prose-counters);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.prose ol > li > * {
+  grid-column: 2;
+}
+
+.prose ul {
   padding-inline-start: 2.25em;
 }
 

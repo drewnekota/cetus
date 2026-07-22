@@ -1128,9 +1128,9 @@ const ConversationRow = memo(function ConversationRow({
             // row button, so moving onto it closes this details tooltip and
             // opens the archive action's own tooltip without nesting triggers.
             className={cn(
-              // Leave a little more breathing room between long titles and the
-              // absolutely positioned relative-time / unread indicator.
-              "relative pr-14",
+              // Keep long titles visibly separated from the absolutely
+              // positioned relative-time / unread indicator.
+              "relative pr-16",
               !active &&
                 "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
             )}

@@ -503,8 +503,8 @@ unsafe fn all_screen_frames() -> Vec<NSRect> {
     frames
 }
 
-/// Origin (bottom-left) that parks a window of size `wf` as a ~1px corner sliver
-/// on the main screen `vf`, with the rest of the window hanging off a corner that
+/// Origin (bottom-left) that parks the main window of size `wf` as a ~1px corner
+/// sliver on the main screen `vf`, with the rest hanging off a corner that
 /// borders NO other display.
 ///
 /// The keep-warm sliver must stay on-screen (off all screens → WebKit purges the
@@ -552,23 +552,19 @@ fn parked_sliver_origin(vf: NSRect, wf: NSRect, frames: &[NSRect]) -> NSPoint {
     NSPoint { x, y }
 }
 
-/// Dismiss the panel WITHOUT ordering it fully out, so its WKWebView stays warm.
+/// Dismiss the launcher and remove it from WindowServer's ordered window list.
 ///
-/// Tauri's `hide()` maps to `orderOut:`, which makes the window occluded; macOS
-/// then suspends the webview's rendering and, once the window has sat idle,
-/// *discards its backing store*. The next `present` has to wait for WebKit to
-/// repaint, so the bare vibrancy (gray) flashes into the real UI — the idle
-/// flicker. (App Nap, handled by [`prevent_app_nap`], is a *separate*, process-
-/// level throttle; preventing it does not stop per-window occlusion suspension.)
+/// An earlier keep-warm scheme parked the panel as a one-pixel, click-through
+/// sliver and immediately called `orderFrontRegardless`. Although visually
+/// hidden, that high-level floating panel remained cetus's front ordered window.
+/// Mission Control could then activate cetus by raising the sliver instead of
+/// the selected main window, leaving the main window underneath the previously
+/// active app. A hidden auxiliary window must never participate in app ordering,
+/// so dismissal now ends at `orderOut:`.
 ///
-/// Instead we keep the window ordered-in but shrink its on-screen footprint to a
-/// single click-through pixel in the top-right corner of the usable screen. It
-/// stays non-occluded, so WebKit keeps the frame alive; `present` just moves it
-/// back to center. The window is never resized (only its origin moves), so there
-/// is no relayout to repaint. The brief `orderOut` → `orderFrontRegardless` hands
-/// keyboard focus back to the previously-active app (the panel may still be key
-/// when dismissed via Esc / the gesture) without leaving the webview suspended:
-/// the order-out is momentary, far short of the idle delay that triggers a purge.
+/// [`disable_occlusion_throttling`] still reduces idle WebKit suspension, and
+/// [`present`] re-centers/orders the launcher when it is next requested. A cold
+/// launcher repaint is preferable to corrupting the main window's z-order.
 pub fn park(ns_window: *mut c_void) {
     if ns_window.is_null() {
         return;
@@ -576,32 +572,15 @@ pub fn park(ns_window: *mut c_void) {
     let obj = ns_window as *mut AnyObject;
     unsafe {
         let window: &AnyObject = &*obj;
-        // Bind the parked sliver to the CURRENT Space (drop `canJoinAllSpaces`,
-        // which `configure`/`present` set so the launcher can pop on any Space).
-        // A canJoinAllSpaces window gets dragged into every Space-switch
-        // animation — so the parked 1px sliver flashes each time you change
-        // desktops. Space-bound, it just sits still on its Space. `present`
-        // re-adds canJoinAllSpaces before showing, so the launcher still appears
-        // on whatever Space is active when the gesture fires.
+        // Drop all-Spaces behavior while hidden. `present` restores it before
+        // ordering the launcher onto whichever Space is active next.
         let default_behavior: usize = 0; // NSWindowCollectionBehaviorDefault
         let _: () = msg_send![window, setCollectionBehavior: default_behavior];
-        // 1px sliver at the top-right of the usable frame (clear of the menu bar
-        // and the Dock, so it is never occluded by them). Only the origin moves.
-        if let Some(screen_cls) = AnyClass::get(c"NSScreen") {
-            let screen: *mut AnyObject = msg_send![screen_cls, mainScreen];
-            if !screen.is_null() {
-                let vf: NSRect = msg_send![screen, visibleFrame];
-                let wf: NSRect = msg_send![window, frame];
-                let origin = parked_sliver_origin(vf, wf, &all_screen_frames());
-                let _: () = msg_send![window, setFrameOrigin: origin];
-            }
-        }
-        // Make the sliver inert, then hand key focus back and re-add the window
-        // ordered-in (NOT key) so it keeps painting.
+        // Make it inert before ordering out so a close/open race cannot leave a
+        // stale panel intercepting clicks. `present` re-enables hit-testing.
         let _: () = msg_send![window, setIgnoresMouseEvents: Bool::new(true)];
         let null: *mut AnyObject = std::ptr::null_mut();
         let _: () = msg_send![window, orderOut: null];
-        let _: () = msg_send![window, orderFrontRegardless];
     }
 }
 
@@ -982,52 +961,6 @@ pub fn prevent_app_nap() {
         // Retain past the autorelease pool and leak: the assertion must outlive
         // this scope (the whole process run).
         let _: *mut AnyObject = msg_send![activity, retain];
-    }
-}
-
-/// Install a one-shot observer that runs `cb` on the main thread whenever the
-/// display layout changes — a monitor is connected/disconnected, resolution or
-/// arrangement changes (`NSApplicationDidChangeScreenParametersNotification`).
-///
-/// Needed because [`park`] computes the sliver origin against the layout at
-/// park time: the launcher body hangs off an edge that borders no display
-/// *then*. Plug in a monitor on that side later and the "dead space" the body
-/// hangs into is suddenly a live screen — the parked launcher pops up on the
-/// new display, fully visible but inert. The callback re-parks against the
-/// fresh layout.
-///
-/// The observer (and its copied block) is intentionally leaked — it lives for
-/// the whole process and is never removed.
-pub fn install_screen_change_observer<F: Fn() + 'static>(cb: F) {
-    static INSTALLED: OnceLock<()> = OnceLock::new();
-    if INSTALLED.set(()).is_err() {
-        return; // already installed
-    }
-    unsafe {
-        let Some(center_cls) = AnyClass::get(c"NSNotificationCenter") else {
-            return;
-        };
-        let center: *mut AnyObject = msg_send![center_cls, defaultCenter];
-        let Some(str_cls) = AnyClass::get(c"NSString") else {
-            return;
-        };
-        let name_c = c"NSApplicationDidChangeScreenParametersNotification";
-        let name: *mut AnyObject = msg_send![str_cls, stringWithUTF8String: name_c.as_ptr()];
-        let block = RcBlock::new(move |_note: *mut AnyObject| {
-            cb();
-        });
-        let null: *mut AnyObject = std::ptr::null_mut();
-        // queue: nil → the block runs on the posting thread; screen-parameter
-        // notifications post on the main thread, where AppKit is safe.
-        let token: *mut AnyObject = msg_send![
-            center,
-            addObserverForName: name,
-            object: null,
-            queue: null,
-            usingBlock: &*block,
-        ];
-        let _: *mut AnyObject = msg_send![token, retain];
-        std::mem::forget(block);
     }
 }
 

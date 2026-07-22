@@ -16,6 +16,7 @@ import { useTranslation } from "@/lib/i18n";
 import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
 import { api } from "@/lib/tauri";
 import { composeWithAmbient } from "@/lib/quick-context";
+import { prepareImageAttachment } from "@/lib/image-attachment";
 import {
   readDraft,
   readDraftAttachments,
@@ -131,11 +132,21 @@ function detectMentionToken(
  *  every other file is written to disk and read by the agent via read_document. */
 export type ComposerAttachment = ImageAttachment | FileAttachment;
 
+/** Runtime choice captured with a composed message. Selecting a runtime only
+ * updates this intent; the conversation is switched when the message is
+ * actually delivered. */
+export interface ComposerRuntimeSelection {
+  backend: BackendId;
+  cliModel: string;
+  cliEffort: string;
+}
+
 /** A message parked in the follow-up queue while the agent is mid-run. */
 export interface QueuedMessage {
   id: string;
   text: string;
   attachments: ComposerAttachment[];
+  runtime?: ComposerRuntimeSelection;
 }
 
 /** Imperative-looking, token-keyed request to replace the current draft. Used
@@ -185,12 +196,20 @@ interface Props {
   onWorkspaceChange: (dir: string) => void;
   /** Require a real repository instead of the repository-free Chat workspace. */
   requireRepository?: boolean;
-  onSend: (text: string, attachments: ComposerAttachment[]) => void;
+  onSend: (
+    text: string,
+    attachments: ComposerAttachment[],
+    runtime?: ComposerRuntimeSelection,
+  ) => void;
   /** Called instead of onSend when the agent is mid-run: the message is parked
    *  in a follow-up queue (shown above the composer) and delivered when the run
    *  ends, unless the user promotes it to a steer. Omit to fall back to onSend
    *  (immediate steer) while streaming. */
-  onQueue?: (text: string, attachments: ComposerAttachment[]) => void;
+  onQueue?: (
+    text: string,
+    attachments: ComposerAttachment[],
+    runtime?: ComposerRuntimeSelection,
+  ) => void;
   /** Send the first queued follow-up when Enter is pressed with an otherwise
    *  empty composer. Omit when there is no queued message to send. */
   onSendFirstQueued?: () => void;
@@ -271,7 +290,6 @@ const CLAUDE_CLI_COMMANDS: SlashItem[] = [
   },
 ];
 
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB — Gemini limit is generous but base64 inflates 33%
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB — docx/xlsx/pdf etc., read on disk by the agent
 const FOCUS_TRIGGER_CHARS = new Set(["/", "、", "／"]);
 
@@ -407,6 +425,16 @@ export function Composer({
   // model picker) hide when a CLI backend serves this conversation — the CLIs
   // run their own default models, so the picker would be a no-op there.
   const [backend, setBackend] = useState<BackendId>("pi");
+  // Existing-conversation runtime is loaded asynchronously. Until it arrives,
+  // omit runtime intent from a very fast send so the persisted backend remains
+  // authoritative instead of accidentally treating the initial `pi` state as
+  // a requested switch.
+  const [runtimeReady, setRuntimeReady] = useState(!conversationId);
+  const [cliTuning, setCliTuning] = useState({ model: "", effort: "" });
+  const onRuntimeTuningChange = useCallback((model: string, effort: string) => {
+    setCliTuning({ model, effort });
+  }, []);
+  useEffect(() => setRuntimeReady(!conversationId), [conversationId]);
   // Ambient rolling context (Littlebird-like collector). The chip only shows
   // when the collector is enabled in Settings; the per-composer toggle decides
   // whether each send leads with a `<context source="cetus-ambient">` fence.
@@ -801,30 +829,30 @@ export function Composer({
     let tooLarge: string | null = null;
     for (const f of Array.from(files)) {
       const isImage = f.type.startsWith("image/");
-      const limit = isImage ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
-      if (f.size > limit) {
+      if (!isImage && f.size > MAX_FILE_BYTES) {
         const realPath = pathHints?.get(f.name);
         if (realPath) {
           referenced.push(realPath);
         } else {
           tooLarge = t("composer.fileTooLarge", {
             name: f.name || t("composer.unnamedFile"),
-            limit: Math.round(limit / 1024 / 1024),
+            limit: Math.round(MAX_FILE_BYTES / 1024 / 1024),
           });
         }
         continue;
       }
       try {
-        const data = await fileToBase64(f);
         if (isImage) {
+          const image = await prepareImageAttachment(f);
           next.push({
             type: "image",
-            data,
-            mimeType: f.type,
+            data: image.data,
+            mimeType: image.mimeType,
             name: f.name || t("composer.pastedImageName"),
-            previewUrl: URL.createObjectURL(f),
+            previewUrl: URL.createObjectURL(image.previewBlob),
           });
         } else {
+          const data = await fileToBase64(f);
           next.push({
             type: "file",
             data,
@@ -912,8 +940,15 @@ export function Composer({
     // Mid-run: park the message in the follow-up queue instead of sending. The
     // user can still promote it to a steer from the queue UI. Falls back to a
     // direct send (immediate steer) when no queue handler is wired.
-    if (streaming && onQueue) onQueue(outgoing, attachments);
-    else onSend(outgoing, attachments);
+    const runtime = runtimeReady
+      ? {
+          backend,
+          cliModel: conversationId ? cliTuning.model : (pendingCliModel ?? ""),
+          cliEffort: conversationId ? cliTuning.effort : (pendingCliEffort ?? ""),
+        }
+      : undefined;
+    if (streaming && onQueue) onQueue(outgoing, attachments, runtime);
+    else onSend(outgoing, attachments, runtime);
     closeSlash();
     closeMention();
     // Drop refs to revoke after send completes — onSend may consume async.
@@ -1249,8 +1284,10 @@ export function Composer({
             pendingEffort={pendingCliEffort}
             onPendingTuningChange={onPendingTuningChange}
             backendSwitch={backendSwitch}
+            onTuningChange={onRuntimeTuningChange}
             onBackendChange={(b) => {
               setBackend(b);
+              setRuntimeReady(true);
               if (!conversationId) onPendingBackendChange?.(b);
             }}
           />

@@ -22,6 +22,7 @@ import {
   Composer,
   type ComposerAttachment,
   type ComposerDraftRequest,
+  type ComposerRuntimeSelection,
   type QuoteRequest,
   type QueuedMessage,
 } from "@/components/chat/composer";
@@ -49,7 +50,11 @@ interface Props {
   workspaceDir: string | null;
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
-  onSend: (text: string, attachments: ComposerAttachment[]) => void;
+  onSend: (
+    text: string,
+    attachments: ComposerAttachment[],
+    runtime?: ComposerRuntimeSelection,
+  ) => void;
   /** Route a leading-`!` command from the Composer to the Terminal surface. */
   onBash?: (command: string) => void;
   onAbort: () => void;
@@ -69,6 +74,7 @@ interface Props {
   onQueue?: (
     text: string,
     attachments: ComposerAttachment[],
+    runtime?: ComposerRuntimeSelection,
     beforeIds?: string[],
   ) => void;
   onSteerQueued?: (id: string) => void;
@@ -187,8 +193,12 @@ export function ChatPane({
     [onRemoveQueued, queued, queuedDraftKey],
   );
   const queueFromComposer = useCallback(
-    (text: string, attachments: ComposerAttachment[]) => {
-      onQueue?.(text, attachments, queuedDraft?.beforeIds);
+    (
+      text: string,
+      attachments: ComposerAttachment[],
+      runtime?: ComposerRuntimeSelection,
+    ) => {
+      onQueue?.(text, attachments, runtime, queuedDraft?.beforeIds);
       setQueuedDrafts((drafts) => {
         const { [queuedDraftKey]: _submitted, ...rest } = drafts;
         return rest;
@@ -197,8 +207,12 @@ export function ChatPane({
     [onQueue, queuedDraft, queuedDraftKey],
   );
   const sendFromComposer = useCallback(
-    (text: string, attachments: ComposerAttachment[]) => {
-      onSend(text, attachments);
+    (
+      text: string,
+      attachments: ComposerAttachment[],
+      runtime?: ComposerRuntimeSelection,
+    ) => {
+      onSend(text, attachments, runtime);
       setQueuedDrafts((drafts) => {
         const { [queuedDraftKey]: _submitted, ...rest } = drafts;
         return rest;
@@ -650,23 +664,27 @@ function MessageList({
     (index: number, item: MessageListItem) => {
       if (item.kind === "thinking") {
         return (
-          <div
-            className={`mx-auto max-w-3xl px-6 ${
-              opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
-            }`}
-          >
-            <ThinkingPlaceholder />
+          <div className="px-4">
+            <div
+              className={`mx-auto max-w-3xl ${
+                opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
+              }`}
+            >
+              <ThinkingPlaceholder />
+            </div>
           </div>
         );
       }
       if (item.kind === "error") {
         return (
-          <div
-            className={`mx-auto max-w-3xl px-6 ${
-              opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
-            }`}
-          >
-            <MessageError convId={convId} onRetry={onRetry} retrying={retrying} />
+          <div className="px-4">
+            <div
+              className={`mx-auto max-w-3xl ${
+                opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
+              }`}
+            >
+              <MessageError convId={convId} onRetry={onRetry} retrying={retrying} />
+            </div>
           </div>
         );
       }
@@ -711,14 +729,18 @@ function MessageList({
             }
           />
         );
-      // Center each turn on the reading column. Virtuoso measures this wrapper.
+      // Center each turn on the reading column. Virtuoso measures the outer
+      // wrapper. Same geometry as the composer column (outer px-4 gutter,
+      // inner max-w-3xl box) so full-width rows line up with the input box.
       return (
-        <div
-          className={`mx-auto max-w-3xl px-6 ${
-            opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
-          }`}
-        >
-          {node}
+        <div className="px-4">
+          <div
+            className={`mx-auto max-w-3xl ${
+              opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
+            }`}
+          >
+            {node}
+          </div>
         </div>
       );
     },

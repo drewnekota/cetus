@@ -1204,74 +1204,10 @@ pub fn run() {
                     // Setup runs on the main thread, where AppKit is safe.
                     if let Ok(ptr) = win.ns_window() {
                         panel::configure(ptr);
-                        // NOTE: do NOT `park()` here to pre-warm. At setup time
-                        // the screen list / window size aren't settled, so the
-                        // sliver move can no-op while `orderFrontRegardless`
-                        // still shows the window — leaving a full-size,
-                        // click-through, un-dismissable panel on launch. The
-                        // first gesture warms it; every dismiss after that parks
-                        // it warm. Only the first open per launch may flash.
+                        // It starts ordered out from config. Do not present it
+                        // until the launcher gesture supplies the correct Space
+                        // and cursor screen.
                     }
-                }
-                // Re-park the launcher whenever the display layout changes.
-                // The parked sliver's origin was computed against the OLD
-                // layout: its body hangs off an edge that bordered no display
-                // at park time, so a monitor plugged in on that side later
-                // turns the "dead space" into a live screen and the whole
-                // launcher pops up there, visible but inert. Recompute the
-                // sliver against the fresh layout. Skip while the launcher is
-                // genuinely open (shown), and skip a window that isn't ordered
-                // in yet (never opened / mid-recapture) — park's
-                // orderFrontRegardless would show it.
-                //
-                // A display handshake (wake, plug/unplug) fires this
-                // notification in a storm — observed 299 times over 3s — and
-                // many of those instants carry a TRANSIENT layout. Parking
-                // synchronously against a mid-transition layout is how the
-                // sliver ended up a full window-height inside the second
-                // display's visible area (a 1pt × window-height white strip on
-                // its edge). Debounce: wait for the layout to settle, park
-                // once, then park once more a second later in case the window
-                // server shuffled windows after the last notification.
-                {
-                    let app_handle = app.handle().clone();
-                    static REPARK_GEN: std::sync::atomic::AtomicU64 =
-                        std::sync::atomic::AtomicU64::new(0);
-                    panel::install_screen_change_observer(move || {
-                        let gen = REPARK_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                        let app_handle = app_handle.clone();
-                        tauri::async_runtime::spawn(async move {
-                            for delay_ms in [600u64, 1500] {
-                                tokio::time::sleep(std::time::Duration::from_millis(delay_ms))
-                                    .await;
-                                // A newer notification restarted the debounce.
-                                if REPARK_GEN.load(std::sync::atomic::Ordering::Relaxed) != gen {
-                                    return;
-                                }
-                                let ah = app_handle.clone();
-                                let _ = app_handle.run_on_main_thread(move || {
-                                    let state = ah.state::<AppState>();
-                                    if state
-                                        .quick
-                                        .shown
-                                        .load(std::sync::atomic::Ordering::Relaxed)
-                                    {
-                                        return;
-                                    }
-                                    if let Some(w) = ah.get_webview_window("quick") {
-                                        if w.is_visible().unwrap_or(false) {
-                                            if let Ok(ptr) = w.ns_window() {
-                                                tracing::debug!(
-                                                    "screen layout settled: re-parking quick launcher"
-                                                );
-                                                panel::park(ptr);
-                                            }
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    });
                 }
                 // The dictation HUD: a never-key panel so the app being dictated
                 // into keeps focus and the injected keystrokes land there. No

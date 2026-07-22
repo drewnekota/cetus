@@ -79,7 +79,7 @@ cases `skip` and **log it** — avoid a false all-green.
 - [ ] Tool card render: args, results, error highlight, partial output
 - [ ] Thinking block collapse / expand
 - [ ] Artifact: first artifact auto-opens right panel, copy, HTML/SVG preview
-- [ ] Attachments: image (paste/drag/picker, 8MB), file (25MB), oversize error
+- [ ] Attachments: image (paste/drag/picker, large images auto-optimized), file (25MB), oversize error
 - [ ] Workspace switch (kills pi, respawns with new cwd)
 - [ ] Lifecycle: rename / archive / delete / messages hydrate on switch
 - [ ] Auto-title: mechanical title on first msg → AI title upgrades in background

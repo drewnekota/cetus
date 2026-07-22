@@ -393,12 +393,43 @@ async function pickImages(event) {
   }
 }
 function readImage(file) {
+  return createImageBitmap(file, { imageOrientation: "from-image" }).then(async bitmap => {
+    try {
+      const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+      if (scale === 1 && Math.ceil(file.size / 3) * 4 <= 4.5 * 1024 * 1024 && /image\/(jpeg|png|gif|webp)/.test(file.type)) {
+        return { type: "image", data: await blobBase64(file), mimeType: file.type };
+      }
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      let width = Math.max(1, Math.round(bitmap.width * scale));
+      let height = Math.max(1, Math.round(bitmap.height * scale));
+      let blob;
+      do {
+        canvas.width = width;
+        canvas.height = height;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(bitmap, 0, 0, width, height);
+        for (const quality of [0.88, 0.72, 0.56, 0.4]) {
+          blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("图片优化失败")), "image/jpeg", quality));
+          if (Math.ceil(blob.size / 3) * 4 <= 4.5 * 1024 * 1024) break;
+        }
+        if (Math.ceil(blob.size / 3) * 4 <= 4.5 * 1024 * 1024 || (width === 1 && height === 1)) break;
+        width = Math.max(1, Math.round(width * 0.8));
+        height = Math.max(1, Math.round(height * 0.8));
+      } while (true);
+      return { type: "image", data: await blobBase64(blob), mimeType: "image/jpeg" };
+    } finally {
+      bitmap.close();
+    }
+  });
+}
+function blobBase64(blob) {
   return new Promise((resolve, reject) => {
-    if (file.size > 10 * 1024 * 1024) return reject(new Error("单张图片不能超过 10 MB"));
     const reader = new FileReader();
-    reader.onload = () => resolve({ type: "image", data: String(reader.result).split(",")[1], mimeType: file.type || "image/jpeg" });
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
     reader.onerror = () => reject(new Error("图片读取失败"));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
 }
 async function stop() {

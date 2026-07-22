@@ -1,6 +1,7 @@
 "use client";
 import { Terminal } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
+import { AnsiText } from "@/components/ui/ansi-text";
 import type { BashResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
@@ -54,7 +55,7 @@ export function BashCard({ command, details }: Props) {
       {result &&
         (output ? (
           <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2 leading-relaxed text-foreground/90">
-            {output}
+            <AnsiText>{output}</AnsiText>
           </pre>
         ) : (
           <div className="px-3 py-2 italic text-muted-foreground">{t("bash.noOutput")}</div>

@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Bot, Check, ChevronDown } from "lucide-react";
-import { toast } from "sonner";
 import { api } from "@/lib/tauri";
 import { useChatStore } from "@/lib/chat-store";
 import type { BackendId, CliDefaults, CliRateLimitInfo } from "@/lib/types";
@@ -340,8 +339,9 @@ function quotaLabel(
   return pct ? { text: pct, warn: false } : null;
 }
 
-/** Self-contained picker: reads the conversation's current backend and switches
- *  it via the API. Rendered next to the model picker in the composer.
+/** Self-contained picker: reads the conversation's current backend and holds a
+ *  pending selection for the composer's next delivered message. Rendered next
+ *  to the model picker in the composer.
  *  `onBackendChange` reports both the loaded value and user switches so the
  *  composer can gate pi-only affordances (model picker) per backend.
  *
@@ -357,6 +357,7 @@ export function BackendPicker({
   pendingModel,
   pendingEffort,
   onPendingTuningChange,
+  onTuningChange,
   backendSwitch,
 }: {
   conversationId: string | null;
@@ -368,6 +369,9 @@ export function BackendPicker({
   pendingModel?: string;
   pendingEffort?: string;
   onPendingTuningChange?: (model: string, effort: string) => void;
+  /** Reports the tuning shown for an existing conversation so the composer can
+   *  commit it together with the selected runtime when a message is sent. */
+  onTuningChange?: (model: string, effort: string) => void;
   /** Keyboard runtime-switch request (⌃1/⌃2/⌃3). Token-keyed so each press
    *  applies exactly once; a stale value from before this picker mounted is
    *  ignored. */
@@ -400,6 +404,7 @@ export function BackendPicker({
           setBackend(((c.backend as BackendId | undefined) ?? "pi"));
           setCliModel(c.cliModel ?? "");
           setCliEffort(c.cliEffort ?? "");
+          onTuningChange?.(c.cliModel ?? "", c.cliEffort ?? "");
         }
       })
       .catch(() => {});
@@ -407,7 +412,7 @@ export function BackendPicker({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, pendingValue]);
+  }, [conversationId, pendingValue, onTuningChange]);
 
   // Apply a keyboard runtime-switch (⌃1/⌃2/⌃3) exactly once per token. The
   // ref starts at the mount-time token so a request fired before this picker
@@ -432,39 +437,15 @@ export function BackendPicker({
   function select(id: string) {
     const b = BACKENDS.find((x) => x.id === id);
     if (!b) return;
-    const prev = backend;
-    const previousTuning = { model: cliModel, effort: cliEffort };
     const tuning = b.id === "pi"
       ? { model: "", effort: "" }
       : loadCliTuningChoice(b.id);
     setBackend(b.id);
     setCliModel(tuning.model);
     setCliEffort(tuning.effort);
+    onTuningChange?.(tuning.model, tuning.effort);
     if (b.id !== "pi") saveCliTuningChoice(b.id, tuning);
-    if (conversationId) {
-      const convId = conversationId;
-      api
-        .setConversationBackend(convId, b.id)
-        .then(() => {
-          api.setConversationCliModel(convId, tuning.model, tuning.effort).catch(() => {});
-          // Mirror the audit divider the backend just persisted, so the switch
-          // is visible in the open transcript without a reload. Skip empty
-          // conversations (backend skips the marker there too, and a divider
-          // would knock the pane out of its hero state).
-          const store = useChatStore.getState();
-          if (prev !== b.id && (store.chats[convId]?.messages.length ?? 0) > 0) {
-            store.runtimeSwitch(convId, prev, b.id);
-          }
-        })
-        .catch((e) => {
-          // Refused (e.g. a turn is still running) — roll the picker back so
-          // it keeps showing the runtime that actually serves the conversation.
-          setBackend(prev);
-          setCliModel(previousTuning.model);
-          setCliEffort(previousTuning.effort);
-          toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
-        });
-    } else {
+    if (!conversationId) {
       onPendingTuningChange?.(tuning.model, tuning.effort);
     }
   }
@@ -475,9 +456,7 @@ export function BackendPicker({
       model,
       effort: cliEffort,
     });
-    if (conversationId) {
-      api.setConversationCliModel(conversationId, model, cliEffort).catch(() => {});
-    }
+    onTuningChange?.(model, cliEffort);
   }
 
   function selectEffort(effort: string) {
@@ -486,9 +465,7 @@ export function BackendPicker({
       model: cliModel,
       effort,
     });
-    if (conversationId) {
-      api.setConversationCliModel(conversationId, cliModel, effort).catch(() => {});
-    }
+    onTuningChange?.(cliModel, effort);
   }
 
   return (

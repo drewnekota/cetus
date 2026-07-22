@@ -2,6 +2,7 @@
 import { memo } from "react";
 import { ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle2, CircleSlash, Bot, Check } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
+import { AnsiText } from "@/components/ui/ansi-text";
 import type { PiContentBlock, RenderedBlock } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
@@ -202,7 +203,9 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
                   isError && "text-warning dark:text-warning",
                 )}
               >
-                {Array.isArray(block.result.content) ? flattenResultContent(block.result.content) : ""}
+                <AnsiText>
+                  {Array.isArray(block.result.content) ? flattenResultContent(block.result.content) : ""}
+                </AnsiText>
               </pre>
             </section>
           )}

@@ -44,6 +44,7 @@ import {
   saveBackendChoice,
 } from "@/lib/backend-choice";
 import { cn } from "@/lib/utils";
+import { prepareImageAttachment } from "@/lib/image-attachment";
 import {
   Tooltip,
   TooltipContent,
@@ -445,16 +446,19 @@ export function QuickPanel() {
     const next: QuickAttachment[] = [];
     for (const file of Array.from(files)) {
       const isImage = file.type.startsWith("image/");
-      const limit = isImage ? 8 * 1024 * 1024 : 25 * 1024 * 1024;
-      if (file.size > limit) {
+      const limit = 25 * 1024 * 1024;
+      if (!isImage && file.size > limit) {
         setAttachError(t("attachment.tooLarge", { name: file.name, limit: limit / 1024 / 1024 }));
         continue;
       }
       try {
-        const data = await fileToBase64(file);
-        next.push(isImage
-          ? { type: "image", data, mimeType: file.type, name: file.name || t("attachment.pastedImage") }
-          : { type: "file", data, mimeType: file.type || "application/octet-stream", name: file.name || t("attachment.unnamed"), sizeBytes: file.size });
+        if (isImage) {
+          const image = await prepareImageAttachment(file);
+          next.push({ type: "image", data: image.data, mimeType: image.mimeType, name: file.name || t("attachment.pastedImage") });
+        } else {
+          const data = await fileToBase64(file);
+          next.push({ type: "file", data, mimeType: file.type || "application/octet-stream", name: file.name || t("attachment.unnamed"), sizeBytes: file.size });
+        }
       } catch (error) {
         setAttachError(String(error));
       }

@@ -5,6 +5,7 @@ import { Inbox, PanelBottom, PanelRight } from "lucide-react";
 import {
   Composer,
   type ComposerAttachment,
+  type ComposerRuntimeSelection,
   type FileAttachment,
   type ImageAttachment,
   type QueuedMessage,
@@ -404,9 +405,9 @@ export default function Home() {
     setPendingCliModel(model);
     setPendingCliEffort(effort);
   }, []);
-  // ⌃1/⌃2/⌃3 runtime switching: the request rides a token down to the
-  // BackendPicker (which owns the switch logic + its own state), same pattern
-  // as focusToken/quoteRequest.
+  // ⌃1/⌃2/⌃3 runtime selection: the request rides a token down to the
+  // BackendPicker, which holds it as pending composer state until send, using
+  // the same token pattern as focusToken/quoteRequest.
   const [backendSwitch, setBackendSwitch] = useState<{
     token: number;
     backend: BackendId;
@@ -743,7 +744,7 @@ export default function Home() {
       if (!q || q.length === 0) continue;
       const [next, ...rest] = q;
       setQueued((cur) => ({ ...cur, [id]: rest }));
-      void deliverQueuedRef.current(id, next.text, next.attachments);
+      void deliverQueuedRef.current(id, next.text, next.attachments, next.runtime);
     }
   }, [streamingSig]);
 
@@ -761,6 +762,7 @@ export default function Home() {
     convId: string,
     text: string,
     attachments: ComposerAttachment[],
+    runtime: ComposerRuntimeSelection | undefined,
     beforeIds: string[] = [],
   ) {
     const id =
@@ -775,7 +777,7 @@ export default function Home() {
         ...q,
         [convId]: [
           ...current.slice(0, insertAt),
-          { id, text, attachments },
+          { id, text, attachments, runtime },
           ...current.slice(insertAt),
         ],
       };
@@ -795,7 +797,7 @@ export default function Home() {
     const item = (queuedRef.current[convId] ?? []).find((m) => m.id === id);
     if (!item) return;
     removeQueued(convId, id);
-    void onSend(item.text, item.attachments);
+    void onSend(item.text, item.attachments, item.runtime);
   }
 
   // Install the IDB write-through cache exactly once.
@@ -2306,23 +2308,63 @@ export default function Home() {
     }
   }
 
-  async function onSend(text: string, attachments: ComposerAttachment[] = []) {
+  /** Commit the runtime displayed in the composer immediately before its
+   *  message is delivered. Runtime picking is intentionally only local UI
+   *  state until this point, so cycling with Tab does not create audit events. */
+  async function applyRuntimeSelection(
+    convId: string,
+    runtime: ComposerRuntimeSelection,
+    fallbackBackend: BackendId = "pi",
+  ) {
+    const conversation = conversationsRef.current.find((c) => c.id === convId);
+    const previous = (conversation?.backend as BackendId | undefined) ?? fallbackBackend;
+    const previousModel = conversation?.cliModel ?? "";
+    const previousEffort = conversation?.cliEffort ?? "";
+    if (previous !== runtime.backend) {
+      await api.setConversationBackend(convId, runtime.backend);
+      const store = chatStore.getState();
+      if ((store.chats[convId]?.messages.length ?? 0) > 0) {
+        store.runtimeSwitch(convId, previous, runtime.backend);
+      }
+    }
+    if (
+      runtime.backend !== "pi" &&
+      (previous !== runtime.backend ||
+        previousModel !== runtime.cliModel ||
+        previousEffort !== runtime.cliEffort)
+    ) {
+      await api.setConversationCliModel(convId, runtime.cliModel, runtime.cliEffort);
+    }
+    if (
+      previous !== runtime.backend ||
+      previousModel !== runtime.cliModel ||
+      previousEffort !== runtime.cliEffort
+    ) {
+      const update = (c: Conversation) =>
+        c.id === convId
+          ? {
+              ...c,
+              backend: runtime.backend,
+              cliModel: runtime.cliModel,
+              cliEffort: runtime.cliEffort,
+            }
+          : c;
+      conversationsRef.current = conversationsRef.current.map(update);
+      setConversations((items) => items.map(update));
+    }
+  }
+
+  async function onSend(
+    text: string,
+    attachments: ComposerAttachment[] = [],
+    runtime?: ComposerRuntimeSelection,
+  ) {
     let id = activeId;
+    let createdBackend: BackendId = "pi";
     if (!id) {
       const c = await api.newConversation(workspaceDir ?? undefined);
       id = c.id;
-      // Apply the backend chosen on the hero composer before the first prompt
-      // goes out, so it already routes through Claude Code / Codex.
-      if (pendingBackend !== "pi") {
-        try {
-          await api.setConversationBackend(id, pendingBackend);
-          if (pendingCliModel || pendingCliEffort) {
-            await api.setConversationCliModel(id, pendingCliModel, pendingCliEffort);
-          }
-        } catch (e) {
-          console.error("[send] set backend failed", e);
-        }
-      }
+      createdBackend = (c.backend as BackendId | undefined) ?? "pi";
       // Insert the freshly-minted row locally instead of refetching the whole
       // list over IPC — we already hold it. The trailing refreshList() after
       // sendPrompt re-sorts by updated_at.
@@ -2332,6 +2374,15 @@ export default function Home() {
       api.setModelChoice(id, modelChoice).catch(console.error);
     }
     const convId = id;
+    if (runtime) {
+      try {
+        await applyRuntimeSelection(convId, runtime, createdBackend);
+      } catch (e) {
+        console.error("[send] set backend failed", e);
+        toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
+        return;
+      }
+    }
     // A new prompt to a task that was waiting on review means we're moving on —
     // drop it out of "Needs review".
     maybeClearReview(convId);
@@ -2682,7 +2733,17 @@ export default function Home() {
     convId: string,
     text: string,
     attachments: ComposerAttachment[] = [],
+    runtime?: ComposerRuntimeSelection,
   ) {
+    if (runtime) {
+      try {
+        await applyRuntimeSelection(convId, runtime);
+      } catch (e) {
+        console.error("[queue] set backend failed", e);
+        toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
+        return;
+      }
+    }
     maybeClearReview(convId);
     const store = chatStore.getState();
     store.ensure(convId);
@@ -2702,9 +2763,22 @@ export default function Home() {
     refreshList().catch(() => {});
   }
 
-  async function onDetailSend(text: string, attachments: ComposerAttachment[] = []) {
+  async function onDetailSend(
+    text: string,
+    attachments: ComposerAttachment[] = [],
+    runtime?: ComposerRuntimeSelection,
+  ) {
     if (!detailId) return;
     const id = detailId;
+    if (runtime) {
+      try {
+        await applyRuntimeSelection(id, runtime);
+      } catch (e) {
+        console.error("[detail-send] set backend failed", e);
+        toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
+        return;
+      }
+    }
     // Sending feedback from the review surface clears the "Needs review" flag.
     maybeClearReview(id);
     const store = chatStore.getState();
@@ -2748,7 +2822,7 @@ export default function Home() {
     const item = (queuedRef.current[detailId] ?? []).find((m) => m.id === id);
     if (!item) return;
     removeQueued(detailId, id);
-    void onDetailSend(item.text, item.attachments);
+    void onDetailSend(item.text, item.attachments, item.runtime);
   }
 
   async function onDetailModelChange(next: ModelChoice) {
@@ -3104,8 +3178,8 @@ export default function Home() {
         onRetry={onDetailRetry}
         retrying={retrying}
         queued={detailId ? queued[detailId] : undefined}
-        onQueue={(text, atts, beforeIds) => {
-          if (detailId) enqueueMessage(detailId, text, atts, beforeIds);
+        onQueue={(text, atts, runtime, beforeIds) => {
+          if (detailId) enqueueMessage(detailId, text, atts, runtime, beforeIds);
         }}
         onSteerQueued={
           detailConvBackend && !backendSupportsSteer(detailConvBackend)
@@ -3298,8 +3372,8 @@ export default function Home() {
                 }}
                 retrying={retrying}
                 queued={activeId ? queued[activeId] : undefined}
-                onQueue={(text, atts, beforeIds) => {
-                  if (activeId) enqueueMessage(activeId, text, atts, beforeIds);
+                onQueue={(text, atts, runtime, beforeIds) => {
+                  if (activeId) enqueueMessage(activeId, text, atts, runtime, beforeIds);
                 }}
                 onSteerQueued={
                   // pi steers via RPC, claude-code over stdin, and codex uses

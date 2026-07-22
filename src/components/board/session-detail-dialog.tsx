@@ -6,7 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChatPane } from "@/components/chat/chat-pane";
 import { useRuntimeShortcuts } from "@/components/chat/backend-picker";
-import type { ComposerAttachment, QueuedMessage } from "@/components/chat/composer";
+import type {
+  ComposerAttachment,
+  ComposerRuntimeSelection,
+  QueuedMessage,
+} from "@/components/chat/composer";
 import {
   WorkspacePanel,
   createTerminalViewState,
@@ -40,7 +44,11 @@ interface Props {
   workspaceDir: string | null;
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
-  onSend: (text: string, attachments: ComposerAttachment[]) => void;
+  onSend: (
+    text: string,
+    attachments: ComposerAttachment[],
+    runtime?: ComposerRuntimeSelection,
+  ) => void;
   onAbort: () => void;
   onForkMessage?: (messageKey: string, messageIndex: number) => void;
   focusToken: number;
@@ -52,6 +60,7 @@ interface Props {
   onQueue?: (
     text: string,
     attachments: ComposerAttachment[],
+    runtime?: ComposerRuntimeSelection,
     beforeIds?: string[],
   ) => void;
   onSteerQueued?: (id: string) => void;

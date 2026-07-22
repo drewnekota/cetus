@@ -42,11 +42,7 @@ export function ActivityGroup({
   const current = running ? currentAction(steps) : null;
 
   return (
-    <div
-      className={`w-full rounded-md border transition-colors ${
-        running ? "border-primary/25 bg-primary/[0.04]" : "border-border/60 bg-muted/30"
-      }`}
-    >
+    <div className="w-full rounded-md border border-border/60 bg-muted/30">
       <button
         onClick={toggle}
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
@@ -57,7 +53,7 @@ export function ActivityGroup({
           <ChevronRight className="h-3.5 w-3.5 shrink-0" />
         )}
         {running ? (
-          <Spinner className="size-3.5 text-primary" />
+          <Spinner className="size-3.5 text-muted-foreground" />
         ) : hasError ? (
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning" />
         ) : (
