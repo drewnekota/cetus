@@ -103,9 +103,9 @@ export function ArtifactView({ artifact }: Props) {
       >
         <div
           className={cn(
-            "overflow-hidden rounded-xl border border-border/80 bg-card transition-all duration-200",
+            "relative isolate overflow-hidden rounded-xl bg-card transition-all duration-200",
             "shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)]",
-            "group-hover/preview-card:border-border group-hover/preview-card:shadow-[0_12px_32px_rgba(0,0,0,0.10),0_2px_6px_rgba(0,0,0,0.06)]",
+            "group-hover/preview-card:shadow-[0_12px_32px_rgba(0,0,0,0.10),0_2px_6px_rgba(0,0,0,0.06)]",
             compact ? "flex items-center gap-3 px-3.5 py-3" : "flex flex-col",
           )}
         >
@@ -124,6 +124,13 @@ export function ArtifactView({ artifact }: Props) {
               </div>
             </>
           )}
+          {/* Paint the outline above media layers. A regular border can be
+              partially covered by an accelerated image during rounded
+              clipping, leaving intermittent 1px gaps at fractional DPRs. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 z-10 rounded-[inherit] border border-border/80 transition-colors duration-200 group-hover/preview-card:border-border"
+          />
         </div>
       </div>
 
