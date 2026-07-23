@@ -75,12 +75,80 @@ async fn remote_ssh_pi_rpc_runs_and_syncs_session() {
     assert_eq!(messages.len(), 2);
 
     drop(pi);
+
+    // A real SSH failure commonly happens after the local process has spawned:
+    // authentication, remote shell startup, or the remote pi command can exit
+    // before replying. In-flight RPCs must fail immediately instead of looking
+    // like a dead Send button until the streaming stall timeout expires.
+    write_executable(
+        &remote_root.join("pi-install").join("pi"),
+        &fake_pi_exit_on_prompt_script(),
+    );
+    let failed_pi = PiRpc::spawn(
+        Arc::new(NoopSink),
+        Arc::new(TokioSpawner),
+        &local_pi.join("pi"),
+        &sessions,
+        Path::new(&remote_workspace),
+        Vec::new(),
+        Some("conv-remote-failure".to_string()),
+        Default::default(),
+    )
+    .unwrap();
+    failed_pi.new_session().await.unwrap();
+    let started = std::time::Instant::now();
+    let error = failed_pi
+        .send_prompt("this SSH turn should fail", Vec::new())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("pi process exited"), "unexpected error: {error}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(3),
+        "SSH process exit took too long to reach the caller"
+    );
+    drop(failed_pi);
+
     std::env::set_var("PATH", old_path);
     match old_root {
         Some(v) => std::env::set_var("CETUS_REMOTE_ROOT", v),
         None => std::env::remove_var("CETUS_REMOTE_ROOT"),
     }
     let _ = std::fs::remove_dir_all(root);
+}
+
+fn fake_pi_exit_on_prompt_script() -> String {
+    r#"#!/bin/sh
+set -eu
+session_dir=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --session-dir)
+      session_dir="$2"
+      shift 2
+      ;;
+    *) shift ;;
+  esac
+done
+mkdir -p "$session_dir"
+session_file="$session_dir/session-remote-failure.jsonl"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  type=$(printf '%s' "$line" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
+  case "$type" in
+    new_session)
+      : > "$session_file"
+      printf '{"type":"response","id":"%s","success":true}\n' "$id"
+      ;;
+    get_state)
+      printf '{"type":"response","id":"%s","success":true,"data":{"sessionFile":"%s"}}\n' "$id" "$session_file"
+      ;;
+    prompt) exit 42 ;;
+    *) printf '{"type":"response","id":"%s","success":true}\n' "$id" ;;
+  esac
+done
+"#
+    .to_string()
 }
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {

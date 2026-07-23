@@ -65,7 +65,8 @@ pub trait TaskSpawner: Send + Sync + 'static {
     fn spawn(&self, fut: Pin<Box<dyn Future<Output = ()> + Send + 'static>>);
 }
 
-type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
+type PendingResponse = std::result::Result<Value, String>;
+type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<PendingResponse>>>>;
 /// Wall-clock of the last stdout line received from pi — bumped by
 /// `stdout_reader` on every line, read by [`PiRpc::request_streaming`] to drive
 /// the stall-based turn timeout.
@@ -197,7 +198,8 @@ impl PiRpc {
             .map_err(|e| anyhow!("pi writer closed: {e}"))?;
 
         match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(v)) => Ok(v),
+            Ok(Ok(Ok(v))) => Ok(v),
+            Ok(Ok(Err(e))) => bail!(e),
             Ok(Err(_)) => {
                 self.pending.lock().unwrap().remove(&id);
                 bail!("pi response channel dropped")
@@ -255,7 +257,8 @@ impl PiRpc {
         let tick = Duration::from_secs(3);
         loop {
             match tokio::time::timeout(tick, &mut rx).await {
-                Ok(Ok(v)) => return Ok(v),
+                Ok(Ok(Ok(v))) => return Ok(v),
+                Ok(Ok(Err(e))) => bail!(e),
                 Ok(Err(_)) => {
                     self.pending.lock().unwrap().remove(&id);
                     bail!("pi response channel dropped")
@@ -622,7 +625,7 @@ fn spawn_process(
     )));
     spawner.spawn(Box::pin(stdout_reader(
         stdout,
-        pending,
+        pending.clone(),
         last_activity,
         sink.clone(),
         conversation_id.clone(),
@@ -635,6 +638,7 @@ fn spawn_process(
 
     let exit_sink = sink.clone();
     let exit_conv = conversation_id;
+    let exit_pending = pending.clone();
     let (kill_tx, kill_rx) = oneshot::channel::<()>();
     spawner.spawn(Box::pin(async move {
         tokio::select! {
@@ -644,12 +648,17 @@ fn spawn_process(
                 alive.store(false, Ordering::Relaxed);
                 match res {
                     Ok(status) => {
+                        fail_pending_requests(
+                            &exit_pending,
+                            format!("pi process exited with status {status}"),
+                        );
                         emit_runtime_event(&exit_sink, RuntimeEvent::Exited {
                             conversation_id: exit_conv,
                             code: status.code(),
                         });
                     }
                     Err(e) => {
+                        fail_pending_requests(&exit_pending, format!("pi wait error: {e}"));
                         emit_runtime_event(&exit_sink, RuntimeEvent::Error {
                             conversation_id: exit_conv,
                             message: format!("pi wait error: {e}"),
@@ -661,6 +670,7 @@ fn spawn_process(
                 alive.store(false, Ordering::Relaxed);
                 let _ = child.start_kill();
                 let _ = child.wait().await;
+                fail_pending_requests(&exit_pending, "pi process stopped".to_string());
             }
         }
     }));
@@ -668,6 +678,16 @@ fn spawn_process(
     Ok(Box::new(move || {
         let _ = kill_tx.send(());
     }))
+}
+
+fn fail_pending_requests(pending: &Pending, message: String) {
+    let requests = {
+        let mut guard = pending.lock().unwrap();
+        guard.drain().map(|(_, tx)| tx).collect::<Vec<_>>()
+    };
+    for tx in requests {
+        let _ = tx.send(Err(message.clone()));
+    }
 }
 
 fn append_owned_extensions(
@@ -919,7 +939,7 @@ fn dispatch_line(
     if msg_type == Some("response") {
         if let Some(id) = value.get("id").and_then(|v| v.as_str()) {
             if let Some(tx) = pending.lock().unwrap().remove(id) {
-                let _ = tx.send(value);
+                let _ = tx.send(Ok(value));
                 return;
             }
         }
