@@ -274,7 +274,7 @@
    area even when the list has ample start padding. The first digit of wider
    markers is then clipped (most visibly from 20 onward). Keep the native
    list-item counter -- so start/value attributes still work -- but render the
-   number in an in-flow grid column. A fixed column also keeps wrapped and
+   number in a reserved marker column. A fixed column also keeps wrapped and
    loose-list content aligned. */
 .prose ol {
   list-style: none;
@@ -282,22 +282,25 @@
 }
 
 .prose ol > li {
-  display: grid;
-  grid-template-columns: 4ch minmax(0, 1fr);
-  column-gap: 0.75em;
-  padding-inline-start: 0;
+  position: relative;
+  display: block;
+  /* Replacing `display: list-item` removes the automatic increment that a
+     `display: list-item` box contributes to the built-in counter. Keep using
+     that counter (including the ol start / li value supplied by HTML), but
+     advance it explicitly so every marker does not render as 0 in WebKit. */
+  counter-increment: list-item;
+  padding-inline-start: calc(4ch + 0.75em);
 }
 
 .prose ol > li::before {
   content: counter(list-item) ".";
+  position: absolute;
+  inset-inline-start: 0;
+  width: 4ch;
   color: var(--tw-prose-counters);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
   text-align: end;
-}
-
-.prose ol > li > * {
-  grid-column: 2;
 }
 
 .prose ul {

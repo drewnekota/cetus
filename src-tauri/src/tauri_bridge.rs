@@ -18,7 +18,9 @@ impl TauriEventSink {
 
 impl EventSink for TauriEventSink {
     fn emit(&self, event: RuntimeEvent) {
-        let _ = self.handle.emit("app-event", AppEvent::from(event));
+        let _ = self
+            .handle
+            .emit_to("main", "app-event", AppEvent::from(event));
     }
 }
 

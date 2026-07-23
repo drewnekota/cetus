@@ -1150,6 +1150,16 @@ pub async fn abort(state: State<'_, AppState>, id: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
+pub async fn compact_conversation(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    let conversation = state
+        .store
+        .get(&id)
+        .map_err(err)?
+        .ok_or_else(|| "conversation not found".to_string())?;
+    crate::cli_backend::compact_codex_conversation(state.handle(), &conversation).await
+}
+
+#[tauri::command]
 pub async fn pi_ping(_state: State<'_, AppState>) -> CmdResult<bool> {
     // Backend is up if this command resolves at all. With per-conversation
     // lazy spawn there's nothing to ping globally.

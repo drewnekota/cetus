@@ -244,6 +244,9 @@ export interface CliSlashCommand {
   name: string;
   description: string;
   argumentHint: string;
+  /** Runtime-native entry type. Claude reports both built-ins and skills in
+   *  one catalog; Codex's skills/list entries are always skills. */
+  kind?: "command" | "skill";
 }
 
 /** Claude's unified rate-limit heartbeat (`rate_limit_event`), forwarded by
@@ -261,6 +264,18 @@ export interface CliRateLimitInfo {
   /** "five_hour" | "seven_day" | "overage" … */
   rateLimitType?: string;
   isUsingOverage?: boolean;
+}
+
+/** Latest model-context occupancy reported by a CLI session. Unlike account
+ * quota this is conversation-scoped and represents the most recent model
+ * request, not cumulative tokens spent across the thread. */
+export interface CliContextUsage {
+  usedTokens: number;
+  contextWindow: number;
+  /** Raw vendor protocol bytes observed since this runtime connection began.
+   *  This catches media-heavy transcripts that token-based compact thresholds
+   *  do not see. */
+  transcriptBytes?: number;
 }
 
 /** Persisted CLI-agent (claude-code / codex) switches. */
@@ -635,9 +650,9 @@ export type McpImportSource =
 /** Opt-in loading of skills + MCP managed outside cetus. Mirrors Rust
  *  `DiscoverySettings` (src-tauri/src/discovery.rs). */
 export interface DiscoverySettings {
-  /** Load SKILL.md folders from `skillsFolder` into each new conversation. */
+  /** Load SKILL.md folders from `skillsFolder` plus standard runtime roots. */
   skillsLoadDiscovered: boolean;
-  /** Folder scanned for discovered skills (default ~/.agents/skills). */
+  /** Additional folder scanned for discovered skills (default ~/.agents/skills). */
   skillsFolder: string;
   /** Editor configs to import MCP servers from. */
   mcpImports: McpImportSource[];
@@ -787,6 +802,13 @@ export type PiEvent =
       toolName: string;
       args: unknown;
       partialResult: { content: PiContentBlock[]; details?: unknown };
+    }
+  | {
+      type: "tool_execution_delta";
+      toolCallId: string;
+      delta: string;
+      totalBytes: number;
+      truncated: boolean;
     }
   | {
       type: "tool_execution_end";

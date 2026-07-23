@@ -30,6 +30,7 @@ import { isReviewRequestDetails, type ReviewRequestDetails } from "./review";
 import type {
   BashResult,
   CliBackgroundTask,
+  CliContextUsage,
   CliControlRequest,
   CliRateLimitInfo,
   CliSlashCommand,
@@ -93,6 +94,10 @@ interface ChatsStore {
    *  these today; the runtime picker renders them as a quota line. */
   cliRateLimits: Record<string, CliRateLimitInfo>;
   setCliRateLimit: (backend: string, info: CliRateLimitInfo) => void;
+  /** Latest context-window occupancy per conversation. */
+  cliContextUsage: Record<string, CliContextUsage>;
+  setCliContextUsage: (id: string, usage: CliContextUsage) => void;
+  clearCliContextUsage: (id: string) => void;
   /** Append a "running" breadcrumb for a local `!` bash command. */
   bashStart: (id: string, key: string, command: string, cwd?: string) => void;
   /** Settle a bash breadcrumb (by key) with its captured output. */
@@ -141,8 +146,9 @@ function step(s: Slice, id: string, action: ChatAction): Slice {
       : next;
   const chats = { ...s.chats, [id]: withIndex };
   let streamingIds = s.streamingIds;
-  const wasActive = prev.isStreaming || prev.awaitingAssistant;
-  const isActive = withIndex.isStreaming || withIndex.awaitingAssistant;
+  const wasActive = prev.isStreaming || prev.awaitingAssistant || prev.isCompacting;
+  const isActive =
+    withIndex.isStreaming || withIndex.awaitingAssistant || withIndex.isCompacting;
   if (isActive !== wasActive) {
     streamingIds = new Set(s.streamingIds);
     if (isActive) streamingIds.add(id);
@@ -296,6 +302,7 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   backgroundTasks: {},
   cliCommands: {},
   cliRateLimits: {},
+  cliContextUsage: {},
   ensure: (id) => {
     flushPiEvents();
     set((s) => {
@@ -342,12 +349,18 @@ export const useChatStore = create<ChatsStore>()((set) => ({
         cliCommands = { ...cliCommands };
         delete cliCommands[id];
       }
+      let cliContextUsage = s.cliContextUsage;
+      if (id in cliContextUsage) {
+        cliContextUsage = { ...cliContextUsage };
+        delete cliContextUsage[id];
+      }
       return {
         chats: next,
         streamingIds: withoutStreaming(s.streamingIds, id),
         controlRequests,
         backgroundTasks,
         cliCommands,
+        cliContextUsage,
       };
     });
   },
@@ -400,6 +413,17 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   },
   setCliRateLimit: (backend, info) => {
     set((s) => ({ cliRateLimits: { ...s.cliRateLimits, [backend]: info } }));
+  },
+  setCliContextUsage: (id, usage) => {
+    set((s) => ({ cliContextUsage: { ...s.cliContextUsage, [id]: usage } }));
+  },
+  clearCliContextUsage: (id) => {
+    set((s) => {
+      if (!(id in s.cliContextUsage)) return s;
+      const cliContextUsage = { ...s.cliContextUsage };
+      delete cliContextUsage[id];
+      return { cliContextUsage };
+    });
   },
   bashStart: (id, key, command, cwd) => {
     flushPiEvents();
@@ -605,7 +629,24 @@ const EMPTY_MESSAGES: RenderedMessage[] = [];
 /** Streaming flag for a conv. */
 export function useIsStreaming(convId: string | null | undefined): boolean {
   return useChatStore((s) =>
-    Boolean(convId && s.chats[convId]?.isStreaming),
+    Boolean(
+      convId &&
+        (s.chats[convId]?.isStreaming || s.chats[convId]?.isCompacting),
+    ),
+  );
+}
+
+export function useCompaction(
+  convId: string | null | undefined,
+): { active: boolean; reason: string | null } {
+  return useChatStore(
+    useShallow((s) => {
+      const chat = convId ? s.chats[convId] : undefined;
+      return {
+        active: Boolean(chat?.isCompacting),
+        reason: chat?.compactionReason ?? null,
+      };
+    }),
   );
 }
 

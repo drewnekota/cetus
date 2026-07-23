@@ -24,6 +24,7 @@ import {
   Cpu,
   Folder,
   FolderOpen,
+  Gauge,
   MessageSquare,
   MoreHorizontal,
   PlusCircle,
@@ -85,6 +86,7 @@ import { useChatStore } from "@/lib/chat-store";
 import { api } from "@/lib/tauri";
 import type {
   BackendId,
+  CliContextUsage,
   CliDefaults,
   CliRateLimitInfo,
   Conversation,
@@ -1047,6 +1049,33 @@ function runtimeQuota(q: CliRateLimitInfo | undefined): string | null {
   return pct ? [window, pct].filter(Boolean).join(" · ") : null;
 }
 
+function compactTokens(tokens: number): string {
+  return new Intl.NumberFormat(undefined, {
+    notation: "compact",
+    maximumFractionDigits: tokens < 10_000 ? 1 : 0,
+  }).format(tokens);
+}
+
+function runtimeContext(usage: CliContextUsage | undefined): string | null {
+  if (!usage || usage.contextWindow <= 0) return null;
+  const pct = Math.min(100, Math.round((usage.usedTokens / usage.contextWindow) * 100));
+  const transcript =
+    usage.transcriptBytes && usage.transcriptBytes > 0
+      ? `Transcript ${formatBytes(usage.transcriptBytes)}`
+      : null;
+  return [
+    `Context · ${pct}% · ${compactTokens(usage.usedTokens)} / ${compactTokens(usage.contextWindow)}`,
+    transcript,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
 const ConversationRow = memo(function ConversationRow({
   conversation,
   active,
@@ -1080,6 +1109,9 @@ const ConversationRow = memo(function ConversationRow({
   const tuning = runtimeTuning(conversation, defaults);
   const rateLimit = useChatStore((s) => s.cliRateLimits[backend]);
   const quota = runtimeQuota(rateLimit);
+  const context = runtimeContext(
+    useChatStore((s) => s.cliContextUsage[conversation.id]),
+  );
   const [detailsOpen, setDetailsOpen] = useState(false);
   const onDetailsOpenChange = useCallback(
     (open: boolean) => {
@@ -1200,6 +1232,12 @@ const ConversationRow = memo(function ConversationRow({
                 {workspaceName(conversation.workspaceDir)}
               </span>
             </div>
+            {backend !== "pi" && context && (
+              <div className="flex min-w-0 items-center gap-1.5 tabular-nums">
+                <Gauge className="size-3 shrink-0 opacity-60" />
+                <span className="truncate">{context}</span>
+              </div>
+            )}
             {/* The tooltip surface is inverted (bg-foreground), so the amber
                 needs to flip with the theme too: light amber on the dark
                 surface in light mode, dark amber on the light surface in dark

@@ -175,6 +175,8 @@ export const chat = {
     "tool.done": "done",
     "tool.args": "args",
     "tool.result": "result",
+    "tool.outputTruncated": "Preview limited · {size} total",
+    "tool.openFullOutput": "Open full output",
     "tool.earlierSteps": "+{count} earlier steps",
 
     // Activity group (collapsed tool/thinking timeline)
@@ -374,6 +376,8 @@ export const chat = {
     "tool.done": "完成",
     "tool.args": "参数",
     "tool.result": "结果",
+    "tool.outputTruncated": "预览已截断 · 共 {size}",
+    "tool.openFullOutput": "打开完整输出",
     "tool.earlierSteps": "还有 {count} 个更早的步骤",
 
     "activity.working": "处理中……",

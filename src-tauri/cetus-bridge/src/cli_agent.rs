@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
@@ -259,9 +259,82 @@ fn normalize_content(v: &Value) -> Value {
                 .collect();
             Value::Array(blocks)
         }
+        Value::Object(object)
+            if matches!(
+                object.get("type").and_then(Value::as_str),
+                Some(
+                    "image"
+                        | "input_image"
+                        | "inputImage"
+                        | "input_file"
+                        | "inputFile"
+                        | "file"
+                )
+            ) =>
+        {
+            // `extracted_artifact_details` materializes inline base64 before
+            // this normalization runs. Never persist the original object as
+            // text: doing so duplicates multi-megabyte media into Cetus's
+            // transcript even though the artifact already has a local path.
+            json!([{ "type": "text", "text": "[Artifact delivered to user]" }])
+        }
         Value::Null => json!([]),
         other => json!([{ "type": "text", "text": other.to_string() }]),
     }
+}
+
+const TOOL_OUTPUT_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
+const TOOL_OUTPUT_PREVIEW_BYTES: usize = 64 * 1024;
+const TOOL_OUTPUT_PENDING_BYTES: usize = 32 * 1024;
+const TOOL_OUTPUT_OMISSION_MARKER: &str = "\n… output omitted …\n";
+
+fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
+    let mut end = value.len().min(max_bytes);
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
+}
+
+fn utf8_suffix(value: &str, max_bytes: usize) -> &str {
+    let mut start = value.len().saturating_sub(max_bytes);
+    while start < value.len() && !value.is_char_boundary(start) {
+        start += 1;
+    }
+    &value[start..]
+}
+
+fn bounded_tool_output_preview(value: &str) -> (String, bool) {
+    if value.len() <= TOOL_OUTPUT_PREVIEW_BYTES {
+        return (value.to_string(), false);
+    }
+    let available = TOOL_OUTPUT_PREVIEW_BYTES.saturating_sub(TOOL_OUTPUT_OMISSION_MARKER.len());
+    let head = available / 2;
+    let tail = available - head;
+    (
+        format!(
+            "{}{}{}",
+            utf8_prefix(value, head),
+            TOOL_OUTPUT_OMISSION_MARKER,
+            utf8_suffix(value, tail)
+        ),
+        true,
+    )
+}
+
+fn persist_tool_output(dir: Option<&Path>, id: &str, output: &str) -> Option<PathBuf> {
+    let dir = dir?;
+    std::fs::create_dir_all(dir).ok()?;
+    let safe_id: String = id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') { c } else { '_' })
+        .take(80)
+        .collect();
+    let millis = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_millis();
+    let sequence = ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = dir.join(format!("tool-output-{safe_id}-{millis}-{sequence}.log"));
+    std::fs::write(&path, output).ok()?;
+    Some(path)
 }
 
 static ARTIFACT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -537,6 +610,13 @@ fn is_background_launch_ack(content: &Value) -> bool {
         || s.contains("Command running in background with ID:")
 }
 
+fn claude_prompt_tokens(usage: &Value) -> u64 {
+    ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+        .into_iter()
+        .filter_map(|key| usage.get(key).and_then(Value::as_u64))
+        .sum()
+}
+
 /// Stateful translator from a backend's raw JSONL lines to Cetus `PiEvent`
 /// values. Allocates a monotonic `contentIndex` per block and remembers which
 /// tool-call ids map to which block so `tool_execution_*` events line up with
@@ -572,9 +652,10 @@ pub struct EventTranslator {
     /// retaining them here lets the UI paint tokens immediately and lets an
     /// interrupted turn persist the partial text.
     codex_live_blocks: std::collections::HashMap<String, CodexLiveBlock>,
-    /// Cumulative command output, used for running tool-card updates. The
-    /// frontend replaces (rather than appends) partialResult on each update.
-    codex_tool_output: std::collections::HashMap<String, String>,
+    /// Coalesced command output waiting to be sent to the running tool card.
+    /// Keeping only a bounded pending suffix prevents a noisy command from
+    /// growing bridge messages quadratically.
+    codex_tool_output: std::collections::HashMap<String, CodexToolOutput>,
     /// Whether the current Claude API message delivered content through
     /// stream_event partials. Older/changed CLI builds can omit partials even
     /// when requested; the cumulative assistant snapshot then becomes the
@@ -608,6 +689,16 @@ pub struct EventTranslator {
     /// content opens a fresh bubble. Without this the steer would render (and
     /// persist) outside the turn it actually landed in.
     pending_steer: Vec<Value>,
+    /// Latest main-chain Claude request's prompt/output occupancy. Retained
+    /// across turns because the persistent session owns the context window.
+    claude_context_used: u64,
+    claude_context_window: Option<u64>,
+    claude_model: Option<String>,
+    /// Approximate raw vendor transcript bytes observed by this session.
+    /// This is intentionally independent from token accounting: giant tool
+    /// results and inline media can make the persisted stream unhealthy well
+    /// before the model context window is full.
+    protocol_bytes: usize,
 }
 
 /// One background subagent tracked from `task_started` to its
@@ -697,6 +788,55 @@ struct CodexLiveBlock {
     buffer: String,
 }
 
+struct CodexToolOutput {
+    pending: String,
+    total_bytes: usize,
+    last_emit: Instant,
+    dropped_pending: bool,
+}
+
+impl CodexToolOutput {
+    fn new() -> Self {
+        Self {
+            pending: String::new(),
+            total_bytes: 0,
+            last_emit: Instant::now() - TOOL_OUTPUT_FLUSH_INTERVAL,
+            dropped_pending: false,
+        }
+    }
+
+    fn push(&mut self, delta: &str) {
+        self.total_bytes = self.total_bytes.saturating_add(delta.len());
+        self.pending.push_str(delta);
+        if self.pending.len() > TOOL_OUTPUT_PENDING_BYTES {
+            self.pending = utf8_suffix(&self.pending, TOOL_OUTPUT_PENDING_BYTES).to_string();
+            self.dropped_pending = true;
+        }
+    }
+
+    fn flush(&mut self, id: &str, force: bool) -> Option<Value> {
+        if self.pending.is_empty()
+            || (!force && self.last_emit.elapsed() < TOOL_OUTPUT_FLUSH_INTERVAL)
+        {
+            return None;
+        }
+        let mut delta = std::mem::take(&mut self.pending);
+        let truncated = self.dropped_pending || self.total_bytes > TOOL_OUTPUT_PREVIEW_BYTES;
+        if self.dropped_pending {
+            delta.insert_str(0, TOOL_OUTPUT_OMISSION_MARKER);
+        }
+        self.dropped_pending = false;
+        self.last_emit = Instant::now();
+        Some(json!({
+            "type": "tool_execution_delta",
+            "toolCallId": id,
+            "delta": delta,
+            "totalBytes": self.total_bytes,
+            "truncated": truncated,
+        }))
+    }
+}
+
 #[derive(PartialEq)]
 enum LiveKind {
     Text,
@@ -726,6 +866,10 @@ impl EventTranslator {
             opened: false,
             background_tasks: std::collections::HashMap::new(),
             pending_steer: Vec::new(),
+            claude_context_used: 0,
+            claude_context_window: None,
+            claude_model: None,
+            protocol_bytes: 0,
         }
     }
 
@@ -774,6 +918,26 @@ impl EventTranslator {
         self.pending_steer.push(message);
     }
 
+    /// Splice Codex `turn/steer` input into the persisted transcript when the
+    /// app-server announces its `userMessage` item. Waiting for that item
+    /// preserves the real order relative to any assistant delta already in
+    /// flight; persisting at button-click time would put the steer before the
+    /// assistant work it actually redirected.
+    fn splice_codex_steer(&mut self) -> Vec<Value> {
+        if self.pending_steer.is_empty() {
+            return Vec::new();
+        }
+        let mut out = self.close_all_codex_blocks();
+        self.flush_assistant();
+        self.messages.append(&mut self.pending_steer);
+        if self.opened {
+            out.push(json!({ "type": "message_end" }));
+            self.opened = false;
+        }
+        self.next_index = 0;
+        out
+    }
+
     /// Re-arm the per-turn portions of a translator while retaining Claude's
     /// conversation-scoped background-task registry. A persistent stream-json
     /// child uses one translator across many turns so task notifications can
@@ -801,6 +965,16 @@ impl EventTranslator {
         live_ids.extend(self.started_items.iter().cloned());
         self.tool_names.retain(|id, _| live_ids.contains(id));
         self.background_tasks.retain(|_, t| !t.done);
+    }
+
+    fn claude_context_event(&self) -> Option<Value> {
+        let context_window = self.claude_context_window?;
+        Some(json!({
+            "type": "cli_context_usage",
+            "usedTokens": self.claude_context_used,
+            "contextWindow": context_window,
+            "transcriptBytes": self.protocol_bytes,
+        }))
     }
 
     /// True when no assistant content has accumulated for the open segment.
@@ -872,7 +1046,8 @@ impl EventTranslator {
     /// PiEvents to emit after the process exits. `error` surfaces a failure as a
     /// visible assistant text block so a crashed turn isn't a blank bubble.
     pub fn finish(&mut self, error: Option<&str>) -> Vec<Value> {
-        let mut out = self.close_live_blocks();
+        let mut out = self.flush_codex_tool_output(true);
+        out.extend(self.close_live_blocks());
         out.extend(self.close_all_codex_blocks());
         if let Some(msg) = error {
             out.extend(self.emit_text(&format!("⚠️ agent error: {msg}")));
@@ -892,6 +1067,18 @@ impl EventTranslator {
         out.push(json!({ "type": "agent_end" }));
         self.finished = true;
         out
+    }
+
+    fn flush_codex_tool_output(&mut self, force: bool) -> Vec<Value> {
+        let mut ids: Vec<String> = self.codex_tool_output.keys().cloned().collect();
+        ids.sort();
+        ids.into_iter()
+            .filter_map(|id| {
+                self.codex_tool_output
+                    .get_mut(&id)
+                    .and_then(|output| output.flush(&id, force))
+            })
+            .collect()
     }
 
     /// Close any content blocks still streaming (their `content_block_stop`
@@ -1108,6 +1295,33 @@ impl EventTranslator {
     /// emitted tool_execution_start when the tool began running.
     fn emit_tool_result_end(&mut self, id: &str, content: &Value, is_error: bool) -> Vec<Value> {
         self.emit_tool_result_end_with_details(id, content, Value::Null, is_error)
+    }
+
+    fn emit_codex_command_result_end(
+        &mut self,
+        id: &str,
+        output: &Value,
+        is_error: bool,
+    ) -> Vec<Value> {
+        let Some(full) = output.as_str() else {
+            return self.emit_tool_result_end(id, output, is_error);
+        };
+        let (preview, truncated) = bounded_tool_output_preview(full);
+        let path = truncated
+            .then(|| persist_tool_output(self.artifact_dir.as_deref(), id, full))
+            .flatten();
+        self.emit_tool_result_end_with_details(
+            id,
+            &json!(preview),
+            json!({
+                "toolOutput": {
+                    "truncated": truncated,
+                    "totalBytes": full.len(),
+                    "path": path.map(|p| p.to_string_lossy().into_owned()),
+                }
+            }),
+            is_error,
+        )
     }
 
     fn emit_tool_result_end_with_details(
@@ -1484,6 +1698,7 @@ impl EventTranslator {
 
     /// Translate one raw JSONL line from the CLI into zero or more PiEvents.
     pub fn on_line(&mut self, line: &str) -> Vec<Value> {
+        self.protocol_bytes = self.protocol_bytes.saturating_add(line.len());
         let line = line.trim();
         if line.is_empty() {
             return Vec::new();
@@ -1617,16 +1832,21 @@ impl EventTranslator {
                     .iter()
                     .filter_map(|c| {
                         let name = c.get("name").and_then(|n| n.as_str())?;
+                        let description = c
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("");
+                        let is_skill = ["(user)", "(project)", "(plugin)", "(builtin)"]
+                            .iter()
+                            .any(|suffix| description.trim_end().ends_with(suffix));
                         Some(json!({
                             "name": name,
-                            "description": c
-                                .get("description")
-                                .and_then(|d| d.as_str())
-                                .unwrap_or(""),
+                            "description": description,
                             "argumentHint": c
                                 .get("argumentHint")
                                 .and_then(|d| d.as_str())
                                 .unwrap_or(""),
+                            "kind": if is_skill { "skill" } else { "command" },
                         }))
                     })
                     .collect();
@@ -1680,6 +1900,17 @@ impl EventTranslator {
             // close the turn instead of waiting for EOF.
             "result" => {
                 self.saw_result = true;
+                if let Some(model_usage) = v.get("modelUsage").and_then(Value::as_object) {
+                    let selected = self
+                        .claude_model
+                        .as_ref()
+                        .and_then(|model| model_usage.get(model))
+                        .or_else(|| model_usage.values().next());
+                    self.claude_context_window = selected
+                        .and_then(|usage| usage.get("contextWindow"))
+                        .and_then(Value::as_u64)
+                        .or(self.claude_context_window);
+                }
                 if v.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false) {
                     self.result_error = Some(
                         v.get("result")
@@ -1688,7 +1919,7 @@ impl EventTranslator {
                             .to_string(),
                     );
                 }
-                Vec::new()
+                self.claude_context_event().into_iter().collect()
             }
             _ => Vec::new(),
         }
@@ -1700,12 +1931,22 @@ impl EventTranslator {
         let ty = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match ty {
             "message_start" => {
+                if let Some(message) = event.get("message") {
+                    self.claude_model = message
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    if let Some(usage) = message.get("usage") {
+                        self.claude_context_used = claude_prompt_tokens(usage);
+                    }
+                }
                 // New API message: any straggler blocks are closed by their
                 // own content_block_stop; just reset the index map.
                 self.live_blocks.clear();
                 self.claude_streamed_content = false;
+                let usage_event = self.claude_context_event();
                 if self.pending_steer.is_empty() {
-                    return Vec::new();
+                    return usage_event.into_iter().collect();
                 }
                 // A steered user message merges into the turn on this API
                 // request. Split the turn here: settle the open assistant
@@ -1721,6 +1962,9 @@ impl EventTranslator {
                     self.opened = false;
                 }
                 self.next_index = 0;
+                if let Some(event) = usage_event {
+                    out.push(event);
+                }
                 out
             }
             "content_block_start" => {
@@ -1909,6 +2153,16 @@ impl EventTranslator {
                     }
                 }
             }
+            "message_delta" => {
+                if let Some(output) = event
+                    .pointer("/usage/output_tokens")
+                    .and_then(Value::as_u64)
+                {
+                    self.claude_context_used =
+                        self.claude_context_used.saturating_add(output);
+                }
+                self.claude_context_event().into_iter().collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -1970,16 +2224,12 @@ impl EventTranslator {
                 if delta.is_empty() || !self.started_items.contains(id) {
                     return Vec::new();
                 }
-                let output = self.codex_tool_output.entry(id.to_string()).or_default();
-                output.push_str(delta);
-                vec![json!({
-                    "type": "tool_execution_update",
-                    "toolCallId": id,
-                    "partialResult": {
-                        "content": normalize_content(&json!(output)),
-                        "details": Value::Null,
-                    },
-                })]
+                let output = self
+                    .codex_tool_output
+                    .entry(id.to_string())
+                    .or_insert_with(CodexToolOutput::new);
+                output.push(delta);
+                output.flush(id, false).into_iter().collect()
             }
             // A command starts executing: show its tool card immediately (with
             // a running spinner via tool_execution_start) instead of waiting
@@ -1990,6 +2240,9 @@ impl EventTranslator {
                     None => return Vec::new(),
                 };
                 let item_ty = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if item_ty == "user_message" {
+                    return self.splice_codex_steer();
+                }
                 if item_ty == "collab_agent_tool_call" {
                     if item.get("tool").and_then(|t| t.as_str()) != Some("spawnAgent") {
                         return Vec::new();
@@ -2141,6 +2394,12 @@ impl EventTranslator {
                         }
                     }
                     "command_execution" => {
+                        let mut out = self
+                            .codex_tool_output
+                            .get_mut(id)
+                            .and_then(|output| output.flush(id, true))
+                            .into_iter()
+                            .collect::<Vec<_>>();
                         self.codex_tool_output.remove(id);
                         let output = item
                             .get("aggregated_output")
@@ -2155,13 +2414,19 @@ impl EventTranslator {
                         // Card already emitted at item.started (normal path) —
                         // just attach the result; emit the full pair otherwise.
                         if self.started_items.remove(id) {
-                            return self.emit_tool_result_end(id, &output, is_err);
+                            out.extend(self.emit_codex_command_result_end(id, &output, is_err));
+                            return out;
                         }
                         let cmd = item.get("command").cloned().unwrap_or(Value::Null);
                         let args = json!({ "command": cmd });
-                        let mut out = self.emit_tool_call(id, "shell", &args);
-                        out.extend(self.emit_tool_result(id, &output, is_err));
-                        out
+                        let mut completed = self.emit_tool_call(id, "shell", &args);
+                        completed.push(
+                            json!({ "type": "tool_execution_start", "toolCallId": id }),
+                        );
+                        completed.extend(
+                            self.emit_codex_command_result_end(id, &output, is_err),
+                        );
+                        completed
                     }
                     "file_change" => {
                         let changes = item.get("changes").cloned().unwrap_or(Value::Null);
@@ -2808,6 +3073,15 @@ enum CodexSessionCommand {
         sink: Arc<dyn EventSink>,
         outcome: tokio::sync::oneshot::Sender<CliTurnOutcome>,
     },
+    Steer {
+        prompt: String,
+        images: Vec<String>,
+        message: Value,
+    },
+    Compact {
+        reason: String,
+        outcome: tokio::sync::oneshot::Sender<std::result::Result<(), String>>,
+    },
     RespondToServerRequest {
         request_id: Value,
         response: Value,
@@ -2844,6 +3118,29 @@ impl CodexSessionHandle {
 
     pub fn abort_turn(&self) {
         let _ = self.tx.send(CodexSessionCommand::AbortTurn);
+    }
+
+    pub fn steer(&self, prompt: String, images: Vec<String>, message: Value) -> Result<()> {
+        self.tx
+            .send(CodexSessionCommand::Steer {
+                prompt,
+                images,
+                message,
+            })
+            .map_err(|_| anyhow::anyhow!("Codex app-server has exited"))
+    }
+
+    pub async fn compact(&self, reason: impl Into<String>) -> Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(CodexSessionCommand::Compact {
+                reason: reason.into(),
+                outcome: tx,
+            })
+            .map_err(|_| anyhow::anyhow!("Codex app-server has exited"))?;
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Codex app-server exited during compaction"))?
+            .map_err(anyhow::Error::msg)
     }
 
     /// Answer a JSON-RPC request initiated by Codex app-server. Unlike normal
@@ -2918,12 +3215,46 @@ async fn read_rpc_response(
     anyhow::bail!("Codex app-server closed before replying")
 }
 
+fn codex_skill_commands(result: &Value) -> Vec<Value> {
+    let mut seen = HashSet::new();
+    result
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| {
+            entry
+                .get("skills")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .filter(|skill| skill.get("enabled").and_then(Value::as_bool).unwrap_or(true))
+        .filter_map(|skill| {
+            let name = skill.get("name").and_then(Value::as_str)?;
+            if !seen.insert(name.to_lowercase()) {
+                return None;
+            }
+            Some(json!({
+                "name": name,
+                "description": skill
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+                "argumentHint": "",
+                "kind": "skill",
+            }))
+        })
+        .collect()
+}
+
 fn normalize_codex_app_item(mut item: Value) -> Value {
     let Some(object) = item.as_object_mut() else {
         return item;
     };
     if let Some(kind) = object.get("type").and_then(Value::as_str) {
         let normalized = match kind {
+            "userMessage" => "user_message",
             "commandExecution" => "command_execution",
             "agentMessage" => "agent_message",
             "fileChange" => "file_change",
@@ -2982,6 +3313,80 @@ fn normalize_codex_app_delta(method: &str, params: &Value) -> Option<Value> {
         "summary_index": params.get("summaryIndex").or_else(|| params.get("summary_index")),
         "content_index": params.get("contentIndex").or_else(|| params.get("content_index")),
     }))
+}
+
+fn codex_context_event(params: &Value, transcript_bytes: usize) -> Option<Value> {
+    let usage = params.get("tokenUsage").or_else(|| params.get("token_usage"))?;
+    let used_tokens = usage
+        .pointer("/last/totalTokens")
+        .or_else(|| usage.pointer("/last/total_tokens"))
+        .and_then(Value::as_u64)?;
+    let context_window = usage
+        .get("modelContextWindow")
+        .or_else(|| usage.get("model_context_window"))
+        .and_then(Value::as_u64)?;
+    Some(json!({
+        "type": "cli_context_usage",
+        "usedTokens": used_tokens,
+        "contextWindow": context_window,
+        "transcriptBytes": transcript_bytes,
+    }))
+}
+
+const CODEX_PROACTIVE_COMPACT_RATIO: f64 = 0.82;
+const CODEX_TRANSCRIPT_COMPACT_BYTES: usize = 64 * 1024 * 1024;
+
+fn codex_user_input(prompt: String, images: Vec<String>) -> Vec<Value> {
+    let mut input = vec![json!({ "type": "text", "text": prompt, "text_elements": [] })];
+    input.extend(
+        images
+            .into_iter()
+            .map(|path| json!({ "type": "localImage", "path": path })),
+    );
+    input
+}
+
+async fn start_codex_turn_request(
+    stdin: &mut tokio::process::ChildStdin,
+    next_id: &mut u64,
+    thread_id: &str,
+    prompt: String,
+    images: Vec<String>,
+    effort: Option<&str>,
+) -> Result<()> {
+    let id = *next_id;
+    *next_id += 1;
+    let mut params = json!({
+        "threadId": thread_id,
+        "input": codex_user_input(prompt, images),
+    });
+    if let Some(effort) = effort {
+        params["effort"] = json!(effort);
+    }
+    write_json_line(
+        stdin,
+        &json!({ "id": id, "method": "turn/start", "params": params }),
+    )
+    .await
+}
+
+async fn start_codex_compaction_request(
+    stdin: &mut tokio::process::ChildStdin,
+    next_id: &mut u64,
+    thread_id: &str,
+) -> Result<u64> {
+    let id = *next_id;
+    *next_id += 1;
+    write_json_line(
+        stdin,
+        &json!({
+            "id": id,
+            "method": "thread/compact/start",
+            "params": { "threadId": thread_id },
+        }),
+    )
+    .await?;
+    Ok(id)
 }
 
 /// How long a Codex tool-suggestion elicitation (an optional plugin-install
@@ -3056,7 +3461,7 @@ pub fn spawn_codex_session(
             let policy = if opts.bypass_approvals { "danger-full-access" } else { "workspace-write" };
             let method = if opts.resume.is_some() { "thread/resume" } else { "thread/start" };
             let mut params = json!({
-                "cwd": cwd_string,
+                "cwd": cwd_string.clone(),
                 "approvalPolicy": "never",
                 "sandbox": policy,
                 "threadSource": "appServer",
@@ -3068,25 +3473,52 @@ pub fn spawn_codex_session(
             if let Some(model) = &opts.model { params["model"] = json!(model); }
             write_json_line(&mut stdin, &json!({ "id": 2, "method": method, "params": params })).await?;
             let result = read_rpc_response(&mut reader, 2).await?;
-            result.pointer("/thread/id").and_then(Value::as_str)
+            let thread_id = result.pointer("/thread/id").and_then(Value::as_str)
                 .map(str::to_string)
-                .ok_or_else(|| anyhow::anyhow!("Codex app-server returned no thread id"))
+                .ok_or_else(|| anyhow::anyhow!("Codex app-server returned no thread id"))?;
+
+            write_json_line(&mut stdin, &json!({
+                "id": 3,
+                "method": "skills/list",
+                "params": { "cwds": [cwd_string.clone()], "forceReload": false },
+            })).await?;
+            let skill_commands = match tokio::time::timeout(
+                Duration::from_secs(5),
+                read_rpc_response(&mut reader, 3),
+            ).await {
+                Ok(Ok(result)) => codex_skill_commands(&result),
+                Ok(Err(error)) => {
+                    tracing::warn!("Codex skills/list failed during startup: {error}");
+                    Vec::new()
+                }
+                Err(_) => {
+                    tracing::warn!("Codex skills/list timed out during startup");
+                    Vec::new()
+                }
+            };
+            Ok::<_, anyhow::Error>((thread_id, skill_commands))
         }.await;
 
-        let thread_id = match initialized {
-            Ok(id) => id,
+        let (thread_id, skill_commands) = match initialized {
+            Ok(initialized) => initialized,
             Err(error) => {
-                if let Some(CodexSessionCommand::StartTurn { sink, outcome, .. }) = rx.recv().await {
-                    let mut tr = EventTranslator::new(CliBackend::Codex);
-                    if let Some(dir) = artifact_dir.clone() {
-                        tr = tr.with_artifact_storage(dir, translator_cwd.clone());
+                match rx.recv().await {
+                    Some(CodexSessionCommand::StartTurn { sink, outcome, .. }) => {
+                        let mut tr = EventTranslator::new(CliBackend::Codex);
+                        if let Some(dir) = artifact_dir.clone() {
+                            tr = tr.with_artifact_storage(dir, translator_cwd.clone());
+                        }
+                        emit(&sink, tr.start());
+                        emit(&sink, tr.finish(Some(&error.to_string())));
+                        let _ = outcome.send(CliTurnOutcome {
+                            resume_id: None, messages: tr.take_messages(), aborted: false,
+                            streamed: tr.opened, resume_rejected: opts.resume.is_some(),
+                        });
                     }
-                    emit(&sink, tr.start());
-                    emit(&sink, tr.finish(Some(&error.to_string())));
-                    let _ = outcome.send(CliTurnOutcome {
-                        resume_id: None, messages: tr.take_messages(), aborted: false,
-                        streamed: tr.opened, resume_rejected: opts.resume.is_some(),
-                    });
+                    Some(CodexSessionCommand::Compact { outcome, .. }) => {
+                        let _ = outcome.send(Err(error.to_string()));
+                    }
+                    _ => {}
                 }
                 let _ = child.start_kill();
                 let _ = child.wait().await;
@@ -3100,8 +3532,31 @@ pub fn spawn_codex_session(
             tr = tr.with_artifact_storage(dir, translator_cwd);
         }
         tr.resume_id = Some(thread_id.clone());
+        emit(
+            &base_sink,
+            vec![json!({ "type": "cli_commands", "commands": skill_commands })],
+        );
         let mut active: Option<ActiveClaudeTurn> = None;
         let mut active_turn_id: Option<String> = None;
+        let mut pending_turn: Option<(
+            String,
+            Vec<String>,
+            Arc<dyn EventSink>,
+            tokio::sync::oneshot::Sender<CliTurnOutcome>,
+        )> = None;
+        let mut compacting = false;
+        let mut compaction_announced = false;
+        let mut compact_reason = String::new();
+        let mut pending_compact_requests: HashMap<
+            u64,
+            tokio::sync::oneshot::Sender<std::result::Result<(), String>>,
+        > = HashMap::new();
+        let mut pending_auto_compact_requests = HashSet::new();
+        let mut transcript_bytes = 0usize;
+        let mut transcript_bytes_at_compaction = 0usize;
+        let mut context_used = 0u64;
+        let mut context_window = 0u64;
+        let mut proactive_compact_due = false;
         let mut pending_plugin_installs: HashMap<
             u64,
             (
@@ -3117,27 +3572,34 @@ pub fn spawn_codex_session(
         // waiting. Track each suggestion and auto-decline past its deadline —
         // Codex then continues with its non-plugin fallback instead of wedging.
         let mut pending_tool_suggestions: Vec<(Value, tokio::time::Instant)> = Vec::new();
+        let mut pending_skills_request: Option<u64> = None;
 
         loop {
             let suggestion_deadline = pending_tool_suggestions.iter().map(|(_, at)| *at).min();
             tokio::select! {
                 command = rx.recv() => match command {
                     Some(CodexSessionCommand::StartTurn { prompt, images, sink, outcome }) => {
-                        if active.is_some() {
+                        if active.is_some() || pending_turn.is_some() {
                             let _ = outcome.send(CliTurnOutcome {
                                 resume_id: Some(thread_id.clone()), messages: Vec::new(),
                                 aborted: false, streamed: false, resume_rejected: false,
                             });
                             continue;
                         }
+                        if compacting {
+                            pending_turn = Some((prompt, images, sink, outcome));
+                            continue;
+                        }
                         tr.begin_next_turn();
                         emit(&sink, tr.start());
-                        let mut input = vec![json!({ "type": "text", "text": prompt, "text_elements": [] })];
-                        input.extend(images.into_iter().map(|path| json!({ "type": "localImage", "path": path })));
-                        let id = next_id; next_id += 1;
-                        let mut params = json!({ "threadId": thread_id, "input": input });
-                        if let Some(effort) = &opts.effort { params["effort"] = json!(effort); }
-                        if let Err(error) = write_json_line(&mut stdin, &json!({ "id": id, "method": "turn/start", "params": params })).await {
+                        if let Err(error) = start_codex_turn_request(
+                            &mut stdin,
+                            &mut next_id,
+                            &thread_id,
+                            prompt,
+                            images,
+                            opts.effort.as_deref(),
+                        ).await {
                             emit(&sink, tr.finish(Some(&error.to_string())));
                             let _ = outcome.send(CliTurnOutcome {
                                 resume_id: Some(thread_id.clone()), messages: tr.take_messages(),
@@ -3146,6 +3608,72 @@ pub fn spawn_codex_session(
                             break;
                         }
                         active = Some(ActiveClaudeTurn { sink, outcome });
+                    }
+                    Some(CodexSessionCommand::Steer { prompt, images, message }) => {
+                        let Some(turn_id) = active_turn_id.as_deref() else {
+                            emit(&base_sink, vec![json!({
+                                "type": "error",
+                                "message": "Codex turn is no longer steerable; queue the message for the next turn",
+                            })]);
+                            continue;
+                        };
+                        if active.is_none() || compacting {
+                            emit(&base_sink, vec![json!({
+                                "type": "error",
+                                "message": "Codex is compacting or settling; queue the message for the next turn",
+                            })]);
+                            continue;
+                        }
+                        let id = next_id;
+                        next_id += 1;
+                        let request = json!({
+                            "id": id,
+                            "method": "turn/steer",
+                            "params": {
+                                "threadId": thread_id,
+                                "expectedTurnId": turn_id,
+                                "clientUserMessageId": format!("cetus-steer-{id}"),
+                                "input": codex_user_input(prompt, images),
+                            },
+                        });
+                        match write_json_line(&mut stdin, &request).await {
+                            Ok(()) => tr.queue_steer(message),
+                            Err(error) => emit(&base_sink, vec![json!({
+                                "type": "error",
+                                "message": format!("Codex steer failed: {error}"),
+                            })]),
+                        }
+                    }
+                    Some(CodexSessionCommand::Compact { reason, outcome }) => {
+                        if active.is_some() || pending_turn.is_some() {
+                            let _ = outcome.send(Err(
+                                "wait for the active Codex turn to finish before compacting".into(),
+                            ));
+                            continue;
+                        }
+                        if compacting {
+                            let _ = outcome.send(Ok(()));
+                            continue;
+                        }
+                        match start_codex_compaction_request(
+                            &mut stdin,
+                            &mut next_id,
+                            &thread_id,
+                        ).await {
+                            Ok(id) => {
+                                compacting = true;
+                                compact_reason = reason;
+                                compaction_announced = true;
+                                pending_compact_requests.insert(id, outcome);
+                                emit(&base_sink, vec![json!({
+                                    "type": "compaction_start",
+                                    "reason": compact_reason,
+                                })]);
+                            }
+                            Err(error) => {
+                                let _ = outcome.send(Err(error.to_string()));
+                            }
+                        }
                     }
                     Some(CodexSessionCommand::RespondToServerRequest { request_id, response }) => {
                         // Server requests are ordinary JSON-RPC in the reverse
@@ -3239,6 +3767,12 @@ pub fn spawn_codex_session(
                 }
                 line = reader.next_line() => {
                     let line = match line { Ok(Some(line)) => line, _ => break };
+                    transcript_bytes = transcript_bytes.saturating_add(line.len());
+                    if transcript_bytes.saturating_sub(transcript_bytes_at_compaction)
+                        >= CODEX_TRANSCRIPT_COMPACT_BYTES
+                    {
+                        proactive_compact_due = true;
+                    }
                     let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
                     // app-server can initiate JSON-RPC requests that require a
                     // client response. Dropping one silently wedges the turn:
@@ -3325,6 +3859,55 @@ pub fn spawn_codex_session(
                         continue;
                     }
                     if let Some(response_id) = value.get("id").and_then(Value::as_u64) {
+                        if pending_auto_compact_requests.remove(&response_id) {
+                            if value.get("error").is_some() {
+                                compacting = false;
+                                proactive_compact_due = false;
+                                compaction_announced = false;
+                                emit(&base_sink, vec![json!({
+                                    "type": "compaction_end",
+                                    "reason": compact_reason,
+                                    "aborted": true,
+                                })]);
+                            }
+                            continue;
+                        }
+                        if let Some(outcome) = pending_compact_requests.remove(&response_id) {
+                            if let Some(error) = value.get("error") {
+                                compacting = false;
+                                proactive_compact_due = false;
+                                compaction_announced = false;
+                                let message = error
+                                    .get("message")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("Codex compaction failed")
+                                    .to_string();
+                                emit(&base_sink, vec![json!({
+                                    "type": "compaction_end",
+                                    "reason": compact_reason,
+                                    "aborted": true,
+                                })]);
+                                let _ = outcome.send(Err(message));
+                            } else {
+                                let _ = outcome.send(Ok(()));
+                            }
+                            continue;
+                        }
+                        if pending_skills_request == Some(response_id) {
+                            pending_skills_request = None;
+                            if let Some(result) = value.get("result") {
+                                let sink =
+                                    active.as_ref().map(|turn| &turn.sink).unwrap_or(&base_sink);
+                                emit(
+                                    sink,
+                                    vec![json!({
+                                        "type": "cli_commands",
+                                        "commands": codex_skill_commands(result),
+                                    })],
+                                );
+                            }
+                            continue;
+                        }
                         if let Some((request_id, response, outcome)) =
                             pending_plugin_installs.remove(&response_id)
                         {
@@ -3358,9 +3941,86 @@ pub fn spawn_codex_session(
                     let params = value.get("params").cloned().unwrap_or(Value::Null);
                     let sink = active.as_ref().map(|a| &a.sink).unwrap_or(&base_sink);
                     match method {
+                        "skills/changed" => {
+                            if pending_skills_request.is_none() {
+                                let id = next_id;
+                                next_id += 1;
+                                if write_json_line(
+                                    &mut stdin,
+                                    &json!({
+                                        "id": id,
+                                        "method": "skills/list",
+                                        "params": {
+                                            "cwds": [cwd_string.clone()],
+                                            "forceReload": true,
+                                        },
+                                    }),
+                                )
+                                .await
+                                .is_ok()
+                                {
+                                    pending_skills_request = Some(id);
+                                }
+                            }
+                        }
                         "item/started" | "item/completed" => {
-                            let ty = if method.ends_with("started") { "item.started" } else { "item.completed" };
-                            let item = normalize_codex_app_item(params.get("item").cloned().unwrap_or(Value::Null));
+                            let completed = method.ends_with("completed");
+                            let ty = if completed { "item.completed" } else { "item.started" };
+                            let item = normalize_codex_app_item(
+                                params.get("item").cloned().unwrap_or(Value::Null),
+                            );
+                            if item.get("type").and_then(Value::as_str)
+                                == Some("context_compaction")
+                            {
+                                if !compaction_announced {
+                                    compact_reason = if proactive_compact_due {
+                                        "automatic safeguard".into()
+                                    } else {
+                                        "Codex auto-compact".into()
+                                    };
+                                    compaction_announced = true;
+                                    emit(&base_sink, vec![json!({
+                                        "type": "compaction_start",
+                                        "reason": compact_reason,
+                                    })]);
+                                }
+                                compacting = true;
+                                if completed {
+                                    compacting = false;
+                                    compaction_announced = false;
+                                    proactive_compact_due = false;
+                                    transcript_bytes_at_compaction = transcript_bytes;
+                                    emit(&base_sink, vec![json!({
+                                        "type": "compaction_end",
+                                        "reason": compact_reason,
+                                        "aborted": false,
+                                    })]);
+                                    if let Some((prompt, images, sink, outcome)) = pending_turn.take() {
+                                        tr.begin_next_turn();
+                                        emit(&sink, tr.start());
+                                        if let Err(error) = start_codex_turn_request(
+                                            &mut stdin,
+                                            &mut next_id,
+                                            &thread_id,
+                                            prompt,
+                                            images,
+                                            opts.effort.as_deref(),
+                                        ).await {
+                                            emit(&sink, tr.finish(Some(&error.to_string())));
+                                            let _ = outcome.send(CliTurnOutcome {
+                                                resume_id: Some(thread_id.clone()),
+                                                messages: tr.take_messages(),
+                                                aborted: false,
+                                                streamed: tr.opened,
+                                                resume_rejected: false,
+                                            });
+                                        } else {
+                                            active = Some(ActiveClaudeTurn { sink, outcome });
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
                             let events = tr.on_line(&json!({ "type": ty, "item": item }).to_string());
                             if !events.is_empty() { emit(sink, events); }
                         }
@@ -3373,6 +4033,31 @@ pub fn spawn_codex_session(
                             if let Some(delta) = normalize_codex_app_delta(method, &params) {
                                 let events = tr.on_line(&delta.to_string());
                                 if !events.is_empty() { emit(sink, events); }
+                            }
+                        }
+                        "thread/tokenUsage/updated" => {
+                            if let Some(usage) =
+                                params.get("tokenUsage").or_else(|| params.get("token_usage"))
+                            {
+                                context_used = usage
+                                    .pointer("/last/totalTokens")
+                                    .or_else(|| usage.pointer("/last/total_tokens"))
+                                    .and_then(Value::as_u64)
+                                    .unwrap_or(context_used);
+                                context_window = usage
+                                    .get("modelContextWindow")
+                                    .or_else(|| usage.get("model_context_window"))
+                                    .and_then(Value::as_u64)
+                                    .unwrap_or(context_window);
+                                if context_window > 0
+                                    && (context_used as f64 / context_window as f64)
+                                        >= CODEX_PROACTIVE_COMPACT_RATIO
+                                {
+                                    proactive_compact_due = true;
+                                }
+                            }
+                            if let Some(event) = codex_context_event(&params, transcript_bytes) {
+                                emit(sink, vec![event]);
                             }
                         }
                         "turn/completed" => {
@@ -3392,6 +4077,35 @@ pub fn spawn_codex_session(
                                 aborted: status == "interrupted", streamed, resume_rejected: false,
                             });
                             active_turn_id = None;
+                            if proactive_compact_due && !compacting {
+                                compact_reason = if context_window > 0
+                                    && (context_used as f64 / context_window as f64)
+                                        >= CODEX_PROACTIVE_COMPACT_RATIO
+                                {
+                                    "context above 82%".into()
+                                } else {
+                                    "transcript grew by 64 MB".into()
+                                };
+                                match start_codex_compaction_request(
+                                    &mut stdin,
+                                    &mut next_id,
+                                    &thread_id,
+                                ).await {
+                                    Ok(id) => {
+                                        pending_auto_compact_requests.insert(id);
+                                        compacting = true;
+                                        compaction_announced = true;
+                                        emit(&base_sink, vec![json!({
+                                            "type": "compaction_start",
+                                            "reason": compact_reason,
+                                        })]);
+                                    }
+                                    Err(error) => {
+                                        proactive_compact_due = false;
+                                        tracing::warn!("proactive Codex compaction failed: {error}");
+                                    }
+                                }
+                            }
                         }
                         "serverRequest/resolved" => {
                             if let Some(request_id) = params
@@ -3416,9 +4130,35 @@ pub fn spawn_codex_session(
             emit(&turn.sink, tr.finish(Some("Codex app-server exited unexpectedly")));
             let streamed = tr.opened;
             let _ = turn.outcome.send(CliTurnOutcome {
-                resume_id: Some(thread_id), messages: tr.take_messages(), aborted: false,
+                resume_id: Some(thread_id.clone()), messages: tr.take_messages(), aborted: false,
                 streamed, resume_rejected: false,
             });
+        }
+        if let Some((_prompt, _images, sink, outcome)) = pending_turn.take() {
+            tr.begin_next_turn();
+            emit(&sink, tr.start());
+            emit(&sink, tr.finish(Some("Codex app-server exited before the queued turn started")));
+            let streamed = tr.opened;
+            let _ = outcome.send(CliTurnOutcome {
+                resume_id: Some(thread_id.clone()),
+                messages: tr.take_messages(),
+                aborted: false,
+                streamed,
+                resume_rejected: false,
+            });
+        }
+        for (_, outcome) in pending_compact_requests.drain() {
+            let _ = outcome.send(Err("Codex app-server exited during compaction".into()));
+        }
+        for (_, (_, _, outcome)) in pending_plugin_installs.drain() {
+            let _ = outcome.send(Err("Codex app-server exited during plugin installation".into()));
+        }
+        if compacting {
+            emit(&base_sink, vec![json!({
+                "type": "compaction_end",
+                "reason": compact_reason,
+                "aborted": true,
+            })]);
         }
         let _ = child.wait().await;
     });
@@ -3823,6 +4563,44 @@ mod tests {
     }
 
     #[test]
+    fn claude_reports_latest_request_context_occupancy() {
+        let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
+        assert!(tr
+            .on_line(
+                r#"{"type":"stream_event","event":{"type":"message_start","message":{"model":"claude-opus-4-6","usage":{"input_tokens":100,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}}}}"#,
+            )
+            .is_empty());
+        assert!(tr
+            .on_line(
+                r#"{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":5}}}"#,
+            )
+            .is_empty());
+        let events = tr.on_line(
+            r#"{"type":"result","subtype":"success","is_error":false,"modelUsage":{"claude-opus-4-6":{"contextWindow":200000}}}"#,
+        );
+        assert_eq!(types(&events), vec!["cli_context_usage"]);
+        assert_eq!(events[0]["usedTokens"], json!(155));
+        assert_eq!(events[0]["contextWindow"], json!(200000));
+    }
+
+    #[test]
+    fn codex_context_uses_last_request_not_cumulative_thread_spend() {
+        let event = codex_context_event(&json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "tokenUsage": {
+                "total": { "totalTokens": 900000 },
+                "last": { "totalTokens": 64000 },
+                "modelContextWindow": 258400
+            }
+        }), 12_345)
+        .unwrap();
+        assert_eq!(event["usedTokens"], json!(64000));
+        assert_eq!(event["contextWindow"], json!(258400));
+        assert_eq!(event["transcriptBytes"], json!(12_345));
+    }
+
+    #[test]
     fn claude_text_tool_and_result_translate() {
         let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
         // init carries the resume session id
@@ -4167,7 +4945,28 @@ mod tests {
         );
         assert_eq!(types(&ev), vec!["cli_commands"]);
         assert_eq!(ev[0]["commands"][0]["name"], json!("usage"));
+        assert_eq!(ev[0]["commands"][0]["kind"], json!("command"));
         assert_eq!(ev[0]["commands"][1]["argumentHint"], json!("<instructions>"));
+    }
+
+    #[test]
+    fn codex_skills_list_becomes_a_deduplicated_skill_catalog() {
+        let commands = codex_skill_commands(&json!({
+            "data": [
+                { "skills": [
+                    { "name": "writer", "description": "Draft prose", "enabled": true },
+                    { "name": "hidden", "description": "Disabled", "enabled": false }
+                ]},
+                { "skills": [
+                    { "name": "Writer", "description": "Duplicate" },
+                    { "name": "reviewer", "description": "Review code" }
+                ]}
+            ]
+        }));
+        assert_eq!(commands.len(), 2);
+        assert_eq!(commands[0]["name"], json!("writer"));
+        assert_eq!(commands[0]["kind"], json!("skill"));
+        assert_eq!(commands[1]["name"], json!("reviewer"));
     }
 
     #[test]
@@ -4294,7 +5093,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_command_output_delta_updates_running_card_cumulatively() {
+    fn codex_command_output_delta_is_incremental_and_coalesced() {
         let mut tr = EventTranslator::new(CliBackend::Codex);
         tr.on_line(
             r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","command":"build"}}"#,
@@ -4305,11 +5104,53 @@ mod tests {
         let second = tr.on_line(
             r#"{"type":"item.tool_output.delta","item_id":"cmd1","delta":"line 2"}"#,
         );
-        assert_eq!(types(&first), vec!["tool_execution_update"]);
-        assert_eq!(
-            second[0]["partialResult"]["content"][0]["text"],
-            json!("line 1\nline 2")
+        assert_eq!(types(&first), vec!["tool_execution_delta"]);
+        assert_eq!(first[0]["delta"], json!("line 1\n"));
+        assert!(second.is_empty(), "updates inside 50ms should be coalesced");
+        std::thread::sleep(TOOL_OUTPUT_FLUSH_INTERVAL + Duration::from_millis(5));
+        let third = tr.on_line(
+            r#"{"type":"item.tool_output.delta","item_id":"cmd1","delta":"line 3"}"#,
         );
+        assert_eq!(types(&third), vec!["tool_execution_delta"]);
+        assert_eq!(third[0]["delta"], json!("line 2line 3"));
+        assert_eq!(third[0]["totalBytes"], json!(19));
+    }
+
+    #[test]
+    fn codex_large_command_output_is_bounded_and_saved() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-tool-output-test-{}",
+            ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut tr = EventTranslator::new(CliBackend::Codex)
+            .with_artifact_storage(dir.clone(), dir.clone());
+        tr.on_line(
+            r#"{"type":"item.started","item":{"id":"cmd-large","type":"command_execution","command":"build"}}"#,
+        );
+        let full = "0123456789".repeat(10_000);
+        let completed = json!({
+            "type": "item.completed",
+            "item": {
+                "id": "cmd-large",
+                "type": "command_execution",
+                "command": "build",
+                "aggregated_output": full,
+                "exit_code": 0
+            }
+        });
+        let events = tr.on_line(&completed.to_string());
+        let end = events
+            .iter()
+            .find(|event| event["type"] == "tool_execution_end")
+            .unwrap();
+        let preview = end["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(preview.len() <= TOOL_OUTPUT_PREVIEW_BYTES);
+        assert_eq!(end["result"]["details"]["toolOutput"]["truncated"], json!(true));
+        let path = end["result"]["details"]["toolOutput"]["path"]
+            .as_str()
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), full);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -4777,6 +5618,7 @@ mod tests {
                case \"$line\" in\n\
                  *'\"method\":\"initialize\"'*) echo '{\"id\":1,\"result\":{\"userAgent\":\"fake\",\"codexHome\":\"/tmp\",\"platformFamily\":\"unix\",\"platformOs\":\"macos\"}}' ;;\n\
                  *'\"method\":\"thread/start\"'*) echo '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-persistent\"}}}' ;;\n\
+                 *'\"method\":\"skills/list\"'*) echo '{\"id\":3,\"result\":{\"data\":[{\"skills\":[{\"name\":\"writer\",\"description\":\"Write clearly\",\"enabled\":true}]}]}}' ;;\n\
                  *'\"method\":\"turn/start\"'*)\n\
                    n=$((n + 1)); id=$((9 + n));\n\
                    echo \"{\\\"id\\\":$id,\\\"result\\\":{\\\"turn\\\":{\\\"id\\\":\\\"turn-$n\\\"}}}\";\n\
@@ -4842,6 +5684,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn codex_app_server_steers_and_compacts_with_native_rpc() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-codex-steer-compact-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-codex.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n\
+             while IFS= read -r line; do\n\
+               case \"$line\" in\n\
+                 *'\"method\":\"initialize\"'*) echo '{\"id\":1,\"result\":{}}' ;;\n\
+                 *'\"method\":\"thread/start\"'*) echo '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-native\"}}}' ;;\n\
+                 *'\"method\":\"skills/list\"'*) echo '{\"id\":3,\"result\":{\"data\":[]}}' ;;\n\
+                 *'\"method\":\"turn/start\"'*)\n\
+                   echo '{\"id\":10,\"result\":{\"turn\":{\"id\":\"turn-native\"}}}';\n\
+                   echo '{\"method\":\"item/agentMessage/delta\",\"params\":{\"itemId\":\"answer-1\",\"delta\":\"before steer\"}}' ;;\n\
+                 *'\"method\":\"turn/steer\"'*)\n\
+                   echo '{\"id\":11,\"result\":{}}';\n\
+                   echo '{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"userMessage\",\"id\":\"steer-1\",\"content\":[{\"type\":\"text\",\"text\":\"redirect\"}]}}}';\n\
+                   echo '{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"agentMessage\",\"id\":\"answer-2\",\"text\":\"after steer\"}}}';\n\
+                   echo '{\"method\":\"turn/completed\",\"params\":{\"turn\":{\"id\":\"turn-native\",\"status\":\"completed\",\"error\":null}}}' ;;\n\
+                 *'\"method\":\"thread/compact/start\"'*)\n\
+                   echo '{\"id\":12,\"result\":{}}';\n\
+                   echo '{\"method\":\"item/started\",\"params\":{\"item\":{\"type\":\"contextCompaction\",\"id\":\"compact-1\"}}}';\n\
+                   echo '{\"method\":\"item/completed\",\"params\":{\"item\":{\"type\":\"contextCompaction\",\"id\":\"compact-1\"}}}' ;;\n\
+               esac\n\
+             done\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let session = spawn_codex_session(
+            sink.clone() as Arc<dyn EventSink>,
+            &script.to_string_lossy(),
+            &dir,
+            None,
+            None,
+            Vec::new(),
+            CliRunOpts::default(),
+        )
+        .unwrap();
+        let outcome = session
+            .start_turn("begin".into(), Vec::new(), sink.clone() as Arc<dyn EventSink>)
+            .unwrap();
+        let observed = sink.clone();
+        for _ in 0..200 {
+            if observed.0.lock().unwrap().iter().any(|event| {
+                event["assistantMessageEvent"]["delta"] == json!("before steer")
+            }) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let steer_message = json!({
+            "role": "user",
+            "content": [{ "type": "text", "text": "redirect" }],
+        });
+        session
+            .steer("redirect".into(), Vec::new(), steer_message.clone())
+            .unwrap();
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), outcome)
+            .await
+            .expect("native steer should let the turn complete")
+            .unwrap();
+        assert!(outcome.messages.contains(&steer_message));
+        assert!(serde_json::to_string(&outcome.messages)
+            .unwrap()
+            .contains("after steer"));
+
+        session.compact("manual").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let events = sink.0.lock().unwrap();
+        assert!(events.iter().any(|event| event["type"] == "compaction_start"));
+        assert!(events.iter().any(|event| {
+            event["type"] == "compaction_end" && event["aborted"] == json!(false)
+        }));
+
+        session.shutdown();
+        drop(events);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn codex_app_server_surfaces_and_answers_reverse_rpc_requests() {
         let dir = std::env::temp_dir().join(format!(
             "cetus-codex-server-request-test-{}-{}",
@@ -4860,6 +5797,7 @@ mod tests {
                case \"$line\" in\n\
                  *'\"method\":\"initialize\"'*) echo '{\"id\":1,\"result\":{}}' ;;\n\
                  *'\"method\":\"thread/start\"'*) echo '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-rpc\"}}}' ;;\n\
+                 *'\"method\":\"skills/list\"'*) echo '{\"id\":3,\"result\":{\"data\":[]}}' ;;\n\
                  *'\"method\":\"turn/start\"'*)\n\
                    echo '{\"id\":10,\"result\":{\"turn\":{\"id\":\"turn-rpc\"}}}';\n\
                    echo '{\"method\":\"mcpServer/elicitation/request\",\"id\":\"request-1\",\"params\":{\"threadId\":\"thread-rpc\",\"turnId\":\"turn-rpc\",\"serverName\":\"codex_apps\",\"mode\":\"form\",\"message\":\"Read repository PRs directly\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{}},\"_meta\":{\"codex_approval_kind\":\"tool_suggestion\",\"tool_type\":\"plugin\",\"tool_id\":\"github@openai-curated-remote\",\"tool_name\":\"GitHub\",\"install_url\":\"https://example.test/install\"}}}' ;;\n\
@@ -4966,6 +5904,7 @@ mod tests {
                case \"$line\" in\n\
                  *'\"method\":\"initialize\"'*) echo '{\"id\":1,\"result\":{}}' ;;\n\
                  *'\"method\":\"thread/start\"'*) echo '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-timeout\"}}}' ;;\n\
+                 *'\"method\":\"skills/list\"'*) echo '{\"id\":3,\"result\":{\"data\":[]}}' ;;\n\
                  *'\"method\":\"turn/start\"'*)\n\
                    echo '{\"id\":10,\"result\":{\"turn\":{\"id\":\"turn-timeout\"}}}';\n\
                    echo '{\"method\":\"mcpServer/elicitation/request\",\"id\":\"request-9\",\"params\":{\"threadId\":\"thread-timeout\",\"turnId\":\"turn-timeout\",\"serverName\":\"codex_apps\",\"mode\":\"form\",\"message\":\"Read repository PRs directly\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{}},\"_meta\":{\"codex_approval_kind\":\"tool_suggestion\",\"tool_type\":\"plugin\",\"tool_id\":\"github@openai-curated-remote\",\"tool_name\":\"GitHub\",\"install_url\":\"https://example.test/install\"}}}' ;;\n\

@@ -131,6 +131,31 @@ fn short_path_hash(path: &Path) -> String {
     format!("{:x}", hasher.finish())
 }
 
+const STANDARD_SKILL_DIRS: &[&str] = &[".agents", ".claude", ".codex"];
+
+fn add_unique_skill_root(root: PathBuf, roots: &mut Vec<PathBuf>, seen: &mut HashSet<String>) {
+    let key = root
+        .canonicalize()
+        .unwrap_or_else(|_| root.clone())
+        .to_string_lossy()
+        .to_string();
+    if seen.insert(key) {
+        roots.push(root);
+    }
+}
+
+fn user_skill_roots(extra: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        for dir in STANDARD_SKILL_DIRS {
+            add_unique_skill_root(home.join(dir).join("skills"), &mut roots, &mut seen);
+        }
+    }
+    add_unique_skill_root(extra.to_path_buf(), &mut roots, &mut seen);
+    roots
+}
+
 fn repo_skill_roots_for_workspace(workspace: Option<&Path>) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     let mut seen = HashSet::new();
@@ -146,17 +171,11 @@ fn add_repo_skill_root_paths_from(
     seen: &mut HashSet<String>,
 ) {
     for ancestor in start.ancestors() {
-        let root = ancestor.join(".agents").join("skills");
-        if !root.is_dir() {
-            continue;
-        }
-        let key = root
-            .canonicalize()
-            .unwrap_or_else(|_| root.clone())
-            .to_string_lossy()
-            .to_string();
-        if seen.insert(key) {
-            roots.push(root);
+        for dir in STANDARD_SKILL_DIRS {
+            let root = ancestor.join(dir).join("skills");
+            if root.is_dir() {
+                add_unique_skill_root(root, roots, seen);
+            }
         }
     }
 }
@@ -311,7 +330,10 @@ pub fn materialize_skills_into_with_budget(
     // same-named skills by name at load time.
     let disc = crate::discovery::load_settings(store);
     if disc.skills_load_discovered {
-        copy_discovered_skills(Path::new(&disc.skills_folder), target, budget, "user");
+        for root in user_skill_roots(Path::new(&disc.skills_folder)) {
+            let ns = format!("user-{}", short_path_hash(&root));
+            copy_discovered_skills(&root, target, budget, &ns);
+        }
         for root in repo_skill_roots_for_workspace(workspace) {
             let ns = format!("repo-{}", short_path_hash(&root));
             copy_discovered_skills(&root, target, budget, &ns);
@@ -1031,18 +1053,21 @@ fn parse_discovered_skill_id(id: &str) -> Option<(Option<DiscoveredScope>, Optio
 
 fn discovered_roots(state: &AppState) -> Vec<DiscoveredRoot> {
     let disc = crate::discovery::load_settings(&state.store);
-    let user_root = PathBuf::from(disc.skills_folder);
-    let user_key = user_root
-        .canonicalize()
-        .unwrap_or_else(|_| user_root.clone())
-        .to_string_lossy()
-        .to_string();
-
-    let mut roots = vec![DiscoveredRoot {
-        scope: DiscoveredScope::User,
-        path: user_root,
-    }];
-    let mut seen = HashSet::from([user_key]);
+    let user_roots = user_skill_roots(Path::new(&disc.skills_folder));
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+    for path in user_roots {
+        let key = path
+            .canonicalize()
+            .unwrap_or_else(|_| path.clone())
+            .to_string_lossy()
+            .to_string();
+        seen.insert(key);
+        roots.push(DiscoveredRoot {
+            scope: DiscoveredScope::User,
+            path,
+        });
+    }
 
     if let Ok(cwd) = std::env::current_dir() {
         add_repo_skill_roots_from(&cwd, &mut roots, &mut seen);
@@ -1086,17 +1111,19 @@ fn add_repo_skill_roots_from_path(
     seen: &mut HashSet<String>,
 ) {
     for ancestor in start.ancestors() {
-        let root = ancestor.join(".agents").join("skills");
-        if !root.is_dir() {
-            continue;
-        }
-        let key = root
-            .canonicalize()
-            .unwrap_or_else(|_| root.clone())
-            .to_string_lossy()
-            .to_string();
-        if seen.insert(key) {
-            roots.push(root);
+        for dir in STANDARD_SKILL_DIRS {
+            let root = ancestor.join(dir).join("skills");
+            if !root.is_dir() {
+                continue;
+            }
+            let key = root
+                .canonicalize()
+                .unwrap_or_else(|_| root.clone())
+                .to_string_lossy()
+                .to_string();
+            if seen.insert(key) {
+                roots.push(root);
+            }
         }
     }
 }

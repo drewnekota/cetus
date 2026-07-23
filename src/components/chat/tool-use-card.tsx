@@ -1,6 +1,7 @@
 "use client";
 import { memo } from "react";
 import { ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle2, CircleSlash, Bot, Check } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { Spinner } from "@/components/ui/spinner";
 import { AnsiText } from "@/components/ui/ansi-text";
 import type { PiContentBlock, RenderedBlock } from "@/lib/types";
@@ -21,6 +22,30 @@ interface SubagentInfo {
   description: string;
   status: string;
   steps: SubagentStep[];
+}
+
+interface ToolOutputInfo {
+  truncated: boolean;
+  totalBytes: number;
+  path?: string;
+}
+
+function toolOutputInfo(details: unknown): ToolOutputInfo | null {
+  if (!details || typeof details !== "object") return null;
+  const value = (details as { toolOutput?: unknown }).toolOutput;
+  if (!value || typeof value !== "object") return null;
+  const info = value as { truncated?: unknown; totalBytes?: unknown; path?: unknown };
+  return {
+    truncated: info.truncated === true,
+    totalBytes: typeof info.totalBytes === "number" ? info.totalBytes : 0,
+    path: typeof info.path === "string" ? info.path : undefined,
+  };
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /** Structured subagent progress a CLI backend (claude-code Task/Agent tool)
@@ -112,6 +137,7 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
   const [open, toggle] = useDisclosure(id);
   const isError = block.result?.isError;
   const subagent = subagentInfo(block.result?.details);
+  const outputInfo = toolOutputInfo(block.result?.details);
   // Codex child threads may outlive the root turn, so agent_end can clear the
   // generic streaming bit while the structured subagent state is still live.
   const isRunning = block.streaming === true || subagent?.status === "running";
@@ -207,6 +233,20 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
                   {Array.isArray(block.result.content) ? flattenResultContent(block.result.content) : ""}
                 </AnsiText>
               </pre>
+              {outputInfo?.truncated && (
+                <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                  <span>{t("tool.outputTruncated", { size: formatBytes(outputInfo.totalBytes) })}</span>
+                  {outputInfo.path && (
+                    <button
+                      type="button"
+                      className="shrink-0 underline underline-offset-2 hover:text-foreground"
+                      onClick={() => invoke("open_path", { path: outputInfo.path }).catch(console.error)}
+                    >
+                      {t("tool.openFullOutput")}
+                    </button>
+                  )}
+                </div>
+              )}
             </section>
           )}
         </div>

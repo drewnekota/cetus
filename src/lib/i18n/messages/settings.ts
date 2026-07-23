@@ -494,7 +494,7 @@ export const settings = {
     "skills.editor.create": "Create skill",
     "skills.discovered.title": "Discovered skills",
     "skills.discovered.description":
-      "Skills installed globally in ~/.agents/skills (via the skills CLI). The agent loads these automatically — they're shown here read-only. Manage them with the skills CLI.",
+      "Skills found in standard .agents, .claude, and .codex folders or the additional folder below. They're shown here read-only; manage them in their source folder.",
     "skills.discovered.badge": "Global",
     "skills.discovered.repoTitle": "Repo skills",
     "skills.discovered.userTitle": "User skills",
@@ -588,7 +588,8 @@ export const settings = {
     "discovery.mcp.title": "Import from other apps",
     "discovery.mcp.description": "Also load MCP servers configured in these apps. Applies to new chats only.",
     "skills.discovered.loadLabel": "Load discovered skills",
-    "skills.discovered.loadDesc": "Include skills from the folder below in new chats.",
+    "skills.discovered.loadDesc":
+      "Include skills from the folder below plus standard .agents, .claude, and .codex skill folders in new chats.",
     "skills.discovered.chooseFolder": "Choose folder",
   },
   zh: {
@@ -1044,7 +1045,7 @@ export const settings = {
     "skills.editor.create": "创建技能",
     "skills.discovered.title": "已发现的技能",
     "skills.discovered.description":
-      "通过 skills CLI 全局安装在 ~/.agents/skills 中的技能。代理会自动加载它们，这里仅作只读展示。如需管理请使用 skills CLI。",
+      "在标准 .agents、.claude、.codex 文件夹或下方附加文件夹中发现的技能。这里仅作只读展示，请在来源文件夹中管理。",
     "skills.discovered.badge": "全局",
     "skills.discovered.repoTitle": "仓库技能",
     "skills.discovered.userTitle": "用户技能",
@@ -1115,7 +1116,8 @@ export const settings = {
     "discovery.mcp.title": "从其他应用导入",
     "discovery.mcp.description": "同时加载这些应用中配置的 MCP 服务器。仅对新对话生效。",
     "skills.discovered.loadLabel": "加载发现的技能",
-    "skills.discovered.loadDesc": "在新对话中包含下方文件夹中的技能。",
+    "skills.discovered.loadDesc":
+      "在新对话中包含下方文件夹，以及标准 .agents、.claude 和 .codex 文件夹中的技能。",
     "skills.discovered.chooseFolder": "选择文件夹",
   },
   ja: {

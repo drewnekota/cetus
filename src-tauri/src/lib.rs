@@ -303,6 +303,21 @@ impl AppState {
         self.cli_turns.lock().unwrap().contains_key(conv_id)
     }
 
+    /// Return the settlement signal only when a registered turn has already
+    /// emitted `agent_end`. Native steer is no longer valid in this narrow
+    /// phase; callers should wait and dispatch a normal next turn instead.
+    pub fn cli_turn_done_if_closing(
+        &self,
+        conv_id: &str,
+    ) -> Option<Arc<tokio::sync::Notify>> {
+        let turns = self.cli_turns.lock().unwrap();
+        let handle = turns.get(conv_id)?;
+        handle
+            .closing
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .then(|| handle.done.clone())
+    }
+
     /// Fire the kill switch of a running CLI turn. No-op when idle.
     pub fn abort_cli_turn(&self, conv_id: &str) {
         if let Some(h) = self.cli_turns.lock().unwrap().get(conv_id) {
@@ -1311,6 +1326,7 @@ pub fn run() {
         commands::delete_conversation,
         commands::rename_conversation,
         commands::send_prompt,
+        commands::compact_conversation,
         commands::get_conversation,
         commands::set_conversation_backend,
         commands::conversation_worktree,
@@ -1481,6 +1497,7 @@ pub fn run() {
         commands::delete_conversation,
         commands::rename_conversation,
         commands::send_prompt,
+        commands::compact_conversation,
         commands::get_conversation,
         commands::set_conversation_backend,
         commands::conversation_worktree,

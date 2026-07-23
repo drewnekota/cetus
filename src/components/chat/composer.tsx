@@ -290,6 +290,16 @@ const CLAUDE_CLI_COMMANDS: SlashItem[] = [
   },
 ];
 
+const CODEX_CLI_COMMANDS: SlashItem[] = [
+  {
+    kind: "command",
+    id: "codex:compact",
+    name: "compact",
+    description: "Compact the Codex thread and free context",
+    prompt: "/compact ",
+  },
+];
+
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB — docx/xlsx/pdf etc., read on disk by the agent
 const FOCUS_TRIGGER_CHARS = new Set(["/", "、", "／"]);
 
@@ -514,10 +524,11 @@ export function Composer({
     let alive = true;
     (async () => {
       try {
-        const [commands, skillState, discovered] = await Promise.all([
+        const [commands, skillState, discovered, discovery] = await Promise.all([
           api.listSlashCommands(),
           api.listSkills(),
           api.listDiscoveredSkills(),
+          api.getDiscoverySettings(),
         ]);
         if (!alive) return;
         setSlashCommands(
@@ -532,7 +543,8 @@ export function Composer({
         const libs = skillState.enabled ? skillState.entries.filter((e) => e.enabled) : [];
         const seen = new Set<string>();
         const skills: SlashItem[] = [];
-        for (const s of [...libs, ...discovered]) {
+        const loadedDiscovered = discovery.skillsLoadDiscovered ? discovered : [];
+        for (const s of [...libs, ...loadedDiscovered]) {
           const key = s.name.toLowerCase();
           if (seen.has(key)) continue;
           seen.add(key);
@@ -552,30 +564,41 @@ export function Composer({
     const q = slashQuery.toLowerCase();
     const match = (it: SlashItem) =>
       it.name.toLowerCase().includes(q) || it.description.toLowerCase().includes(q);
-    // Runtime built-ins first: on claude-code they're what /-muscle-memory
-    // from the native CLI reaches for. Prefer the catalog the session itself
-    // reported on boot (initialize ack — /usage, /compact, /context, /model …);
-    // the hardcoded snapshot only covers conversations whose session hasn't
-    // spawned yet. Skills ride the catalog too, suffixed "(user)"/"(project)"
-    // — dropped here since the menu already lists them from its own sources.
-    const skillNames = new Set(slashSkills.map((s) => s.name.toLowerCase()));
-    const native: SlashItem[] = nativeCommands
-      .filter((c) => !/\((?:user|project|plugin|builtin)\)\s*$/.test(c.description))
-      .filter((c) => !skillNames.has(c.name.toLowerCase()))
-      .map((c) => ({
-        kind: "command",
-        id: `cli:${c.name}`,
-        name: c.name,
-        description: c.argumentHint
-          ? `${c.description} — ${c.argumentHint}`
-          : c.description,
-        prompt: `/${c.name} `,
-      }));
-    const builtins =
-      backend === "claude-code"
-        ? (native.length > 0 ? native : CLAUDE_CLI_COMMANDS).filter(match)
-        : [];
-    return [...builtins, ...slashCommands.filter(match), ...slashSkills.filter(match)];
+    // CLI runtimes own their skill catalogs. Claude reports built-ins + skills
+    // in its initialize ack; Codex reports skills via app-server skills/list.
+    // Do not merge Cetus/pi's managed/discovered skills into either runtime:
+    // seeing a skill in the menu must mean the selected runtime can invoke it.
+    const native: SlashItem[] = nativeCommands.map((c) => {
+      const description = c.argumentHint
+        ? `${c.description} — ${c.argumentHint}`
+        : c.description;
+      return c.kind === "skill"
+        ? {
+            kind: "skill" as const,
+            id: `cli:${c.name}`,
+            name: c.name,
+            description,
+          }
+        : {
+            kind: "command" as const,
+            id: `cli:${c.name}`,
+            name: c.name,
+            description,
+            prompt: `/${c.name} `,
+          };
+    });
+    if (backend === "claude-code") {
+      const runtimeItems = native.length > 0 ? native : CLAUDE_CLI_COMMANDS;
+      return [...runtimeItems.filter(match), ...slashCommands.filter(match)];
+    }
+    if (backend === "codex") {
+      return [
+        ...CODEX_CLI_COMMANDS.filter(match),
+        ...native.filter(match),
+        ...slashCommands.filter(match),
+      ];
+    }
+    return [...slashCommands.filter(match), ...slashSkills.filter(match)];
   }, [slashCommands, slashSkills, slashQuery, backend, nativeCommands]);
 
   const slashVisible = slashOpen && slashItems.length > 0;
@@ -645,11 +668,18 @@ export function Composer({
   }
 
   /** Replace the `/<token>` with the picked item: a command expands to its
-   *  prompt; a skill inserts its `/name ` token verbatim. */
+   * prompt; a skill inserts the selected runtime's explicit-invocation token. */
   function applySlash(item: SlashItem) {
     const el = taRef.current;
     const caret = el?.selectionStart ?? text.length;
-    const insert = item.kind === "command" ? item.prompt : `/${item.name} `;
+    // Codex's native explicit-skill syntax is `$skill-name`; the slash menu is
+    // only the discovery UI. Claude and pi expose skills as `/skill-name`.
+    const insert =
+      item.kind === "command"
+        ? item.prompt
+        : backend === "codex"
+          ? `$${item.name} `
+          : `/${item.name} `;
     const next = text.slice(0, slashStart) + insert + text.slice(caret);
     const pos = slashStart + insert.length;
     updateText(next);

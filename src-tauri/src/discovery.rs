@@ -1,9 +1,9 @@
 //! "Discovered" sources — opt-in loading of skills and MCP servers the user
 //! manages *outside* cetus. Two distinct mechanisms, surfaced as one settings blob:
 //!
-//! - **Skills**: a filesystem folder (default `~/.agents/skills`, the home of the
-//!   external `skills` CLI). When enabled, every `SKILL.md` folder there is copied
-//!   into a conversation's active skill set alongside cetus's own library.
+//! - **Skills**: standard user/repo folders for Codex, Claude, and Agent Skills,
+//!   plus one configurable extra folder. When enabled, every `SKILL.md` folder
+//!   there is copied into a conversation's active skill set.
 //! - **MCP**: mcporter can only import servers from *named editor configs*
 //!   (`claude-code`, `cursor`, …) — not an arbitrary folder. The selected sources
 //!   are written as mcporter's `imports` list in `mcp.json`.
@@ -34,11 +34,12 @@ pub const MCP_IMPORT_SOURCES: &[&str] = &[
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoverySettings {
-    /// When on, also load `SKILL.md` folders from [`Self::skills_folder`] into each
-    /// new conversation's skill set (in addition to cetus's managed library).
+    /// When on, load standard runtime skill roots and [`Self::skills_folder`]
+    /// into each new conversation (in addition to cetus's managed library).
     #[serde(default)]
     pub skills_load_discovered: bool,
-    /// Folder scanned for discovered skills. Defaults to `~/.agents/skills`.
+    /// Additional folder scanned for discovered skills. Defaults to
+    /// `~/.agents/skills`, which is de-duplicated against the standard roots.
     #[serde(default = "default_skills_folder")]
     pub skills_folder: String,
     /// mcporter `imports` sources to pull MCP servers from. Empty = cetus's own

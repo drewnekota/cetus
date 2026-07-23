@@ -35,6 +35,10 @@ export interface ChatState {
   toolIndex: Record<string, { messageIdx: number; blockIdx: number }>;
   // True while an agent run is active (between agent_start and agent_end).
   isStreaming: boolean;
+  // True while a vendor runtime is summarizing its context. Compaction is a
+  // first-class busy state but does not create an assistant message.
+  isCompacting: boolean;
+  compactionReason: string | null;
   // True from user_sent / agent_start until the first message_start (or stream
   // ends without one). UI renders a "thinking…" placeholder so the gap between
   // hitting send and pi emitting the first token doesn't look like a stall.
@@ -58,6 +62,8 @@ export const emptyChatState: ChatState = {
   activeAssistantIdx: null,
   toolIndex: {},
   isStreaming: false,
+  isCompacting: false,
+  compactionReason: null,
   awaitingAssistant: false,
   hasArtifacts: false,
   error: null,
@@ -460,6 +466,23 @@ function reducePiEvent(state: ChatState, event: PiEvent): ChatState {
   switch (event.type) {
     case "agent_start":
       return { ...state, isStreaming: true, awaitingAssistant: true, error: null, aborted: false };
+    case "compaction_start":
+      return {
+        ...state,
+        isCompacting: true,
+        compactionReason: event.reason || "context",
+        error: null,
+      };
+    case "compaction_end":
+      return {
+        ...state,
+        isCompacting: false,
+        compactionReason: null,
+        error:
+          event.aborted && !state.error
+            ? "Context compaction failed. The conversation is unchanged."
+            : state.error,
+      };
     case "agent_end": {
       // Catch a turn that ended with NO visible answer (empty/degenerate
       // completion — see assistantHasVisibleContent) and surface a recoverable
@@ -542,6 +565,7 @@ function reducePiEvent(state: ChatState, event: PiEvent): ChatState {
     }
     case "tool_execution_start":
     case "tool_execution_update":
+    case "tool_execution_delta":
     case "tool_execution_end":
       return reduceToolExec(state, event);
     default:
@@ -673,6 +697,31 @@ function reduceToolExec(
       },
       streaming: true,
     };
+  } else if (event.type === "tool_execution_delta") {
+    const current = b.result?.content
+      .filter((block): block is Extract<PiContentBlock, { type: "text" }> => block.type === "text")
+      .map((block) => block.text)
+      .join("\n") ?? "";
+    const text = appendBoundedToolOutput(current, event.delta);
+    const previousDetails =
+      b.result?.details && typeof b.result.details === "object"
+        ? b.result.details as Record<string, unknown>
+        : {};
+    m.blocks[loc.blockIdx] = {
+      ...b,
+      result: {
+        content: [{ type: "text", text }],
+        details: {
+          ...previousDetails,
+          toolOutput: {
+            truncated: event.truncated || text.includes(TOOL_OUTPUT_OMISSION_MARKER),
+            totalBytes: event.totalBytes,
+          },
+        },
+        isError: false,
+      },
+      streaming: true,
+    };
   } else if (event.type === "tool_execution_end") {
     m.blocks[loc.blockIdx] = {
       ...b,
@@ -694,4 +743,20 @@ function reduceToolExec(
       !!updated.result &&
       artifactsFromDetails(updated.result.details).length > 0);
   return { ...state, messages, hasArtifacts };
+}
+
+const TOOL_OUTPUT_PREVIEW_CHARS = 64 * 1024;
+const TOOL_OUTPUT_OMISSION_MARKER = "\n… output omitted …\n";
+
+function appendBoundedToolOutput(current: string, delta: string): string {
+  const combined = current + delta;
+  if (combined.length <= TOOL_OUTPUT_PREVIEW_CHARS) return combined;
+  const available = TOOL_OUTPUT_PREVIEW_CHARS - TOOL_OUTPUT_OMISSION_MARKER.length;
+  const head = Math.floor(available / 2);
+  const tail = available - head;
+  return (
+    combined.slice(0, head) +
+    TOOL_OUTPUT_OMISSION_MARKER +
+    combined.slice(combined.length - tail)
+  );
 }

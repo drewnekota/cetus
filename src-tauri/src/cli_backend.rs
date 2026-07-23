@@ -559,15 +559,31 @@ pub fn dispatch_turn(
         }
     }
 
-    // Codex app-server exposes turn/interrupt. A prompt sent mid-run interrupts
-    // only that turn, then redispatches on the same thread; app-server-owned
-    // background terminals remain alive.
+    // Codex app-server has a real same-turn steering primitive. Preserve the
+    // terminal semantics: a promoted follow-up appends with `turn/steer`;
+    // only the explicit Stop action calls `turn/interrupt`. Once agent_end has
+    // already crossed the bridge the turn is no longer steerable, so wait for
+    // persistence and dispatch a normal next turn in that narrow race.
     if backend == cetus_bridge::cli_agent::CliBackend::Codex {
-        if let Some(done) = state.cli_interrupt_turn(&conv.id) {
+        if let Some(done) = state.cli_turn_done_if_closing(&conv.id) {
             redispatch_after_settle(handle, conv.id.clone(), message.to_string(), images, done);
             return Ok(());
         }
-        // Idle: fall through to a normal dispatch.
+        if state.cli_turn_active(&conv.id) {
+            let Some(session) = state.codex_session(&conv.id) else {
+                return Err("Codex session disappeared while its turn was running".into());
+            };
+            let image_paths = save_turn_images(&state.app_data_dir, &conv.id, &images);
+            session
+                .steer(
+                    message.to_string(),
+                    image_paths,
+                    cli_user_message_json(message, &images),
+                )
+                .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+        // Idle: fall through to a normal turn.
     }
 
     let ws = PathBuf::from(&conv.workspace_dir);
@@ -830,6 +846,88 @@ pub fn dispatch_turn(
     unreachable!("all CLI backends dispatch through a persistent session")
 }
 
+/// Run Codex's native manual compaction for a conversation. This deliberately
+/// uses `thread/compact/start` rather than sending the text `/compact` as a
+/// model prompt. A cold Cetus process reattaches to the saved Codex thread
+/// first, so manual compact works immediately after an app restart too.
+pub async fn compact_codex_conversation(
+    handle: &AppHandle,
+    conv: &Conversation,
+) -> Result<(), String> {
+    if conv.backend != "codex" {
+        return Err("manual compact is only available for Codex conversations".into());
+    }
+    if conv.session_file.trim().is_empty() {
+        return Err("this Codex conversation has no session to compact yet".into());
+    }
+    let state = handle.state::<AppState>();
+    if state.cli_turn_active(&conv.id) {
+        return Err("wait for the active Codex turn to finish before compacting".into());
+    }
+    let session = match state.codex_session(&conv.id) {
+        Some(session) => session,
+        None => {
+            let ws = PathBuf::from(&conv.workspace_dir);
+            std::fs::create_dir_all(&ws).ok();
+            let settings = load_settings(&state.store);
+            let cwd = if cetus_bridge::worktree::is_git_repo(&ws) {
+                let existing = cetus_bridge::worktree::worktree_path(&ws, &conv.id);
+                if existing.join(".git").exists() {
+                    existing
+                } else {
+                    ws.clone()
+                }
+            } else {
+                ws.clone()
+            };
+            let mut env = crate::secrets::load_env();
+            env.push((
+                "CETUS_SOCK".to_string(),
+                crate::control::socket_path(&state.app_data_dir)
+                    .to_string_lossy()
+                    .into_owned(),
+            ));
+            env.push((
+                "PATH".to_string(),
+                format!(
+                    "{}:{}",
+                    crate::control::cli_bin_dir(&state.app_data_dir).display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            ));
+            let opts = cetus_bridge::cli_agent::CliRunOpts {
+                model: (!conv.cli_model.trim().is_empty())
+                    .then(|| conv.cli_model.trim().to_string()),
+                effort: (!conv.cli_effort.trim().is_empty())
+                    .then(|| conv.cli_effort.trim().to_string()),
+                resume: Some(conv.session_file.clone()),
+                bypass_approvals: settings.bypass_approvals,
+                images: Vec::new(),
+                image_blocks: Vec::new(),
+                append_system_prompt: None,
+            };
+            let base_sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
+                std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(handle.clone()));
+            let session = cetus_bridge::cli_agent::spawn_codex_session(
+                base_sink,
+                cetus_bridge::cli_agent::CliBackend::Codex.default_bin(),
+                &cwd,
+                Some(artifacts_dir(&state.app_data_dir, &conv.id)),
+                Some(conv.id.clone()),
+                env,
+                opts,
+            )
+            .map_err(|error| error.to_string())?;
+            state.set_codex_session(conv.id.clone(), session.clone());
+            session
+        }
+    };
+    session
+        .compact("manual")
+        .await
+        .map_err(|error| error.to_string())
+}
+
 fn persist_cli_outcome(
     store: &Store,
     conv_id: &str,
@@ -872,9 +970,8 @@ impl cetus_bridge::pi_rpc::EventSink for ClosingSink {
 
 /// Redispatch `message` as a fresh turn once the currently-closing turn has
 /// fully settled (`done` fired by `end_cli_turn`, so its partial messages and
-/// resume token are on disk). Shared by the codex steer (interrupt + resume)
-/// and the claude follow-up that flushed on `agent_end` after the turn stopped
-/// reading stdin — both need a settled session to resume from.
+/// resume token are on disk). Shared by the Codex/Claude follow-up that flushed
+/// on `agent_end` after the turn stopped accepting steer input.
 fn redispatch_after_settle(
     handle: &AppHandle,
     conv_id: String,

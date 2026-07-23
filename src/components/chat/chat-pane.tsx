@@ -31,6 +31,7 @@ import {
   useAwaitingAssistant,
   useBackgroundTasks,
   useChatError,
+  useCompaction,
   useHasMessages,
   useIsStreaming,
   useMessageKeys,
@@ -148,6 +149,7 @@ export function ChatPane({
   const { locale } = useTranslation("chat");
   const hasMessages = useHasMessages(convId);
   const isStreaming = useIsStreaming(convId);
+  const compaction = useCompaction(convId);
   const [quoteRequest, setQuoteRequest] = useState<QuoteRequest | null>(null);
   const [queuedDrafts, setQueuedDrafts] = useState<
     Record<string, { request: ComposerDraftRequest; beforeIds: string[] }>
@@ -285,6 +287,7 @@ export function ChatPane({
           }`}
         >
           {convId ? <BackgroundAgentsBar convId={convId} /> : null}
+          {compaction.active ? <CompactionBar reason={compaction.reason} /> : null}
           {convId ? <CliControlCard convId={convId} /> : null}
           {convId ? <AgentControlCard conversationId={convId} /> : null}
           <QueuedMessages
@@ -325,6 +328,16 @@ export function ChatPane({
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+function CompactionBar({ reason }: { reason: string | null }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/5 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+      <Spinner className="size-3 text-sky-600" />
+      <span className="font-medium text-foreground">Compacting context…</span>
+      {reason ? <span className="truncate">{reason}</span> : null}
     </div>
   );
 }
@@ -990,7 +1003,7 @@ function QuoteSelectionToolbar({
     setSelection(null);
   }, [scroller]);
 
-  const readSelection = useCallback((trimTrailingBoundary = false) => {
+  const readSelection = useCallback((finalize = false) => {
     const root = scroller;
     const sel = window.getSelection();
     if (!root || !sel || sel.rangeCount === 0 || sel.isCollapsed) {
@@ -1006,18 +1019,21 @@ function QuoteSelectionToolbar({
       return;
     }
 
-    // Dragging past the end of a markdown paragraph makes WebKit include the
-    // paragraph's block boundary in the Range. Its native ::selection paint
-    // then fills the otherwise-empty remainder of the row. Once the gesture is
-    // complete, move only that structural endpoint back to the final selected
-    // text node; endpoints already inside text (including deliberate spaces)
-    // are left untouched.
-    if (trimTrailingBoundary) {
-      const trimmed = trimTrailingBlockBoundary(range, root);
+    // WebKit lets a drag begin/end on a markdown block boundary or on whitespace
+    // between blocks. Those structural endpoints can paint the empty remainder
+    // of a row as selected (and can even leave a non-collapsed, visually empty
+    // Range). Once the gesture is complete, reduce the Range to its first and
+    // last real character so the native highlight matches what can be quoted.
+    if (finalize) {
+      const trimmed = trimSelectionToText(range, root);
       if (trimmed) {
         sel.removeAllRanges();
         sel.addRange(trimmed);
         range = trimmed;
+      } else {
+        sel.removeAllRanges();
+        setSelection(null);
+        return;
       }
     }
 
@@ -1124,20 +1140,35 @@ function QuoteSelectionToolbar({
   );
 }
 
-/** Remove a selected block boundary without altering a genuine text endpoint. */
-function trimTrailingBlockBoundary(range: Range, root: HTMLElement): Range | null {
-  if (range.endContainer.nodeType === Node.TEXT_NODE) return null;
-
-  let finalText: Text | null = null;
+/** Remove structural/whitespace boundaries from a completed native selection. */
+function trimSelectionToText(range: Range, root: HTMLElement): Range | null {
+  let first: { node: Text; offset: number } | null = null;
+  let last: { node: Text; offset: number } | null = null;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode as Text;
-    if (node.data && range.intersectsNode(node)) finalText = node;
+    if (!node.data || !range.intersectsNode(node)) continue;
+
+    const start = node === range.startContainer ? range.startOffset : 0;
+    const end = node === range.endContainer ? range.endOffset : node.data.length;
+    if (start >= end) continue;
+
+    const selected = node.data.slice(start, end);
+    const firstCharacter = selected.search(/\S/u);
+    if (firstCharacter >= 0 && !first) {
+      first = { node, offset: start + firstCharacter };
+    }
+
+    const trailingWhitespace = selected.match(/\s*$/u)?.[0].length ?? 0;
+    if (trailingWhitespace < selected.length) {
+      last = { node, offset: end - trailingWhitespace };
+    }
   }
-  if (!finalText) return null;
+  if (!first || !last) return null;
 
   const trimmed = range.cloneRange();
-  trimmed.setEnd(finalText, finalText.data.length);
+  trimmed.setStart(first.node, first.offset);
+  trimmed.setEnd(last.node, last.offset);
   return trimmed.collapsed ? null : trimmed;
 }
 

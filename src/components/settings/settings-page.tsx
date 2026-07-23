@@ -3871,6 +3871,14 @@ function DiscoveredSkillsSection({ open }: { open: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const repoSkills = skills?.filter((s) => s.scope === "repo") ?? [];
   const userSkills = skills?.filter((s) => s.scope !== "repo") ?? [];
+  const userGroups = Array.from(
+    userSkills.reduce((groups, skill) => {
+      const group = groups.get(skill.root) ?? [];
+      group.push(skill);
+      groups.set(skill.root, group);
+      return groups;
+    }, new Map<string, DiscoveredSkill[]>()),
+  );
   const repoGroups = Array.from(
     repoSkills.reduce((groups, skill) => {
       const group = groups.get(skill.root) ?? [];
@@ -3978,16 +3986,17 @@ function DiscoveredSkillsSection({ open }: { open: boolean }) {
                 }
               />
             ))}
-            {userSkills.length > 0 && (
+            {userGroups.map(([root, group]) => (
               <DiscoveredSkillGroup
+                key={root}
                 title={t("skills.discovered.userTitle")}
-                root={discovery?.skillsFolder}
-                skills={userSkills}
+                root={root}
+                skills={group}
                 onReveal={(id) =>
                   api.revealDiscoveredSkill(id).catch((e) => setError(String(e)))
                 }
               />
-            )}
+            ))}
           </div>
         )}
       </div>

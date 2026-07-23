@@ -4,7 +4,7 @@
 // grouped assistant turn (assistant-turn.tsx) render text, attachments, and the
 // hover toolbar identically.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkCjkFriendly from "remark-cjk-friendly";
@@ -49,6 +49,66 @@ const PROSE_CLASS = cn(
   "[&_td_code]:text-[0.95em] [&_th_code]:text-[0.95em]",
 );
 
+/** Fenced code blocks get their own copy action. Keep this renderer local to
+ * assistant chat markdown: other shared Markdown surfaces have denser layouts
+ * where an overlaid action would need separate treatment. */
+function CopyablePre({
+  children,
+  node: _node,
+  ...props
+}: React.ComponentProps<"pre"> & { node?: unknown }) {
+  const { t } = useTranslation("common");
+  const preRef = useRef<HTMLPreElement>(null);
+  const resetTimerRef = useRef<number | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current != null) window.clearTimeout(resetTimerRef.current);
+    },
+    [],
+  );
+
+  const copy = useCallback(async () => {
+    // react-markdown leaves one structural newline at the end of fenced code.
+    // Drop only that newline so pasting a shell block does not immediately run it.
+    const text = (preRef.current?.textContent ?? "").replace(/\n$/, "");
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      if (resetTimerRef.current != null) window.clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.error("copy code block failed", e);
+    }
+  }, []);
+
+  const label = copied ? t("action.copied") : t("action.copy");
+  return (
+    <div className="group/code relative my-2">
+      <pre ref={preRef} {...props} className={cn("!my-0 pr-16", props.className)}>
+        {children}
+      </pre>
+      <button
+        type="button"
+        onClick={copy}
+        title={label}
+        aria-label={label}
+        className="not-prose absolute right-2 top-2 flex h-7 items-center gap-1 rounded-md border border-border/60 bg-background/80 px-2 text-[11px] text-muted-foreground opacity-70 shadow-sm backdrop-blur-sm transition-[color,background-color,opacity] hover:bg-background hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+        <span>{label}</span>
+      </button>
+    </div>
+  );
+}
+
+const assistantMarkdownComponents: Components = {
+  ...markdownComponents,
+  pre: CopyablePre,
+};
+
 /** One parse of a markdown fragment. Memoized on the source string so an
  *  unchanged fragment (e.g. the frozen prefix of a streaming reply, or a prior
  *  bubble when a new message is appended) is never re-parsed — parsing is the
@@ -58,7 +118,7 @@ const RawMarkdown = memo(function RawMarkdown({ text }: { text: string }) {
     <ReactMarkdown
       remarkPlugins={[[remarkGfm, { singleTilde: false }], [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly]}
       rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
-      components={markdownComponents}
+      components={assistantMarkdownComponents}
       urlTransform={markdownUrlTransform}
     >
       {normalizeMath(text)}

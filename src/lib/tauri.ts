@@ -241,6 +241,7 @@ export const api = {
       message,
       images: images && images.length ? images : null,
     }),
+  compactConversation: (id: string) => invoke<void>("compact_conversation", { id }),
   abort: (id: string) => invoke<void>("abort", { id }),
   /** Run a one-shot shell command locally (the composer's `!` bash mode) in
    *  `cwd` (defaults to the workspace). Bypasses the agent; the result is

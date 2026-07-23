@@ -1035,6 +1035,7 @@ export default function Home() {
               eventType !== "cli_background_tasks" &&
               eventType !== "cli_commands" &&
               eventType !== "cli_rate_limit" &&
+              eventType !== "cli_context_usage" &&
               cid
             ) {
               store.piEvent(cid, evt.event);
@@ -1045,6 +1046,26 @@ export default function Home() {
             if (eventType === "cli_rate_limit") {
               const info = (evt.event as unknown as { info?: CliRateLimitInfo }).info;
               if (info) store.setCliRateLimit("claude-code", info);
+            }
+            if (cid && eventType === "cli_context_usage") {
+              const usage = evt.event as unknown as {
+                usedTokens?: number;
+                contextWindow?: number;
+                transcriptBytes?: number;
+              };
+              if (
+                Number.isFinite(usage.usedTokens) &&
+                Number.isFinite(usage.contextWindow) &&
+                usage.contextWindow! > 0
+              ) {
+                store.setCliContextUsage(cid, {
+                  usedTokens: Math.max(0, usage.usedTokens!),
+                  contextWindow: usage.contextWindow!,
+                  transcriptBytes: Number.isFinite(usage.transcriptBytes)
+                    ? Math.max(0, usage.transcriptBytes!)
+                    : undefined,
+                });
+              }
             }
             // The CLI session's slash-command catalog (initialize ack) — the
             // composer's slash menu reads it back per conversation.
@@ -2323,6 +2344,11 @@ export default function Home() {
     if (previous !== runtime.backend) {
       await api.setConversationBackend(convId, runtime.backend);
       const store = chatStore.getState();
+      // Native slash catalogs belong to the runtime process that reported
+      // them. Never carry Claude commands into Codex (or vice versa) while the
+      // newly selected runtime is still starting.
+      store.setCliCommands(convId, []);
+      store.clearCliContextUsage(convId);
       if ((store.chats[convId]?.messages.length ?? 0) > 0) {
         store.runtimeSwitch(convId, previous, runtime.backend);
       }
@@ -2354,6 +2380,27 @@ export default function Home() {
     }
   }
 
+  async function maybeRunCodexCommand(
+    convId: string,
+    text: string,
+    attachments: ComposerAttachment[],
+  ): Promise<boolean> {
+    const backend = conversationsRef.current.find((c) => c.id === convId)?.backend;
+    if (
+      backend !== "codex" ||
+      attachments.length > 0 ||
+      !/^\/compact(?:\s.*)?$/s.test(text.trim())
+    ) {
+      return false;
+    }
+    try {
+      await api.compactConversation(convId);
+    } catch (error) {
+      chatStore.getState().setError(convId, String(error));
+    }
+    return true;
+  }
+
   async function onSend(
     text: string,
     attachments: ComposerAttachment[] = [],
@@ -2382,6 +2429,10 @@ export default function Home() {
         toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
         return;
       }
+    }
+    if (await maybeRunCodexCommand(convId, text, attachments)) {
+      setFocusToken((token) => token + 1);
+      return;
     }
     // A new prompt to a task that was waiting on review means we're moving on —
     // drop it out of "Needs review".
@@ -2744,6 +2795,7 @@ export default function Home() {
         return;
       }
     }
+    if (await maybeRunCodexCommand(convId, text, attachments)) return;
     maybeClearReview(convId);
     const store = chatStore.getState();
     store.ensure(convId);
@@ -2778,6 +2830,10 @@ export default function Home() {
         toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
         return;
       }
+    }
+    if (await maybeRunCodexCommand(id, text, attachments)) {
+      setDetailFocusToken((token) => token + 1);
+      return;
     }
     // Sending feedback from the review surface clears the "Needs review" flag.
     maybeClearReview(id);
