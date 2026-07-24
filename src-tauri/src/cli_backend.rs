@@ -141,6 +141,18 @@ pub async fn get_cli_runtime_status() -> Result<CliRuntimeStatus, String> {
     })
 }
 
+/// Return the last native slash-command/skill catalog reported by this
+/// conversation's live CLI session. The event stream remains the update path;
+/// this snapshot makes the menu resilient to renderer reloads and listener
+/// startup races.
+#[tauri::command]
+pub async fn get_cli_commands(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<Vec<Value>, String> {
+    Ok(state.cli_commands(&conversation_id))
+}
+
 /// Mirror Cetus's archive state into Codex's own saved-thread inventory so
 /// clients backed by the same CODEX_HOME (including the Codex app) put the
 /// conversation in the same bucket. This is deliberately best-effort at the

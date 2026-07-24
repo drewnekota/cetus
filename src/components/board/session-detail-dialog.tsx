@@ -417,6 +417,7 @@ export function SessionDetailDialog({
             <div className="flex min-w-0 flex-1 flex-col">
               <ChatPane
                 convId={convId}
+                backend={(conversation?.backend as BackendId | undefined) ?? "pi"}
                 modelChoice={modelChoice}
                 onModelChange={onModelChange}
                 workspaceDir={workspaceDir}

@@ -129,6 +129,10 @@ pub struct AppState {
     /// Conversation-scoped Codex app-server threads. Background terminals are
     /// owned here and therefore survive `turn/completed`.
     codex_sessions: std::sync::Mutex<HashMap<String, cetus_bridge::cli_agent::CodexSessionHandle>>,
+    /// Last slash-command/skill catalog reported by each live CLI session.
+    /// Unlike the matching UI event, this survives a renderer reload, so the
+    /// composer can hydrate the menu without restarting the vendor process.
+    cli_commands: std::sync::Mutex<HashMap<String, Vec<serde_json::Value>>>,
 }
 
 /// One line bound for a running CLI turn's stdin.
@@ -212,6 +216,7 @@ impl AppState {
         if let Some(session) = self.claude_sessions.lock().unwrap().remove(conv_id) {
             session.shutdown();
         }
+        self.cli_commands.lock().unwrap().remove(conv_id);
     }
 
     pub fn codex_session(
@@ -239,6 +244,7 @@ impl AppState {
         if let Some(session) = self.codex_sessions.lock().unwrap().remove(conv_id) {
             session.shutdown();
         }
+        self.cli_commands.lock().unwrap().remove(conv_id);
     }
 
     pub fn kill_all_cli_sessions(&self) {
@@ -248,6 +254,23 @@ impl AppState {
         for (_, session) in self.codex_sessions.lock().unwrap().drain() {
             session.shutdown();
         }
+        self.cli_commands.lock().unwrap().clear();
+    }
+
+    pub fn cache_cli_commands(&self, conv_id: &str, commands: Vec<serde_json::Value>) {
+        self.cli_commands
+            .lock()
+            .unwrap()
+            .insert(conv_id.to_string(), commands);
+    }
+
+    pub fn cli_commands(&self, conv_id: &str) -> Vec<serde_json::Value> {
+        self.cli_commands
+            .lock()
+            .unwrap()
+            .get(conv_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Register a CLI-backend turn for `conv_id`, returning its kill switch,
@@ -968,6 +991,7 @@ pub fn run() {
                 cli_turns: std::sync::Mutex::new(HashMap::new()),
                 claude_sessions: std::sync::Mutex::new(HashMap::new()),
                 codex_sessions: std::sync::Mutex::new(HashMap::new()),
+                cli_commands: std::sync::Mutex::new(HashMap::new()),
             });
             let remote_runtime = remote::RemoteRuntime::new(&app.state::<AppState>().store);
             app.manage(remote_runtime);
@@ -1340,6 +1364,7 @@ pub fn run() {
         cli_backend::set_cli_agent_settings,
         cli_backend::get_cli_defaults,
         cli_backend::get_cli_runtime_status,
+        cli_backend::get_cli_commands,
         cli_backend::cli_control_respond,
         commands::retry_last_turn,
         commands::abort,
@@ -1511,6 +1536,7 @@ pub fn run() {
         cli_backend::set_cli_agent_settings,
         cli_backend::get_cli_defaults,
         cli_backend::get_cli_runtime_status,
+        cli_backend::get_cli_commands,
         cli_backend::cli_control_respond,
         commands::retry_last_turn,
         commands::abort,

@@ -44,6 +44,7 @@ import type {
   WorkspaceTextPreview,
   WorktreeInfo,
   CliAgentSettings,
+  CliSlashCommand,
   CliDefaults,
   DevtestDomOp,
   DevtestDomArgs,
@@ -454,6 +455,9 @@ export const api = {
   // Slash commands (local prompt snippets) --------------------------------
   /** All user-defined slash commands, sorted by name. */
   listSlashCommands: () => invoke<SlashCommand[]>("list_slash_commands"),
+  /** Last native command/skill catalog reported by a live CLI conversation. */
+  getCliCommands: (conversationId: string) =>
+    invoke<CliSlashCommand[]>("get_cli_commands", { conversationId }),
   /** Create (no id) or update (with id) a slash command; returns the saved one. */
   upsertSlashCommand: (input: SlashCommandInput) =>
     invoke<SlashCommand>("upsert_slash_command", { input }),

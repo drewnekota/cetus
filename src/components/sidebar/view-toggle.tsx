@@ -40,7 +40,7 @@ export function ViewToggle({ view, onChange, hints }: Props) {
             onClick={() => onChange(it.id)}
             title={`${label} (${hint})`}
             className={cn(
-              "inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              "inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
               active
                 ? "bg-[var(--brand)] text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground",

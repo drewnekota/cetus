@@ -6,7 +6,7 @@ import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { BackendPicker, nextBackend } from "@/components/chat/backend-picker";
-import { useCliCommands } from "@/lib/chat-store";
+import { useChatStore, useCliCommands } from "@/lib/chat-store";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { SlashMenu, type SlashItem } from "@/components/chat/slash-menu";
 import { MentionMenu } from "@/components/chat/mention-menu";
@@ -524,13 +524,23 @@ export function Composer({
     let alive = true;
     (async () => {
       try {
-        const [commands, skillState, discovered, discovery] = await Promise.all([
+        const [commands, skillState, discovered, discovery, cachedNative] = await Promise.all([
           api.listSlashCommands(),
           api.listSkills(),
           api.listDiscoveredSkills(),
           api.getDiscoverySettings(),
+          conversationId ? api.getCliCommands(conversationId) : Promise.resolve([]),
         ]);
         if (!alive) return;
+        // cli_commands is also streamed live, but the Rust-side snapshot
+        // survives renderer/HMR reloads and closes the startup-listener race.
+        if (
+          conversationId &&
+          cachedNative.length > 0 &&
+          (useChatStore.getState().cliCommands[conversationId]?.length ?? 0) === 0
+        ) {
+          useChatStore.getState().setCliCommands(conversationId, cachedNative);
+        }
         setSlashCommands(
           commands.map((c) => ({
             kind: "command",
@@ -558,7 +568,7 @@ export function Composer({
     return () => {
       alive = false;
     };
-  }, [slashOpen]);
+  }, [conversationId, slashOpen]);
 
   const slashItems = useMemo(() => {
     const q = slashQuery.toLowerCase();

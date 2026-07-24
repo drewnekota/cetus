@@ -96,16 +96,15 @@ export function ArtifactView({ artifact }: Props) {
           }
         }}
         className={cn(
-          "group/preview-card block max-w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          compact ? "w-80" : "w-96",
+          "block max-w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          compact ? "w-72" : "w-80",
         )}
         aria-label={t("artifact.open", { name: artifact.name })}
       >
         <div
           className={cn(
-            "relative isolate overflow-hidden rounded-xl bg-card transition-all duration-200",
+            "relative isolate overflow-hidden rounded-xl bg-card",
             "shadow-[0_2px_8px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)]",
-            "group-hover/preview-card:shadow-[0_12px_32px_rgba(0,0,0,0.10),0_2px_6px_rgba(0,0,0,0.06)]",
             compact ? "flex items-center gap-3 px-3.5 py-3" : "flex flex-col",
           )}
         >
@@ -129,7 +128,7 @@ export function ArtifactView({ artifact }: Props) {
               clipping, leaving intermittent 1px gaps at fractional DPRs. */}
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-0 z-10 rounded-[inherit] border border-border/80 transition-colors duration-200 group-hover/preview-card:border-border"
+            className="pointer-events-none absolute inset-0 z-10 rounded-[inherit] border border-border/80"
           />
         </div>
       </div>
@@ -160,7 +159,7 @@ function Thumbnail({
         <img
           src={url}
           alt={artifact.caption ?? artifact.name}
-          className="h-full w-full object-cover transition-transform duration-500 group-hover/preview-card:scale-[1.03]"
+          className="h-full w-full object-cover"
           loading="lazy"
         />
       );
@@ -269,7 +268,7 @@ function NativeThumbnail({
       <img
         src={thumbnailUrl}
         alt={artifact.caption ?? artifact.name}
-        className="h-full w-full object-contain drop-shadow-sm transition-transform duration-500 group-hover/preview-card:scale-[1.02]"
+        className="h-full w-full object-contain drop-shadow-sm"
         loading="lazy"
         onError={clearThumbnail}
       />
@@ -287,8 +286,7 @@ function VideoThumbnail({
   const { thumbnailUrl, clearThumbnail } = useArtifactThumbnail(artifact.path);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const mediaClass =
-    "h-full w-full object-cover transition-transform duration-500 group-hover/preview-card:scale-[1.03]";
+  const mediaClass = "h-full w-full object-cover";
 
   return (
     <>
@@ -316,7 +314,7 @@ function VideoThumbnail({
         />
       )}
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <div className="rounded-full bg-background/80 p-2.5 shadow-md backdrop-blur-sm transition-transform duration-200 group-hover/preview-card:scale-110">
+        <div className="rounded-full bg-background/80 p-2.5 shadow-md backdrop-blur-sm">
           <Play className="size-5 fill-current" />
         </div>
       </div>

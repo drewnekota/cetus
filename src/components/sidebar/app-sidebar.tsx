@@ -271,11 +271,11 @@ export const AppSidebar = memo(function AppSidebar({
         // 14px) and 14px icons (vs 16px). Scoped to this sidebar via descendant
         // selectors + `!` so they win over the menu-button base styles without
         // forking the shared primitive.
-        "[&_[data-slot=sidebar-menu-button]]:!text-[13px] [&_[data-slot=sidebar-menu-button]_svg]:!size-3.5",
+        "[&_[data-slot=sidebar-menu-button]]:text-[13px]! [&_[data-slot=sidebar-menu-button]_svg]:size-3.5!",
         // The row archive action is a shared primitive that ships a 20px box +
         // 16px glyph — oversized next to the trimmed 14px row icons. Shrink both,
         // scoped to this sidebar so the primitive stays untouched elsewhere.
-        "[&_[data-slot=sidebar-menu-action]]:!w-3.5 [&_[data-slot=sidebar-menu-action]_svg]:!size-3",
+        "[&_[data-slot=sidebar-menu-action]]:w-3.5! [&_[data-slot=sidebar-menu-action]_svg]:size-3!",
       )}
     >
       <SidebarHeader className="gap-2">
@@ -288,7 +288,7 @@ export const AppSidebar = memo(function AppSidebar({
                 plain row (no hover/active state, no pointer cursor). */}
             <SidebarMenuButton
               asChild
-              className="data-[slot=sidebar-menu-button]:!gap-1 data-[slot=sidebar-menu-button]:!p-1.5 cursor-default hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
+              className="data-[slot=sidebar-menu-button]:gap-1! data-[slot=sidebar-menu-button]:p-1.5! cursor-default hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
             >
               <div>
                 <img

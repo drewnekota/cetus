@@ -42,6 +42,7 @@ import { TestHook } from "@/components/devtest/test-hook";
 import { ScreenHistoryPage } from "@/components/screen-history/screen-history-page";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import {
@@ -137,6 +138,49 @@ interface PersistedAppViewState {
   historyOpen?: boolean;
   detailId?: string | null;
   boardWorkspaceFilter?: string | null;
+}
+
+/** Stable transcript-shaped placeholder for a cold conversation switch. It
+ * mirrors ChatPane's message/composer split so hydration changes content, not
+ * the page's overall geometry. */
+function ChatLoadingPane({ opticalCenter }: { opticalCenter: boolean }) {
+  const columnShift = opticalCenter
+    ? "xl:-translate-x-10 2xl:-translate-x-12"
+    : "";
+  return (
+    <div
+      className="flex min-h-0 flex-1 flex-col bg-background"
+      aria-busy="true"
+      aria-label="Loading conversation"
+    >
+      <div className="min-h-0 flex-1 overflow-hidden px-4 pt-4">
+        <div className={`mx-auto flex w-full max-w-3xl flex-col gap-6 ${columnShift}`}>
+          <div className="flex justify-end">
+            <Skeleton className="h-10 w-2/5 rounded-2xl" />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-2.5 w-14" />
+            <Skeleton className="h-3 w-11/12" />
+            <Skeleton className="h-3 w-4/5" />
+            <Skeleton className="h-3 w-2/3" />
+          </div>
+          <div className="flex justify-end">
+            <Skeleton className="h-10 w-1/3 rounded-2xl" />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-2.5 w-14" />
+            <Skeleton className="h-3 w-10/12" />
+            <Skeleton className="h-3 w-3/5" />
+          </div>
+        </div>
+      </div>
+      <div className="shrink-0 bg-background px-4 pb-3 pt-2">
+        <div className={`mx-auto w-full max-w-3xl ${columnShift}`}>
+          <Skeleton className="h-[92px] w-full rounded-2xl" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function isSidebarView(value: unknown): value is SidebarView {
@@ -369,6 +413,11 @@ export default function Home() {
   const [activeId, setActiveId] = useState<string | null>(() =>
     initialViewState.view === "chat" ? loadLastActive() : null,
   );
+  // A selected conversation can be absent from the in-memory LRU and need an
+  // IndexedDB/backend round-trip before its messages exist. Keep that distinct
+  // from a genuinely empty/new chat so the pane never flashes the hero between
+  // two populated conversations.
+  const [loadingChatId, setLoadingChatId] = useState<string | null>(null);
   const [piReady, setPiReady] = useState(false);
   // Store actions are pulled via getState() inside callbacks so we never
   // subscribe page.tsx to chat-store ticks.
@@ -715,14 +764,13 @@ export default function Home() {
   );
   deliverQueuedRef.current = deliverQueued; // hoisted function declaration
 
-  // Comma-joined ids of every conversation whose run is live. Object.is over the
-  // string means this only re-renders when the *set* of streaming runs changes,
-  // and the flush effect below re-runs on exactly those boundaries.
-  const streamingSig = useChatStore((s) => {
-    let sig = "";
-    for (const id in s.chats) if (s.chats[id]?.isStreaming) sig += `${id},`;
-    return sig;
-  });
+  // Comma-joined ids of every active conversation (streaming, awaiting the
+  // first event, or compacting). Object.is over the string means this only
+  // re-renders when that set changes, and the flush effect below re-runs on
+  // exactly those boundaries.
+  const streamingSig = useChatStore((s) =>
+    Array.from(s.streamingIds).sort().join(","),
+  );
 
   // Deliver the next queued follow-up whenever ANY conversation's run ends —
   // active chat, detail dialog, or a background run the user has navigated away
@@ -765,6 +813,15 @@ export default function Home() {
     runtime: ComposerRuntimeSelection | undefined,
     beforeIds: string[] = [],
   ) {
+    // The composer's `streaming` prop is a rendered snapshot. A completion can
+    // settle the store after that render but just before Enter reaches here;
+    // queueing from the stale prop would miss the already-fired active→idle
+    // boundary and strand the follow-up forever. Re-check the synchronous store
+    // at the hand-off point and send immediately when the conversation is idle.
+    if (!chatStore.getState().streamingIds.has(convId)) {
+      void deliverQueued(convId, text, attachments, runtime);
+      return;
+    }
     const id =
       typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
@@ -2002,6 +2059,7 @@ export default function Home() {
       setWorkspaceDir(nextWorkspaceDir);
     }
     saveLastActive(null);
+    setLoadingChatId(null);
     setActiveId(null);
     setFocusToken((t) => t + 1);
   }
@@ -2015,6 +2073,15 @@ export default function Home() {
       // of a newer one (the "clicked A, landed on B" / stutter bug).
       pendingSelectRef.current = id;
       const isStale = () => pendingSelectRef.current !== id;
+      const finishLoading = () => {
+        setLoadingChatId((current) => (current === id ? null : current));
+      };
+      // Capture liveness before changing the visible id. A cold target needs a
+      // stable loading transcript until hydration; otherwise `hasMessages`
+      // briefly reads false and the main pane mistakes it for a new chat.
+      const liveState = chatStore.getState().chats[id];
+      const hasLiveState = !!liveState && liveState.messages.length > 0;
+      setLoadingChatId(hasLiveState ? null : id);
       // Flip the active chat *synchronously*, before any await. The highlight
       // and pane switch must not wait on the backend round-trip — `pi_for`
       // serializes on a global lock and lazy-spawns a pi process on first open,
@@ -2022,10 +2089,6 @@ export default function Home() {
       // it makes rapid clicks feel like they do nothing. Messages stream in
       // once the cache/backend resolves below (guarded by `isStale`).
       setActiveId(id);
-      // Capture liveness *before* we touch the store, so a background stream
-      // for this conv can't be clobbered by a cache hydrate + reset.
-      const liveState = chatStore.getState().chats[id];
-      const hasLiveState = !!liveState && liveState.messages.length > 0;
       // A *settled* render with no user bubble at all is a stale, lossy render
       // — e.g. an automation that streamed under older code which dropped the
       // user prompt. Don't take the client-side fast path for it; fall through
@@ -2061,6 +2124,7 @@ export default function Home() {
         if (isStale()) return;
         if (cached && cached.length > 0) {
           chatStore.getState().hydrate(id, cached);
+          finishLoading();
           cacheHit = true;
           cachedLen = cached.length;
           // Caches written before automation runs rendered their prompt are
@@ -2086,6 +2150,7 @@ export default function Home() {
         // flipped to `id` optimistically, so log and bail rather than letting
         // the rejection silently abort the rest of the handler.
         console.error("switchConversation failed", id, e);
+        finishLoading();
         return;
       }
       if (isStale()) return;
@@ -2112,6 +2177,7 @@ export default function Home() {
       if ((!hasLiveState && !cacheHit) || repairFromHistory) {
         chatStore.getState().reset(conversation.id, messages);
       }
+      finishLoading();
     },
     // Reads activeIdRef (not activeId) so this keeps a stable identity across
     // selections — required for the memoized sidebar rows / board cards to skip
@@ -3405,9 +3471,12 @@ export default function Home() {
                 onApproveReview={onApproveReview}
                 onRequestChanges={onRequestChanges}
               />
+            ) : loadingChatId === activeId && !hasMessages ? (
+              <ChatLoadingPane opticalCenter={!sideWorkspace.open} />
             ) : hasMessages ? (
               <ChatPane
                 convId={activeId}
+                backend={activeConvBackend ?? pendingBackend}
                 opticalCenter={!sideWorkspace.open}
                 draftKey={activeId ? `chat:${activeId}` : "chat:new"}
                 modelChoice={modelChoice}

@@ -38,7 +38,7 @@ const PROSE_CLASS = cn(
   // Contain unbreakable content (KaTeX nowrap spans, long tokens, wide tables)
   // to this message: without this it widens the Virtuoso scroller and puts a
   // horizontal scrollbar under the whole conversation.
-  "min-w-0 overflow-x-auto",
+  "scrollbar-slim min-w-0 overflow-x-auto",
   // Tighten default prose spacing so chat bubbles don't blow up.
   "prose-p:my-2 prose-pre:my-2 prose-ul:my-2 prose-ol:my-2 prose-headings:my-3",
   "prose-code:rounded prose-code:bg-secondary prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:before:content-none prose-code:after:content-none",
