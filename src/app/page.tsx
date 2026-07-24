@@ -1361,6 +1361,20 @@ export default function Home() {
     setDetailId(null);
   }, [conversations, conversationsLoaded, detailId]);
 
+  // The persisted/optimistic active id can outlive its conversation (for
+  // example when the last chat is deleted in another window, or a selection
+  // loses a race with a list refresh). Once the authoritative list has loaded,
+  // never leave that orphan id driving the cold-conversation skeleton.
+  useEffect(() => {
+    if (!conversationsLoaded || !activeId) return;
+    if (conversations.some((c) => c.id === activeId)) return;
+    pendingSelectRef.current = null;
+    activeIdRef.current = null;
+    saveLastActive(null);
+    setLoadingChatId(null);
+    setActiveId(null);
+  }, [activeId, conversations, conversationsLoaded]);
+
   const refreshAutomations = useCallback(async () => {
     const list = await api.listAutomations();
     setAutomations(list);
@@ -2058,6 +2072,10 @@ export default function Home() {
     if (nextWorkspaceDir) {
       setWorkspaceDir(nextWorkspaceDir);
     }
+    // Invalidate a cold selection/restore before its async cache or backend
+    // work can finish on top of the new-chat hero.
+    pendingSelectRef.current = null;
+    activeIdRef.current = null;
     saveLastActive(null);
     setLoadingChatId(null);
     setActiveId(null);
@@ -3471,7 +3489,9 @@ export default function Home() {
                 onApproveReview={onApproveReview}
                 onRequestChanges={onRequestChanges}
               />
-            ) : loadingChatId === activeId && !hasMessages ? (
+            ) : loadingChatId !== null &&
+              loadingChatId === activeId &&
+              !hasMessages ? (
               <ChatLoadingPane opticalCenter={!sideWorkspace.open} />
             ) : hasMessages ? (
               <ChatPane

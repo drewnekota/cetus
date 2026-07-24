@@ -17,7 +17,6 @@ import { AgentControlCard } from "@/components/chat/agent-control-card";
 import { CliControlCard } from "@/components/chat/cli-control-card";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
 import {
-  Activity,
   AlertTriangle,
   ArrowDown,
   ArrowUp,
@@ -38,7 +37,6 @@ import {
 } from "@/components/chat/composer";
 import {
   getTurnPreview,
-  useActiveTurnActivity,
   useAwaitingAssistant,
   useBackgroundTasks,
   useChatError,
@@ -301,9 +299,6 @@ export function ChatPane({
             opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
           }`}
         >
-          {convId && isStreaming ? (
-            <TurnActivityBar convId={convId} backend={backend} />
-          ) : null}
           {convId ? <BackgroundAgentsBar convId={convId} backend={backend} /> : null}
           {compaction.active ? <CompactionBar reason={compaction.reason} /> : null}
           {convId ? <CliControlCard convId={convId} /> : null}
@@ -372,93 +367,21 @@ function CompactionBar({ reason }: { reason: string | null }) {
  *  when both are empty. */
 const RUNTIME_TONES: Record<
   BackendId,
-  { frame: string; accent: string; badge: string }
+  { frame: string; accent: string }
 > = {
   "claude-code": {
     frame: "border-[#d97757]/30 bg-[#d97757]/5",
     accent: "text-[#d97757]",
-    badge: "border-[#d97757]/20 bg-[#d97757]/10 text-[#b85f42]",
   },
   codex: {
     frame: "border-emerald-600/30 bg-emerald-500/[0.06]",
     accent: "text-emerald-600 dark:text-emerald-400",
-    badge:
-      "border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
   },
   pi: {
     frame: "border-sky-600/25 bg-sky-500/[0.05]",
     accent: "text-sky-600 dark:text-sky-400",
-    badge: "border-sky-600/20 bg-sky-500/10 text-sky-700 dark:text-sky-300",
   },
 };
-
-function runtimeLabel(backend: BackendId): string {
-  if (backend === "claude-code") return "Claude Code";
-  if (backend === "codex") return "Codex";
-  return "Cetus";
-}
-
-function toolActivityLabel(tool: string, t: (key: string, vars?: Record<string, string | number>) => string) {
-  const normalized = tool.toLowerCase().replaceAll("-", "_");
-  if (
-    normalized.includes("image_generation") ||
-    normalized.includes("imagegen") ||
-    normalized.includes("generate_image")
-  ) {
-    return t("pane.turnActivity.generatingImage");
-  }
-  if (normalized.includes("web_search") || normalized === "search") {
-    return t("pane.turnActivity.searching");
-  }
-  if (
-    normalized.includes("exec") ||
-    normalized === "bash" ||
-    normalized.includes("shell")
-  ) {
-    return t("pane.turnActivity.runningCommand");
-  }
-  return t("pane.turnActivity.runningTool", { tool: tool || "tool" });
-}
-
-/** Standing foreground-turn indicator. Tool cards can settle while the model
- *  is deciding its next action, so the transcript alone is not a reliable
- *  whole-turn completion signal; this bar stays live until `agent_end`. */
-function TurnActivityBar({
-  convId,
-  backend,
-}: {
-  convId: string;
-  backend: BackendId;
-}) {
-  const { t } = useTranslation("chat");
-  const activity = useActiveTurnActivity(convId);
-  const tone = RUNTIME_TONES[backend];
-  const detail =
-    activity?.kind === "thinking"
-      ? t("pane.turnActivity.thinking")
-      : activity?.kind === "responding"
-        ? t("pane.turnActivity.responding")
-        : activity?.kind === "tool"
-          ? toolActivityLabel(activity.name, t)
-          : t("pane.turnActivity.working");
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      data-testid="turn-activity"
-      className={`flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] text-muted-foreground ${tone.frame}`}
-    >
-      <Activity className={`size-3.5 shrink-0 ${tone.accent}`} />
-      <Spinner className={`size-3 shrink-0 ${tone.accent}`} />
-      <span
-        className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none ${tone.badge}`}
-      >
-        {runtimeLabel(backend)}
-      </span>
-      <span className="truncate font-medium text-foreground">{detail}</span>
-    </div>
-  );
-}
 
 function BackgroundAgentsBar({
   convId,

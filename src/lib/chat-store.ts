@@ -723,42 +723,6 @@ export function useStreamingIds(): Set<string> {
   return useChatStore((s) => s.streamingIds);
 }
 
-export type ActiveTurnActivity =
-  | { kind: "thinking" }
-  | { kind: "responding" }
-  | { kind: "tool"; name: string };
-
-/** The last foreground block that is still streaming in the active turn.
- *  This is deliberately separate from `backgroundTasks`: foreground tools
- *  (image generation, commands, MCP calls, …) die with `agent_end`, while a
- *  real background task can outlive the turn that launched it. Returning a
- *  primitive signature keeps this selector quiet during unrelated deltas. */
-export function useActiveTurnActivity(
-  convId: string | null | undefined,
-): ActiveTurnActivity | null {
-  const signature = useChatStore((s) => {
-    const c = convId ? s.chats[convId] : undefined;
-    if (!c?.isStreaming) return "";
-    for (let messageIndex = c.messages.length - 1; messageIndex >= 0; messageIndex--) {
-      const blocks = c.messages[messageIndex].blocks;
-      for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex--) {
-        const block = blocks[blockIndex];
-        if (!("streaming" in block) || block.streaming !== true) continue;
-        if (block.kind === "thinking") return "thinking";
-        if (block.kind === "text") return "responding";
-        if (block.kind === "tool_use") return `tool:${block.name || "tool"}`;
-      }
-    }
-    return "";
-  });
-  return useMemo(() => {
-    if (!signature) return null;
-    if (signature === "thinking") return { kind: "thinking" };
-    if (signature === "responding") return { kind: "responding" };
-    return { kind: "tool", name: signature.slice("tool:".length) };
-  }, [signature]);
-}
-
 /** A background subagent (claude-code Task/Agent tool) still running in the
  *  current turn. Surfaced above the composer so the user knows *why* the run
  *  is held open after the main reply already landed. */
