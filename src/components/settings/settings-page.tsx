@@ -731,26 +731,35 @@ function GeneralSection() {
         />
         <div className="flex items-center justify-between gap-4 pt-1">
           <div className="min-w-0 space-y-0.5">
-            <Label className="font-medium">{t("update.check.label")}</Label>
-            <p className="text-xs text-muted-foreground">
-              {checkState === "checking"
-                ? t("update.check.checking")
-                : checkState === "installing"
-                  ? downloadPercent == null
-                    ? t("update.installing")
-                    : `${t("update.installing")} ${downloadPercent}%`
-                : checkState === "ready"
-                  ? t("update.installed")
-                  : checkState === "upToDate"
-                    ? t("update.check.upToDate")
-                    : checkState === "available" && pending
-                      ? t("update.check.available", { version: pending.version })
-                      : checkState === "failed"
-                        ? t("update.failed")
-                        : appVersion
-                          ? t("update.check.current", { version: appVersion })
-                          : ""}
-            </p>
+            <div className="flex items-center gap-2">
+              <Label className="font-medium">{t("update.check.label")}</Label>
+              {appVersion ? (
+                <span className="font-mono text-xs text-muted-foreground">
+                  v{appVersion}
+                </span>
+              ) : null}
+            </div>
+            {checkState !== "idle" ? (
+              <p className="text-xs text-muted-foreground">
+                {checkState === "checking"
+                  ? t("update.check.checking")
+                  : checkState === "installing"
+                    ? downloadPercent == null
+                      ? t("update.installing")
+                      : `${t("update.installing")} ${downloadPercent}%`
+                    : checkState === "ready"
+                      ? t("update.installed")
+                      : checkState === "upToDate"
+                        ? t("update.check.upToDate")
+                        : checkState === "available" && pending
+                          ? t("update.check.available", {
+                              version: pending.version,
+                            })
+                          : checkState === "failed"
+                            ? t("update.failed")
+                            : ""}
+              </p>
+            ) : null}
           </div>
           {checkState === "ready" ? (
             <Button size="sm" className="shrink-0 gap-1.5" onClick={restartNow}>

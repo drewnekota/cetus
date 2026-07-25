@@ -143,8 +143,8 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork, active = fa
                 active={active && i === segments.length - 1}
               />
             ) : (
-              // Answer content keeps the bubble-ish 88% reading width; only
-              // activity bars span the full column to line up with the composer.
+              // Answer content and activity bars share the same 88% reading
+              // width so the assistant turn keeps a consistent right edge.
               <div key={i} className="w-full max-w-[88%]">
                 <AnswerBlock block={seg.block} isUser={false} />
               </div>

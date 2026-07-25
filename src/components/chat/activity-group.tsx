@@ -42,7 +42,7 @@ export function ActivityGroup({
   const current = running ? currentAction(steps) : null;
 
   return (
-    <div className="w-full rounded-md border border-border/60 bg-muted/30">
+    <div className="w-full max-w-[88%] rounded-md border border-border/60 bg-muted/30">
       <button
         onClick={toggle}
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"

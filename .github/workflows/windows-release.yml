@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing GitHub release tag to receive the installer
         required: true
-        default: v0.3.36
+        default: release
 
 permissions:
   contents: write

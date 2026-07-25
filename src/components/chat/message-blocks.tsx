@@ -104,8 +104,26 @@ function CopyablePre({
   );
 }
 
+/**
+ * Keep WebKit's selected block separator from painting the empty remainder of
+ * a paragraph row. The paragraph owns a transparent structural selection
+ * style; this inline leaf restores the normal highlight behind real text.
+ */
+function SelectableParagraph({
+  children,
+  node: _node,
+  ...props
+}: React.ComponentProps<"p"> & { node?: unknown }) {
+  return (
+    <p {...props}>
+      <span data-chat-selection-text>{children}</span>
+    </p>
+  );
+}
+
 const assistantMarkdownComponents: Components = {
   ...markdownComponents,
+  p: SelectableParagraph,
   pre: CopyablePre,
 };
 
@@ -177,7 +195,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
 }) {
   const cut = useMemo(() => (streaming ? safeStreamSplit(text) : -1), [text, streaming]);
   return (
-    <div className={PROSE_CLASS}>
+    <div data-chat-markdown className={PROSE_CLASS}>
       {cut > 0 ? (
         <>
           <RawMarkdown text={text.slice(0, cut)} />

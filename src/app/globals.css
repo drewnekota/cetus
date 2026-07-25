@@ -217,6 +217,19 @@
     background-color: color-mix(in oklab, var(--brand) 32%, transparent);
     color: var(--foreground);
   }
+  /* A selection crossing two block paragraphs also selects the structural
+     separator between them. WKWebView paints that separator through the full
+     width of the paragraph box, producing an apparent whole-row selection
+     even after the Range endpoints have been trimmed to real characters.
+     Assistant markdown wraps paragraph contents in an inline selection leaf:
+     leave the block separator transparent, then restore the normal highlight
+     only behind the leaf's actual text. */
+  [data-chat-markdown] p::selection {
+    background-color: transparent;
+  }
+  [data-chat-markdown] p > [data-chat-selection-text]::selection {
+    background-color: color-mix(in oklab, var(--brand) 32%, transparent);
+  }
   html.theme-repaint [data-chat-composer],
   html.theme-repaint [data-slot="textarea"],
   html.theme-repaint [data-slot="input"] {

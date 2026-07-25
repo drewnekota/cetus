@@ -330,10 +330,7 @@ export const AppSidebar = memo(function AppSidebar({
                   // default SidebarMenuButton treatment.
                   className="min-w-8"
                 >
-                  {/* The enclosing ring fills Lucide's viewBox more completely
-                      than the neighboring Clock / Blocks glyphs. Scale only the
-                      artwork (not its layout box) for matching optical weight. */}
-                  <PlusCircle className="scale-[0.86]" />
+                  <PlusCircle />
                   <span>{t("new.task")}</span>
                   <Kbd className="ml-auto border-transparent">{shortcutLabels.newChat}</Kbd>
                 </SidebarMenuButton>

@@ -30,7 +30,7 @@
   <text x="360" y="91" text-anchor="middle"
         font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif"
         font-size="13" font-weight="400" fill="#727983">
-    拖动即可完成安装
+    Move Cetus into your Applications folder
   </text>
 
   <g transform="translate(336 210)" fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#softShadow)">

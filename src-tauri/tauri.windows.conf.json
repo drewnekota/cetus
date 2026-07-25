@@ -1,16 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Cetus",
-  "version": "0.3.37",
-  "identifier": "dev.cetus.app",
-  "build": {
-    "frontendDist": "../out",
-    "devUrl": "http://localhost:17381",
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
-  },
   "app": {
-    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -20,7 +10,7 @@
         "minWidth": 700,
         "minHeight": 480,
         "decorations": true,
-        "transparent": true,
+        "transparent": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "backgroundThrottling": "throttle",
@@ -68,42 +58,6 @@
         "shadow": false,
         "visible": false
       }
-    ],
-    "security": {
-      "csp": null,
-      "assetProtocol": {
-        "enable": true,
-        "scope": {
-          "allow": ["**"],
-          "requireLiteralLeadingDot": false
-        }
-      }
-    }
-  },
-  "plugins": {
-    "updater": {
-      "endpoints": [
-        "https://github.com/drewnekota/cetus/releases/latest/download/latest.json"
-      ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM2RDUzQUNCNDJFQTk4MzgKUldRNG1PcEN5enJWeGlNdHFOTWRFMitkckRvS2cvL3RCQUNEMnBuZmxpbi9FSURPSHk3dWVqdDAK"
-    }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "macOS": {
-      "entitlements": "entitlements.plist",
-      "minimumSystemVersion": "13.0"
-    },
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "resources": [
-      "pi-install"
     ]
   }
 }
