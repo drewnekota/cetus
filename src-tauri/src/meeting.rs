@@ -553,6 +553,7 @@ fn hide_pill(app: &AppHandle) {
 
 /// Consume the helper's JSONL stream: index segments, then finalize the session
 /// when the helper exits (normal stop, auto-stop, or crash — all the same path).
+#[cfg(target_os = "macos")]
 async fn run_reader(
     app: AppHandle,
     store: Arc<Store>,
@@ -688,6 +689,7 @@ async fn run_reader(
     }
 }
 
+#[cfg(target_os = "macos")]
 fn kill_active_capture() {
     let target = ACTIVE_CAPTURE_TARGET.swap(0, Ordering::Relaxed);
     if target != 0 {
@@ -699,6 +701,9 @@ fn kill_active_capture() {
         }
     }
 }
+
+#[cfg(not(target_os = "macos"))]
+fn kill_active_capture() {}
 
 /// Synchronous exit hook: do not leave a privacy-sensitive capture helper
 /// holding the microphone if the desktop process is killed/restarted.

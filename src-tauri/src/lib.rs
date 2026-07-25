@@ -15,6 +15,10 @@ mod capture;
 pub mod cli;
 mod cli_backend;
 mod commands;
+#[cfg(unix)]
+mod control;
+#[cfg(not(unix))]
+#[path = "control_stub.rs"]
 mod control;
 mod corrections;
 mod cua;
@@ -24,8 +28,8 @@ mod discovery;
 mod doubao;
 mod dream;
 mod focused_text;
-#[cfg(target_os = "macos")]
 mod host_tunnel;
+#[cfg(target_os = "macos")]
 mod hotkey;
 mod locale;
 mod mcp;
@@ -57,6 +61,9 @@ mod store;
 mod tauri_bridge;
 mod terminal;
 #[cfg(target_os = "macos")]
+mod text_input;
+#[cfg(not(target_os = "macos"))]
+#[path = "text_input_stub.rs"]
 mod text_input;
 mod titling;
 mod transcripts;
