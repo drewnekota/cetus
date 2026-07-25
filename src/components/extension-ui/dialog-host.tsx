@@ -29,6 +29,10 @@ import { api, onAppEvent } from "@/lib/tauri";
 import { dispatchNotification } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import type { ExtensionUIRequest, ExtensionUIResponseBody } from "@/lib/types";
+import {
+  primaryAccelerator,
+  shortcutDisplay,
+} from "@/lib/keyboard-shortcuts";
 
 type DialogReq = Extract<
   ExtensionUIRequest,
@@ -290,7 +294,9 @@ function EditorBody({
         <Button variant="secondary" onClick={onCancel}>
           Cancel
         </Button>
-        <Button onClick={() => onSubmit(text)}>Save (⌘⏎)</Button>
+        <Button onClick={() => onSubmit(text)}>
+          Save ({shortcutDisplay(primaryAccelerator("Enter"))})
+        </Button>
       </DialogFooter>
     </div>
   );

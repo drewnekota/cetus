@@ -33,7 +33,8 @@ export interface QuickSettings {
   /** Gesture that captures the current UI and directly drafts reply options
    *  with a vision model. */
   gestureReply: QuickGesture;
-  /** Configurable global hotkey (Tauri accelerator, e.g. "Cmd+Shift+K") that
+  /** Configurable global hotkey (for example "Cmd+Shift+K" on macOS or
+   *  "Ctrl+Shift+K" on Windows) that
    *  brings cetus to the front, switching desktops if it's on another. Empty
    *  string = no hotkey. */
   summonHotkey: string;

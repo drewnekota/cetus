@@ -1,7 +1,7 @@
 "use client";
 // A "press keys to record" field for the global summon hotkey, à la
-// Raycast/Alfred. Click to arm, press a combo (one of ⌘/⌃/⌥ plus a key), and it
-// commits a Tauri accelerator string ("Cmd+Shift+K") the backend can register.
+// Raycast/Alfred. Click to arm, press a modifier plus a key, and it commits a
+// platform-native Tauri accelerator string the backend can register.
 // The ✕ clears it; Esc cancels recording without changing anything.
 
 import { useCallback, useEffect, useRef, useState } from "react";

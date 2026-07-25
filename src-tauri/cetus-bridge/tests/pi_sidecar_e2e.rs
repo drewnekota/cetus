@@ -153,16 +153,19 @@ async fn bundled_pi_sidecar_speaks_the_protocol_cetus_assumes() {
         "get_state still carries the selected model: {state}"
     );
 
-    pi.set_model("deepseek", "deepseek-v4-pro")
-        .await
-        .expect("set_model deepseek-v4-pro — the model cetus applies on every cold conversation");
-
-    // --- one real turn (needs a key) ----------------------------------------
+    // --- everything below needs a key ---------------------------------------
+    // `set_model` included: pi ≥0.82 drops unauthenticated providers from its
+    // registry, so without a key it answers "Model not found" for a model that
+    // is very much bundled (see `set_model_without_a_credential_...` below).
     if std::env::var("DEEPSEEK_API_KEY").ok().filter(|k| !k.is_empty()).is_none() {
-        eprintln!("skipping the model-turn half: DEEPSEEK_API_KEY is not set");
+        eprintln!("skipping the model half: DEEPSEEK_API_KEY is not set");
         let _ = std::fs::remove_dir_all(&root);
         return;
     }
+
+    pi.set_model("deepseek", "deepseek-v4-pro")
+        .await
+        .expect("set_model deepseek-v4-pro — the model cetus applies on every cold conversation");
 
     pi.send_prompt(
         "Call the skill_search tool with query \"e2e marker\". It returns a SKILL.md path. \
@@ -220,6 +223,75 @@ async fn bundled_pi_sidecar_speaks_the_protocol_cetus_assumes() {
     let settled = types.iter().rposition(|t| t == "agent_settled");
     assert!(end.is_some(), "agent_end emitted; saw {types:?}");
     assert!(settled > end, "agent_settled follows agent_end; saw {types:?}");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Pin the failure mode that produced two misdiagnosed releases.
+///
+/// pi ≥0.82 filters `getAvailable()` by *configured credentials*, so a sidecar
+/// that ships `deepseek-v4-pro` still answers `Model not found:
+/// deepseek/deepseek-v4-pro` when the child has no usable `DEEPSEEK_API_KEY`.
+/// The message names the model, so it reads as "the bundled runtime is stale"
+/// — which is what the build-time model-registry gate and the runtime-refresh
+/// marker were built to fix, neither of which touches the real cause.
+///
+/// `model_bridge::apply_choice` keys its rewritten, actionable error off this
+/// exact wording; this test is what tells us when pi changes it. Needs no API
+/// key and makes no network request.
+#[tokio::test]
+async fn set_model_without_a_credential_reports_the_model_as_missing() {
+    let pi_dir = sidecar_dir();
+    let bin = pi_dir.join(if cfg!(windows) { "pi.exe" } else { "pi" });
+    if !bin.exists() {
+        eprintln!(
+            "skipping: no sidecar at {} — run scripts/build-pi-sidecar.sh",
+            bin.display()
+        );
+        return;
+    }
+
+    let root = std::env::temp_dir().join(format!("cetus-pi-nokey-{}", std::process::id()));
+    let sessions = root.join("sessions");
+    let cwd = root.join("cwd");
+    let agent_dir = root.join("agent");
+    std::fs::create_dir_all(&sessions).unwrap();
+    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::create_dir_all(&agent_dir).unwrap();
+
+    let pi = PiRpc::spawn(
+        Arc::new(CollectingSink::default()),
+        Arc::new(TokioSpawner),
+        &bin,
+        &sessions,
+        &cwd,
+        vec![
+            (
+                "PI_CODING_AGENT_DIR".to_string(),
+                agent_dir.to_string_lossy().to_string(),
+            ),
+            // Empty, not absent: the child inherits this process's env, and a
+            // developer running the suite usually has a real key exported.
+            // pi treats an empty value as "no credential" (falsy), which is
+            // exactly the state a user with no key configured is in.
+            ("DEEPSEEK_API_KEY".to_string(), String::new()),
+        ],
+        Some("e2e-nokey".to_string()),
+        RuntimeConfig::default(),
+    )
+    .expect("spawn bundled pi");
+
+    pi.new_session().await.expect("new_session");
+    let error = pi
+        .set_model("deepseek", "deepseek-v4-pro")
+        .await
+        .expect_err("an unauthenticated provider has no models to select")
+        .to_string();
+
+    assert!(
+        error.contains("Model not found") && error.contains("deepseek-v4-pro"),
+        "the wording model_bridge translates must not drift; got: {error}"
+    );
 
     let _ = std::fs::remove_dir_all(&root);
 }

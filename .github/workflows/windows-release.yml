@@ -1,10 +1,13 @@
-name: Release (Windows x64)
+name: Release (compatibility entrypoint)
+
+# Kept so existing bookmarks and manual runbooks still work. It rebuilds only
+# Windows, then safely merges that updater into the same-version release.
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing GitHub release tag to receive the installer
+        description: GitHub release tag to create or replace
         required: true
         default: release
 
@@ -12,51 +15,10 @@ permissions:
   contents: write
 
 jobs:
-  windows:
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - uses: oven-sh/setup-bun@v2
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install JS deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Build pi sidecar tree
-        shell: bash
-        run: scripts/build-pi-sidecar.sh
-
-      - name: Build NSIS installer
-        run: pnpm tauri build --bundles nsis
-
-      - name: Rename installer
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          INSTALLER="$(find src-tauri/target/release/bundle/nsis -maxdepth 1 -name '*-setup.exe' | head -1)"
-          cp "$INSTALLER" "Cetus_${VERSION}_x64-setup.exe"
-          echo "INSTALLER=Cetus_${VERSION}_x64-setup.exe" >> "$GITHUB_ENV"
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Cetus-Windows-x64
-          path: ${{ env.INSTALLER }}
-          if-no-files-found: error
-
-      - name: Attach installer to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-        shell: bash
-        run: gh release upload "$RELEASE_TAG" "$INSTALLER" --clobber
+  release:
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ inputs.tag }}
+      platform: windows
+      publish: true
+    secrets: inherit

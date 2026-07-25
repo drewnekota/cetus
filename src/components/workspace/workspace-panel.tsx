@@ -65,6 +65,10 @@ import { markdownComponents, markdownUrlTransform } from "@/lib/markdown";
 import { api } from "@/lib/tauri";
 import type { WorkspaceFileEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import {
+  shortcutDisplay,
+  useKeyboardShortcuts,
+} from "@/lib/keyboard-shortcuts";
 
 export type WorkspaceTabKind = "files" | "terminal" | "browser";
 export type WorkspaceLayout = "side" | "bottom";
@@ -127,6 +131,7 @@ export function WorkspacePanel({
   hidden,
 }: Props) {
   const { t } = useTranslation("chat");
+  const shortcuts = useKeyboardShortcuts();
   const active = tabs.find((t) => t.id === activeId) ?? tabs[0] ?? null;
   const cwd = workspaceDir || defaultWorkspace;
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
@@ -250,21 +255,21 @@ export function WorkspacePanel({
                 <NewTabMenuItem
                   icon={<Terminal className="size-3.5 text-muted-foreground" />}
                   label={t("workspacePanel.terminal")}
-                  shortcut="⌘J"
+                  shortcut={shortcutDisplay(shortcuts.toggleTerminal)}
                   onSelect={() => createTab("terminal")}
                   data-testid="workspace-new-terminal"
                 />
                 <NewTabMenuItem
                   icon={<Globe className="size-3.5 text-muted-foreground" />}
                   label={t("workspacePanel.browser")}
-                  shortcut="⌘T"
+                  shortcut={shortcutDisplay(shortcuts.openBrowserTab)}
                   onSelect={() => createTab("browser")}
                   data-testid="workspace-new-browser"
                 />
                 <NewTabMenuItem
                   icon={<Folder className="size-3.5 text-muted-foreground" />}
                   label={t("workspacePanel.files")}
-                  shortcut="⌘P"
+                  shortcut={shortcutDisplay(shortcuts.openFilesTab)}
                   onSelect={() => createTab("files")}
                   data-testid="workspace-new-files"
                 />

@@ -676,7 +676,19 @@ fn log_dir() -> Option<PathBuf> {
     {
         dirs_home().map(|h| h.join("Library/Application Support/dev.cetus.app/logs"))
     }
-    #[cfg(not(target_os = "macos"))]
+    // Windows has no HOME, so `dirs_home()` was empty here and the app shipped
+    // with **no log file at all** — every Windows bug report arrived blind.
+    // %APPDATA% is where the rest of the app data (db, sessions, pi-install)
+    // already lives, and it exists for every GUI process.
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("APPDATA")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(dirs_home)
+            .map(|base| base.join("dev.cetus.app").join("logs"))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         dirs_home().map(|h| h.join(".cetus/logs"))
     }
@@ -707,6 +719,13 @@ fn prune_old_logs(dir: &Path) {
 /// directory" on a cold GUI launch while working fine when the app is started
 /// from a terminal. Ask the login shell for its PATH once at startup and adopt
 /// it, keeping any entries the current env has that the shell lacks.
+///
+/// Windows has no login shell to ask, and spawning a missing `/bin/zsh` from a
+/// GUI process there only risks a console flash — so it's a no-op there.
+#[cfg(target_os = "windows")]
+fn adopt_login_shell_path() {}
+
+#[cfg(not(target_os = "windows"))]
 fn adopt_login_shell_path() {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     // `-i` matters: PATH exports typically live in .zshrc, which only
@@ -894,12 +913,20 @@ pub fn run() {
             // centered, on the first ever launch. Tracking + persistence is wired
             // up below via the main window's event handler and the exit flush.
             window_geom::restore_or_default(app.handle(), &store);
-            // Default workspace lives under $HOME so the agent writes where the
-            // user expects, not inside the app's install tree.
-            let default_workspace = dirs_home()
-                .map(|h| h.join("cetus"))
-                .unwrap_or_else(|| app_data_dir.join("workspace"));
+            // Default workspace lives under the user's home so the agent writes
+            // where the user expects, not inside the app's install tree.
+            // `<app_data>/workspace` is the pre-Windows-home fallback: installs
+            // made while `dirs_home()` was HOME-only put their "Chat"
+            // conversations there, and those rows carry the absolute path, so
+            // keep using it wherever it already exists rather than stranding
+            // them under a folder named "workspace".
+            let legacy_workspace = app_data_dir.join("workspace");
+            let default_workspace = match dirs_home() {
+                Some(home) if !legacy_workspace.is_dir() => home.join("cetus"),
+                Some(_) | None => legacy_workspace,
+            };
             std::fs::create_dir_all(&default_workspace).ok();
+            tracing::info!("default workspace: {}", default_workspace.display());
 
             // Quick-launcher config drives both the panel and the native gesture
             // listener; build the shared runtime from persisted settings.
@@ -2354,8 +2381,28 @@ fn sync_pi_ai_guard(resource: &Path, target: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The user's home directory. Windows GUI processes get no `HOME` (that's a
+/// Unix/Git-Bash convention), so fall back to the native variables — otherwise
+/// every home-relative lookup silently degrades there.
 fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    if let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+        return Some(PathBuf::from(home));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(profile) = std::env::var_os("USERPROFILE").filter(|p| !p.is_empty()) {
+            return Some(PathBuf::from(profile));
+        }
+        if let (Some(drive), Some(path)) = (
+            std::env::var_os("HOMEDRIVE").filter(|d| !d.is_empty()),
+            std::env::var_os("HOMEPATH").filter(|p| !p.is_empty()),
+        ) {
+            let mut home = std::ffi::OsString::from(drive);
+            home.push(path);
+            return Some(PathBuf::from(home));
+        }
+    }
+    None
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {

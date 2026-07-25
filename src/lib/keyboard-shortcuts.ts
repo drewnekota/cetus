@@ -34,6 +34,10 @@ export interface ShortcutDefinition {
   label: string;
   description: string;
   defaultAccelerator: string;
+  /** Windows/Linux override when the platform convention or a Ctrl collision
+   *  makes the macOS accelerator unsuitable. Cmd defaults automatically become
+   *  Ctrl off macOS, so this is only needed for genuine differences. */
+  windowsAccelerator?: string;
 }
 
 export type ShortcutMap = Record<ShortcutId, string>;
@@ -50,8 +54,9 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: "newChat",
-    label: "New task",
-    description: "Start a new task in a repository",
+    label: "New chat or task",
+    description:
+      "Start a task in the selected folder, or open a new chat without one",
     defaultAccelerator: "Cmd+N",
   },
   {
@@ -107,30 +112,35 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: "Go back",
     description: "Go back to the previous page (views and settings)",
     defaultAccelerator: "Cmd+BracketLeft",
+    windowsAccelerator: "Alt+ArrowLeft",
   },
   {
     id: "navigateForward",
     label: "Go forward",
     description: "Go forward to the next page after going back",
     defaultAccelerator: "Cmd+BracketRight",
+    windowsAccelerator: "Alt+ArrowRight",
   },
   {
     id: "runtimeCetus",
     label: "Runtime: Cetus",
     description: "Switch the current chat to the Cetus runtime",
     defaultAccelerator: "Ctrl+1",
+    windowsAccelerator: "Alt+1",
   },
   {
     id: "runtimeClaudeCode",
     label: "Runtime: Claude Code",
     description: "Switch the current chat to the Claude Code runtime",
     defaultAccelerator: "Ctrl+2",
+    windowsAccelerator: "Alt+2",
   },
   {
     id: "runtimeCodex",
     label: "Runtime: Codex",
     description: "Switch the current chat to the Codex runtime",
     defaultAccelerator: "Ctrl+3",
+    windowsAccelerator: "Alt+3",
   },
   {
     id: "toggleWorkspace",
@@ -167,24 +177,29 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: "Previous workspace tab",
     description: "Move to the previous right workspace tab",
     defaultAccelerator: "Cmd+Alt+ArrowLeft",
+    windowsAccelerator: "Ctrl+PageUp",
   },
   {
     id: "nextWorkspaceTab",
     label: "Next workspace tab",
     description: "Move to the next right workspace tab",
     defaultAccelerator: "Cmd+Alt+ArrowRight",
+    windowsAccelerator: "Ctrl+PageDown",
   },
   {
     id: "previousChat",
     label: "Previous chat",
     description: "Move to the previous chat in the sidebar",
     defaultAccelerator: "Cmd+Alt+ArrowUp",
+    // Avoid Windows' long-standing Ctrl+Alt+Arrow display-rotation chord.
+    windowsAccelerator: "Ctrl+Shift+ArrowUp",
   },
   {
     id: "nextChat",
     label: "Next chat",
     description: "Move to the next chat in the sidebar",
     defaultAccelerator: "Cmd+Alt+ArrowDown",
+    windowsAccelerator: "Ctrl+Shift+ArrowDown",
   },
   {
     id: "lastChat",
@@ -194,11 +209,34 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
 ];
 
-const MOD_SYMBOL: Record<string, string> = {
+export type ShortcutPlatform = "mac" | "windows";
+
+/** Synchronous on purpose: shortcuts are consumed by keydown handlers before
+ *  any async Tauri OS query could resolve. Tauri's Windows WebView reports
+ *  Win32 in navigator.platform and macOS reports MacIntel. */
+export function shortcutPlatform(): ShortcutPlatform {
+  if (typeof navigator === "undefined") return "mac";
+  const nav = navigator as Navigator & {
+    userAgentData?: { platform?: string };
+  };
+  const raw = `${nav.userAgentData?.platform ?? ""} ${navigator.platform ?? ""} ${
+    navigator.userAgent ?? ""
+  }`;
+  return /mac|iphone|ipad|ipod/i.test(raw) ? "mac" : "windows";
+}
+
+const MAC_MOD_LABEL: Record<string, string> = {
   Ctrl: "⌃",
   Alt: "⌥",
   Shift: "⇧",
   Cmd: "⌘",
+};
+
+const WINDOWS_MOD_LABEL: Record<string, string> = {
+  Ctrl: "Ctrl",
+  Alt: "Alt",
+  Shift: "Shift",
+  Cmd: "Win",
 };
 
 const KEY_LABEL: Record<string, string> = {
@@ -209,6 +247,8 @@ const KEY_LABEL: Record<string, string> = {
   Enter: "⏎",
   Space: "Space",
   Tab: "⇥",
+  PageUp: "PgUp",
+  PageDown: "PgDn",
   Backspace: "⌫",
   Delete: "⌦",
   Escape: "Esc",
@@ -240,28 +280,63 @@ const KEY_TO_CODE: Record<string, string> = {
   " ": "Space",
 };
 
-export function defaultShortcutMap(): ShortcutMap {
+function platformDefault(
+  definition: ShortcutDefinition,
+  platform: ShortcutPlatform,
+): string {
+  if (platform === "windows" && definition.windowsAccelerator) {
+    return normalizeAccelerator(definition.windowsAccelerator);
+  }
+  const accelerator =
+    platform === "windows"
+      ? definition.defaultAccelerator.replaceAll("Cmd", "Ctrl")
+      : definition.defaultAccelerator;
+  return normalizeAccelerator(accelerator);
+}
+
+export function defaultShortcutMap(
+  platform: ShortcutPlatform = shortcutPlatform(),
+): ShortcutMap {
   return Object.fromEntries(
-    SHORTCUT_DEFINITIONS.map((s) => [s.id, s.defaultAccelerator]),
+    SHORTCUT_DEFINITIONS.map((s) => [s.id, platformDefault(s, platform)]),
   ) as ShortcutMap;
 }
 
 export function readKeyboardShortcuts(): ShortcutMap {
-  const defaults = defaultShortcutMap();
-  if (typeof window === "undefined") return defaults;
+  const platform = shortcutPlatform();
+  if (typeof window === "undefined") return defaultShortcutMap(platform);
   try {
     const raw = window.localStorage.getItem(KEYBOARD_SHORTCUTS_STORAGE_KEY);
-    if (!raw) return defaults;
+    if (!raw) return defaultShortcutMap(platform);
     const parsed = JSON.parse(raw) as Partial<Record<ShortcutId, unknown>>;
-    const next = { ...defaults };
-    for (const def of SHORTCUT_DEFINITIONS) {
-      const value = parsed[def.id];
-      if (typeof value === "string") next[def.id] = normalizeAccelerator(value);
-    }
-    return next;
+    return mergeStoredShortcutMap(parsed, platform);
   } catch {
-    return defaults;
+    return defaultShortcutMap(platform);
   }
+}
+
+/** Merge a persisted partial map with current platform defaults. Exported so
+ *  platform migration remains covered without mocking browser localStorage. */
+export function mergeStoredShortcutMap(
+  parsed: Partial<Record<ShortcutId, unknown>>,
+  platform: ShortcutPlatform,
+): ShortcutMap {
+  const defaults = defaultShortcutMap(platform);
+  const next = { ...defaults };
+  for (const def of SHORTCUT_DEFINITIONS) {
+    const value = parsed[def.id];
+    if (typeof value !== "string") continue;
+    const normalized = normalizeAccelerator(value);
+    // Releases before 0.3.40 wrote the macOS defaults verbatim on Windows.
+    // Migrate only values that still equal that old default; genuinely custom
+    // bindings survive untouched.
+    const legacyDefault = normalizeAccelerator(def.defaultAccelerator);
+    next[def.id] =
+      platform === "windows" && normalized === legacyDefault
+        ? defaults[def.id]
+        : normalized;
+  }
+  return next;
 }
 
 export function useKeyboardShortcuts(): ShortcutMap {
@@ -333,15 +408,37 @@ export function normalizeAccelerator(accelerator: string): string {
   return [...orderedMods, normalizeKey(key)].join("+");
 }
 
-export function shortcutChips(accelerator: string): string[] {
+export function shortcutChips(
+  accelerator: string,
+  platform: ShortcutPlatform = shortcutPlatform(),
+): string[] {
   const normalized = normalizeAccelerator(accelerator);
   if (!normalized) return [];
-  return normalized.split("+").map((part) => MOD_SYMBOL[part] ?? KEY_LABEL[part] ?? part);
+  const modifierLabels =
+    platform === "mac" ? MAC_MOD_LABEL : WINDOWS_MOD_LABEL;
+  return normalized
+    .split("+")
+    .map((part) => modifierLabels[part] ?? KEY_LABEL[part] ?? part);
 }
 
-export function shortcutDisplay(accelerator: string): string {
-  const chips = shortcutChips(accelerator);
-  return chips.length ? chips.join("") : "Unassigned";
+export function shortcutDisplay(
+  accelerator: string,
+  platform: ShortcutPlatform = shortcutPlatform(),
+): string {
+  const chips = shortcutChips(accelerator, platform);
+  return chips.length
+    ? chips.join(platform === "mac" ? "" : "+")
+    : "Unassigned";
+}
+
+/** Non-configurable UI chords (for example submit-with-modifier) should still
+ *  use the platform's primary modifier and the same visual language as the
+ *  configurable shortcut system. */
+export function primaryAccelerator(
+  key: string,
+  platform: ShortcutPlatform = shortcutPlatform(),
+): string {
+  return `${platform === "mac" ? "Cmd" : "Ctrl"}+${key}`;
 }
 
 export function matchesShortcut(e: KeyboardEvent, accelerator: string): boolean {

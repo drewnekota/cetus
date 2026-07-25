@@ -1598,11 +1598,23 @@ export default function Home() {
         );
       } else if (shortcut("newChat")) {
         e.preventDefault();
-        if (view === "board") {
+        // Cmd+N is contextual on Kanban: a concrete folder creates a task in
+        // that workspace; "All workspaces", Chat, or no selection opens the
+        // repository-free new-chat page. Use the board filter, not workspaceDir
+        // (which may still point at a previously opened conversation).
+        const taskWorkspace =
+          view === "board" &&
+          boardWorkspaceFilter &&
+          boardWorkspaceFilter !== defaultWorkspace
+            ? boardWorkspaceFilter
+            : null;
+        if (taskWorkspace) {
+          setWorkspaceDir(taskWorkspace);
           setNewTaskOpen(true);
         } else {
-          // Outside Kanban, Cmd+N starts a fresh chat on the chat page.
-          onNew();
+          onNew(
+            view === "board" ? defaultWorkspace || undefined : undefined,
+          );
         }
       } else if (shortcut("newDefaultChat")) {
         e.preventDefault();
@@ -1667,6 +1679,7 @@ export default function Home() {
     archiveConversation,
     keyboardShortcuts,
     defaultWorkspace,
+    boardWorkspaceFilter,
     requestBackendSwitch,
     switchToPreviousPage,
     navigateBack,
@@ -2240,15 +2253,19 @@ export default function Home() {
     [onSelectChat],
   );
   const onNewSidebar = useCallback((nextWorkspaceDir?: string) => {
-    if (viewRef.current === "board") {
-      if (nextWorkspaceDir) {
-        setWorkspaceDir(nextWorkspaceDir);
-      }
+    const taskWorkspace =
+      viewRef.current === "board" &&
+      nextWorkspaceDir &&
+      nextWorkspaceDir !== defaultWorkspace
+        ? nextWorkspaceDir
+        : null;
+    if (taskWorkspace) {
+      setWorkspaceDir(taskWorkspace);
       setNewTaskOpen(true);
     } else {
-      onNew(nextWorkspaceDir);
+      onNew(nextWorkspaceDir || defaultWorkspace || undefined);
     }
-  }, []);
+  }, [defaultWorkspace]);
 
   // Open the conversation a clicked OS notification points at. notify.rs brings
   // the window forward and emits this with the conversation id. Archived → it's

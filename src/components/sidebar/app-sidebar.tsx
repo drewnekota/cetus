@@ -196,11 +196,16 @@ export const AppSidebar = memo(function AppSidebar({
       autoSortConversations,
     ],
   );
-  const chatGroups = groups;
   // The default workspace surfaces as the standalone "Chat" section, pinned
-  // first; only the real workspace folders below it are draggable.
+  // first; only the real workspace folders below it are draggable. Keep a
+  // synthetic empty group during the first paint while the backend's default
+  // directory is still resolving, so the Chat section never disappears.
   const defaultGroup = useMemo(
-    () => groups.find((g) => g.dir === defaultWorkspace) ?? null,
+    () =>
+      groups.find((g) => g.dir === defaultWorkspace) ?? {
+        dir: defaultWorkspace,
+        items: [],
+      },
     [groups, defaultWorkspace],
   );
   const folderGroups = useMemo(
@@ -393,17 +398,15 @@ export const AppSidebar = memo(function AppSidebar({
               </SidebarMenuItem>
               {/* "Chat" (the default workspace) is pinned below "All" and never
                   reorderable — it isn't a folder to the user. */}
-              {defaultGroup && (
-                <SidebarMenuItem>
-                  <WorkspaceFilterButton
-                    label={t("workspace.default")}
-                    icon={<MessageSquare />}
-                    count={workspaceCounts.get(defaultGroup.dir) ?? 0}
-                    active={workspaceFilter === defaultGroup.dir}
-                    onSelect={() => onWorkspaceFilterChange(defaultGroup.dir)}
-                  />
-                </SidebarMenuItem>
-              )}
+              <SidebarMenuItem>
+                <WorkspaceFilterButton
+                  label={t("workspace.default")}
+                  icon={<MessageSquare />}
+                  count={workspaceCounts.get(defaultGroup.dir) ?? 0}
+                  active={workspaceFilter === defaultGroup.dir}
+                  onSelect={() => onWorkspaceFilterChange(defaultGroup.dir)}
+                />
+              </SidebarMenuItem>
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
@@ -435,12 +438,6 @@ export const AppSidebar = memo(function AppSidebar({
               </DndContext>
             </SidebarMenu>
           </SidebarGroup>
-        ) : chatGroups.length === 0 ? (
-          <div className="px-3 py-6 text-xs text-muted-foreground">
-            {t("chats.empty.prefix")}{" "}
-            <Kbd className="border-border bg-muted">{shortcutLabels.newChat}</Kbd>{" "}
-            {t("chats.empty.suffix")}
-          </div>
         ) : (
           <DndContext
             sensors={sensors}
@@ -451,27 +448,25 @@ export const AppSidebar = memo(function AppSidebar({
           >
             {/* "Chat" (the default workspace) is pinned first, outside the
                 sortable list — it reads as a plain section, not a folder. */}
-            {defaultGroup && (
-              <SidebarGroup>
-                <WorkspaceGroupView
-                  group={defaultGroup}
-                  label={t("workspace.default")}
-                  isDefault
-                  collapsed={collapsedDirs.has(defaultGroup.dir)}
-                  onToggleCollapse={toggleCollapsed}
-                  activeId={activeId}
-                  streamingIds={streamingIds}
-                  unreadCompletedIds={unreadCompletedIds}
-                  archiveShortcut={shortcutLabels.archiveChat}
-                  onNew={onNew}
-                  onSelect={onSelect}
-                  onArchive={onArchive}
-                  onRevealWorkspace={onRevealWorkspace}
-                  onArchiveWorkspaceChats={onArchiveWorkspaceChats}
-                  onRemoveWorkspace={onRemoveWorkspace}
-                />
-              </SidebarGroup>
-            )}
+            <SidebarGroup>
+              <WorkspaceGroupView
+                group={defaultGroup}
+                label={t("workspace.default")}
+                isDefault
+                collapsed={collapsedDirs.has(defaultGroup.dir)}
+                onToggleCollapse={toggleCollapsed}
+                activeId={activeId}
+                streamingIds={streamingIds}
+                unreadCompletedIds={unreadCompletedIds}
+                archiveShortcut={shortcutLabels.archiveChat}
+                onNew={onNew}
+                onSelect={onSelect}
+                onArchive={onArchive}
+                onRevealWorkspace={onRevealWorkspace}
+                onArchiveWorkspaceChats={onArchiveWorkspaceChats}
+                onRemoveWorkspace={onRemoveWorkspace}
+              />
+            </SidebarGroup>
             <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
               {folderGroups.map((g) => (
                 <SortableWorkspaceGroup

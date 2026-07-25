@@ -1,42 +1,73 @@
-name: Release (macOS, signed + notarized)
+name: Release (macOS + Windows)
 
-# Builds cetus, signs it with a Developer ID Application certificate, notarizes
-# it with Apple, and attaches the signed .dmg to a GitHub Release. Because every
-# release is signed with the SAME stable Developer ID, users grant Accessibility
-# / Screen Recording ONCE and the grant survives future updates — and Gatekeeper
-# opens it with a double-click (no right-click bypass).
+# Supports artifact-only builds for either platform, same-version single-platform
+# release repairs, and complete cross-platform releases. A single-platform
+# publish must merge into a same-version manifest that already contains the
+# other platform; this prevents an old package from being advertised as newer.
 #
-# No secret material lives in this repo. Configure these GitHub repository
-# secrets (Settings → Secrets and variables → Actions):
+# Required repository secrets:
 #
-#   APPLE_CERTIFICATE           base64 of your Developer ID Application .p12
-#                               (base64 -i cert.p12 | pbcopy)
-#   APPLE_CERTIFICATE_PASSWORD  the password you set when exporting the .p12
-#   APPLE_SIGNING_IDENTITY      e.g. "Developer ID Application: Your Name (TEAMID)"
-#   APPLE_ID                    your Apple Developer account email
-#   APPLE_PASSWORD              an app-specific password (appleid.apple.com → Sign-In & Security)
-#   APPLE_TEAM_ID               your 10-char Team ID (e.g. H8NRJ9BUBQ)
-#   KEYCHAIN_PASSWORD           any random string (temp keychain password for this run)
+# macOS signing + notarization:
+#   APPLE_CERTIFICATE
+#   APPLE_CERTIFICATE_PASSWORD
+#   APPLE_SIGNING_IDENTITY
+#   APPLE_ID
+#   APPLE_PASSWORD
+#   APPLE_TEAM_ID
+#   KEYCHAIN_PASSWORD
 #
-# In-app auto-update signing (separate from Apple — a minisign keypair). Generate
-# once with `pnpm tauri signer generate -w ~/.cetus-updater.key`, paste the
-# PUBLIC key into src-tauri/tauri.conf.json (plugins.updater.pubkey), and set:
-#
-#   TAURI_SIGNING_PRIVATE_KEY            contents of the generated private key file
-#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   the password you set during generation
+# Tauri updater signing (shared by macOS and Windows):
+#   TAURI_SIGNING_PRIVATE_KEY
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub release tag to create or replace
+        required: true
+        default: release
+      platform:
+        description: Platforms to build
+        required: true
+        type: choice
+        options:
+          - both
+          - macos
+          - windows
+        default: both
+      publish:
+        description: Publish to GitHub Release (otherwise keep Actions artifacts only)
+        required: true
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      tag:
+        description: GitHub release tag to create or replace
+        required: true
+        type: string
+      platform:
+        description: Platforms to build
+        required: false
+        type: string
+        default: both
+      publish:
+        description: Publish to GitHub Release
+        required: false
+        type: boolean
+        default: true
 
-# Allow the workflow's GITHUB_TOKEN to create the GitHub Release + upload assets.
 permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: macos-14 # Apple Silicon runner → aarch64-apple-darwin
+  macos:
+    name: Build macOS arm64
+    if: github.event_name == 'push' || inputs.platform == 'both' || inputs.platform == 'macos'
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -59,7 +90,7 @@ jobs:
       - name: Build pi sidecar tree
         run: scripts/build-pi-sidecar.sh
 
-      - name: Import Developer ID certificate into a temporary keychain
+      - name: Import Developer ID certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -75,14 +106,13 @@ jobs:
             -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          # Make the temp keychain searchable so codesign finds the identity.
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
           rm -f "$RUNNER_TEMP/cert.p12"
 
-      - name: Build app bundle (unsigned — we sign nested binaries ourselves)
+      - name: Build app bundle
         run: pnpm tauri build --bundles app
 
-      - name: Sign + notarize + staple the .app
+      - name: Sign, notarize, and staple app bundle
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -93,7 +123,7 @@ jobs:
           APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
           scripts/macos-sign.sh "$APP" --notarize
 
-      - name: Package signed .app into a .dmg, then sign + notarize the .dmg
+      - name: Package, sign, and notarize DMG
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -104,75 +134,214 @@ jobs:
           APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
           VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
           DMG="$RUNNER_TEMP/Cetus_${VERSION}_aarch64.dmg"
-          # The .app inside is already notarized+stapled; we package (with the
-          # drag-to-/Applications layout), then sign and notarize the dmg
-          # container itself so the download is Gatekeeper-clean.
           scripts/package-dmg.sh "$APP" "$DMG"
           scripts/macos-sign.sh "$DMG" --notarize
           echo "DMG=$DMG" >> "$GITHUB_ENV"
 
-      - name: Build + sign the updater artifact and manifest
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Package and sign macOS updater
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
-          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          # The in-app updater downloads a gzipped tar of the already
-          # signed+notarized .app and swaps it in place. Build it AFTER
-          # notarization so the Developer ID grant (Accessibility / Screen
-          # Recording) survives the update — a tarball of the unsigned app would
-          # silently break those permissions on the next launch.
-          TARBALL="$RUNNER_TEMP/Cetus.app.tar.gz"
-          tar -C "$(dirname "$APP")" -czf "$TARBALL" "$(basename "$APP")"
-          # Minisign the tarball with the updater key (entirely separate from the
-          # Apple Developer ID signature). The app verifies this against the
-          # pubkey baked into tauri.conf.json before installing.
+          UPDATER="$RUNNER_TEMP/Cetus.app.tar.gz"
+          tar -C "$(dirname "$APP")" -czf "$UPDATER" "$(basename "$APP")"
           pnpm tauri signer sign \
             -k "$TAURI_SIGNING_PRIVATE_KEY" \
             -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
-            "$TARBALL"
-          # Emit latest.json — the manifest the app polls. The signature is the
-          # contents of the .sig file; the URL must resolve to the uploaded asset.
-          SIGNATURE="$(cat "$TARBALL.sig")" \
-          VERSION="$VERSION" \
-          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/Cetus.app.tar.gz" \
-          MANIFEST="$RUNNER_TEMP/latest.json" \
-          node -e '
-            const fs = require("fs");
-            fs.writeFileSync(process.env.MANIFEST, JSON.stringify({
-              version: process.env.VERSION,
-              notes: "See the GitHub release page for details.",
-              pub_date: process.env.PUB_DATE,
-              platforms: {
-                "darwin-aarch64": {
-                  signature: process.env.SIGNATURE,
-                  url: process.env.URL,
-                },
-              },
-            }, null, 2));
-          '
-          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
-          echo "MANIFEST=$RUNNER_TEMP/latest.json" >> "$GITHUB_ENV"
+            "$UPDATER"
+          test -s "$UPDATER"
+          test -s "$UPDATER.sig"
+          echo "MAC_UPDATER=$UPDATER" >> "$GITHUB_ENV"
 
-      - name: Create published GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Stage macOS release assets
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          cp "$DMG" release-assets/
+          cp "$MAC_UPDATER" "$MAC_UPDATER.sig" release-assets/
+
+      - name: Upload macOS release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: cetus-release-macos
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 3
+
+  windows:
+    name: Build Windows x64
+    if: github.event_name == 'push' || inputs.platform == 'both' || inputs.platform == 'windows'
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pi sidecar tree
+        shell: bash
+        run: scripts/build-pi-sidecar.sh
+
+      - name: Build and sign NSIS installer + updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: >-
+          pnpm tauri build --bundles nsis
+          --config '{"bundle":{"createUpdaterArtifacts":true}}'
+
+      - name: Stage Windows release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          INSTALLER="$(find src-tauri/target/release/bundle/nsis -maxdepth 1 -name '*-setup.exe' | head -1)"
+          test -n "$INSTALLER"
+          test -s "$INSTALLER"
+          test -s "$INSTALLER.sig"
+          mkdir release-assets
+          cp "$INSTALLER" "release-assets/Cetus_${VERSION}_x64-setup.exe"
+          cp "$INSTALLER.sig" "release-assets/Cetus_${VERSION}_x64-setup.exe.sig"
+
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: cetus-release-windows
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: Publish updater release
+    needs: [macos, windows]
+    if: >-
+      always() &&
+      !cancelled() &&
+      (github.event_name == 'push' || inputs.publish) &&
+      needs.macos.result != 'failure' &&
+      needs.windows.result != 'failure' &&
+      (needs.macos.result == 'success' || needs.windows.result == 'success')
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download signed release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cetus-release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Build or merge updater manifest
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          WINDOWS_ASSET="Cetus_${VERSION}_x64-setup.exe"
+          MAC_BUILT=false
+          WINDOWS_BUILT=false
+          test ! -s "release-assets/Cetus.app.tar.gz" || MAC_BUILT=true
+          test ! -s "release-assets/$WINDOWS_ASSET" || WINDOWS_BUILT=true
+
+          if [[ "$MAC_BUILT" == true && "$WINDOWS_BUILT" == true ]]; then
+            test -s "release-assets/Cetus.app.tar.gz.sig"
+            test -s "release-assets/$WINDOWS_ASSET.sig"
+            node scripts/updater-manifest.mjs create \
+              --output release-assets/latest.json \
+              --version "$VERSION" \
+              --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --mac-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.app.tar.gz" \
+              --mac-signature-file release-assets/Cetus.app.tar.gz.sig \
+              --windows-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${WINDOWS_ASSET}" \
+              --windows-signature-file "release-assets/$WINDOWS_ASSET.sig"
+            echo "PUBLISH_MODE=replace" >> "$GITHUB_ENV"
+          else
+            EXISTING="$RUNNER_TEMP/existing-latest.json"
+            curl --fail --location --retry 3 --retry-all-errors \
+              "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/latest.json?run=${GITHUB_RUN_ID}" \
+              --output "$EXISTING"
+
+            if [[ "$MAC_BUILT" == true ]]; then
+              test -s "release-assets/Cetus.app.tar.gz.sig"
+              node scripts/updater-manifest.mjs merge \
+                --manifest "$EXISTING" \
+                --output release-assets/latest.json \
+                --version "$VERSION" \
+                --platform darwin-aarch64 \
+                --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.app.tar.gz" \
+                --signature-file release-assets/Cetus.app.tar.gz.sig
+            elif [[ "$WINDOWS_BUILT" == true ]]; then
+              test -s "release-assets/$WINDOWS_ASSET.sig"
+              node scripts/updater-manifest.mjs merge \
+                --manifest "$EXISTING" \
+                --output release-assets/latest.json \
+                --version "$VERSION" \
+                --platform windows-x86_64 \
+                --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${WINDOWS_ASSET}" \
+                --signature-file "release-assets/$WINDOWS_ASSET.sig"
+            else
+              echo "No platform release assets were downloaded" >&2
+              exit 1
+            fi
+            echo "PUBLISH_MODE=merge" >> "$GITHUB_ENV"
+          fi
+
+          node scripts/updater-manifest.mjs verify \
+            --manifest release-assets/latest.json \
+            --version "$VERSION"
+
+      - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release delete "$TAG" --yes
+          if [[ "$PUBLISH_MODE" == replace ]]; then
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              gh release delete "$RELEASE_TAG" --yes
+            fi
+            gh release create "$RELEASE_TAG" \
+              release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" \
+              --generate-notes \
+              --latest
+          else
+            gh release view "$RELEASE_TAG" >/dev/null
+            gh release upload "$RELEASE_TAG" \
+              release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
           fi
-          gh release create "$TAG" \
-            "$DMG" \
-            "$TARBALL" \
-            "$MANIFEST" \
-            --title "$TAG" \
-            --generate-notes \
-            --latest \
-            --verify-tag
+
+      - name: Verify published updater endpoints
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          PUBLISHED="$RUNNER_TEMP/latest.json"
+          curl --fail --location --retry 5 --retry-all-errors \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/latest.json?run=${GITHUB_RUN_ID}" \
+            --output "$PUBLISHED"
+          node scripts/updater-manifest.mjs verify \
+            --manifest "$PUBLISHED" \
+            --version "$VERSION"
+          node -e '
+            const fs = require("node:fs");
+            const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            for (const platform of ["darwin-aarch64", "windows-x86_64"]) {
+              process.stdout.write(`${platform}: ${manifest.platforms[platform].url}\n`);
+            }
+          ' "$PUBLISHED"

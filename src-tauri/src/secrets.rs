@@ -54,6 +54,22 @@ fn cache() -> &'static Mutex<Option<HashMap<String, String>>> {
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
+/// Last credential-store failure, kept so callers that can only answer
+/// yes/no ([`has`], [`load_env`]) don't silently turn a broken store into
+/// "user configured nothing". A backend that is unavailable (a locked or
+/// missing Windows Credential Manager, a denied Keychain prompt) otherwise
+/// looks exactly like an empty store, and the symptom surfaces far away —
+/// as pi's `Model not found: deepseek/...` (see `model_bridge`).
+fn last_error() -> &'static Mutex<Option<String>> {
+    static LAST: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(None))
+}
+
+/// The most recent credential-store error, or `None` if the last read worked.
+pub fn store_error() -> Option<String> {
+    last_error().lock().unwrap().clone()
+}
+
 // ---------------------------------------------------------------------------
 // Release backend: OS keychain.
 // ---------------------------------------------------------------------------
@@ -180,7 +196,19 @@ fn load_cached() -> Result<HashMap<String, String>> {
     if let Some(map) = guard.as_ref() {
         return Ok(map.clone());
     }
-    let mut map = read_blob()?;
+    let mut map = match read_blob() {
+        Ok(map) => {
+            *last_error().lock().unwrap() = None;
+            map
+        }
+        Err(e) => {
+            // Not cached: a transient backend failure should be retried on the
+            // next call rather than pinned for the life of the process.
+            tracing::error!("credential store read failed: {e}");
+            *last_error().lock().unwrap() = Some(e.to_string());
+            return Err(e);
+        }
+    };
     if map.is_empty() {
         migrate_legacy(&mut map);
     }
@@ -240,13 +268,25 @@ pub fn delete(provider: &str) -> Result<()> {
 pub fn load_env() -> Vec<(String, String)> {
     let map = match load_cached() {
         Ok(m) => m,
+        // Already logged (and recorded for `store_error`) by `load_cached`.
         Err(_) => return Vec::new(),
     };
-    KNOWN_PROVIDERS
+    let env: Vec<(String, String)> = KNOWN_PROVIDERS
         .iter()
         .filter_map(|(prov, env_name)| {
             map.get(*prov)
                 .map(|val| (env_name.to_string(), val.clone()))
         })
-        .collect()
+        .collect();
+    // Names only, never values. pi drops any provider it can't authenticate
+    // from its model registry, so "which keys did the child actually get"
+    // is the first question when an agent fails to start.
+    tracing::info!(
+        "agent env credentials: [{}]",
+        env.iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    env
 }

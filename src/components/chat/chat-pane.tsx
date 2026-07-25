@@ -8,7 +8,12 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import {
+  Virtuoso,
+  type StateSnapshot,
+  type VirtuosoHandle,
+  type VirtuosoProps,
+} from "react-virtuoso";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { MessageListBoundary } from "@/components/chat/message-list-boundary";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
@@ -442,6 +447,33 @@ const SCROLL_TO_BOTTOM_BUTTON_VIEWPORT_RATIO = 0.5;
 // do not add mounting pressure at the streaming/bottom edge.
 const OVERSCAN_PX = { top: 800, bottom: 0 } as const;
 
+/** Reading position per conversation, so a half-read history resumes where it
+ *  was left instead of snapping to the newest turn. Only conversations the
+ *  reader scrolled AWAY from the bottom get an entry: sitting at the bottom is
+ *  the default open position and must keep following new messages.
+ *
+ *  Virtuoso's own StateSnapshot is the unit here (scrollTop + the measured item
+ *  sizes): a raw scrollTop alone restores wrong, because a remounted list only
+ *  has height ESTIMATES for the turns it hasn't mounted yet. Deliberately
+ *  in-memory (module scope, not IndexedDB): it is worth exactly one app session,
+ *  and the message store already pays enough persistence cost. */
+const readingAnchors = new Map<string, StateSnapshot>();
+const MAX_READING_ANCHORS = 64;
+// How long after opening a conversation scroll events are still treated as part
+// of the landing rather than as the reader moving.
+const OPEN_SETTLE_MS = 1000;
+
+function rememberReadingAnchor(convId: string, snapshot: StateSnapshot) {
+  // Delete-then-set so the Map's insertion order stays a true LRU.
+  readingAnchors.delete(convId);
+  readingAnchors.set(convId, snapshot);
+  while (readingAnchors.size > MAX_READING_ANCHORS) {
+    const oldest = readingAnchors.keys().next().value;
+    if (oldest === undefined) break;
+    readingAnchors.delete(oldest);
+  }
+}
+
 type MessageGroup =
   | { kind: "assistant"; keys: string[] }
   | { kind: "single"; key: string };
@@ -546,13 +578,25 @@ function MessageList({
     const next = el instanceof HTMLElement ? el : null;
     setScroller((current) => (current === next ? current : next));
   }, []);
-  const [atBottom, setAtBottom] = useState(true);
+  // The reading position this open should land on, read ONCE per conversation
+  // switch (Virtuoso only honours it at mount). Undefined = land at the newest
+  // turn, the default for a conversation last left at the bottom.
+  const restoreRef = useRef<StateSnapshot | undefined>(
+    convId ? readingAnchors.get(convId) : undefined,
+  );
+  const [atBottom, setAtBottom] = useState(!restoreRef.current);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const atBottomRef = useRef(true);
+  const atBottomRef = useRef(!restoreRef.current);
   // Topmost visible group index (from Virtuoso's rangeChanged) — drives the turn
   // navigator's active tick with no getBoundingClientRect scanning.
   const [topIndex, setTopIndex] = useState(0);
-  const pendingInitialBottomRef = useRef<string | null>(convId);
+  // A restored open must NOT run the settle-then-seek-to-LAST correction: that
+  // pass exists to nail the bottom landing, and here the whole point is not to
+  // be at the bottom.
+  const pendingInitialBottomRef = useRef<string | null>(
+    restoreRef.current ? null : convId,
+  );
+  const prevLastKeyRef = useRef<string | null>(null);
   const setAtBottomState = useCallback((next: boolean) => {
     atBottomRef.current = next;
     setAtBottom(next);
@@ -564,7 +608,17 @@ function MessageList({
   const [renderedConvId, setRenderedConvId] = useState(convId);
   if (renderedConvId !== convId) {
     setRenderedConvId(convId);
-    pendingInitialBottomRef.current = convId;
+    const anchor = convId ? readingAnchors.get(convId) : undefined;
+    restoreRef.current = anchor;
+    pendingInitialBottomRef.current = anchor ? null : convId;
+    // Seed the bottom state pessimistically for a restored open. Virtuoso will
+    // publish the truth a frame later; until then the streaming follow (which
+    // reads the ref, not the state) must not yank a restored position down.
+    atBottomRef.current = !anchor;
+    setAtBottom(!anchor);
+    // Forget the previous conversation's tail: switching into a chat that ends
+    // on a user turn must not read as "the user just sent" and seek to LAST.
+    prevLastKeyRef.current = null;
   }
 
   // User turns paired with their index in the group list, for the navigator's
@@ -584,7 +638,6 @@ function MessageList({
   // token — and NOT on the first non-empty observation: when a restored
   // conversation happens to end on a user turn (agent never replied), hydration
   // must not count as "the user just sent" or the open position gets yanked.
-  const prevLastKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const lastKey = keys[keys.length - 1] ?? null;
     if (
@@ -645,6 +698,70 @@ function MessageList({
     });
     return () => cancelAnimationFrame(frame);
   }, [convId, items.length, scroller]);
+
+  // Remember the reading position while the reader is away from the bottom, so
+  // switching conversations (or to another view) and back resumes mid-history
+  // instead of jumping to the newest turn.
+  //
+  // Only ARMED scrolls count. The open sequence, the send/elevator seeks and the
+  // streaming follow all move the scroller programmatically; if those captured,
+  // a conversation opened mid-history would immediately overwrite (or, once
+  // Virtuoso briefly reports at-bottom during the landing, erase) the very
+  // anchor being restored. The arm is either a real pointer/keyboard scroll
+  // gesture or simply "the open is long over".
+  useEffect(() => {
+    if (!scroller || !convId) return;
+
+    let armed = false;
+    let frame: number | null = null;
+    const arm = () => {
+      armed = true;
+    };
+    const settle = window.setTimeout(arm, OPEN_SETTLE_MS);
+
+    const capture = () => {
+      frame = null;
+      // At the bottom there is nothing to resume — drop any stale anchor so the
+      // next open follows new messages as usual.
+      if (atBottomRef.current) {
+        readingAnchors.delete(convId);
+        return;
+      }
+      // getState reads Virtuoso's own size tree and scroll offset: no DOM
+      // measurement, so this stays off the forced-layout path.
+      virtuosoRef.current?.getState((snapshot) => {
+        if (snapshot.scrollTop <= 0) {
+          // Parked at the very top of a short history that never scrolled —
+          // indistinguishable from a fresh open, so keep nothing.
+          readingAnchors.delete(convId);
+          return;
+        }
+        rememberReadingAnchor(convId, snapshot);
+      });
+    };
+    const onScroll = () => {
+      if (!armed || frame != null) return;
+      frame = requestAnimationFrame(capture);
+    };
+
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("wheel", arm, { passive: true });
+    scroller.addEventListener("touchmove", arm, { passive: true });
+    scroller.addEventListener("pointerdown", arm, { passive: true });
+    scroller.addEventListener("keydown", arm);
+    return () => {
+      window.clearTimeout(settle);
+      scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("wheel", arm);
+      scroller.removeEventListener("touchmove", arm);
+      scroller.removeEventListener("pointerdown", arm);
+      scroller.removeEventListener("keydown", arm);
+      // Deliberately no final flush here: by the time this cleanup runs the
+      // keyed Virtuoso has already remounted for the NEXT conversation, so
+      // getState would file that list's position under this convId.
+      if (frame != null) cancelAnimationFrame(frame);
+    };
+  }, [scroller, convId]);
 
   // Streaming follow. Virtuoso's followOutput only reacts to NEW items; a
   // streaming reply grows an EXISTING item, so without help the view strands
@@ -812,6 +929,21 @@ function MessageList({
     ],
   );
 
+  // Where this mount lands: the remembered reading position when the reader left
+  // mid-history, otherwise the LAST visible row aligned to the viewport's BOTTOM
+  // (Thinking and errors are rows too, so every bottom-follow path targets the
+  // same measured edge). restoreStateFrom also replays Virtuoso's measured item
+  // sizes, without which a scroll offset into a virtualized history — built on
+  // height ESTIMATES for unmounted turns — would land somewhere else entirely.
+  const openAnchor: Partial<
+    Pick<
+      VirtuosoProps<MessageListItem, unknown>,
+      "initialTopMostItemIndex" | "restoreStateFrom"
+    >
+  > = restoreRef.current
+    ? { restoreStateFrom: restoreRef.current }
+    : { initialTopMostItemIndex: { index: Math.max(0, items.length - 1), align: "end" } };
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <QuoteSelectionToolbar scroller={scroller} onQuote={onQuote} />
@@ -832,10 +964,11 @@ function MessageList({
         }}
         itemContent={itemContent}
         components={{ Header: TopSpacer }}
-        // Align the LAST visible row to the viewport's BOTTOM on open. Thinking
-        // and errors are rows too, so every bottom-follow path now targets the
-        // same measured edge.
-        initialTopMostItemIndex={{ index: Math.max(0, items.length - 1), align: "end" }}
+        // Exactly ONE of these two is passed. Virtuoso publishes props in a
+        // fixed order and initialTopMostItemIndex lands AFTER restoreStateFrom,
+        // so an explicit (even undefined) initialTopMostItemIndex would clobber
+        // the restored offset — hence a spread rather than two props.
+        {...openAnchor}
         // Do not use alignToBottom: it pins a short/new conversation to the
         // bottom of the empty viewport. The initial index already opens an
         // overflowing history at its newest turn, while short chats keep the

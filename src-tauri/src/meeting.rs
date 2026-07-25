@@ -122,7 +122,11 @@ fn default_asr_engine() -> String {
     "auto".into()
 }
 fn default_toggle_hotkey() -> String {
-    "Cmd+Shift+M".into()
+    if cfg!(target_os = "macos") {
+        "Cmd+Shift+M".into()
+    } else {
+        "Ctrl+Shift+M".into()
+    }
 }
 
 impl Default for MeetingSettings {
@@ -140,10 +144,21 @@ impl Default for MeetingSettings {
 }
 
 pub fn load_settings(store: &Store) -> MeetingSettings {
-    match store.get_setting(SETTINGS_KEY) {
+    let settings = match store.get_setting(SETTINGS_KEY) {
         Ok(Some(json)) => serde_json::from_str(&json).unwrap_or_default(),
         _ => MeetingSettings::default(),
-    }
+    };
+    // Older Windows builds persisted the macOS default verbatim. Migrate that
+    // one known default while preserving every user-recorded custom binding.
+    #[cfg(not(target_os = "macos"))]
+    let settings = {
+        let mut migrated = settings;
+        if migrated.toggle_hotkey == "Cmd+Shift+M" {
+            migrated.toggle_hotkey = default_toggle_hotkey();
+        }
+        migrated
+    };
+    settings
 }
 
 fn save_settings(store: &Store, settings: &MeetingSettings) -> anyhow::Result<()> {

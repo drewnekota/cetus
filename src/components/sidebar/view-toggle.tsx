@@ -1,6 +1,10 @@
 "use client";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
+import {
+  defaultShortcutMap,
+  shortcutDisplay,
+} from "@/lib/keyboard-shortcuts";
 
 // "chat" and "board" are two layouts of the same data (conversations); the
 // toggle switches between them. Automations and Plugins are separate
@@ -19,20 +23,24 @@ type ToggleId = Extract<SidebarView, "chat" | "board">;
 const ITEMS: {
   id: ToggleId;
   labelKey: "view.chats" | "view.kanban";
-  hint: string;
 }[] = [
-  { id: "chat", labelKey: "view.chats", hint: "⌘1" },
-  { id: "board", labelKey: "view.kanban", hint: "⌘2" },
+  { id: "chat", labelKey: "view.chats" },
+  { id: "board", labelKey: "view.kanban" },
 ];
 
 export function ViewToggle({ view, onChange, hints }: Props) {
   const { t } = useTranslation("sidebar");
+  const defaults = defaultShortcutMap();
   return (
     <div className="inline-flex w-full items-center rounded-full border border-border bg-card p-0.5 shadow-[0px_1px_2px_0px_rgba(0,0,0,0.04)]">
       {ITEMS.map((it) => {
         const active = view === it.id;
         const label = t(it.labelKey);
-        const hint = hints?.[it.id] ?? it.hint;
+        const hint =
+          hints?.[it.id] ??
+          shortcutDisplay(
+            it.id === "chat" ? defaults.switchChats : defaults.switchBoard,
+          );
         return (
           <button
             key={it.id}
