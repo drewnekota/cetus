@@ -139,7 +139,6 @@ export function CreateTaskDialog({
             workspaceDir={workspaceDir}
             defaultWorkspace={defaultWorkspace}
             onWorkspaceChange={onWorkspaceChange}
-            requireRepository
             onSend={handleSend}
             onAbort={() => {}}
             ultra={ultra}

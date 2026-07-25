@@ -77,6 +77,13 @@ cp -R dist/modes/interactive/theme  "$DEST_DIR/theme"
 cp -R dist/modes/interactive/assets "$DEST_DIR/assets"
 chmod 0755 "$DEST_DIR/$PI_FILENAME"
 
+# The app runs pi from a writable copy under app_data. Stamp the bundled tree
+# with both Cetus and pi versions so an app upgrade can tell when that copy must
+# be replaced instead of silently keeping an old binary/model registry forever.
+APP_VERSION="$(node -e 'console.log(require(process.argv[1]).version)' "$REPO_ROOT/src-tauri/tauri.conf.json")"
+PI_VERSION="$(node -e 'console.log(require(process.argv[1]).version)' "$DEST_DIR/package.json")"
+printf '%s\n' "cetus=$APP_VERSION pi=$PI_VERSION" > "$DEST_DIR/.cetus-runtime-version"
+
 # Overlay cetus's own pi extensions (vision-bridge, etc.). These live under
 # version control at src-tauri/cetus-extensions/ and must be re-deployed here on
 # every sidecar build because this whole tree is wiped (rm -rf above) and is
@@ -178,5 +185,14 @@ if [ -n "$DANGLING" ]; then
   echo "$DANGLING" | sed 's/^/    /'
 fi
 echo "  install tree: $BEFORE_SZ → $(du -sh "$DEST_DIR" | awk '{print $1}')"
+
+# Release gate: Cetus applies this model id through pi RPC on every cold
+# conversation start. A sidecar that does not advertise it would install fine
+# but every first message would fail at set_model.
+if ! "$DEST_DIR/$PI_FILENAME" --list-models deepseek | grep -q 'deepseek-v4-pro'; then
+  echo "Bundled pi runtime does not provide deepseek-v4-pro" >&2
+  exit 1
+fi
+echo "→ Verified model registry: deepseek-v4-pro"
 
 echo "✓ Done. $DEST_DIR ($(du -sh "$DEST_DIR" | awk '{print $1}'))"

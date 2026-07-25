@@ -194,8 +194,6 @@ interface Props {
   workspaceDir: string | null;
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
-  /** Require a real repository instead of the repository-free Chat workspace. */
-  requireRepository?: boolean;
   onSend: (
     text: string,
     attachments: ComposerAttachment[],
@@ -323,7 +321,6 @@ export function Composer({
   workspaceDir,
   defaultWorkspace,
   onWorkspaceChange,
-  requireRepository = false,
   onSend,
   onQueue,
   onSendFirstQueued,
@@ -945,7 +942,6 @@ export function Composer({
 
   async function submit() {
     if (disabled) return;
-    if (requireRepository && (!workspaceDir || workspaceDir === defaultWorkspace)) return;
     // Terminal mode: hand the command to the right-side Terminal surface and
     // bypass the agent entirely. An empty command (`!` alone) is a no-op.
     if (bashMode) {
@@ -1303,7 +1299,6 @@ export function Composer({
             defaultWorkspace={defaultWorkspace}
             onChange={onWorkspaceChange}
             disabled={disabled}
-            excludeDefault={requireRepository}
             context={
               <GitBranchIndicator
                 conversationId={conversationId ?? null}
@@ -1389,11 +1384,7 @@ export function Composer({
             type="button"
             size="icon-sm"
             onClick={submit}
-            disabled={
-              disabled ||
-              (requireRepository && (!workspaceDir || workspaceDir === defaultWorkspace)) ||
-              (!text.trim() && attachments.length === 0)
-            }
+            disabled={disabled || (!text.trim() && attachments.length === 0)}
             title={t("composer.send")}
           >
             <ArrowUp className="h-4 w-4" />

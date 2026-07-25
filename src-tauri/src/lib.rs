@@ -1149,13 +1149,22 @@ pub fn run() {
                         "tray_quit" => app.exit(0),
                         _ => {}
                     });
-                // Monochrome template glyph: macOS tints it to match the menu bar
-                // (white in dark mode, black in light), like every native status item.
-                if let Ok(icon) =
-                    tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))
+                // macOS wants a monochrome template glyph so the system can
+                // tint it for the current menu-bar appearance. Windows does
+                // not apply that tint and rendered the same asset as a black
+                // silhouette, so use the full-color application logo there.
+                #[cfg(target_os = "macos")]
                 {
-                    tray = tray.icon(icon).icon_as_template(true);
-                } else if let Some(icon) = app.default_window_icon() {
+                    if let Ok(icon) =
+                        tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))
+                    {
+                        tray = tray.icon(icon).icon_as_template(true);
+                    } else if let Some(icon) = app.default_window_icon() {
+                        tray = tray.icon(icon.clone());
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                if let Some(icon) = app.default_window_icon() {
                     tray = tray.icon(icon.clone());
                 }
                 tray.build(app)?;
@@ -2062,6 +2071,19 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
         .join("pi-install");
 
     if target.join(PI_BINARY_NAME).exists() {
+        // The writable runtime used to be copied only on first launch. App
+        // updates therefore kept an arbitrarily old pi binary/model registry,
+        // even while the UI moved to newer model ids (for example
+        // deepseek-v4-pro). A marker produced with the bundled tree lets us
+        // replace the complete runtime whenever either Cetus or pi changes.
+        if pi_runtime_needs_refresh(&resource, &target) {
+            tracing::info!(
+                "refreshing pi runtime {} → {}",
+                resource.display(),
+                target.display()
+            );
+            replace_pi_install(&resource, &target)?;
+        }
         // Always re-sync our cetus-extensions overlay so new tool files (and
         // edits to existing ones) ship without needing to wipe the install
         // tree. Without this, a stale install from before cetus-extensions/
@@ -2120,6 +2142,102 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
         plugins::runtime_plugins_dir(&target),
     );
     Ok(target)
+}
+
+const PI_RUNTIME_MARKER: &str = ".cetus-runtime-version";
+
+fn pi_runtime_marker(root: &Path) -> Option<String> {
+    std::fs::read_to_string(root.join(PI_RUNTIME_MARKER))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn pi_runtime_needs_refresh(resource: &Path, target: &Path) -> bool {
+    let Some(bundled) = pi_runtime_marker(resource) else {
+        // Older/dev resource trees have no marker. Preserve the existing
+        // behavior instead of replacing a user runtime on every launch.
+        return false;
+    };
+    pi_runtime_marker(target).as_deref() != Some(bundled.as_str())
+}
+
+/// Replace the writable pi tree without exposing a half-copied directory if a
+/// copy fails. Startup runs before any pi child is spawned, so the old tree can
+/// be renamed safely on every supported desktop platform.
+fn replace_pi_install(resource: &Path, target: &Path) -> std::io::Result<()> {
+    let parent = target.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "pi install has no parent")
+    })?;
+    let staging = parent.join("pi-install.next");
+    let backup = parent.join("pi-install.previous");
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging)?;
+    }
+    if backup.exists() {
+        std::fs::remove_dir_all(&backup)?;
+    }
+    copy_dir(resource, &staging)?;
+    std::fs::rename(target, &backup)?;
+    if let Err(error) = std::fs::rename(&staging, target) {
+        let _ = std::fs::rename(&backup, target);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::remove_dir_all(&backup) {
+        tracing::warn!("could not prune previous pi runtime: {error}");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod pi_runtime_refresh_tests {
+    use super::*;
+
+    fn temp_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("cetus-{name}-{}", uuid::Uuid::new_v4()))
+    }
+
+    #[test]
+    fn marker_requests_refresh_only_for_a_new_bundled_runtime() {
+        let root = temp_root("pi-marker");
+        let resource = root.join("resource");
+        let target = root.join("target");
+        std::fs::create_dir_all(&resource).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+
+        assert!(!pi_runtime_needs_refresh(&resource, &target));
+        std::fs::write(resource.join(PI_RUNTIME_MARKER), "cetus=1 pi=2\n").unwrap();
+        assert!(pi_runtime_needs_refresh(&resource, &target));
+        std::fs::write(target.join(PI_RUNTIME_MARKER), "cetus=1 pi=2\n").unwrap();
+        assert!(!pi_runtime_needs_refresh(&resource, &target));
+        std::fs::write(target.join(PI_RUNTIME_MARKER), "cetus=1 pi=1\n").unwrap();
+        assert!(pi_runtime_needs_refresh(&resource, &target));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn replacement_swaps_the_complete_runtime_tree() {
+        let root = temp_root("pi-replace");
+        let resource = root.join("resource");
+        let target = root.join("pi-install");
+        std::fs::create_dir_all(&resource).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(resource.join("new-runtime"), "new").unwrap();
+        std::fs::write(target.join("old-runtime"), "old").unwrap();
+
+        replace_pi_install(&resource, &target).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(target.join("new-runtime")).unwrap(),
+            "new"
+        );
+        assert!(!target.join("old-runtime").exists());
+        assert!(!root.join("pi-install.next").exists());
+        assert!(!root.join("pi-install.previous").exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 /// Re-deploy `<resource>/cetus-extensions` over `<target>/cetus-extensions`.
