@@ -196,6 +196,9 @@ jobs:
         run: scripts/build-pi-sidecar.sh
 
       - name: Build and sign NSIS installer + updater
+        # PowerShell strips the quotes out of the inline JSON, so run this in
+        # bash — tauri rejects `{bundle:{...}}` as invalid JSON.
+        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
