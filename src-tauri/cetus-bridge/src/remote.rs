@@ -49,6 +49,14 @@ pub fn parse_remote_workspace(raw: &str) -> Option<RemoteWorkspace> {
         return None;
     }
 
+    // A Windows drive path (for example `C:\\Users\\me` or `C:/Users/me`)
+    // looks like scp's `host:path` syntax. Treat the drive prefix as local
+    // before considering the scp form, regardless of the host OS running this
+    // parser (workspace values may be persisted and read cross-platform).
+    if matches!(s.as_bytes(), [drive, b':', ..] if drive.is_ascii_alphabetic()) {
+        return None;
+    }
+
     if let Some(rest) = s.strip_prefix("ssh://") {
         let slash = rest.find('/')?;
         let authority = &rest[..slash];
@@ -446,6 +454,9 @@ mod tests {
     fn leaves_local_paths_alone() {
         assert_eq!(parse_remote_workspace("/Users/me/repo"), None);
         assert_eq!(parse_remote_workspace("relative/path:with-colon"), None);
+        assert_eq!(parse_remote_workspace(r"C:\Users\me\repo"), None);
+        assert_eq!(parse_remote_workspace("D:/work/repo"), None);
+        assert_eq!(parse_remote_workspace("E:relative-to-drive"), None);
     }
 
     #[test]

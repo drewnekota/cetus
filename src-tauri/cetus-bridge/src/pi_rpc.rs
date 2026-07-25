@@ -602,6 +602,11 @@ fn spawn_process(
         }
     }
 
+    // Cetus is a GUI app, so its background pi/ssh process must not allocate a
+    // visible console window on Windows.
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
