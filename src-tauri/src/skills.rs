@@ -233,8 +233,8 @@ pub fn materialize_skills_into(app_data_dir: &Path, target: &Path, store: &Store
 
 /// Shared budget for skills that pi exposes directly in the system prompt. Once
 /// exhausted, skills are still copied into the conversation snapshot but marked
-/// `disable-model-invocation: true`; the `skill_search` / `skill_read` tools can
-/// discover and load them lazily.
+/// `disable-model-invocation: true`; the `skill_search` tool discovers them and
+/// the agent loads the SKILL.md it points at with pi's built-in `read` tool.
 #[derive(Debug, Clone)]
 pub struct SkillPromptBudget {
     max_chars: usize,
@@ -413,7 +413,7 @@ fn mark_skill_lazy_only(skill_md: &Path) -> std::io::Result<()> {
         out
     } else {
         format!(
-            "---\ndescription: \"Lazy-only skill; use skill_read to inspect the original instructions.\"\ndisable-model-invocation: true\n---\n\n{}",
+            "---\ndescription: \"Lazy-only skill; find it with skill_search and read this file for the original instructions.\"\ndisable-model-invocation: true\n---\n\n{}",
             md
         )
     };

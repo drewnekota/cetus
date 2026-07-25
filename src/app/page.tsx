@@ -997,6 +997,11 @@ export default function Home() {
             break;
           }
           case "agent_end": {
+            // pi auto-retries transient provider failures (and retries after an
+            // overflow compaction) — `willRetry` says another run is coming for
+            // the SAME prompt. Notifying here would announce "your task is
+            // ready" mid-retry; the run that finally settles notifies instead.
+            if (pe.willRetry) break;
             const r = runStatusRef.current[cid];
             // Ignore an agent_end with no live run behind it (orphan or
             // replayed event) — only runs we saw start should notify.

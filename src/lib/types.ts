@@ -785,7 +785,14 @@ export interface PiMessage {
 // Streaming event types we care about (subset of pi RPC events).
 export type PiEvent =
   | { type: "agent_start" }
-  | { type: "agent_end"; messages: PiMessage[] }
+  // `agent_end` closes ONE low-level run. pi may still continue on its own —
+  // auto-retry after a transient provider error, auto-compaction, or a queued
+  // follow-up — and says so with `willRetry`. `agent_settled` is the
+  // authoritative "pi will not continue by itself" signal (pi ≥ 0.80.4); the
+  // CLI backends (claude-code / codex) synthesize it right after `agent_end`
+  // so every runtime settles through the same event.
+  | { type: "agent_end"; messages: PiMessage[]; willRetry?: boolean }
+  | { type: "agent_settled" }
   | { type: "turn_start" }
   | { type: "turn_end"; message: PiMessage; toolResults: unknown[] }
   | { type: "message_start"; message: PiMessage }

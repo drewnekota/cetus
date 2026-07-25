@@ -462,6 +462,28 @@ function assistantHasVisibleContent(m: RenderedMessage): boolean {
   );
 }
 
+/** End the active run: stop streaming and, if the turn produced NO visible
+ *  answer (empty/degenerate completion — see assistantHasVisibleContent),
+ *  surface a recoverable hint instead of leaving the user on a blank bubble.
+ *  Regenerate is already wired, so this just makes the dead-end visible.
+ *  Shared by `agent_end` and `agent_settled` so both settle identically. */
+function settleRun(state: ChatState): ChatState {
+  const idx = state.activeAssistantIdx ?? state.messages.length - 1;
+  const last = idx >= 0 ? state.messages[idx] : undefined;
+  const emptyAnswer =
+    last?.role === "assistant" && !assistantHasVisibleContent(last);
+  return {
+    ...state,
+    isStreaming: false,
+    awaitingAssistant: false,
+    activeAssistantIdx: null,
+    error:
+      emptyAnswer && !state.error && !state.aborted
+        ? "The model returned an empty response — no answer was produced. Tap Regenerate to try again."
+        : state.error,
+  };
+}
+
 function reducePiEvent(state: ChatState, event: PiEvent): ChatState {
   switch (event.type) {
     case "agent_start":
@@ -483,26 +505,19 @@ function reducePiEvent(state: ChatState, event: PiEvent): ChatState {
             ? "Context compaction failed. The conversation is unchanged."
             : state.error,
       };
-    case "agent_end": {
-      // Catch a turn that ended with NO visible answer (empty/degenerate
-      // completion — see assistantHasVisibleContent) and surface a recoverable
-      // hint instead of silently leaving the user on a blank bubble. Regenerate
-      // is already wired, so this just makes the dead-end visible.
-      const idx = state.activeAssistantIdx ?? state.messages.length - 1;
-      const last = idx >= 0 ? state.messages[idx] : undefined;
-      const emptyAnswer =
-        last?.role === "assistant" && !assistantHasVisibleContent(last);
-      return {
-        ...state,
-        isStreaming: false,
-        awaitingAssistant: false,
-        activeAssistantIdx: null,
-        error:
-          emptyAnswer && !state.error && !state.aborted
-            ? "The model returned an empty response — no answer was produced. Tap Regenerate to try again."
-            : state.error,
-      };
-    }
+    case "agent_end":
+      // `agent_end` closes one LOW-LEVEL run, not necessarily the turn: pi
+      // continues on its own after an auto-retry, an auto-compaction, or a
+      // queued follow-up, and flags that with `willRetry`. Settling here would
+      // flip the composer back on mid-flight and — worse — fire the
+      // empty-answer error for a run that is about to be retried anyway.
+      return event.willRetry ? state : settleRun(state);
+    // Authoritative "pi will not continue by itself" signal (pi ≥ 0.80.4).
+    // Idempotent by design: an ordinary turn has already settled on its
+    // `agent_end`, so this is a no-op; after a retry/compaction chain (whose
+    // last `agent_end` carried `willRetry`) this is what ends the run.
+    case "agent_settled":
+      return state.isStreaming ? settleRun(state) : state;
     case "message_start": {
       // Assistant messages get a streaming slot tracked by activeAssistantIdx.
       // Custom messages (extension breadcrumbs) are inserted as fully-formed

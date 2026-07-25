@@ -118,17 +118,32 @@ fi
 # is bricked. The poison is usually a tool result whose content was never
 # populated (content == null) OR a half-streamed assistant turn left with an
 # EMPTY content array ([]) when a run crashed mid-stream — both choke the
-# per-provider converters. Inject one tolerant guard at this shared chokepoint
-# (nullish OR empty-array content → a "(no content)" placeholder block; strings
-# are left untouched as they're already handled per role). Idempotent: keyed off
-# the `cetus-guard` marker so re-runs and upstream changes are safe.
-PI_AI_TRANSFORM="$DEST_DIR/node_modules/@earendil-works/pi-ai/dist/providers/transform-messages.js"
+# per-provider converters. pi 0.82 normalizes the null half upstream (null →
+# []), which is exactly the other poison, so this guard still earns its keep.
+# Inject it at the shared chokepoint (nullish OR empty-array content → a
+# "(no content)" placeholder block; strings are left untouched as they're
+# already handled per role). Idempotent: keyed off the `cetus-guard` marker so
+# re-runs and upstream changes are safe.
+#
+# The file MOVED in pi 0.82 (dist/providers/ → dist/api/), and the old
+# hardcoded path failed silently — the tree shipped unguarded. Locate it
+# instead, and treat "not found / not applied" as a build failure: this is a
+# release gate, not a nice-to-have.
+PI_AI_ROOT="$DEST_DIR/node_modules/@earendil-works/pi-ai"
+PI_AI_TRANSFORM="$(find "$PI_AI_ROOT/dist" -name 'transform-messages.js' 2>/dev/null | head -1)"
 GUARD='    messages = messages.map((m) => (m \&\& (m.content == null || (Array.isArray(m.content) \&\& m.content.length === 0))) ? { ...m, content: [{ type: "text", text: "(no content)" }] } : m); \/* cetus-guard *\/'
-if [ -f "$PI_AI_TRANSFORM" ] && ! grep -q "cetus-guard" "$PI_AI_TRANSFORM"; then
+if [ -z "$PI_AI_TRANSFORM" ]; then
+  echo "pi-ai transform-messages.js not found under $PI_AI_ROOT (moved again?)" >&2
+  exit 1
+fi
+if ! grep -q "cetus-guard" "$PI_AI_TRANSFORM"; then
   perl -0777 -pi -e "s/(export function transformMessages\\(messages, model, normalizeToolCallId\\) \\{\\n)/\$1${GUARD}\\n/" "$PI_AI_TRANSFORM"
-  grep -q "cetus-guard" "$PI_AI_TRANSFORM" \
-    && echo "→ pi-ai content guard applied: transform-messages.js" \
-    || echo "⚠ pi-ai content guard FAILED to apply (transformMessages signature changed?)" >&2
+fi
+if grep -q "cetus-guard" "$PI_AI_TRANSFORM"; then
+  echo "→ pi-ai content guard applied: ${PI_AI_TRANSFORM#"$DEST_DIR/"}"
+else
+  echo "pi-ai content guard FAILED to apply (transformMessages signature changed?): $PI_AI_TRANSFORM" >&2
+  exit 1
 fi
 
 # Native clipboard module (pi loads it at runtime for some operations).

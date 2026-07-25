@@ -11,7 +11,7 @@
  * capture is off or the log is empty, the tool says so.
  */
 
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readNdjsonLog } from "./bridge/ndjson-log";
 

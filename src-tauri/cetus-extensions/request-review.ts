@@ -16,7 +16,7 @@
  * spin waiting for an answer; the user's reply arrives as a fresh prompt.
  */
 
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const PARAMS = Type.Object({

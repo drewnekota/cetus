@@ -229,9 +229,9 @@ impl PiRpc {
             .is_ok()
     }
 
-    /// Like [`request`], but for the prompt turn — whose `response` only arrives
-    /// when the whole agent turn completes (events stream meanwhile). A fixed
-    /// wall-clock deadline is wrong here: it would kill a long-but-healthy turn.
+    /// Like [`request`], but for commands whose `response` can lag behind an
+    /// event stream that keeps flowing (the prompt turn). A fixed wall-clock
+    /// deadline is wrong here: it would kill a long-but-healthy turn.
     /// Instead this is STALL-based — it fails only after pi has emitted nothing
     /// on stdout for [`stall_timeout`]. A turn that keeps streaming never times
     /// out; a genuinely hung pi still surfaces. Individual stuck tools are bound
@@ -400,8 +400,15 @@ impl PiRpc {
         if !images.is_empty() {
             payload["images"] = Value::Array(images);
         }
-        // The prompt turn can legitimately run for minutes; use the stall-based
-        // wait so a healthy long turn isn't killed by a fixed wall-clock.
+        // NOTE ON SEMANTICS: pi answers `prompt` once the message is ACCEPTED
+        // (preflight ok / queued / handled) — not when the turn finishes. So a
+        // successful return here means "the turn started", and the turn's real
+        // end is the `agent_end` + `agent_settled` event pair on the stream.
+        // Callers that must wait for completion do so on events (run_engine
+        // parks on the sub-agent's `emit_node_result`); nobody may treat this
+        // `Ok(())` as "the model is done". Still use the stall-based wait: pi
+        // can take a while to accept a prompt on a cold session, and a wedged
+        // child must not hang the caller forever.
         let resp = self.request_streaming(payload).await?;
         let ok = resp
             .get("success")

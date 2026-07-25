@@ -3,11 +3,17 @@
  *
  * pi exposes a small visible skill manifest in the system prompt. Cetus marks
  * overflow skills with `disable-model-invocation: true` so they don't bloat every
- * turn; these tools let the model search and read the frozen per-conversation
- * skill snapshot on demand.
+ * turn; this tool lets the model search the frozen per-conversation skill
+ * snapshot on demand.
+ *
+ * Search only. Loading the skill is pi's own progressive disclosure: every hit
+ * reports its absolute SKILL.md path and the model opens it with the built-in
+ * `read` tool — the same path a visible skill takes. (We used to ship a
+ * `skill_read` tool that reimplemented `read` with a private char cap; native
+ * `read` already handles ranges, truncation, and skill-aware rendering.)
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, sep } from "node:path";
+import { basename, join, sep } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { textResult } from "./bridge/protocol";
@@ -15,7 +21,6 @@ import { textResult } from "./bridge/protocol";
 const AGENT_DIR = process.env.PI_CODING_AGENT_DIR?.trim();
 const SKILLS_DIR = AGENT_DIR ? join(AGENT_DIR, "skills") : "";
 const SEARCH_LIMIT = 30;
-const READ_LIMIT_CHARS = 60_000;
 
 interface SkillEntry {
   id: string;
@@ -40,9 +45,11 @@ export default function skillDiscovery(pi: ExtensionAPI) {
     description:
       "Search the user's frozen skill library by keyword. Use this when no visible " +
       "skill obviously matches, or when the prompt says additional skills are lazy-only. " +
-      "Then call skill_read with the returned id/name to load the full SKILL.md.",
+      "Each hit reports the absolute path of its SKILL.md — open it with the `read` " +
+      "tool, then follow its instructions and resolve relative paths against the " +
+      "directory that SKILL.md lives in.",
     promptSnippet:
-      "Additional lazy-only skills may be available. Use skill_search(query) then skill_read(id) when a task may match a skill not listed in <available_skills>.",
+      "Additional lazy-only skills may be available. Use skill_search(query), then `read` the SKILL.md path it returns, when a task may match a skill not listed in <available_skills>.",
     parameters: Type.Object({
       query: Type.Optional(Type.String({ description: "Keywords to match against skill names/descriptions. Omit to list top skills." })),
       includeVisible: Type.Optional(Type.Boolean({ description: "Include skills already visible in <available_skills> (default false)." })),
@@ -53,31 +60,6 @@ export default function skillDiscovery(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerTool({
-    name: "skill_read",
-    label: "Read skill",
-    description:
-      "Read one skill's SKILL.md from the frozen conversation snapshot. Use after " +
-      "skill_search, then follow the skill instructions and resolve relative paths " +
-      "against the reported skillDir.",
-    parameters: Type.Object({
-      id: Type.String({ description: "Skill id or exact skill name from skill_search." }),
-    }),
-    async execute(_id, params) {
-      const wanted = String(((params ?? {}) as { id?: string }).id ?? "").trim();
-      const skill = resolveSkill(catalog(), wanted);
-      if (!skill) return { content: [{ type: "text" as const, text: `Unknown skill "${wanted}". Use skill_search first.` }], isError: true };
-      try {
-        const raw = readFileSync(skill.filePath, "utf-8");
-        const text = raw.length > READ_LIMIT_CHARS
-          ? `${raw.slice(0, READ_LIMIT_CHARS)}\n\n[truncated: ${raw.length - READ_LIMIT_CHARS} chars omitted]`
-          : raw;
-        return textResult(`skillId: ${skill.id}\nskillName: ${skill.name}\nskillDir: ${dirname(skill.filePath)}\n\n${text}`);
-      } catch (err) {
-        return { content: [{ type: "text" as const, text: `Failed to read skill: ${(err as Error).message}` }], isError: true };
-      }
-    },
-  });
 }
 
 function loadCatalog(root: string): SkillEntry[] {
@@ -137,17 +119,12 @@ function searchSkills(skills: SkillEntry[], query?: string, includeVisible = fal
     .sort((a, b) => b.score - a.score || cmp(a.skill.name, b.skill.name) || cmp(a.skill.id, b.skill.id));
   if (scored.length === 0) return q ? `No lazy-only skills match "${query}".` : "No lazy-only skills available.";
   const shown = scored.slice(0, SEARCH_LIMIT);
-  const lines = shown.map(({ skill }) => `- ${skill.id} (${skill.name})${skill.lazyOnly ? " [lazy]" : ""}: ${compact(skill.description, 180)}`);
+  const lines = shown.map(
+    ({ skill }) =>
+      `- ${skill.id} (${skill.name})${skill.lazyOnly ? " [lazy]" : ""}: ${compact(skill.description, 180)}\n  read: ${skill.filePath}`,
+  );
   const more = scored.length > shown.length ? `\n…and ${scored.length - shown.length} more; narrow your query.` : "";
-  return `${scored.length} matching skill(s). Use skill_read({ "id": "..." }) to load one:\n${lines.join("\n")}${more}`;
-}
-
-function resolveSkill(skills: SkillEntry[], id: string): SkillEntry | undefined {
-  const exact = skills.find((s) => s.id === id || s.name === id || s.filePath === id);
-  if (exact) return exact;
-  const lower = id.toLowerCase();
-  const hits = skills.filter((s) => s.id.toLowerCase() === lower || s.name.toLowerCase() === lower);
-  return hits.length === 1 ? hits[0] : undefined;
+  return `${scored.length} matching skill(s). Load one by reading its path with the \`read\` tool, then follow its instructions (relative paths resolve against that file's directory):\n${lines.join("\n")}${more}`;
 }
 
 function frontmatter(md: string): { name?: string; description?: string; disableModelInvocation?: boolean } {

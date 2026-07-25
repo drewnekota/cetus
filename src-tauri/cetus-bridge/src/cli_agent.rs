@@ -1065,6 +1065,12 @@ impl EventTranslator {
             out.push(json!({ "type": "message_end" }));
         }
         out.push(json!({ "type": "agent_end" }));
+        // pi (≥ 0.80.4) follows every run with `agent_settled` once it will not
+        // continue on its own (auto-retry, compaction retry, queued follow-up).
+        // The CLI child has already exited by the time we get here, so its run
+        // is settled by definition — emit the same event so every runtime ends a
+        // turn through one signal instead of the frontend special-casing pi.
+        out.push(json!({ "type": "agent_settled" }));
         self.finished = true;
         out
     }
@@ -4786,7 +4792,12 @@ mod tests {
         let ev = tr.finish(None);
         assert_eq!(
             types(&ev),
-            vec!["message_update:text_end", "message_end", "agent_end"]
+            vec![
+                "message_update:text_end",
+                "message_end",
+                "agent_end",
+                "agent_settled"
+            ]
         );
         assert_eq!(ev[0]["assistantMessageEvent"]["content"], json!("partial answ"));
         let messages = tr.take_messages();
@@ -5223,10 +5234,14 @@ mod tests {
     #[test]
     fn turn_open_and_close_events() {
         // message_start is deferred to the first content event, so a turn that
-        // never produced content opens no bubble and closes with agent_end only.
+        // never produced content opens no bubble and closes with the run-end
+        // pair (agent_end + the settle signal) alone.
         let mut tr = EventTranslator::new(CliBackend::Codex);
         assert_eq!(types(&tr.start()), vec!["agent_start"]);
-        assert_eq!(types(&tr.finish(None)), vec!["agent_end"]);
+        assert_eq!(
+            types(&tr.finish(None)),
+            vec!["agent_end", "agent_settled"]
+        );
 
         let mut tr = EventTranslator::new(CliBackend::Codex);
         let ev = tr.finish(Some("boom"));
@@ -5240,7 +5255,8 @@ mod tests {
                 "message_update:text_delta",
                 "message_update:text_end",
                 "message_end",
-                "agent_end"
+                "agent_end",
+                "agent_settled"
             ]
         );
     }
@@ -5306,7 +5322,7 @@ mod tests {
         let events = sink.0.lock().unwrap();
         let types = types(&events);
         assert_eq!(types.first().map(String::as_str), Some("agent_start"));
-        assert_eq!(types.last().map(String::as_str), Some("agent_end"));
+        assert_eq!(types.last().map(String::as_str), Some("agent_settled"));
         assert!(types.iter().any(|t| t == "message_update:text_end"));
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -6035,7 +6051,7 @@ mod tests {
         let events = sink.0.lock().unwrap();
         assert_eq!(
             types(&events).last().map(String::as_str),
-            Some("agent_end")
+            Some("agent_settled")
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -6190,7 +6206,7 @@ mod tests {
         assert_eq!(outcome.messages.len(), 1);
         let events = sink.0.lock().unwrap();
         let types = types(&events);
-        assert_eq!(types.last().map(String::as_str), Some("agent_end"));
+        assert_eq!(types.last().map(String::as_str), Some("agent_settled"));
         assert!(types.iter().any(|t| t == "message_update:text_end"));
     }
 
@@ -6429,7 +6445,7 @@ mod tests {
         eprintln!("messages: {:?}", outcome.messages);
         assert!(outcome.resume_id.is_some(), "session id captured");
         assert!(tys.iter().any(|t| t == "message_update:text_delta"), "streamed deltas");
-        assert_eq!(tys.last().map(String::as_str), Some("agent_end"));
+        assert_eq!(tys.last().map(String::as_str), Some("agent_settled"));
         assert!(outcome
             .messages
             .iter()
