@@ -9,7 +9,7 @@
 # install tree mirrors the npm tarball so every relative-path read resolves.
 #
 # Output: src-tauri/pi-install/
-#   pi                        — the bun-compiled executable
+#   pi / pi.exe               — the bun-compiled executable
 #   package.json, dist/, ...  — full npm tarball contents
 #   node_modules/             — runtime deps from `bun install`
 #   theme/, assets/           — symlinks to dist/modes/interactive/{theme,assets}
@@ -21,10 +21,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST_DIR="$REPO_ROOT/src-tauri/pi-install"
 
 case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64)  CLIP_PLATFORM="darwin-arm64" ;;
-  Darwin-x86_64) CLIP_PLATFORM="darwin-x64" ;;
-  Linux-x86_64)  CLIP_PLATFORM="linux-x64" ;;
-  Linux-aarch64) CLIP_PLATFORM="linux-arm64" ;;
+  Darwin-arm64)       CLIP_PLATFORM="darwin-arm64";       PI_FILENAME="pi" ;;
+  Darwin-x86_64)      CLIP_PLATFORM="darwin-x64";         PI_FILENAME="pi" ;;
+  Linux-x86_64)       CLIP_PLATFORM="linux-x64";          PI_FILENAME="pi" ;;
+  Linux-aarch64)      CLIP_PLATFORM="linux-arm64";        PI_FILENAME="pi" ;;
+  MINGW*-x86_64)      CLIP_PLATFORM="win32-x64-msvc";     PI_FILENAME="pi.exe" ;;
+  MINGW*-aarch64)     CLIP_PLATFORM="win32-arm64-msvc";   PI_FILENAME="pi.exe" ;;
   *)
     echo "Unsupported host platform: $(uname -s) $(uname -m)" >&2
     exit 1 ;;
@@ -58,7 +60,7 @@ echo "→ Adding mcporter@$MCPORTER_VERSION (MCP bridge dependency)..."
 bun add "mcporter@$MCPORTER_VERSION" --silent
 
 echo "→ Compiling single-file binary..."
-bun build --compile ./dist/bun/cli.js --outfile pi
+bun build --compile ./dist/bun/cli.js --outfile "$PI_FILENAME"
 
 echo "→ Assembling install tree at $DEST_DIR"
 rm -rf "$DEST_DIR"
@@ -73,7 +75,7 @@ cp -R . "$DEST_DIR/"
 # then the bundled copy has no top-level theme/ dir).
 cp -R dist/modes/interactive/theme  "$DEST_DIR/theme"
 cp -R dist/modes/interactive/assets "$DEST_DIR/assets"
-chmod 0755 "$DEST_DIR/pi"
+chmod 0755 "$DEST_DIR/$PI_FILENAME"
 
 # Overlay cetus's own pi extensions (vision-bridge, etc.). These live under
 # version control at src-tauri/cetus-extensions/ and must be re-deployed here on

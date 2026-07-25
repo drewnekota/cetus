@@ -72,6 +72,11 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Listener, Manager};
 use tokio::sync::Mutex;
 
+#[cfg(target_os = "windows")]
+const PI_BINARY_NAME: &str = "pi.exe";
+#[cfg(not(target_os = "windows"))]
+const PI_BINARY_NAME: &str = "pi";
+
 /// Pool of `pi --mode rpc` child processes — one per active conversation.
 ///
 /// Processes are lazy: a conversation only gets a pi spawned the first time
@@ -870,7 +875,7 @@ pub fn run() {
             // PI_INSTALL env var overrides for local dev iteration.
             let pi_dir =
                 resolve_pi_install(app.handle(), &app_data_dir).expect("locate/install pi tree");
-            let pi_bin = pi_dir.join("pi");
+            let pi_bin = pi_dir.join(PI_BINARY_NAME);
             std::env::set_var(
                 plugins::CETUS_USER_PLUGINS_ENV,
                 plugins::user_plugins_dir(&app_data_dir),
@@ -2010,7 +2015,7 @@ pub(crate) fn apply_launch_on_startup(app: &AppHandle, enabled: bool) {
 fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBuf> {
     if let Ok(p) = std::env::var("PI_INSTALL") {
         let p = PathBuf::from(p);
-        if p.join("pi").exists() {
+        if p.join(PI_BINARY_NAME).exists() {
             tracing::info!("using PI_INSTALL={}", p.display());
             // The bundled-resource overlay below never runs on this dev branch,
             // so without a sync here the install's cetus-extensions stay frozen at
@@ -2049,7 +2054,7 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
         .map_err(|e| anyhow::anyhow!("resource_dir: {e}"))?
         .join("pi-install");
 
-    if target.join("pi").exists() {
+    if target.join(PI_BINARY_NAME).exists() {
         // Always re-sync our cetus-extensions overlay so new tool files (and
         // edits to existing ones) ship without needing to wipe the install
         // tree. Without this, a stale install from before cetus-extensions/
@@ -2057,16 +2062,16 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
         if let Some(src) = dev_ext_src() {
             sync_cetus_extensions_from(&src, &target)?;
             tracing::info!("synced cetus-extensions from {}", src.display());
-        } else if resource.join("pi").exists() {
+        } else if resource.join(PI_BINARY_NAME).exists() {
             sync_cetus_extensions(&resource, &target)?;
         }
         if let Some(src) = plugins::dev_plugins_src() {
             sync_cetus_plugins_from(&src, &target)?;
             tracing::info!("synced cetus-plugins from {}", src.display());
-        } else if resource.join("pi").exists() {
+        } else if resource.join(PI_BINARY_NAME).exists() {
             sync_cetus_plugins(&resource, &target)?;
         }
-        if resource.join("pi").exists() {
+        if resource.join(PI_BINARY_NAME).exists() {
             // The tree's node_modules is copied only on first install, so a
             // bundled pi-ai hotfix (the transform-messages content guard, see
             // scripts/build-pi-sidecar.sh) would otherwise never reach an
@@ -2083,7 +2088,7 @@ fn resolve_pi_install(app: &AppHandle, app_data: &Path) -> anyhow::Result<PathBu
         return Ok(target);
     }
 
-    if !resource.join("pi").exists() {
+    if !resource.join(PI_BINARY_NAME).exists() {
         anyhow::bail!(
             "pi-install missing from resources at {}; run scripts/build-pi-sidecar.sh",
             resource.display()
