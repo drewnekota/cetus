@@ -41,3 +41,25 @@ export function CodexIcon({ className }: { className?: string }) {
     />
   );
 }
+
+export function OpenCodeIcon({ className }: { className?: string }) {
+  return (
+    <BrandImage
+      src="/brands/opencode.svg"
+      label="OpenCode"
+      className={className}
+    />
+  );
+}
+
+export function GrokIcon({ className }: { className?: string }) {
+  return (
+    <BrandImage src="/brands/grok.svg" label="Grok" className={className} />
+  );
+}
+
+export function KimiIcon({ className }: { className?: string }) {
+  return (
+    <BrandImage src="/brands/kimi.svg" label="Kimi" className={className} />
+  );
+}

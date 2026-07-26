@@ -13,6 +13,7 @@ import { markdownComponents, markdownUrlTransform } from "@/lib/markdown";
 import {
   ClaudeCodeIcon,
   CodexIcon,
+  OpenCodeIcon,
   type AppIcon,
 } from "@/components/brand-icons";
 import {
@@ -4960,7 +4961,7 @@ const MCP_IMPORT_SOURCES: {
   { id: "vscode", label: "VS Code" },
   { id: "windsurf", label: "Windsurf" },
   { id: "codex", label: "Codex", icon: CodexIcon },
-  { id: "opencode", label: "opencode" },
+  { id: "opencode", label: "opencode", icon: OpenCodeIcon },
 ];
 
 /**

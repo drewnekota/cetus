@@ -1,20 +1,15 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Bot,
-  Braces,
-  Check,
-  ChevronDown,
-  Moon,
-  Orbit,
-  Settings2,
-} from "lucide-react";
+import { Bot, Check, ChevronDown, Settings2 } from "lucide-react";
 import { api } from "@/lib/tauri";
 import { useChatStore } from "@/lib/chat-store";
 import type { BackendId, CliDefaults, CliRateLimitInfo } from "@/lib/types";
 import {
   ClaudeCodeIcon,
   CodexIcon,
+  GrokIcon,
+  KimiIcon,
+  OpenCodeIcon,
   type AppIcon,
 } from "@/components/brand-icons";
 import {
@@ -54,9 +49,9 @@ export const BACKENDS: { id: BackendId; label: string; icon: AppIcon }[] = [
   { id: "pi", label: "Cetus", icon: Bot },
   { id: "claude-code", label: "Claude Code", icon: ClaudeCodeIcon },
   { id: "codex", label: "Codex", icon: CodexIcon },
-  { id: "opencode", label: "OpenCode", icon: Braces },
-  { id: "grok", label: "Grok Build", icon: Orbit },
-  { id: "kimi", label: "Kimi CLI", icon: Moon },
+  { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
+  { id: "grok", label: "Grok Build", icon: GrokIcon },
+  { id: "kimi", label: "Kimi CLI", icon: KimiIcon },
 ];
 
 export function useRuntimeCatalog() {
