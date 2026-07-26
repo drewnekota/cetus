@@ -159,12 +159,22 @@ import {
   usePermissionStatuses,
 } from "./permission-row";
 
-function updateDownloadPercent(progress: UpdateDownloadProgress | null) {
+export function updateDownloadPercent(progress: UpdateDownloadProgress | null) {
   if (!progress?.total || progress.total <= 0) return null;
   return Math.max(
     0,
     Math.min(100, Math.round((progress.downloaded / progress.total) * 100)),
   );
+}
+
+/** "12.4 MB / 60.0 MB" — a 60 MB package on a slow link sits on the same
+ *  percentage for minutes, and the byte counter is what shows it's alive. */
+function updateDownloadSize(progress: UpdateDownloadProgress | null) {
+  if (!progress) return null;
+  const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+  return progress.total && progress.total > 0
+    ? `${mb(progress.downloaded)} / ${mb(progress.total)} MB`
+    : `${mb(progress.downloaded)} MB`;
 }
 
 function UpdateProgressBar({ progress }: { progress: UpdateDownloadProgress | null }) {
@@ -801,6 +811,18 @@ function GeneralSection() {
         if (version) setCheckState("ready");
       })
       .catch(() => {});
+    // This section unmounts whenever another settings section is open, so a
+    // download started here (or by a background check) is usually already
+    // running by the time we come back. Re-attach to it instead of resetting to
+    // an idle "Check for updates".
+    api
+      .updateDownloadProgress()
+      .then((progress) => {
+        if (!progress || progress.finished || progress.failed) return;
+        setDownloadProgress(progress);
+        setCheckState("installing");
+      })
+      .catch(() => {});
     import("@tauri-apps/api/app")
       .then(({ getVersion }) => getVersion())
       .then(setAppVersion)
@@ -812,8 +834,17 @@ function GeneralSection() {
     let cancelled = false;
     onUpdateDownloadProgress((progress) => {
       setDownloadProgress(progress);
+      if (progress.failed) {
+        setDownloadProgress(null);
+        setCheckState("failed");
+        return;
+      }
       if (progress.finished) {
+        setCheckState("ready");
         setTimeout(() => setDownloadProgress(null), 800);
+      } else {
+        // A background check can start a download while this panel is open.
+        setCheckState("installing");
       }
     }).then((u) => {
       if (cancelled) u();
@@ -863,7 +894,13 @@ function GeneralSection() {
     setCheckState("installing");
     setDownloadProgress(null);
     try {
-      await api.installUpdate();
+      const staged = await api.installUpdate();
+      if (!staged) {
+        // A download was already in flight (background check, or this panel
+        // before it was unmounted). It keeps running and reports through the
+        // progress / update-ready events — don't claim it's done.
+        return;
+      }
       setPending(null);
       setDownloadProgress(null);
       // Swap is on disk. Surface a Restart button so the user can apply it now
@@ -880,6 +917,7 @@ function GeneralSection() {
   }
 
   const downloadPercent = updateDownloadPercent(downloadProgress);
+  const downloadSize = updateDownloadSize(downloadProgress);
 
   return (
     <section>
@@ -952,9 +990,13 @@ function GeneralSection() {
                 {checkState === "checking"
                   ? t("update.check.checking")
                   : checkState === "installing"
-                    ? downloadPercent == null
-                      ? t("update.installing")
-                      : `${t("update.installing")} ${downloadPercent}%`
+                    ? [
+                        t("update.installing"),
+                        downloadPercent == null ? null : `${downloadPercent}%`,
+                        downloadSize,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")
                     : checkState === "ready"
                       ? t("update.installed")
                       : checkState === "upToDate"

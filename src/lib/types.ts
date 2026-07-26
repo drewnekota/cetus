@@ -106,7 +106,12 @@ export interface UpdateMeta {
 export interface UpdateDownloadProgress {
   downloaded: number;
   total?: number | null;
+  /** Download completed and the swap is staged. */
   finished: boolean;
+  /** Download ended without staging anything. */
+  failed: boolean;
+  /** Version being fetched — the download outlives the surface that started it. */
+  version?: string | null;
 }
 
 /** Bare base64 screen capture (no `data:` prefix), as pi-ai ImageContent. */

@@ -89,6 +89,7 @@ import {
   type PiMessage,
   type QuickLaunchPayload,
   type BackendId,
+  type UpdateDownloadProgress,
   backendSupportsSteer,
 } from "@/lib/types";
 import { OPEN_RUNTIME_SETTINGS_EVENT } from "@/lib/runtime-settings";
@@ -2377,8 +2378,14 @@ export default function Home() {
                   description: percent == null ? undefined : `${percent}%`,
                 });
               });
-              await api.installUpdate();
-              toast.success(tt("settings", "update.installed"), { id });
+              const staged = await api.installUpdate();
+              if (staged) {
+                toast.success(tt("settings", "update.installed"), { id });
+              } else {
+                // A download was already running; it keeps going and the
+                // sidebar row carries its progress from here.
+                toast.dismiss(id);
+              }
             } catch {
               toast.error(tt("settings", "update.failed"), { id });
             } finally {
@@ -2434,6 +2441,54 @@ export default function Home() {
   }, []);
   const onRestartToUpdate = useCallback(() => {
     api.relaunchApp().catch(console.error);
+  }, []);
+
+  // An update download runs in the backend and outlives whatever surface
+  // started it — Settings unmounts as soon as another section is opened, and a
+  // background check can start one with no surface at all. Track it here so the
+  // sidebar can show it from anywhere in the app; on a slow link a 60 MB
+  // package takes a long while, and a percentage that disappears when you
+  // navigate away reads as a download that died.
+  const [updateDownloadPercent, setUpdateDownloadPercent] = useState<
+    number | null
+  >(null);
+  const [updateDownloading, setUpdateDownloading] = useState(false);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    const apply = (progress: UpdateDownloadProgress | null) => {
+      if (!progress || progress.finished || progress.failed) {
+        setUpdateDownloading(false);
+        setUpdateDownloadPercent(null);
+        return;
+      }
+      setUpdateDownloading(true);
+      setUpdateDownloadPercent(
+        progress.total && progress.total > 0
+          ? Math.max(
+              0,
+              Math.min(
+                100,
+                Math.round((progress.downloaded / progress.total) * 100),
+              ),
+            )
+          : null,
+      );
+    };
+    api
+      .updateDownloadProgress()
+      .then((progress) => {
+        if (!cancelled) apply(progress);
+      })
+      .catch(() => {});
+    onUpdateDownloadProgress(apply).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   const openSettings = useCallback(() => setSettingsOpen(true), []);
@@ -3448,6 +3503,8 @@ export default function Home() {
         onArchive={onArchive}
         onOpenSettings={openSettings}
         updateReadyVersion={updateReadyVersion}
+        updateDownloading={updateDownloading}
+        updateDownloadPercent={updateDownloadPercent}
         onRestartToUpdate={onRestartToUpdate}
       />
       {/* Opaque card, no backdrop-filter: the shell root paints solid bg-sidebar,

@@ -11,7 +11,12 @@ use crate::quick;
 use crate::AppState;
 use serde::Serialize;
 #[cfg(not(debug_assertions))]
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
+#[cfg(not(debug_assertions))]
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 #[cfg(not(debug_assertions))]
 use tauri::Manager;
@@ -27,6 +32,26 @@ const LAST_CHECK_KEY: &str = "updater_last_check_secs";
 const FOCUS_CHECK_MIN_INTERVAL: Duration = Duration::from_secs(15 * 60);
 #[cfg(not(debug_assertions))]
 const PERIODIC_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
+/// Progress is forwarded to the webview at most this often. The package is ~60 MB
+/// and arrives in thousands of chunks; emitting one IPC message per chunk floods
+/// the main thread badly enough that the percentage the user sees lags minutes
+/// behind the socket — which reads as "stuck".
+#[cfg(not(debug_assertions))]
+const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(200);
+
+/// One download at a time, process-wide.
+///
+/// The startup check, the on-focus check, the hourly check and the Settings
+/// button all funnel through `download_update`. On a slow link a download takes
+/// longer than those intervals, so without this guard the next check restarts it
+/// from zero while the first is still running: N downloads then split the same
+/// bandwidth and none of them ever finishes.
+#[cfg(not(debug_assertions))]
+static DOWNLOADING: AtomicBool = AtomicBool::new(false);
+/// Last progress reported by the in-flight download, so a UI that mounts (or
+/// remounts) mid-download can pick it up instead of showing a fresh idle state.
+#[cfg(not(debug_assertions))]
+static PROGRESS: Mutex<Option<UpdateDownloadProgress>> = Mutex::new(None);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,7 +70,40 @@ pub struct UpdateMeta {
 pub struct UpdateDownloadProgress {
     pub downloaded: u64,
     pub total: Option<u64>,
+    /// The download completed and the swap is staged.
     pub finished: bool,
+    /// The download ended without staging anything (network, signature, install).
+    pub failed: bool,
+    /// Version being fetched, for UI that outlives the surface that started it.
+    pub version: Option<String>,
+}
+
+/// Held for the lifetime of a download; releases `DOWNLOADING` on every exit
+/// path, including the error and cancellation ones.
+#[cfg(not(debug_assertions))]
+struct DownloadGuard;
+
+#[cfg(not(debug_assertions))]
+impl DownloadGuard {
+    /// `None` when another download already holds the slot.
+    fn acquire() -> Option<Self> {
+        (!DOWNLOADING.swap(true, Ordering::SeqCst)).then_some(Self)
+    }
+}
+
+#[cfg(not(debug_assertions))]
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        store_progress(None);
+        DOWNLOADING.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn store_progress(progress: Option<UpdateDownloadProgress>) {
+    if let Ok(mut slot) = PROGRESS.lock() {
+        *slot = progress;
+    }
 }
 
 #[cfg(not(debug_assertions))]
@@ -104,6 +162,108 @@ fn clear_ready_if_applied(app: &AppHandle) {
     }
 }
 
+/// Download the update, verify it and stage the swap, reporting throttled
+/// progress to the main window the whole way.
+///
+/// `Ok(false)` means another download is already in flight and this call was a
+/// no-op — the running one emits progress and `update-ready` for every caller,
+/// so a second click (or a background check landing mid-download) just attaches
+/// to it instead of starting a competing transfer.
+#[cfg(not(debug_assertions))]
+async fn download_update(
+    app: &AppHandle,
+    update: &tauri_plugin_updater::Update,
+) -> Result<bool, String> {
+    use tauri::Emitter;
+
+    let Some(_guard) = DownloadGuard::acquire() else {
+        tracing::info!(
+            "cetus: update download already running — attaching instead of restarting it"
+        );
+        return Ok(false);
+    };
+
+    let version = update.version.clone();
+    let started = UpdateDownloadProgress {
+        downloaded: 0,
+        total: None,
+        finished: false,
+        failed: false,
+        version: Some(version.clone()),
+    };
+    store_progress(Some(started.clone()));
+    let _ = app.emit_to("main", "update-download-progress", started);
+
+    let mut downloaded: u64 = 0;
+    let mut total: Option<u64> = None;
+    let mut last_emit: Option<Instant> = None;
+    let outcome = update
+        .download_and_install(
+            |chunk_len, content_len| {
+                downloaded += chunk_len as u64;
+                if content_len.is_some() {
+                    total = content_len;
+                }
+                let snapshot = UpdateDownloadProgress {
+                    downloaded,
+                    total,
+                    finished: false,
+                    failed: false,
+                    version: Some(version.clone()),
+                };
+                // Always record — a Settings panel that mounts between emits
+                // still reads a current number.
+                store_progress(Some(snapshot.clone()));
+                if last_emit.is_none_or(|at| at.elapsed() >= PROGRESS_EMIT_INTERVAL) {
+                    last_emit = Some(Instant::now());
+                    let _ = app.emit_to("main", "update-download-progress", snapshot);
+                }
+            },
+            || {},
+        )
+        .await;
+
+    if let Err(e) = outcome {
+        let _ = app.emit_to(
+            "main",
+            "update-download-progress",
+            UpdateDownloadProgress {
+                downloaded,
+                total,
+                finished: false,
+                failed: true,
+                version: Some(version.clone()),
+            },
+        );
+        return Err(e.to_string());
+    }
+
+    remember_ready(app, &version);
+    let _ = app.emit_to(
+        "main",
+        "update-download-progress",
+        UpdateDownloadProgress {
+            downloaded,
+            total,
+            finished: true,
+            failed: false,
+            version: Some(version.clone()),
+        },
+    );
+    // Surface a persistent "Restart to update" affordance in the sidebar so the
+    // user can apply it now instead of waiting for a stray relaunch.
+    let _ = app.emit_to(
+        "main",
+        "update-ready",
+        UpdateMeta {
+            version: update.version.clone(),
+            current_version: update.current_version.clone(),
+            notes: update.body.clone(),
+        },
+    );
+    Ok(true)
+}
+
 /// Background check at launch.
 ///
 /// - auto on  → download + swap silently (applies on next launch, no nag).
@@ -159,22 +319,12 @@ async fn check_once(app: AppHandle, auto: bool) {
     if auto {
         let v = update.version.clone();
         tracing::info!("cetus: update {v} available — installing in background");
-        match update.download_and_install(|_, _| {}, || {}).await {
-            Ok(_) => {
+        match download_update(&app, &update).await {
+            Ok(true) => {
                 tracing::info!("cetus: update {v} installed; applies on next launch");
-                remember_ready(&app, &v);
-                // Surface a persistent "Restart to update" affordance in the
-                // sidebar so the user can apply it now instead of waiting for a
-                // stray relaunch.
-                let _ = app.emit_to(
-                    "main",
-                    "update-ready",
-                    UpdateMeta {
-                        version: update.version.clone(),
-                        current_version: update.current_version.clone(),
-                        notes: update.body.clone(),
-                    },
-                );
+            }
+            Ok(false) => {
+                tracing::debug!("cetus: update {v} already downloading");
             }
             Err(e) => {
                 tracing::warn!("cetus: update install failed: {e}");
@@ -278,8 +428,12 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateMeta>, Stri
 
 /// Download + install the available update (applies on next launch). Re-checks
 /// internally so it's safe to call from either the toast or the button.
+///
+/// Resolves to `false` when a download (a background one, or one started from
+/// another surface) was already running: nothing new was started and the caller
+/// should keep showing progress until `update-ready` arrives.
 #[tauri::command]
-pub async fn install_update(app: AppHandle) -> Result<(), String> {
+pub async fn install_update(app: AppHandle) -> Result<bool, String> {
     #[cfg(debug_assertions)]
     {
         let _ = app;
@@ -287,79 +441,40 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     }
     #[cfg(not(debug_assertions))]
     {
-        use std::sync::{
-            atomic::{AtomicU64, Ordering},
-            Arc,
-        };
-        use tauri::Emitter;
         use tauri_plugin_updater::UpdaterExt;
 
+        // A download already in flight has the package (and its version) in
+        // hand; re-checking first would just add a network round trip before
+        // discovering that.
+        if DOWNLOADING.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
         let updater = app.updater().map_err(|e| e.to_string())?;
         let update = updater
             .check()
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "no update available".to_string())?;
-        let downloaded = Arc::new(AtomicU64::new(0));
-        let total = Arc::new(AtomicU64::new(0));
-        let progress_app = app.clone();
-        let progress_downloaded = Arc::clone(&downloaded);
-        let progress_total = Arc::clone(&total);
-        let _ = app.emit_to(
-            "main",
-            "update-download-progress",
-            UpdateDownloadProgress {
-                downloaded: 0,
-                total: None,
-                finished: false,
-            },
-        );
-        update
-            .download_and_install(
-                move |chunk_len, content_len| {
-                    let next = progress_downloaded.fetch_add(chunk_len as u64, Ordering::Relaxed)
-                        + chunk_len as u64;
-                    if let Some(content_len) = content_len {
-                        progress_total.store(content_len, Ordering::Relaxed);
-                    }
-                    let known_total = progress_total.load(Ordering::Relaxed);
-                    let _ = progress_app.emit_to(
-                        "main",
-                        "update-download-progress",
-                        UpdateDownloadProgress {
-                            downloaded: next,
-                            total: (known_total > 0).then_some(known_total),
-                            finished: false,
-                        },
-                    );
-                },
-                || {},
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        remember_ready(&app, &update.version);
-        let total_value = total.load(Ordering::Relaxed);
-        let _ = app.emit_to(
-            "main",
-            "update-download-progress",
-            UpdateDownloadProgress {
-                downloaded: downloaded.load(Ordering::Relaxed),
-                total: (total_value > 0).then_some(total_value),
-                finished: true,
-            },
-        );
-        // Same "Restart to update" signal as the silent auto path, so a manual
-        // install from Settings / the toast also lights up the sidebar button.
-        let _ = app.emit_to(
-            "main",
-            "update-ready",
-            UpdateMeta {
-                version: update.version.clone(),
-                current_version: update.current_version.clone(),
-                notes: update.body.clone(),
-            },
-        );
-        Ok(())
+        download_update(&app, &update).await
+    }
+}
+
+/// Progress of the download currently in flight, if any. Lets a surface that
+/// mounts mid-download (the Settings panel is unmounted whenever another section
+/// is open) pick the transfer back up instead of showing an idle state.
+#[tauri::command]
+pub async fn update_download_progress(
+    app: AppHandle,
+) -> Result<Option<UpdateDownloadProgress>, String> {
+    #[cfg(debug_assertions)]
+    {
+        let _ = app;
+        return Ok(None);
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = app;
+        Ok(PROGRESS.lock().ok().and_then(|slot| slot.clone()))
     }
 }
 

@@ -502,8 +502,14 @@ export const api = {
   /** Manually check for an update. Resolves to its metadata, or null if the
    *  app is up to date (always null in dev builds). */
   checkForUpdate: () => invoke<UpdateMeta | null>("check_for_update"),
-  /** Download + install the available update (applied on next launch). */
-  installUpdate: () => invoke<void>("install_update"),
+  /** Download + install the available update (applied on next launch).
+   *  Resolves false when a download was already running — nothing new was
+   *  started and `update-ready` still reports the running one's completion. */
+  installUpdate: () => invoke<boolean>("install_update"),
+  /** Progress of the in-flight update download, for surfaces that mount while
+   *  one is already running. Null when nothing is downloading. */
+  updateDownloadProgress: () =>
+    invoke<UpdateDownloadProgress | null>("update_download_progress"),
   /** Remember a version dismissed from the passive toast (no re-prompt until a
    *  newer one ships). */
   ignoreUpdateVersion: (version: string) =>
