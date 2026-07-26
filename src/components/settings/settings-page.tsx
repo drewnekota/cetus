@@ -530,7 +530,14 @@ function RemoteSection() {
         {remote?.enabled ? (
           <div className="border-t border-border bg-muted/15 p-4">
             <div className="grid gap-5 sm:grid-cols-[180px_1fr]">
-              <div className="overflow-hidden rounded-xl bg-white p-3" dangerouslySetInnerHTML={{ __html: remote.pairingQrSvg }} />
+              {/* The generated SVG carries its own intrinsic size (≥256px), which
+                  overflows this 180px column and used to get cropped by the
+                  clip. Scale it to the column instead — the viewBox keeps it
+                  square — and hug the top rather than stretching to the row. */}
+              <div
+                className="w-full max-w-[180px] self-start overflow-hidden rounded-xl bg-white p-3 [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
+                dangerouslySetInnerHTML={{ __html: remote.pairingQrSvg }}
+              />
               <div className="min-w-0 space-y-4">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-medium"><span className={cn("size-2 rounded-full", remote.tailscaleReady ? "bg-emerald-500" : "bg-amber-500")} />{remote.tailscaleReady ? t("remote.ready") : t("remote.localOnly")}</div>
