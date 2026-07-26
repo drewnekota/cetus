@@ -712,6 +712,7 @@ pub async fn archive_conversation(
         state.abort_cli_turn(&id);
         state.kill_claude_session(&id);
         state.kill_codex_session(&id);
+        state.kill_acp_session(&id);
     }
     // Codex persists app-server threads in its own session inventory. Mirror
     // Cetus's state after stopping the live session so Codex App/CLI sees the
@@ -753,6 +754,7 @@ pub async fn delete_conversation(state: State<'_, AppState>, id: String) -> CmdR
     state.abort_cli_turn(&id);
     state.kill_claude_session(&id);
     state.kill_codex_session(&id);
+    state.kill_acp_session(&id);
     state.remove_conv_agent(&id);
     // CLI-backend leftovers: the git worktree (its branch survives so finished
     // work isn't lost), the persisted transcript, and on-disk attachments.
@@ -960,8 +962,8 @@ pub async fn get_conversation(
 }
 
 /// Switch which coding-agent backend serves a conversation:
-/// "pi" (built-in) | "claude-code" | "codex". The next `send_prompt` routes
-/// accordingly. Idempotent.
+/// "pi" (built-in), a native CLI adapter, or a native ACP runtime. The next
+/// `send_prompt` routes accordingly. Idempotent.
 ///
 /// Swaps the per-runtime resume tokens (see [`crate::store::Store::switch_backend`])
 /// and drops an audit marker into the CLI transcript so the switch is visible
@@ -974,6 +976,21 @@ pub async fn set_conversation_backend(
     id: String,
     backend: String,
 ) -> CmdResult<()> {
+    if backend != "pi" && cetus_bridge::cli_agent::CliBackend::from_id(&backend).is_none() {
+        return Err(format!("unknown runtime: {backend}"));
+    }
+    let cli_settings = crate::cli_backend::load_settings(&state.store);
+    let enabled = match backend.as_str() {
+        "claude-code" => cli_settings.claude_code_enabled,
+        "codex" => cli_settings.codex_enabled,
+        "opencode" => cli_settings.opencode_enabled,
+        "grok" => cli_settings.grok_enabled,
+        "kimi" => cli_settings.kimi_enabled,
+        _ => true,
+    };
+    if !enabled {
+        return Err(format!("{backend} is disabled in Settings"));
+    }
     if state.cli_turn_active(&id) {
         return Err(
             "A turn is still running — stop it or let it finish before switching runtime."
@@ -988,6 +1005,7 @@ pub async fn set_conversation_backend(
     // the old runtime. Switching runtime is an explicit lifecycle boundary.
     state.kill_claude_session(&id);
     state.kill_codex_session(&id);
+    state.kill_acp_session(&id);
     // Audit marker, but only when there's already a transcript: fresh
     // conversations get their backend set at creation (pending picker choice)
     // and must not open with a stray "Cetus → Codex" divider.
@@ -1011,6 +1029,9 @@ fn backend_label(id: &str) -> &str {
         "pi" => "Cetus",
         "claude-code" => "Claude Code",
         "codex" => "Codex",
+        "opencode" => "OpenCode",
+        "grok" => "Grok Build",
+        "kimi" => "Kimi CLI",
         other => other,
     }
 }
@@ -1033,6 +1054,7 @@ pub async fn set_conversation_cli_model(
     // idle process so the new choice applies on the next turn.
     state.kill_claude_session(&id);
     state.kill_codex_session(&id);
+    state.kill_acp_session(&id);
     Ok(())
 }
 
@@ -1064,6 +1086,7 @@ pub async fn retry_last_turn(state: State<'_, AppState>, id: String) -> CmdResul
     if cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend).is_some() {
         state.kill_claude_session(&id);
         state.kill_codex_session(&id);
+        state.kill_acp_session(&id);
         let (row_id, message, resume_before) = state
             .store
             .last_cli_user_message(&id)
@@ -1874,6 +1897,7 @@ pub async fn set_workspace(
     state.kill_pi(&id).await;
     state.kill_claude_session(&id);
     state.kill_codex_session(&id);
+    state.kill_acp_session(&id);
     Ok(conv)
 }
 

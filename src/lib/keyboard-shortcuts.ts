@@ -15,9 +15,12 @@ export type ShortcutId =
   | "switchPreviousView"
   | "navigateBack"
   | "navigateForward"
-  | "runtimeCetus"
-  | "runtimeClaudeCode"
-  | "runtimeCodex"
+  | "runtimeSlot1"
+  | "runtimeSlot2"
+  | "runtimeSlot3"
+  | "runtimeSlot4"
+  | "runtimeSlot5"
+  | "runtimeSlot6"
   | "toggleWorkspace"
   | "toggleTerminal"
   | "openBrowserTab"
@@ -44,6 +47,26 @@ export type ShortcutMap = Record<ShortcutId, string>;
 
 export const KEYBOARD_SHORTCUTS_STORAGE_KEY = "cetus:keyboardShortcuts";
 export const KEYBOARD_SHORTCUTS_EVENT = "cetus-keyboard-shortcuts-changed";
+
+/** ⌃1…⌃6 are positional: they select the 1st…6th *enabled* runtime in the
+ *  order set in Settings › Runtimes, rather than being pinned to one runtime.
+ *  Length matches the number of runtimes Cetus ships. */
+export const RUNTIME_SLOT_SHORTCUT_IDS = [
+  "runtimeSlot1",
+  "runtimeSlot2",
+  "runtimeSlot3",
+  "runtimeSlot4",
+  "runtimeSlot5",
+  "runtimeSlot6",
+] as const satisfies readonly ShortcutId[];
+
+/** Bindings replaced by the positional slots in 0.3.41. Carried over by index
+ *  so a user who rebound "Runtime: Codex" keeps that key on slot 3. */
+const LEGACY_RUNTIME_SHORTCUT_IDS = [
+  "runtimeCetus",
+  "runtimeClaudeCode",
+  "runtimeCodex",
+] as const;
 
 export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
@@ -121,27 +144,13 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     defaultAccelerator: "Cmd+BracketRight",
     windowsAccelerator: "Alt+ArrowRight",
   },
-  {
-    id: "runtimeCetus",
-    label: "Runtime: Cetus",
-    description: "Switch the current chat to the Cetus runtime",
-    defaultAccelerator: "Ctrl+1",
-    windowsAccelerator: "Alt+1",
-  },
-  {
-    id: "runtimeClaudeCode",
-    label: "Runtime: Claude Code",
-    description: "Switch the current chat to the Claude Code runtime",
-    defaultAccelerator: "Ctrl+2",
-    windowsAccelerator: "Alt+2",
-  },
-  {
-    id: "runtimeCodex",
-    label: "Runtime: Codex",
-    description: "Switch the current chat to the Codex runtime",
-    defaultAccelerator: "Ctrl+3",
-    windowsAccelerator: "Alt+3",
-  },
+  ...RUNTIME_SLOT_SHORTCUT_IDS.map((id, index) => ({
+    id,
+    label: `Runtime ${index + 1}`,
+    description: `Switch the current chat to runtime ${index + 1} in Settings › Runtimes`,
+    defaultAccelerator: `Ctrl+${index + 1}`,
+    windowsAccelerator: `Alt+${index + 1}`,
+  })),
   {
     id: "toggleWorkspace",
     label: "Toggle workspace",
@@ -323,8 +332,14 @@ export function mergeStoredShortcutMap(
 ): ShortcutMap {
   const defaults = defaultShortcutMap(platform);
   const next = { ...defaults };
+  const legacy = parsed as Record<string, unknown>;
   for (const def of SHORTCUT_DEFINITIONS) {
-    const value = parsed[def.id];
+    const slot = RUNTIME_SLOT_SHORTCUT_IDS.indexOf(
+      def.id as (typeof RUNTIME_SLOT_SHORTCUT_IDS)[number],
+    );
+    const value =
+      parsed[def.id] ??
+      (slot >= 0 ? legacy[LEGACY_RUNTIME_SHORTCUT_IDS[slot] ?? ""] : undefined);
     if (typeof value !== "string") continue;
     const normalized = normalizeAccelerator(value);
     // Releases before 0.3.40 wrote the macOS defaults verbatim on Windows.

@@ -16,6 +16,7 @@ export const settings = {
     "group.app": "App",
     "group.data": "Data",
     "nav.general": "General",
+    "nav.runtimes": "Runtimes",
     "nav.remote": "Remote access",
     "nav.api-keys": "API Keys",
     "nav.memory": "Memory",
@@ -98,6 +99,20 @@ export const settings = {
     "remote.rotate": "Revoke phones",
     "remote.security": "Only conversation features are exposed. API keys, terminal control, local file browsing and Cetus settings stay on this Mac.",
     "general.description": "Language and app-level basics.",
+    "runtimes.title": "Runtimes",
+    "runtimes.description":
+      "Choose which coding agents appear in runtime pickers and arrange them in your preferred order. The order also sets their keyboard shortcuts: Cetus keeps the first, the rest follow from the second down.",
+    "runtimes.builtIn": "Always available",
+    "runtimes.installed": "Installed",
+    "runtimes.notInstalled": "Not installed",
+    "runtimes.moveUp": "Move up",
+    "runtimes.shortcutHint":
+      "Keyboard shortcut for this position — reordering moves it",
+    "runtimes.moveDown": "Move down",
+    "runtimes.enabled": "Enable {runtime}",
+    "runtimes.behavior.title": "Runtime behavior",
+    "runtimes.behavior.description":
+      "Shared execution settings for external CLI and ACP runtimes.",
     "general.autoSortConversations.label": "Move active chats to the top",
     "general.autoSortConversations.description":
       "Reorder chats when they receive new messages. Turn this off to keep chats in creation order, with newly created chats at the top.",
@@ -106,7 +121,7 @@ export const settings = {
       "Check for and install updates in the background. Applied the next time you open Cetus.",
     "general.cliAgents.label": "CLI agents: skip permission prompts",
     "general.cliAgents.description":
-      "Let Claude Code / Codex run without approval prompts. Off = every tool call asks first — approval cards appear in the chat, like the native apps.",
+      "Let external runtimes run without approval prompts. Off = tool calls ask first through approval cards in the chat.",
     "general.cliWorktree.label": "CLI agents: isolate in git worktrees",
     "general.cliWorktree.description":
       "Run each conversation on its own branch in a separate git worktree, so agents never touch your checked-out files. Off = agents edit the workspace directly, like running the CLI in a terminal. Conversations that already have a worktree keep it.",
@@ -235,6 +250,11 @@ export const settings = {
     "keyboard.clear": "Clear shortcut",
     "keyboard.reset": "Reset to default",
     "keyboard.conflict": "Also assigned to {commands}.",
+    "keyboard.runtimeSlot.current": "Currently {runtime}.",
+    "keyboard.runtimeSlot.pinned":
+      "Always {runtime} — the built-in runtime keeps the first slot.",
+    "keyboard.runtimeSlot.empty":
+      "Empty — enable more runtimes in Settings › Runtimes.",
 
     // --- Voice dictation --------------------------------------------------
     "voice.title": "Voice dictation",
@@ -601,6 +621,7 @@ export const settings = {
     "group.app": "应用",
     "group.data": "数据",
     "nav.general": "通用",
+    "nav.runtimes": "Runtime",
     "nav.remote": "远程访问",
     "general.title": "通用",
     "remote.title": "远程访问",
@@ -614,6 +635,19 @@ export const settings = {
     "remote.rotate": "撤销手机访问",
     "remote.security": "远程端只开放对话功能；API Key、终端控制、本地文件浏览和 Cetus 设置仍只保留在这台 Mac 上。",
     "general.description": "语言和应用级基础设置。",
+    "runtimes.title": "Runtime",
+    "runtimes.description":
+      "选择哪些编程智能体显示在 Runtime 选择器中，并按你的偏好调整顺序。顺序同时决定快捷键：Cetus 固定占第一个，其余从第二个开始依次排下来。",
+    "runtimes.builtIn": "始终可用",
+    "runtimes.installed": "已安装",
+    "runtimes.notInstalled": "未安装",
+    "runtimes.moveUp": "上移",
+    "runtimes.shortcutHint": "该位置的快捷键——调整顺序会跟着变",
+    "runtimes.moveDown": "下移",
+    "runtimes.enabled": "启用 {runtime}",
+    "runtimes.behavior.title": "Runtime 行为",
+    "runtimes.behavior.description":
+      "适用于外部 CLI 与 ACP Runtime 的共享执行设置。",
     "general.autoSortConversations.label": "有新消息时将对话移到顶部",
     "general.autoSortConversations.description":
       "对话收到新消息时自动重新排序。关闭后按创建顺序固定排列，新建的对话位于顶部。",
@@ -621,7 +655,7 @@ export const settings = {
     "general.autoUpdate.description": "在后台检查并安装更新，下次打开 Cetus 时生效。",
     "general.cliAgents.label": "CLI 智能体：跳过权限确认",
     "general.cliAgents.description":
-      "让 Claude Code / Codex 无需逐项确认即可执行。关闭后每次工具调用都会先询问——审批卡片会出现在聊天里，与原生应用一致。",
+      "允许外部 Runtime 跳过逐项确认。关闭后工具调用会通过聊天中的审批卡片先询问。",
     "general.cliWorktree.label": "CLI 智能体：隔离在 git worktree 中",
     "general.cliWorktree.description":
       "每个会话在独立的 git worktree 和分支上运行，智能体不会触碰你当前检出的文件。关闭时智能体直接修改工作区，就像在终端里运行 CLI 一样。已有 worktree 的会话会继续使用原有 worktree。",
@@ -803,6 +837,9 @@ export const settings = {
     "keyboard.clear": "清除快捷键",
     "keyboard.reset": "恢复默认",
     "keyboard.conflict": "也分配给了 {commands}。",
+    "keyboard.runtimeSlot.current": "当前是 {runtime}。",
+    "keyboard.runtimeSlot.pinned": "固定为 {runtime}——内置 Runtime 始终占第一位。",
+    "keyboard.runtimeSlot.empty": "空位——可在「设置 › Runtime」中启用更多。",
 
     "voice.title": "语音听写",
     "voice.description":

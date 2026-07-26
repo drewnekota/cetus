@@ -1,6 +1,6 @@
-//! App-side plumbing for the CLI-agent backends (claude-code / codex): the
-//! persisted settings blob, per-turn image attachments, and small transcript
-//! helpers. The process orchestration itself lives in
+//! App-side plumbing for CLI-agent and native ACP backends: the persisted
+//! settings blob, per-turn image attachments, and small transcript helpers.
+//! The process orchestration itself lives in
 //! [`cetus_bridge::cli_agent`]; the command wiring in [`crate::commands`].
 
 use crate::store::{now_ms, Conversation, Store};
@@ -11,7 +11,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
@@ -32,6 +32,13 @@ pub struct CliAgentSettings {
     /// already has a worktree keeps it regardless — switching cwd mid-
     /// conversation would break the CLIs' session resume.
     pub isolate_in_worktree: bool,
+    /// Expose the built-in ACP runtime descriptors in runtime pickers.
+    pub claude_code_enabled: bool,
+    pub codex_enabled: bool,
+    pub opencode_enabled: bool,
+    pub grok_enabled: bool,
+    pub kimi_enabled: bool,
+    pub runtime_order: Vec<String>,
 }
 
 impl Default for CliAgentSettings {
@@ -39,19 +46,45 @@ impl Default for CliAgentSettings {
         Self {
             bypass_approvals: true,
             isolate_in_worktree: false,
+            claude_code_enabled: true,
+            codex_enabled: true,
+            opencode_enabled: true,
+            grok_enabled: true,
+            kimi_enabled: true,
+            runtime_order: vec![
+                "pi".into(),
+                "claude-code".into(),
+                "codex".into(),
+                "opencode".into(),
+                "grok".into(),
+                "kimi".into(),
+            ],
         }
     }
 }
 
 const SETTINGS_KEY: &str = "cli_agents";
+const RUNTIME_IDS: [&str; 6] = ["pi", "claude-code", "codex", "opencode", "grok", "kimi"];
 
 pub fn load_settings(store: &Store) -> CliAgentSettings {
-    store
+    let mut settings = store
         .get_setting(SETTINGS_KEY)
         .ok()
         .flatten()
         .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    normalize_runtime_order(&mut settings);
+    settings
+}
+
+fn normalize_runtime_order(settings: &mut CliAgentSettings) {
+    let mut normalized = Vec::with_capacity(RUNTIME_IDS.len());
+    for id in settings.runtime_order.iter().map(String::as_str).chain(RUNTIME_IDS) {
+        if RUNTIME_IDS.contains(&id) && !normalized.iter().any(|saved| saved == id) {
+            normalized.push(id.to_string());
+        }
+    }
+    settings.runtime_order = normalized;
 }
 
 pub(crate) fn save_settings(store: &Store, s: &CliAgentSettings) -> anyhow::Result<()> {
@@ -68,10 +101,14 @@ pub async fn get_cli_agent_settings(
 
 #[tauri::command]
 pub async fn set_cli_agent_settings(
+    app: AppHandle,
     state: State<'_, AppState>,
-    settings: CliAgentSettings,
+    mut settings: CliAgentSettings,
 ) -> Result<(), String> {
-    save_settings(&state.store, &settings).map_err(|e| e.to_string())
+    normalize_runtime_order(&mut settings);
+    save_settings(&state.store, &settings).map_err(|e| e.to_string())?;
+    app.emit("cli-agent-settings-changed", &settings)
+        .map_err(|e| e.to_string())
 }
 
 /// What a CLI backend actually runs when no per-conversation override is set,
@@ -131,6 +168,9 @@ pub async fn get_cli_defaults(backend: String) -> Result<CliDefaults, String> {
 pub struct CliRuntimeStatus {
     pub claude_code: bool,
     pub codex: bool,
+    pub opencode: bool,
+    pub grok: bool,
+    pub kimi: bool,
 }
 
 #[tauri::command]
@@ -138,6 +178,9 @@ pub async fn get_cli_runtime_status() -> Result<CliRuntimeStatus, String> {
     Ok(CliRuntimeStatus {
         claude_code: executable_on_path("claude"),
         codex: executable_on_path("codex"),
+        opencode: executable_on_path("opencode"),
+        grok: executable_on_path("grok"),
+        kimi: executable_on_path("kimi"),
     })
 }
 
@@ -407,6 +450,21 @@ pub async fn cli_control_respond(
     source: Option<String>,
     install_plugin_id: Option<String>,
 ) -> Result<(), String> {
+    if source.as_deref() == Some("acp") {
+        let allow = response
+            .get("behavior")
+            .and_then(Value::as_str)
+            .is_some_and(|behavior| behavior == "allow")
+            || response
+                .get("action")
+                .and_then(Value::as_str)
+                .is_some_and(|action| action == "accept");
+        return state
+            .acp_session(&id)
+            .ok_or_else(|| "ACP session is no longer running".to_string())?
+            .respond_permission(request_id, allow)
+            .map_err(|error| error.to_string());
+    }
     if source.as_deref() == Some("codex") {
         let session = state
             .codex_session(&id)
@@ -689,12 +747,32 @@ pub fn dispatch_turn(
     };
     // codex has no --append-system-prompt equivalent, so the Cetus hint rides
     // the first turn's prompt (resumed turns already have it in context).
-    if is_codex && resume_before.is_empty() {
+    if (is_codex || backend.is_acp()) && resume_before.is_empty() {
         prompt = format!(
             "<cetus-env>\n{}\n</cetus-env>\n\n{prompt}",
             crate::control::AGENT_HINT
         );
     }
+    // An ACP session id lives in the vendor process, not on disk, so a resume
+    // token can outlive the process that owned it. Agents advertising
+    // `loadSession` restore it; the rest silently start an empty session. Build
+    // the same first-turn preamble for that case and hand it to the session,
+    // which uses it only if the load really didn't happen. Cold spawn only, so
+    // the transcript read stays a once-per-process cost.
+    let acp_cold_start_preamble = (backend.is_acp()
+        && !resume_before.is_empty()
+        && state.acp_session(&conv.id).is_none())
+    .then(|| {
+        let history = state.store.list_cli_messages(&conv.id).unwrap_or_default();
+        let hint = format!(
+            "<cetus-env>\n{}\n</cetus-env>",
+            crate::control::AGENT_HINT
+        );
+        match handoff_preamble(&history) {
+            Some(handoff) => format!("{hint}\n\n{handoff}"),
+            None => hint,
+        }
+    });
 
     // Persist the user message first so the transcript replays after a
     // restart (the handoff preamble is NOT persisted — it's rebuilt from the
@@ -714,8 +792,11 @@ pub fn dispatch_turn(
         images: image_paths.clone(),
         image_blocks: image_blocks.clone(),
         // claude: the Cetus hint goes on the system prompt every turn (codex
-        // got it as a first-turn preamble above).
-        append_system_prompt: (!is_codex).then(|| crate::control::AGENT_HINT.to_string()),
+        // and the ACP runtimes got it as a first-turn preamble above).
+        append_system_prompt: (!is_codex && !backend.is_acp())
+            .then(|| crate::control::AGENT_HINT.to_string()),
+        cold_start_preamble: acp_cold_start_preamble,
+        client_version: Some(handle.package_info().version.to_string()),
     };
     let bin = backend.default_bin().to_string();
     let store = state.store.clone();
@@ -834,6 +915,7 @@ pub fn dispatch_turn(
             Ok(receiver) => receiver,
             Err(error) => {
                 state.kill_codex_session(&conv.id);
+                state.kill_acp_session(&conv.id);
                 state.end_cli_turn(&conv.id);
                 return Err(error.to_string());
             }
@@ -851,6 +933,54 @@ pub fn dispatch_turn(
             }
             let st = task_handle.state::<AppState>();
             st.end_cli_turn(&conv_id);
+        });
+        return Ok(());
+    }
+
+    if backend.is_acp() {
+        let session = match state.acp_session(&conv.id) {
+            Some(session) => session,
+            None => {
+                let session = match cetus_bridge::cli_agent::spawn_acp_session(
+                    backend,
+                    &bin,
+                    &cwd,
+                    Some(artifacts_dir(&state.app_data_dir, &conv.id)),
+                    Some(conv.id.clone()),
+                    env,
+                    opts,
+                ) {
+                    Ok(session) => session,
+                    Err(error) => {
+                        state.end_cli_turn(&conv.id);
+                        return Err(error.to_string());
+                    }
+                };
+                state.set_acp_session(conv.id.clone(), session.clone());
+                session
+            }
+        };
+        let outcome_rx = match session.start_turn(prompt, image_blocks, sink) {
+            Ok(receiver) => receiver,
+            Err(error) => {
+                state.kill_acp_session(&conv.id);
+                state.end_cli_turn(&conv.id);
+                return Err(error.to_string());
+            }
+        };
+        tokio::spawn(async move {
+            let mut outcome_rx = outcome_rx;
+            let outcome = loop {
+                tokio::select! {
+                    result = &mut outcome_rx => break result.ok(),
+                    _ = kill.notified() => session.abort(),
+                }
+            };
+            if let Some(outcome) = outcome {
+                persist_cli_outcome(&store, &conv_id, &outcome);
+            }
+            let state = task_handle.state::<AppState>();
+            state.end_cli_turn(&conv_id);
         });
         return Ok(());
     }
@@ -917,6 +1047,8 @@ pub async fn compact_codex_conversation(
                 images: Vec::new(),
                 image_blocks: Vec::new(),
                 append_system_prompt: None,
+                cold_start_preamble: None,
+                client_version: None,
             };
             let base_sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
                 std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(handle.clone()));
@@ -1141,6 +1273,44 @@ pub fn message_text(message: &Value) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn legacy_cli_settings_enable_and_order_every_runtime_by_default() {
+        let settings: CliAgentSettings = serde_json::from_value(json!({
+            "bypassApprovals": false,
+            "isolateInWorktree": true
+        }))
+        .unwrap();
+        assert!(!settings.bypass_approvals);
+        assert!(settings.isolate_in_worktree);
+        assert!(settings.claude_code_enabled);
+        assert!(settings.codex_enabled);
+        assert!(settings.opencode_enabled);
+        assert!(settings.grok_enabled);
+        assert!(settings.kimi_enabled);
+        assert_eq!(
+            settings.runtime_order,
+            ["pi", "claude-code", "codex", "opencode", "grok", "kimi"]
+        );
+    }
+
+    #[test]
+    fn runtime_order_deduplicates_discards_unknown_and_appends_new_entries() {
+        let mut settings = CliAgentSettings {
+            runtime_order: vec![
+                "kimi".into(),
+                "unknown".into(),
+                "pi".into(),
+                "kimi".into(),
+            ],
+            ..Default::default()
+        };
+        normalize_runtime_order(&mut settings);
+        assert_eq!(
+            settings.runtime_order,
+            ["kimi", "pi", "claude-code", "codex", "opencode", "grok"]
+        );
+    }
 
     #[test]
     fn claude_initialize_resolves_recommended_model_and_catalog() {

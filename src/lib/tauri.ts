@@ -220,7 +220,7 @@ export const api = {
     id: string,
     requestId: string | number,
     response: unknown,
-    source?: "claude-code" | "codex",
+    source?: "claude-code" | "codex" | "acp",
     installPluginId?: string,
   ) => invoke<void>("cli_control_respond", {
     id,
@@ -329,7 +329,13 @@ export const api = {
   ) => invoke<void>("extension_ui_respond", { conversationId, id, payload }),
   listApiKeys: () => invoke<string[]>("list_api_keys"),
   getCliRuntimeStatus: () =>
-    invoke<{ claudeCode: boolean; codex: boolean }>("get_cli_runtime_status"),
+    invoke<{
+      claudeCode: boolean;
+      codex: boolean;
+      opencode: boolean;
+      grok: boolean;
+      kimi: boolean;
+    }>("get_cli_runtime_status"),
   listApiKeysMasked: () => invoke<Record<string, string>>("list_api_keys_masked"),
   revealApiKey: (provider: string) =>
     invoke<string | null>("reveal_api_key", { provider }),
@@ -621,6 +627,16 @@ export const api = {
 
 export async function onAppEvent(handler: (e: AppEvent) => void): Promise<UnlistenFn> {
   return listen<AppEvent>("app-event", (e) => handler(e.payload));
+}
+
+/** Settings saves are broadcast by Rust to every webview so all runtime
+ * pickers hide/show ACP agents immediately. */
+export async function onCliAgentSettingsChanged(
+  handler: (settings: CliAgentSettings) => void,
+): Promise<UnlistenFn> {
+  return listen<CliAgentSettings>("cli-agent-settings-changed", (e) =>
+    handler(e.payload),
+  );
 }
 
 /** Fired (main window only) when a background check finds an update and

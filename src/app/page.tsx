@@ -91,6 +91,11 @@ import {
   type BackendId,
   backendSupportsSteer,
 } from "@/lib/types";
+import { OPEN_RUNTIME_SETTINGS_EVENT } from "@/lib/runtime-settings";
+import {
+  runtimeForShortcut,
+  useRuntimeSlots,
+} from "@/components/chat/backend-picker";
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
 import { loadBackendChoice, saveBackendChoice } from "@/lib/backend-choice";
 import { composeWithContext } from "@/lib/quick-context";
@@ -1278,6 +1283,21 @@ export default function Home() {
     return list;
   }, []);
 
+  // Read through a ref so reordering runtimes in Settings doesn't re-register
+  // the (large) global keydown handler.
+  const runtimeSlots = useRuntimeSlots();
+  const runtimeSlotsRef = useRef(runtimeSlots);
+  runtimeSlotsRef.current = runtimeSlots;
+
+  // Runtime picker footer opens the dedicated Runtime settings page. This is a
+  // DOM event because the picker and settings page live in the same renderer.
+  useEffect(() => {
+    const openRuntimeSettings = () => setSettingsOpen(true);
+    window.addEventListener(OPEN_RUNTIME_SETTINGS_EVENT, openRuntimeSettings);
+    return () =>
+      window.removeEventListener(OPEN_RUNTIME_SETTINGS_EVENT, openRuntimeSettings);
+  }, []);
+
   // Identity-stable SettingsPage props — the panel stays mounted after first
   // open and is memoized, so unstable inline callbacks here would defeat that.
   const onSettingsSaved = useCallback(() => {
@@ -1635,18 +1655,19 @@ export default function Home() {
         setSettingsOpen(true);
       } else if (
         view === "chat" &&
-        (shortcut("runtimeCetus") ||
-          shortcut("runtimeClaudeCode") ||
-          shortcut("runtimeCodex"))
+        runtimeForShortcut(e, keyboardShortcuts, runtimeSlotsRef.current) !==
+          undefined
       ) {
+        // ⌃1…⌃6 address runtimes by position, so the key set follows Settings ›
+        // Runtimes. An empty slot still swallows the key instead of falling
+        // through to whatever else is bound to it.
         e.preventDefault();
-        requestBackendSwitch(
-          shortcut("runtimeCetus")
-            ? "pi"
-            : shortcut("runtimeClaudeCode")
-              ? "claude-code"
-              : "codex",
+        const target = runtimeForShortcut(
+          e,
+          keyboardShortcuts,
+          runtimeSlotsRef.current,
         );
+        if (target) requestBackendSwitch(target);
       } else if (shortcut("switchChats")) {
         e.preventDefault();
         setView("chat");

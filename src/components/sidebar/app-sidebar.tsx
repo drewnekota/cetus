@@ -75,6 +75,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ViewToggle, type SidebarView } from "@/components/sidebar/view-toggle";
+import { BACKENDS } from "@/components/chat/backend-picker";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { shortcutDisplay, useKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
@@ -983,18 +984,24 @@ function SidebarResizeHandle({
  *  identity-stable onSelect/onArchive (see page.tsx useCallback wrappers) and
  *  the `conversation` ref is stable unless that row actually changed. */
 function normalizedBackend(conversation: Conversation): BackendId {
-  return conversation.backend === "claude-code" || conversation.backend === "codex"
-    ? conversation.backend
+  return BACKENDS.some((backend) => backend.id === conversation.backend)
+    ? (conversation.backend as BackendId)
     : "pi";
 }
 
 function runtimeLabel(backend: BackendId): string {
-  return backend === "claude-code"
-    ? "Claude Code"
-    : backend === "codex"
-      ? "Codex"
-      : "Cetus";
+  return BACKENDS.find((runtime) => runtime.id === backend)?.label ?? "Cetus";
 }
+
+/** Runtime identity dot in the row tooltip. Vendor brand colors where they have
+ *  one; Cetus itself stays neutral. */
+const RUNTIME_DOTS: Partial<Record<BackendId, string>> = {
+  "claude-code": "bg-[#d97757]",
+  codex: "bg-[#10a37f]",
+  opencode: "bg-violet-500",
+  grok: "bg-zinc-400",
+  kimi: "bg-indigo-500",
+};
 
 function displayModelName(raw: string): string {
   const claude = raw.match(/^claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d+))?/i);
@@ -1198,11 +1205,7 @@ const ConversationRow = memo(function ConversationRow({
             <span
               className={cn(
                 "size-1.5 shrink-0 rounded-full",
-                backend === "claude-code"
-                  ? "bg-[#d97757]"
-                  : backend === "codex"
-                    ? "bg-[#10a37f]"
-                    : "bg-background/65",
+                RUNTIME_DOTS[backend] ?? "bg-background/65",
               )}
             />
             <span className="truncate font-medium">{runtimeLabel(backend)}</span>

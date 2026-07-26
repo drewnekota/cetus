@@ -208,6 +208,7 @@ async fn sweep(state: &AppState, handle: &AppHandle, settings: &AutoArchiveSetti
         state.abort_cli_turn(&c.id);
         state.kill_claude_session(&c.id);
         state.kill_codex_session(&c.id);
+        state.kill_acp_session(&c.id);
         if let Err(e) = crate::cli_backend::sync_codex_archive_state(&c, true).await {
             tracing::warn!("auto-archive: failed to sync Codex archive state for {}: {e}", c.id);
         }

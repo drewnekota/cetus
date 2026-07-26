@@ -10,11 +10,14 @@ import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { ModelPicker } from "@/components/chat/model-picker";
 import {
   BACKENDS,
+  backendSupportsTuning,
   CliTuningMenu,
   nextBackend,
   RuntimeShortcutHint,
+  useRuntimeCatalog,
   useRuntimeShortcuts,
 } from "@/components/chat/backend-picker";
+import { useEnabledBackendIds } from "@/lib/runtime-settings";
 import {
   Select,
   SelectContent,
@@ -57,6 +60,7 @@ import {
  *  the "quick-open" event the gesture listener emits. */
 export function QuickPanel() {
   const { t } = useTranslation("quick");
+  const enabledBackendIds = useEnabledBackendIds();
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<QuickAttachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -91,6 +95,12 @@ export function QuickPanel() {
   const [backend, setBackend] = useState<BackendId>("pi");
   const [cliModel, setCliModel] = useState("");
   const [cliEffort, setCliEffort] = useState("");
+  useEffect(() => {
+    if (enabledBackendIds.has(backend)) return;
+    setBackend("pi");
+    setCliModel("");
+    setCliEffort("");
+  }, [backend, enabledBackendIds]);
   // True while the native "Add folder…" dialog is open, so the blur-to-dismiss
   // handler doesn't close the panel when that OS dialog steals focus.
   const pickingWorkspaceRef = useRef(false);
@@ -172,9 +182,9 @@ export function QuickPanel() {
       // Same runtime again (e.g. a repeated shortcut) is a no-op so it doesn't
       // reset the model/effort overrides.
       if (!b || b.id === backend) return;
-      const tuning = b.id === "pi"
-        ? { model: "", effort: "" }
-        : loadCliTuningChoice(b.id);
+      const tuning = backendSupportsTuning(b.id)
+        ? loadCliTuningChoice(b.id)
+        : { model: "", effort: "" };
       setBackend(b.id);
       setCliModel(tuning.model);
       setCliEffort(tuning.effort);
@@ -494,7 +504,7 @@ export function QuickPanel() {
     // default meaning rather than being repurposed here.
     if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
-      onBackendChange(nextBackend(backend));
+      onBackendChange(nextBackend(backend, enabledBackendIds));
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
@@ -662,7 +672,7 @@ export function QuickPanel() {
             ultra={ultraEnabled}
             onUltraToggle={onUltraToggle}
           />
-        ) : (
+        ) : backendSupportsTuning(backend) ? (
           <CliTuningMenu
             backend={backend}
             model={cliModel}
@@ -671,7 +681,7 @@ export function QuickPanel() {
             onEffortChange={onCliEffortChange}
             className="h-8 text-[13px] hover:bg-black/5 dark:hover:bg-white/[0.08]"
           />
-        )}
+        ) : null}
         <span className="ml-auto flex items-center gap-1.5 pr-1">
           <Kbd>
             <CornerDownLeft className="size-2.5" />
@@ -845,6 +855,10 @@ function BackendSelect({
   value: BackendId;
   onChange: (id: string) => void;
 }) {
+  const { orderedBackends, enabledBackendIds } = useRuntimeCatalog();
+  const availableBackends = orderedBackends.filter(
+    (backend) => enabledBackendIds.has(backend.id),
+  );
   const current = BACKENDS.find((b) => b.id === value) ?? BACKENDS[0];
   const TriggerIcon = current.icon;
   return (
@@ -857,7 +871,7 @@ function BackendSelect({
         <span className="truncate">{current.label}</span>
       </SelectTrigger>
       <SelectContent align="start">
-        {BACKENDS.map((b) => {
+        {availableBackends.map((b) => {
           const Icon = b.icon;
           return (
             <SelectItem key={b.id} value={b.id} className="text-[13px]">

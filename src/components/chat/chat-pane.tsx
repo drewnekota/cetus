@@ -382,6 +382,18 @@ const RUNTIME_TONES: Record<
     frame: "border-emerald-600/30 bg-emerald-500/[0.06]",
     accent: "text-emerald-600 dark:text-emerald-400",
   },
+  opencode: {
+    frame: "border-violet-600/25 bg-violet-500/[0.05]",
+    accent: "text-violet-600 dark:text-violet-400",
+  },
+  grok: {
+    frame: "border-zinc-500/30 bg-zinc-500/[0.06]",
+    accent: "text-zinc-700 dark:text-zinc-300",
+  },
+  kimi: {
+    frame: "border-indigo-600/25 bg-indigo-500/[0.05]",
+    accent: "text-indigo-600 dark:text-indigo-400",
+  },
   pi: {
     frame: "border-sky-600/25 bg-sky-500/[0.05]",
     accent: "text-sky-600 dark:text-sky-400",

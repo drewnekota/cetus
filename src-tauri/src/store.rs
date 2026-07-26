@@ -1701,8 +1701,20 @@ mod tests {
         let c = store.get("c1").unwrap().unwrap();
         assert_eq!(c.session_file, "claude-sess-1");
 
+        // ACP runtimes use the same per-runtime token map.
+        store.switch_backend("c1", "opencode", 5).unwrap();
+        assert_eq!(store.get("c1").unwrap().unwrap().session_file, "");
+        store.set_session_file("c1", "opencode-session-1").unwrap();
+        store.switch_backend("c1", "kimi", 6).unwrap();
+        store.set_session_file("c1", "kimi-session-1").unwrap();
+        store.switch_backend("c1", "opencode", 7).unwrap();
+        assert_eq!(
+            store.get("c1").unwrap().unwrap().session_file,
+            "opencode-session-1"
+        );
+
         // Same backend / missing conversation: no-op.
-        assert_eq!(store.switch_backend("c1", "claude-code", 5).unwrap(), None);
+        assert_eq!(store.switch_backend("c1", "opencode", 8).unwrap(), None);
         assert_eq!(store.switch_backend("nope", "codex", 5).unwrap(), None);
 
         drop(store);

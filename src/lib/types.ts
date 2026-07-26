@@ -180,7 +180,13 @@ export interface QuickReplyResultPayload {
 /** Coding-agent runtime for a conversation. "pi" is the built-in Cetus
  *  harness; claude-code / codex are headless CLI backends orchestrated
  *  per-turn (spawned in a git worktree, streamed through the same chat UI). */
-export type BackendId = "pi" | "claude-code" | "codex";
+export type BackendId =
+  | "pi"
+  | "claude-code"
+  | "codex"
+  | "opencode"
+  | "grok"
+  | "kimi";
 
 /** Whether a backend supports sending a message while a turn is running.
  *  `pi` steers over its RPC, claude-code over the turn's stdin, and codex
@@ -214,7 +220,7 @@ export interface CliAskQuestion {
 export interface CliControlRequest {
   type: "cli_control_request";
   requestId: string | number;
-  source?: "claude-code" | "codex";
+  source?: "claude-code" | "codex" | "acp";
   requestKind?: "request_user_input" | "mcp_elicitation";
   toolName: string;
   input: Record<string, unknown> & { questions?: CliAskQuestion[] };
@@ -279,13 +285,21 @@ export interface CliContextUsage {
   transcriptBytes?: number;
 }
 
-/** Persisted CLI-agent (claude-code / codex) switches. */
+/** Persisted coding-runtime preferences. */
 export interface CliAgentSettings {
   /** Skip the CLIs' permission prompts (headless turns can't answer them). */
   bypassApprovals: boolean;
   /** Run each conversation in its own git worktree/branch instead of the
    *  workspace's working tree. Off by default. */
   isolateInWorktree: boolean;
+  /** Runtime visibility. Cetus itself stays enabled as the safe fallback. */
+  claudeCodeEnabled: boolean;
+  codexEnabled: boolean;
+  opencodeEnabled: boolean;
+  grokEnabled: boolean;
+  kimiEnabled: boolean;
+  /** Picker order. Unknown ids are discarded and newly-added runtimes append. */
+  runtimeOrder: BackendId[];
 }
 
 /** What a CLI backend actually runs when no override is set, resolved from

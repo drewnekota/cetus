@@ -1,6 +1,14 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { Bot, Check, ChevronDown } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Bot,
+  Braces,
+  Check,
+  ChevronDown,
+  Moon,
+  Orbit,
+  Settings2,
+} from "lucide-react";
 import { api } from "@/lib/tauri";
 import { useChatStore } from "@/lib/chat-store";
 import type { BackendId, CliDefaults, CliRateLimitInfo } from "@/lib/types";
@@ -27,34 +35,87 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/lib/i18n";
 import { loadCliTuningChoice, saveCliTuningChoice } from "@/lib/backend-choice";
 import {
+  openRuntimeSettings,
+  runtimeSlotDisplay,
+  runtimeSlots,
+  useRuntimePreferences,
+} from "@/lib/runtime-settings";
+import {
   matchesShortcut,
-  shortcutDisplay,
+  RUNTIME_SLOT_SHORTCUT_IDS,
   useKeyboardShortcuts,
-  type ShortcutId,
+  type ShortcutMap,
 } from "@/lib/keyboard-shortcuts";
 
 export const BACKENDS: { id: BackendId; label: string; icon: AppIcon }[] = [
   { id: "pi", label: "Cetus", icon: Bot },
   { id: "claude-code", label: "Claude Code", icon: ClaudeCodeIcon },
   { id: "codex", label: "Codex", icon: CodexIcon },
+  { id: "opencode", label: "OpenCode", icon: Braces },
+  { id: "grok", label: "Grok Build", icon: Orbit },
+  { id: "kimi", label: "Kimi CLI", icon: Moon },
 ];
 
-/** The next runtime in picker order, wrapping around. Bound to Tab across the
- *  new-chat surfaces (composer, quick launcher, task dialog) so one key cycles
- *  Cetus → Claude Code → Codex → Cetus. */
-export function nextBackend(current: BackendId): BackendId {
-  const i = BACKENDS.findIndex((b) => b.id === current);
-  return BACKENDS[(i + 1) % BACKENDS.length].id;
+export function useRuntimeCatalog() {
+  const { order, enabledBackendIds } = useRuntimePreferences();
+  const orderedBackends = useMemo(() => {
+    const byId = new Map(BACKENDS.map((backend) => [backend.id, backend]));
+    return order.flatMap((id) => {
+      const backend = byId.get(id);
+      return backend ? [backend] : [];
+    });
+  }, [order]);
+  return { orderedBackends, enabledBackendIds };
 }
 
-/** The user-editable shortcut bound to each runtime (⌃1/⌃2/⌃3 by default). */
-export const RUNTIME_SHORTCUT_IDS: Record<BackendId, ShortcutId> = {
-  pi: "runtimeCetus",
-  "claude-code": "runtimeClaudeCode",
-  codex: "runtimeCodex",
-};
+export type TunableBackendId = "claude-code" | "codex";
+
+export function backendSupportsTuning(
+  backend: BackendId,
+): backend is TunableBackendId {
+  return backend === "claude-code" || backend === "codex";
+}
+
+/** The next runtime in the user's picker order, wrapping around. Bound to Tab
+ *  across the new-chat surfaces. Disabled runtimes are omitted. */
+export function nextBackend(
+  current: BackendId,
+  enabled?: ReadonlySet<BackendId>,
+): BackendId {
+  const choices = enabled
+    ? Array.from(enabled).flatMap((id) => {
+        const backend = BACKENDS.find((candidate) => candidate.id === id);
+        return backend ? [backend] : [];
+      })
+    : BACKENDS;
+  const i = choices.findIndex((b) => b.id === current);
+  return choices[(i + 1 + choices.length) % choices.length].id;
+}
+
+/** Live view of [`runtimeSlots`] — what ⌃1…⌃6 currently address. */
+export function useRuntimeSlots(): BackendId[] {
+  const { settings } = useRuntimePreferences();
+  return useMemo(() => runtimeSlots(settings), [settings]);
+}
+
+/** The runtime a positional shortcut selects, or null when that slot is past
+ *  the end of the enabled list. */
+export function runtimeForShortcut(
+  event: KeyboardEvent,
+  shortcuts: ShortcutMap,
+  slots: readonly BackendId[],
+): BackendId | null | undefined {
+  const slot = RUNTIME_SLOT_SHORTCUT_IDS.findIndex((id) =>
+    matchesShortcut(event, shortcuts[id]),
+  );
+  // undefined: not a runtime shortcut at all. null: bound, but nothing in that
+  // slot — swallow the key rather than letting it fall through.
+  if (slot < 0) return undefined;
+  return slots[slot] ?? null;
+}
 
 /** Window keydown → runtime switch, matched against the user's (editable)
  *  shortcut map. For surfaces that own their backend state directly — the
@@ -66,32 +127,29 @@ export function useRuntimeShortcuts(
   enabled: boolean = true,
 ) {
   const shortcuts = useKeyboardShortcuts();
+  const slots = useRuntimeSlots();
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
-      const target: BackendId | null = matchesShortcut(e, shortcuts.runtimeCetus)
-        ? "pi"
-        : matchesShortcut(e, shortcuts.runtimeClaudeCode)
-          ? "claude-code"
-          : matchesShortcut(e, shortcuts.runtimeCodex)
-            ? "codex"
-            : null;
-      if (!target) return;
+      const target = runtimeForShortcut(e, shortcuts, slots);
+      if (target === undefined) return;
       e.preventDefault();
-      onSwitch(target);
+      if (target) onSwitch(target);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [enabled, shortcuts, onSwitch]);
+  }, [enabled, shortcuts, onSwitch, slots]);
 }
 
 /** Right-aligned shortcut hint inside a runtime SelectItem (e.g. "⌃2").
- *  Live-updates when the user rebinds the shortcut; renders nothing when
- *  unassigned. */
+ *  Follows the runtime's position in the enabled order, so reordering in
+ *  Settings relabels the menu. Renders nothing when unassigned or out of
+ *  slots. */
 export function RuntimeShortcutHint({ backend }: { backend: BackendId }) {
   const shortcuts = useKeyboardShortcuts();
-  const display = shortcutDisplay(shortcuts[RUNTIME_SHORTCUT_IDS[backend]]);
-  if (!display || display === "Unassigned") return null;
+  const { settings } = useRuntimePreferences();
+  const display = runtimeSlotDisplay(backend, settings, shortcuts);
+  if (!display) return null;
   return (
     <span className="ml-auto pl-3 text-[10px] tracking-wide text-muted-foreground/70">
       {display}
@@ -107,7 +165,7 @@ export function RuntimeShortcutHint({ backend }: { backend: BackendId }) {
  *  is only the fallback when its models_cache.json can't be read — normally
  *  the live catalog from `api.getCliDefaults` replaces it. */
 export const CLI_MODELS: Record<
-  Exclude<BackendId, "pi">,
+  TunableBackendId,
   { id: string; label: string }[]
 > = {
   "claude-code": [
@@ -130,7 +188,7 @@ export const CLI_MODELS: Record<
  *  natively: `claude --effort` (low…max) / codex `model_reasoning_effort`
  *  (low…xhigh). "" keeps the CLI's configured default. */
 export const CLI_EFFORTS: Record<
-  Exclude<BackendId, "pi">,
+  TunableBackendId,
   { id: string; label: string }[]
 > = {
   "claude-code": [
@@ -212,7 +270,7 @@ export function CliTuningMenu({
   disabled,
   className,
 }: {
-  backend: Exclude<BackendId, "pi">;
+  backend: TunableBackendId;
   model: string;
   effort: string;
   onModelChange: (model: string) => void;
@@ -377,17 +435,35 @@ export function BackendPicker({
    *  ignored. */
   backendSwitch?: { token: number; backend: BackendId } | null;
 }) {
+  const { t } = useTranslation("chat");
   const [backend, setBackendState] = useState<BackendId>("pi");
   const [cliModel, setCliModel] = useState("");
   const [cliEffort, setCliEffort] = useState("");
   // Account-level quota snapshots (backend id → rate_limit_info), fed by the
   // CLI's rate_limit_event heartbeat. Shown only inside the dropdown.
   const cliRateLimits = useChatStore((s) => s.cliRateLimits);
+  const { orderedBackends, enabledBackendIds } = useRuntimeCatalog();
+  const availableBackends = orderedBackends.filter(
+    (candidate) =>
+      enabledBackendIds.has(candidate.id) ||
+      (conversationId !== null && candidate.id === backend),
+  );
 
   function setBackend(b: BackendId) {
     setBackendState(b);
     onBackendChange?.(b);
   }
+
+  useEffect(() => {
+    if (conversationId || enabledBackendIds.has(pendingValue ?? "pi")) return;
+    setBackend("pi");
+    onPendingTuningChange?.("", "");
+  }, [
+    conversationId,
+    enabledBackendIds,
+    pendingValue,
+    onPendingTuningChange,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -435,16 +511,20 @@ export function BackendPicker({
   const TriggerIcon = current.icon;
 
   function select(id: string) {
+    if (id === "__runtime_settings") {
+      openRuntimeSettings();
+      return;
+    }
     const b = BACKENDS.find((x) => x.id === id);
     if (!b) return;
-    const tuning = b.id === "pi"
-      ? { model: "", effort: "" }
-      : loadCliTuningChoice(b.id);
+    const tuning = backendSupportsTuning(b.id)
+      ? loadCliTuningChoice(b.id)
+      : { model: "", effort: "" };
     setBackend(b.id);
     setCliModel(tuning.model);
     setCliEffort(tuning.effort);
     onTuningChange?.(tuning.model, tuning.effort);
-    if (b.id !== "pi") saveCliTuningChoice(b.id, tuning);
+    if (backendSupportsTuning(b.id)) saveCliTuningChoice(b.id, tuning);
     if (!conversationId) {
       onPendingTuningChange?.(tuning.model, tuning.effort);
     }
@@ -452,7 +532,7 @@ export function BackendPicker({
 
   function selectModel(model: string) {
     setCliModel(model);
-    saveCliTuningChoice(shown as Exclude<BackendId, "pi">, {
+    saveCliTuningChoice(shown as TunableBackendId, {
       model,
       effort: cliEffort,
     });
@@ -461,7 +541,7 @@ export function BackendPicker({
 
   function selectEffort(effort: string) {
     setCliEffort(effort);
-    saveCliTuningChoice(shown as Exclude<BackendId, "pi">, {
+    saveCliTuningChoice(shown as TunableBackendId, {
       model: cliModel,
       effort,
     });
@@ -472,6 +552,7 @@ export function BackendPicker({
     <>
       <Select value={shown} onValueChange={select} disabled={disabled}>
         <SelectTrigger
+          data-testid="runtime-picker-trigger"
           size="sm"
           className={
             "h-7 gap-1.5 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted focus-visible:ring-0 data-[size=sm]:h-7 " +
@@ -487,11 +568,16 @@ export function BackendPicker({
           <span className="truncate">{current.label}</span>
         </SelectTrigger>
         <SelectContent align="start">
-          {BACKENDS.map((b) => {
+          {availableBackends.map((b) => {
             const Icon = b.icon;
             const quota = quotaLabel(cliRateLimits[b.id]);
             return (
-              <SelectItem key={b.id} value={b.id} className="text-xs">
+              <SelectItem
+                key={b.id}
+                value={b.id}
+                className="text-xs"
+                data-testid={`runtime-option-${b.id}`}
+              >
                 <Icon className="size-4" />
                 <span className="truncate">{b.label}</span>
                 {quota && (
@@ -510,9 +596,17 @@ export function BackendPicker({
               </SelectItem>
             );
           })}
+          <SelectItem
+            value="__runtime_settings"
+            className="text-xs"
+            data-testid="runtime-settings-item"
+          >
+            <Settings2 className="size-4" />
+            <span className="truncate">{t("runtime.settings")}</span>
+          </SelectItem>
         </SelectContent>
       </Select>
-      {shown !== "pi" &&
+      {backendSupportsTuning(shown) &&
         (conversationId ? (
           <CliTuningMenu
             backend={shown}

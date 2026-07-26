@@ -34,6 +34,9 @@ const BACKENDS = [
   { id: "pi", label: "Cetus", cls: "" },
   { id: "codex", label: "Codex", cls: "codex" },
   { id: "claude-code", label: "Claude Code", cls: "claude-code" },
+  { id: "opencode", label: "OpenCode", cls: "opencode" },
+  { id: "grok", label: "Grok Build", cls: "grok" },
+  { id: "kimi", label: "Kimi CLI", cls: "kimi" },
 ];
 const backendMeta = (id) => BACKENDS.find((b) => b.id === id) || BACKENDS[0];
 const S = {

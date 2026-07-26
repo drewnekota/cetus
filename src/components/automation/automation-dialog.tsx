@@ -10,8 +10,10 @@ import { ModelPicker } from "@/components/chat/model-picker";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import {
   BACKENDS,
+  backendSupportsTuning,
   CliTuningMenu,
   RuntimeShortcutHint,
+  useRuntimeCatalog,
   useRuntimeShortcuts,
 } from "@/components/chat/backend-picker";
 import {
@@ -87,12 +89,18 @@ export function AutomationDialog({
 }: Props) {
   const { t } = useTranslation("automation");
   const { t: tc } = useTranslation("common");
+  const { orderedBackends, enabledBackendIds } = useRuntimeCatalog();
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<ModelChoice>(defaultModel ?? DEFAULT_MODEL_CHOICE);
-  // Which agent runtime fired runs use (Cetus / Claude Code / Codex) and the
-  // CLI backends' optional model override.
+  // Which agent runtime scheduled runs use and the tunable CLI backends'
+  // optional model override.
   const [backend, setBackend] = useState<BackendId>("pi");
+  const availableBackends = orderedBackends.filter(
+    (candidate) =>
+      enabledBackendIds.has(candidate.id) ||
+      (automation !== null && candidate.id === backend),
+  );
   const [cliModel, setCliModel] = useState("");
   const [cliEffort, setCliEffort] = useState("");
   const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
@@ -107,6 +115,13 @@ export function AutomationDialog({
   const [cronExpr, setCronExpr] = useState("0 9 * * *");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (automation || enabledBackendIds.has(backend)) return;
+    setBackend("pi");
+    setCliModel("");
+    setCliEffort("");
+  }, [automation, backend, enabledBackendIds]);
 
   // ⌃1/⌃2/⌃3 (user-editable) switch the automation's runtime while the dialog
   // is open — page.tsx's global handler is modal-guarded here.
@@ -459,7 +474,7 @@ export function AutomationDialog({
                 })()}
               </SelectTrigger>
               <SelectContent align="end">
-                {BACKENDS.map((b) => {
+                {availableBackends.map((b) => {
                   const Icon = b.icon;
                   return (
                     <SelectItem key={b.id} value={b.id} className="text-xs">
@@ -473,7 +488,7 @@ export function AutomationDialog({
             </Select>
             {backend === "pi" ? (
               <ModelPicker value={model} onChange={setModel} />
-            ) : (
+            ) : backendSupportsTuning(backend) ? (
               <CliTuningMenu
                 backend={backend}
                 model={cliModel}
@@ -481,7 +496,7 @@ export function AutomationDialog({
                 onModelChange={setCliModel}
                 onEffortChange={setCliEffort}
               />
-            )}
+            ) : null}
           </div>
         </div>
 

@@ -6,9 +6,14 @@ import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { BackendPicker, nextBackend } from "@/components/chat/backend-picker";
+import { useEnabledBackendIds } from "@/lib/runtime-settings";
 import { useChatStore, useCliCommands } from "@/lib/chat-store";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { SlashMenu, type SlashItem } from "@/components/chat/slash-menu";
+import {
+  SlashCommandDialog,
+  type EditableSlashCommand,
+} from "@/components/chat/slash-command-dialog";
 import { MentionMenu } from "@/components/chat/mention-menu";
 import { MENTIONS, expandGoalDirective } from "@/lib/goal";
 import { cn } from "@/lib/utils";
@@ -432,6 +437,7 @@ export function Composer({
   // model picker) hide when a CLI backend serves this conversation — the CLIs
   // run their own default models, so the picker would be a no-op there.
   const [backend, setBackend] = useState<BackendId>("pi");
+  const enabledBackendIds = useEnabledBackendIds();
   // Existing-conversation runtime is loaded asynchronously. Until it arrives,
   // omit runtime intent from a very fast send so the persisted backend remains
   // authoritative instead of accidentally treating the initial `pi` state as
@@ -497,6 +503,12 @@ export function Composer({
   // Set when the user dismisses with Esc; cleared on the next edit so the menu
   // stays closed for the current token but a later `/` reopens it.
   const slashSuppress = useRef(false);
+  // Slash-command editor, opened from the menu: the Commands heading creates
+  // (the typed token seeds the name, so `/summar` + click lands in a half-filled
+  // form), a row's pencil edits that command.
+  const [commandDialogOpen, setCommandDialogOpen] = useState(false);
+  const [newCommandSeed, setNewCommandSeed] = useState("");
+  const [editingCommand, setEditingCommand] = useState<EditableSlashCommand | null>(null);
 
   // ---- @-mention menu (goal, …) -------------------------------------------
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -545,6 +557,8 @@ export function Composer({
             name: c.name,
             description: c.description,
             prompt: c.prompt,
+            // Locally stored → the menu offers an inline edit affordance.
+            commandId: c.id,
           })),
         );
         const libs = skillState.enabled ? skillState.entries.filter((e) => e.enabled) : [];
@@ -571,6 +585,13 @@ export function Composer({
     const q = slashQuery.toLowerCase();
     const match = (it: SlashItem) =>
       it.name.toLowerCase().includes(q) || it.description.toLowerCase().includes(q);
+    // The menu labels one heading per run of a kind, and a runtime catalog
+    // arrives alphabetically interleaved (a skill can be row 0). Partition here
+    // so the panel always reads Commands → Skills, order stable within each.
+    const byKind = (list: SlashItem[]): SlashItem[] => [
+      ...list.filter((it) => it.kind === "command"),
+      ...list.filter((it) => it.kind === "skill"),
+    ];
     // CLI runtimes own their skill catalogs. Claude reports built-ins + skills
     // in its initialize ack; Codex reports skills via app-server skills/list.
     // Do not merge Cetus/pi's managed/discovered skills into either runtime:
@@ -596,16 +617,19 @@ export function Composer({
     });
     if (backend === "claude-code") {
       const runtimeItems = native.length > 0 ? native : CLAUDE_CLI_COMMANDS;
-      return [...runtimeItems.filter(match), ...slashCommands.filter(match)];
+      return byKind([...runtimeItems.filter(match), ...slashCommands.filter(match)]);
     }
     if (backend === "codex") {
-      return [
+      return byKind([
         ...CODEX_CLI_COMMANDS.filter(match),
         ...native.filter(match),
         ...slashCommands.filter(match),
-      ];
+      ]);
     }
-    return [...slashCommands.filter(match), ...slashSkills.filter(match)];
+    if (backend !== "pi") {
+      return byKind([...native.filter(match), ...slashCommands.filter(match)]);
+    }
+    return byKind([...slashCommands.filter(match), ...slashSkills.filter(match)]);
   }, [slashCommands, slashSkills, slashQuery, backend, nativeCommands]);
 
   const slashVisible = slashOpen && slashItems.length > 0;
@@ -1057,8 +1081,56 @@ export function Composer({
           activeIndex={slashIdx}
           onSelect={applySlash}
           onHover={setSlashActive}
+          onCreateCommand={() => {
+            setEditingCommand(null);
+            setNewCommandSeed(slashQuery);
+            setCommandDialogOpen(true);
+            closeSlash();
+          }}
+          onEditCommand={(item) => {
+            setEditingCommand({
+              id: item.commandId!,
+              name: item.name,
+              description: item.description,
+              prompt: item.prompt,
+            });
+            setCommandDialogOpen(true);
+            closeSlash();
+          }}
         />
       )}
+
+      <SlashCommandDialog
+        open={commandDialogOpen}
+        onOpenChange={setCommandDialogOpen}
+        command={editingCommand}
+        initialName={newCommandSeed}
+        onSaved={(command, created) => {
+          if (created) {
+            // Drop the user straight into the command they just wrote: the
+            // token that opened the menu expands to the new prompt, same as
+            // picking it. The token's own end (not the live caret, which the
+            // dialog may have moved) bounds the replacement.
+            const tokenEnd = Math.min(slashStart + 1 + slashQuery.length, text.length);
+            const insert = command.prompt;
+            const next = text.slice(0, slashStart) + insert + text.slice(tokenEnd);
+            const pos = slashStart + insert.length;
+            updateText(next);
+            requestAnimationFrame(() => {
+              const node = taRef.current;
+              if (!node) return;
+              node.focus({ preventScroll: true });
+              node.setSelectionRange(pos, pos);
+            });
+            return;
+          }
+          // An edit leaves the message alone and drops back into the menu,
+          // which refetches on open and so shows the updated row.
+          slashSuppress.current = false;
+          setSlashOpen(true);
+          requestAnimationFrame(() => taRef.current?.focus({ preventScroll: true }));
+        }}
+      />
 
       {mentionVisible && !slashVisible && (
         <MentionMenu
@@ -1234,7 +1306,7 @@ export function Composer({
             onRequestBackendSwitch
           ) {
             e.preventDefault();
-            onRequestBackendSwitch(nextBackend(backend));
+            onRequestBackendSwitch(nextBackend(backend, enabledBackendIds));
             return;
           }
           // Don't intercept Enter while an IME is composing — Chinese / Japanese

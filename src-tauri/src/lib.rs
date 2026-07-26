@@ -141,6 +141,8 @@ pub struct AppState {
     /// Conversation-scoped Codex app-server threads. Background terminals are
     /// owned here and therefore survive `turn/completed`.
     codex_sessions: std::sync::Mutex<HashMap<String, cetus_bridge::cli_agent::CodexSessionHandle>>,
+    /// Conversation-scoped native ACP sessions (OpenCode / Grok Build / Kimi).
+    acp_sessions: std::sync::Mutex<HashMap<String, cetus_bridge::cli_agent::AcpSessionHandle>>,
     /// Last slash-command/skill catalog reported by each live CLI session.
     /// Unlike the matching UI event, this survives a renderer reload, so the
     /// composer can hydrate the menu without restarting the vendor process.
@@ -259,11 +261,42 @@ impl AppState {
         self.cli_commands.lock().unwrap().remove(conv_id);
     }
 
+    pub fn acp_session(&self, conv_id: &str) -> Option<cetus_bridge::cli_agent::AcpSessionHandle> {
+        let mut sessions = self.acp_sessions.lock().unwrap();
+        if sessions
+            .get(conv_id)
+            .is_some_and(|session| !session.is_alive())
+        {
+            sessions.remove(conv_id);
+        }
+        sessions.get(conv_id).cloned()
+    }
+
+    pub fn set_acp_session(
+        &self,
+        conv_id: String,
+        session: cetus_bridge::cli_agent::AcpSessionHandle,
+    ) {
+        if let Some(old) = self.acp_sessions.lock().unwrap().insert(conv_id, session) {
+            old.shutdown();
+        }
+    }
+
+    pub fn kill_acp_session(&self, conv_id: &str) {
+        if let Some(session) = self.acp_sessions.lock().unwrap().remove(conv_id) {
+            session.shutdown();
+        }
+        self.cli_commands.lock().unwrap().remove(conv_id);
+    }
+
     pub fn kill_all_cli_sessions(&self) {
         for (_, session) in self.claude_sessions.lock().unwrap().drain() {
             session.shutdown();
         }
         for (_, session) in self.codex_sessions.lock().unwrap().drain() {
+            session.shutdown();
+        }
+        for (_, session) in self.acp_sessions.lock().unwrap().drain() {
             session.shutdown();
         }
         self.cli_commands.lock().unwrap().clear();
@@ -1030,6 +1063,7 @@ pub fn run() {
                 cli_turns: std::sync::Mutex::new(HashMap::new()),
                 claude_sessions: std::sync::Mutex::new(HashMap::new()),
                 codex_sessions: std::sync::Mutex::new(HashMap::new()),
+                acp_sessions: std::sync::Mutex::new(HashMap::new()),
                 cli_commands: std::sync::Mutex::new(HashMap::new()),
             });
             let remote_runtime = remote::RemoteRuntime::new(&app.state::<AppState>().store);

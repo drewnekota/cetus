@@ -7,6 +7,8 @@ export const chat = {
     // Slash menu (commands + skills)
     "slash.commands": "Commands",
     "slash.skills": "Skills",
+    "slash.newCommand": "New command",
+    "slash.editCommand": "Edit command",
     // @-mention menu (goal, …)
     "mention.title": "Mentions",
     // Composer
@@ -121,6 +123,7 @@ export const chat = {
       "Finish installation in the opened page, then return here to continue the task.",
     "cliControl.pluginOpenFailed": "Couldn't open the plugin installation page.",
     "cliControl.notNow": "Not now",
+    "runtime.settings": "Runtime settings…",
     "pane.worktree.tooltip":
       "This agent's changes land on an isolated worktree branch. Click to open the folder:\n{path}",
     "pane.backgroundAgents.title": "{count} background task(s) running",
@@ -330,6 +333,7 @@ export const chat = {
     "cliControl.pluginFinishHint": "请在刚打开的页面中完成安装，然后回到这里继续任务。",
     "cliControl.pluginOpenFailed": "无法打开插件安装页面。",
     "cliControl.notNow": "暂不安装",
+    "runtime.settings": "Runtime 设置…",
     "pane.backgroundAgents.title": "{count} 个后台任务运行中",
     "pane.backgroundAgents.more": "，还有 {count} 个",
     "pane.worktree.tooltip": "该智能体的改动落在独立的 worktree 分支上。点击打开文件夹：\n{path}",

@@ -7,7 +7,14 @@
 import type { BackendId } from "./types";
 
 const KEY = "cetus:lastBackendChoice";
-const BACKEND_IDS: BackendId[] = ["pi", "claude-code", "codex"];
+const BACKEND_IDS: BackendId[] = [
+  "pi",
+  "claude-code",
+  "codex",
+  "opencode",
+  "grok",
+  "kimi",
+];
 type CliBackendId = Exclude<BackendId, "pi">;
 
 interface CliTuningChoice {

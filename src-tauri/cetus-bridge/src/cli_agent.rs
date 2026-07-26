@@ -34,6 +34,9 @@ use tokio::process::Command as TokioCommand;
 pub enum CliBackend {
     ClaudeCode,
     Codex,
+    OpenCode,
+    Grok,
+    Kimi,
 }
 
 impl CliBackend {
@@ -42,6 +45,9 @@ impl CliBackend {
         match self {
             CliBackend::ClaudeCode => "claude-code",
             CliBackend::Codex => "codex",
+            CliBackend::OpenCode => "opencode",
+            CliBackend::Grok => "grok",
+            CliBackend::Kimi => "kimi",
         }
     }
 
@@ -49,6 +55,9 @@ impl CliBackend {
         match s {
             "claude-code" | "claude" => Some(CliBackend::ClaudeCode),
             "codex" => Some(CliBackend::Codex),
+            "opencode" => Some(CliBackend::OpenCode),
+            "grok" | "grok-build" => Some(CliBackend::Grok),
+            "kimi" | "kimi-cli" => Some(CliBackend::Kimi),
             _ => None,
         }
     }
@@ -58,6 +67,23 @@ impl CliBackend {
         match self {
             CliBackend::ClaudeCode => "claude",
             CliBackend::Codex => "codex",
+            CliBackend::OpenCode => "opencode",
+            CliBackend::Grok => "grok",
+            CliBackend::Kimi => "kimi",
+        }
+    }
+
+    pub fn is_acp(self) -> bool {
+        matches!(self, Self::OpenCode | Self::Grok | Self::Kimi)
+    }
+
+    /// Arguments that start the vendor's native ACP stdio server.
+    pub fn acp_args(self) -> &'static [&'static str] {
+        match self {
+            Self::OpenCode => &["acp"],
+            Self::Grok => &["agent", "stdio"],
+            Self::Kimi => &["acp"],
+            _ => &[],
         }
     }
 }
@@ -88,6 +114,15 @@ pub struct CliRunOpts {
     /// inside Cetus. codex has no equivalent flag — the host prepends the hint
     /// to the first turn's prompt instead.
     pub append_system_prompt: Option<String>,
+    /// ACP only, and only meaningful together with `resume`: the first-turn
+    /// preamble (Cetus hint + transcript handoff) to prepend if the agent turns
+    /// out to be unable to `session/load` that token. An ACP session id lives in
+    /// the vendor process, so a cold start after a restart otherwise resumes
+    /// into an empty session with no sign that the context is gone.
+    pub cold_start_preamble: Option<String>,
+    /// Host version reported in the ACP `initialize` handshake. None → the
+    /// bridge crate's own version.
+    pub client_version: Option<String>,
 }
 
 impl CliBackend {
@@ -174,6 +209,9 @@ impl CliBackend {
                     a.push("workspace-write".into());
                 }
                 a.push(prompt.into());
+            }
+            CliBackend::OpenCode | CliBackend::Grok | CliBackend::Kimi => {
+                let _ = (prompt, opts);
             }
         }
         a
@@ -1367,6 +1405,99 @@ impl EventTranslator {
         })]
     }
 
+    /// Translate one ACP `session/update` payload into Cetus's existing event
+    /// model. All native ACP runtimes share this path; only their launch
+    /// command differs.
+    pub fn on_acp_update(&mut self, update: &Value) -> Vec<Value> {
+        let kind = update
+            .get("sessionUpdate")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let mut out = match kind {
+            "agent_message_chunk" => {
+                let text = acp_content_text(update.get("content"));
+                self.emit_codex_delta(
+                    "acp-message".to_string(),
+                    "acp-message",
+                    LiveKind::Text,
+                    &text,
+                )
+            }
+            "agent_thought_chunk" => {
+                let text = acp_content_text(update.get("content"));
+                self.emit_codex_delta(
+                    "acp-thought".to_string(),
+                    "acp-thought",
+                    LiveKind::Thinking,
+                    &text,
+                )
+            }
+            "tool_call" => {
+                let mut events = self.close_all_codex_blocks();
+                let id = update
+                    .get("toolCallId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("acp-tool");
+                let name = update
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty() && *value != "other")
+                    .or_else(|| update.get("title").and_then(Value::as_str))
+                    .unwrap_or("tool");
+                let input = update
+                    .get("rawInput")
+                    .cloned()
+                    .unwrap_or_else(|| json!({ "description": update.get("title") }));
+                if self.started_items.insert(id.to_string()) {
+                    events.extend(self.emit_tool_call(id, name, &input));
+                    events.push(json!({ "type": "tool_execution_start", "toolCallId": id }));
+                }
+                if acp_tool_terminal(update) {
+                    let result = acp_tool_result(update);
+                    let failed = update.get("status").and_then(Value::as_str) == Some("failed");
+                    events.extend(self.emit_tool_result_end(id, &result, failed));
+                    self.started_items.remove(id);
+                }
+                events
+            }
+            "tool_call_update" => {
+                let mut events = self.close_all_codex_blocks();
+                let id = update
+                    .get("toolCallId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("acp-tool");
+                if !self.started_items.contains(id) {
+                    let name = update
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .or_else(|| update.get("title").and_then(Value::as_str))
+                        .unwrap_or("tool");
+                    let input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
+                    self.started_items.insert(id.to_string());
+                    events.extend(self.emit_tool_call(id, name, &input));
+                    events.push(json!({ "type": "tool_execution_start", "toolCallId": id }));
+                }
+                if acp_tool_terminal(update) {
+                    let result = acp_tool_result(update);
+                    let failed = update.get("status").and_then(Value::as_str) == Some("failed");
+                    events.extend(self.emit_tool_result_end(id, &result, failed));
+                    self.started_items.remove(id);
+                } else if let Some(content) = update.get("content") {
+                    events.push(json!({
+                        "type": "tool_execution_update",
+                        "toolCallId": id,
+                        "partialResult": { "content": normalize_content(content) },
+                    }));
+                }
+                events
+            }
+            "available_commands_update" => vec![acp_commands_event(update)],
+            _ => Vec::new(),
+        };
+        out = self.with_open(out);
+        out
+    }
+
     /// A main-chain claude tool result. Background subagent launches get
     /// special treatment: the CLI answers the Agent/Task call immediately with
     /// an internal-metadata ack (agentId, output file, "never quote this") and
@@ -1717,6 +1848,7 @@ impl EventTranslator {
         let events = match self.backend {
             CliBackend::ClaudeCode => self.on_claude(&v),
             CliBackend::Codex => self.on_codex(&v),
+            CliBackend::OpenCode | CliBackend::Grok | CliBackend::Kimi => Vec::new(),
         };
         self.with_open(events)
     }
@@ -2589,6 +2721,75 @@ fn am(event: Value) -> Value {
     json!({ "type": "message_update", "assistantMessageEvent": event })
 }
 
+/// The slash-command catalog from an `available_commands_update`. Free-standing
+/// because agents announce their commands right after `session/new` — before
+/// any turn owns a sink — so the session loop caches this and replays it when
+/// the next turn opens.
+fn acp_commands_event(update: &Value) -> Value {
+    let commands = update
+        .get("availableCommands")
+        .and_then(Value::as_array)
+        .map(|commands| {
+            commands
+                .iter()
+                .filter_map(|command| {
+                    // `input` is an object in the ACP schema (`{ hint }`), not a
+                    // bare string.
+                    let hint = command
+                        .pointer("/input/hint")
+                        .or_else(|| command.get("input"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    Some(json!({
+                        "name": command.get("name")?.as_str()?,
+                        "description": command.get("description").and_then(Value::as_str).unwrap_or(""),
+                        "argumentHint": hint,
+                        "kind": "command",
+                    }))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    json!({ "type": "cli_commands", "commands": commands })
+}
+
+fn acp_content_text(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Object(object)) => object
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+fn acp_tool_terminal(update: &Value) -> bool {
+    matches!(
+        update.get("status").and_then(Value::as_str),
+        Some("completed" | "failed")
+    )
+}
+
+fn acp_tool_result(update: &Value) -> Value {
+    if let Some(output) = update.get("rawOutput") {
+        return output.clone();
+    }
+    if let Some(content) = update.get("content") {
+        return content.clone();
+    }
+    json!(update
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("completed"))
+}
+
 /// What a completed (or aborted) CLI turn produced.
 pub struct CliTurnOutcome {
     /// Resume token (session/thread id) for the next turn, when discovered.
@@ -2663,6 +2864,10 @@ fn auth_expired_hint(backend: CliBackend, stderr: &str) -> Option<String> {
     let login = match backend {
         CliBackend::ClaudeCode => "claude, then /login",
         CliBackend::Codex => "codex login",
+        CliBackend::OpenCode => "opencode auth login",
+        CliBackend::Grok => "grok login",
+        // Kimi has no login subcommand — signing in happens inside the TUI.
+        CliBackend::Kimi => "kimi, then /login",
     };
     Some(format!(
         "{} session has expired. Run `{}` in a terminal to sign in again, then retry.",
@@ -3060,6 +3265,631 @@ pub fn spawn_claude_session(
             &base_sink,
             vec![json!({ "type": "cli_background_tasks", "tasks": [] })],
         );
+        let _ = child.wait().await;
+    });
+
+    Ok(handle)
+}
+
+/// One persistent native-ACP process and session. OpenCode, Grok Build and
+/// Kimi differ only in argv; their wire behavior is handled here.
+#[derive(Clone)]
+pub struct AcpSessionHandle {
+    tx: tokio::sync::mpsc::UnboundedSender<AcpSessionCommand>,
+}
+
+enum AcpSessionCommand {
+    StartTurn {
+        prompt: String,
+        images: Vec<(String, String)>,
+        sink: Arc<dyn EventSink>,
+        outcome: tokio::sync::oneshot::Sender<CliTurnOutcome>,
+    },
+    RespondPermission {
+        request_id: Value,
+        allow: bool,
+    },
+    Abort,
+    Shutdown,
+}
+
+impl AcpSessionHandle {
+    pub fn start_turn(
+        &self,
+        prompt: String,
+        images: Vec<(String, String)>,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<tokio::sync::oneshot::Receiver<CliTurnOutcome>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(AcpSessionCommand::StartTurn {
+                prompt,
+                images,
+                sink,
+                outcome: tx,
+            })
+            .map_err(|_| anyhow::anyhow!("ACP session has exited"))?;
+        Ok(rx)
+    }
+
+    pub fn respond_permission(&self, request_id: Value, allow: bool) -> Result<()> {
+        self.tx
+            .send(AcpSessionCommand::RespondPermission { request_id, allow })
+            .map_err(|_| anyhow::anyhow!("ACP session has exited"))
+    }
+
+    pub fn abort(&self) {
+        let _ = self.tx.send(AcpSessionCommand::Abort);
+    }
+
+    pub fn shutdown(&self) {
+        let _ = self.tx.send(AcpSessionCommand::Shutdown);
+    }
+
+    pub fn is_alive(&self) -> bool {
+        !self.tx.is_closed()
+    }
+}
+
+struct ActiveAcpTurn {
+    request_id: Value,
+    sink: Arc<dyn EventSink>,
+    outcome: tokio::sync::oneshot::Sender<CliTurnOutcome>,
+    translator: EventTranslator,
+}
+
+fn emit_protocol(sink: &Arc<dyn EventSink>, conversation_id: &Option<String>, events: Vec<Value>) {
+    for event in events {
+        sink.emit(RuntimeEvent::Protocol {
+            conversation_id: conversation_id.clone(),
+            event,
+        });
+    }
+}
+
+async fn acp_write(stdin: &mut tokio::process::ChildStdin, value: &Value) -> std::io::Result<()> {
+    stdin.write_all(value.to_string().as_bytes()).await?;
+    stdin.write_all(b"\n").await?;
+    stdin.flush().await
+}
+
+/// Answer a reverse request we can't route — one arriving mid-handshake, or a
+/// permission prompt with no turn to show it on. Silence would block the agent
+/// forever, so permission prompts get a protocol-level `cancelled` and anything
+/// else (we advertise no filesystem/terminal capabilities) a "method not
+/// found".
+async fn acp_decline_request(stdin: &mut tokio::process::ChildStdin, request: &Value) {
+    let Some(id) = request.get("id") else { return };
+    let response = if request.get("method").and_then(Value::as_str)
+        == Some("session/request_permission")
+    {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": { "outcome": { "outcome": "cancelled" } }
+        })
+    } else {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": -32601, "message": "Unsupported ACP client method" }
+        })
+    };
+    let _ = acp_write(stdin, &response).await;
+}
+
+async fn acp_handshake_request(
+    stdin: &mut tokio::process::ChildStdin,
+    reader: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    id: u64,
+    method: &str,
+    params: Value,
+) -> Result<Value> {
+    acp_write(
+        stdin,
+        &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
+    )
+    .await
+    .with_context(|| format!("failed to write ACP {method} request"))?;
+    loop {
+        let line = tokio::time::timeout(Duration::from_secs(30), reader.next_line())
+            .await
+            .with_context(|| format!("ACP {method} timed out"))??
+            .ok_or_else(|| anyhow::anyhow!("ACP process exited during {method}"))?;
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if value.get("id").and_then(Value::as_u64) != Some(id) {
+            // Notifications (session/load replays its history through them) are
+            // ignored, but a *request* must be answered or the agent stalls
+            // before it ever reaches its first turn.
+            if value.get("method").is_some() && value.get("id").is_some() {
+                acp_decline_request(stdin, &value).await;
+            }
+            continue;
+        }
+        if let Some(error) = value.get("error") {
+            anyhow::bail!("ACP {method} failed: {error}");
+        }
+        return Ok(value.get("result").cloned().unwrap_or(Value::Null));
+    }
+}
+
+/// The option id matching the user's answer. Once-scoped kinds win over
+/// always-scoped ones so a single Allow can never silently become a standing
+/// grant. There is deliberately NO "just take the first option" fallback: an
+/// agent that offers nothing matching the answer must get `cancelled`, because
+/// guessing here would turn a Deny into an Allow.
+fn acp_allow_option(params: &Value, allow: bool) -> Option<Value> {
+    let options = params.get("options")?.as_array()?;
+    let wanted: [&str; 2] = if allow {
+        ["allow_once", "allow"]
+    } else {
+        ["reject_once", "reject"]
+    };
+    wanted
+        .iter()
+        .find_map(|prefix| {
+            options.iter().find(|option| {
+                option
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| kind.starts_with(prefix))
+            })
+        })
+        .and_then(|option| option.get("optionId").cloned())
+}
+
+/// A `session/prompt` reply carries why the agent stopped. `end_turn` and
+/// `cancelled` are normal; the rest end the turn with nothing rendered, so
+/// surface them instead of showing an empty answer.
+fn acp_stop_reason_error(response: &Value) -> Option<String> {
+    match response.pointer("/result/stopReason").and_then(Value::as_str)? {
+        "end_turn" | "cancelled" => None,
+        "refusal" => Some("The agent declined to continue this turn.".to_string()),
+        "max_tokens" => Some("The agent stopped: token limit reached.".to_string()),
+        "max_turn_requests" => {
+            Some("The agent stopped: too many requests in one turn.".to_string())
+        }
+        other => Some(format!("The agent stopped early ({other}).")),
+    }
+}
+
+fn acp_permission_response(params: &Value, allow: bool) -> Value {
+    match acp_allow_option(params, allow) {
+        Some(option_id) => json!({
+            "outcome": { "outcome": "selected", "optionId": option_id }
+        }),
+        None => json!({ "outcome": { "outcome": "cancelled" } }),
+    }
+}
+
+fn fail_queued_acp_turns(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<AcpSessionCommand>,
+    backend: CliBackend,
+    artifact_dir: Option<&Path>,
+    cwd: &Path,
+    conversation_id: &Option<String>,
+    error: &str,
+) {
+    while let Ok(command) = rx.try_recv() {
+        if let AcpSessionCommand::StartTurn { sink, outcome, .. } = command {
+            let mut translator = EventTranslator::new(backend);
+            if let Some(dir) = artifact_dir {
+                translator = translator.with_artifact_storage(dir.to_path_buf(), cwd.to_path_buf());
+            }
+            emit_protocol(&sink, conversation_id, translator.start());
+            emit_protocol(&sink, conversation_id, translator.finish(Some(error)));
+            let _ = outcome.send(CliTurnOutcome {
+                resume_id: None,
+                messages: translator.take_messages(),
+                aborted: false,
+                streamed: false,
+                resume_rejected: false,
+            });
+        }
+    }
+}
+
+/// Spawn a vendor-native ACP stdio server, initialize it, and keep one session
+/// alive across turns. A cold app process loads the saved ACP session id when
+/// the agent advertises `loadSession`; when it can't, the session starts empty
+/// and `opts.cold_start_preamble` (the Cetus hint plus a transcript handoff,
+/// built by the host) rides the first prompt so the context isn't silently
+/// lost.
+pub fn spawn_acp_session(
+    backend: CliBackend,
+    bin: &str,
+    cwd: &Path,
+    artifact_dir: Option<PathBuf>,
+    conversation_id: Option<String>,
+    extra_env: Vec<(String, String)>,
+    opts: CliRunOpts,
+) -> Result<AcpSessionHandle> {
+    anyhow::ensure!(
+        backend.is_acp(),
+        "{} is not an ACP backend",
+        backend.as_str()
+    );
+    let mut command = TokioCommand::new(bin);
+    command
+        .args(backend.acp_args())
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to launch `{bin} {}`", backend.acp_args().join(" ")))?;
+    let mut stdin = child.stdin.take().context("ACP child stdin missing")?;
+    let stdout = child.stdout.take().context("ACP child stdout missing")?;
+    let stderr = child.stderr.take();
+    let translator_cwd = cwd.to_path_buf();
+    let cwd_string = cwd.to_string_lossy().into_owned();
+    let client_version = opts
+        .client_version
+        .clone()
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let handle = AcpSessionHandle { tx };
+
+    tokio::spawn(async move {
+        if let Some(stderr) = stderr {
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::debug!("{} ACP stderr: {line}", backend.as_str());
+                }
+            });
+        }
+        let mut reader = BufReader::new(stdout).lines();
+        let init = acp_handshake_request(
+            &mut stdin,
+            &mut reader,
+            1,
+            "initialize",
+            json!({
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": { "readTextFile": false, "writeTextFile": false },
+                    "terminal": false
+                },
+                "clientInfo": { "name": "cetus", "version": client_version }
+            }),
+        )
+        .await;
+        let init = match init {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!("{} ACP initialize failed: {error}", backend.as_str());
+                fail_queued_acp_turns(
+                    &mut rx,
+                    backend,
+                    artifact_dir.as_deref(),
+                    &translator_cwd,
+                    &conversation_id,
+                    &error.to_string(),
+                );
+                let _ = child.start_kill();
+                return;
+            }
+        };
+        let can_load = init
+            .pointer("/agentCapabilities/loadSession")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let session_params = json!({ "cwd": cwd_string, "mcpServers": [] });
+        let resume_requested = opts.resume.is_some();
+        let loaded = if can_load {
+            if let Some(resume) = opts.resume.as_ref() {
+                acp_handshake_request(
+                    &mut stdin,
+                    &mut reader,
+                    2,
+                    "session/load",
+                    json!({
+                        "sessionId": resume,
+                        "cwd": cwd_string,
+                        "mcpServers": []
+                    }),
+                )
+                .await
+                .ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let loaded_existing = loaded.is_some();
+        let session_result = match loaded {
+            Some(value) => value,
+            None => match acp_handshake_request(
+                &mut stdin,
+                &mut reader,
+                3,
+                "session/new",
+                session_params,
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::warn!("{} ACP session/new failed: {error}", backend.as_str());
+                    fail_queued_acp_turns(
+                        &mut rx,
+                        backend,
+                        artifact_dir.as_deref(),
+                        &translator_cwd,
+                        &conversation_id,
+                        &error.to_string(),
+                    );
+                    let _ = child.start_kill();
+                    return;
+                }
+            },
+        };
+        let Some(session_id) = session_result
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| opts.resume.filter(|_| loaded_existing))
+        else {
+            tracing::warn!("{} ACP returned no session id", backend.as_str());
+            fail_queued_acp_turns(
+                &mut rx,
+                backend,
+                artifact_dir.as_deref(),
+                &translator_cwd,
+                &conversation_id,
+                "ACP returned no session id",
+            );
+            let _ = child.start_kill();
+            return;
+        };
+
+        let mut next_id = 10u64;
+        let mut active: Option<ActiveAcpTurn> = None;
+        let mut permission_params: HashMap<String, Value> = HashMap::new();
+        // Announced right after session/new, i.e. before any turn owns a sink.
+        // Cached here and replayed on every turn so the composer's slash menu
+        // hydrates instead of staying empty.
+        let mut commands_event: Option<Value> = None;
+        // Only set when a resume token existed but the agent could not load it,
+        // so this session really did start from nothing.
+        let mut cold_start_preamble = match (loaded_existing, resume_requested) {
+            (false, true) => opts.cold_start_preamble.clone(),
+            _ => None,
+        };
+        loop {
+            tokio::select! {
+                command = rx.recv() => match command {
+                    Some(AcpSessionCommand::StartTurn { prompt, images, sink, outcome }) => {
+                        if active.is_some() {
+                            // begin_cli_turn is supposed to make this
+                            // unreachable; report it instead of eating the
+                            // prompt if it ever isn't.
+                            let mut translator = EventTranslator::new(backend);
+                            emit_protocol(&sink, &conversation_id, translator.start());
+                            emit_protocol(
+                                &sink,
+                                &conversation_id,
+                                translator.finish(Some("A turn is already running on this ACP session")),
+                            );
+                            let _ = outcome.send(CliTurnOutcome {
+                                resume_id: Some(session_id.clone()),
+                                messages: translator.take_messages(),
+                                aborted: false,
+                                streamed: false,
+                                resume_rejected: false,
+                            });
+                            continue;
+                        }
+                        let mut translator = EventTranslator::new(backend);
+                        if let Some(dir) = artifact_dir.clone() {
+                            translator = translator.with_artifact_storage(dir, translator_cwd.clone());
+                        }
+                        emit_protocol(&sink, &conversation_id, translator.start());
+                        if let Some(event) = commands_event.clone() {
+                            emit_protocol(&sink, &conversation_id, vec![event]);
+                        }
+                        let prompt = match cold_start_preamble.take() {
+                            Some(preamble) => format!("{preamble}\n\n{prompt}"),
+                            None => prompt,
+                        };
+                        let mut blocks = vec![json!({ "type": "text", "text": prompt })];
+                        blocks.extend(images.into_iter().map(|(mime_type, data)| {
+                            json!({ "type": "image", "mimeType": mime_type, "data": data })
+                        }));
+                        let request_id = json!(next_id);
+                        next_id += 1;
+                        let request = json!({
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "method": "session/prompt",
+                            "params": { "sessionId": session_id, "prompt": blocks }
+                        });
+                        if let Err(error) = acp_write(&mut stdin, &request).await {
+                            emit_protocol(
+                                &sink,
+                                &conversation_id,
+                                translator.finish(Some(&format!("ACP stdin closed: {error}"))),
+                            );
+                            let streamed = translator.opened;
+                            let _ = outcome.send(CliTurnOutcome {
+                                resume_id: Some(session_id.clone()),
+                                messages: translator.take_messages(),
+                                aborted: false,
+                                streamed,
+                                resume_rejected: false,
+                            });
+                            break;
+                        }
+                        active = Some(ActiveAcpTurn { request_id, sink, outcome, translator });
+                    }
+                    Some(AcpSessionCommand::RespondPermission { request_id, allow }) => {
+                        let key = request_id.to_string();
+                        if let Some(params) = permission_params.remove(&key) {
+                            let result = acp_permission_response(&params, allow);
+                            let _ = acp_write(
+                                &mut stdin,
+                                &json!({ "jsonrpc": "2.0", "id": request_id, "result": result }),
+                            ).await;
+                        }
+                    }
+                    Some(AcpSessionCommand::Abort) => {
+                        let _ = acp_write(
+                            &mut stdin,
+                            &json!({
+                                "jsonrpc": "2.0",
+                                "method": "session/cancel",
+                                "params": { "sessionId": session_id }
+                            }),
+                        ).await;
+                        permission_params.clear();
+                        if let Some(mut turn) = active.take() {
+                            emit_protocol(&turn.sink, &conversation_id, turn.translator.finish(None));
+                            let streamed = turn.translator.opened;
+                            let _ = turn.outcome.send(CliTurnOutcome {
+                                resume_id: Some(session_id.clone()),
+                                messages: turn.translator.take_messages(),
+                                aborted: true,
+                                streamed,
+                                resume_rejected: false,
+                            });
+                        }
+                    }
+                    Some(AcpSessionCommand::Shutdown) | None => {
+                        let _ = child.start_kill();
+                        break;
+                    }
+                },
+                line = reader.next_line() => {
+                    let line = match line {
+                        Ok(Some(line)) => line,
+                        Ok(None) => break,
+                        Err(error) => {
+                            tracing::warn!("{} ACP stdout failed: {error}", backend.as_str());
+                            break;
+                        }
+                    };
+                    let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                        tracing::debug!("{} ACP non-JSON stdout: {line}", backend.as_str());
+                        continue;
+                    };
+                    if value.get("method").and_then(Value::as_str) == Some("session/update") {
+                        let Some(update) = value.pointer("/params/update") else { continue };
+                        // Session-scoped, not turn-scoped: agents announce their
+                        // slash commands right after session/new, when no turn
+                        // is active yet.
+                        if update.get("sessionUpdate").and_then(Value::as_str)
+                            == Some("available_commands_update")
+                        {
+                            commands_event = Some(acp_commands_event(update));
+                        }
+                        if let Some(turn) = active.as_mut() {
+                            let events = turn.translator.on_acp_update(update);
+                            emit_protocol(&turn.sink, &conversation_id, events);
+                        }
+                        continue;
+                    }
+                    if value.get("method").and_then(Value::as_str)
+                        == Some("session/request_permission")
+                    {
+                        let request_id = value.get("id").cloned().unwrap_or(Value::Null);
+                        let params = value.get("params").cloned().unwrap_or(Value::Null);
+                        if opts.bypass_approvals {
+                            let result = acp_permission_response(&params, true);
+                            let _ = acp_write(
+                                &mut stdin,
+                                &json!({ "jsonrpc": "2.0", "id": request_id, "result": result }),
+                            ).await;
+                        } else if let Some(turn) = active.as_ref() {
+                            permission_params.insert(request_id.to_string(), params.clone());
+                            // `{}` rather than null: the card renders the tool
+                            // call straight from `input`.
+                            let tool_call = params
+                                .get("toolCall")
+                                .filter(|value| value.is_object())
+                                .cloned()
+                                .unwrap_or_else(|| json!({}));
+                            emit_protocol(
+                                &turn.sink,
+                                &conversation_id,
+                                vec![json!({
+                                    "type": "cli_control_request",
+                                    "requestId": request_id,
+                                    "source": "acp",
+                                    "toolName": tool_call.get("title").and_then(Value::as_str).unwrap_or("tool"),
+                                    "input": tool_call,
+                                    "toolUseId": tool_call.get("toolCallId"),
+                                    "suggestions": params.get("options"),
+                                })],
+                            );
+                        } else {
+                            // No turn owns this request, so nothing can ever
+                            // answer it — cancel instead of blocking the agent.
+                            acp_decline_request(&mut stdin, &value).await;
+                        }
+                        continue;
+                    }
+                    let response_id = value.get("id");
+                    let is_prompt_response = active
+                        .as_ref()
+                        .is_some_and(|turn| response_id == Some(&turn.request_id));
+                    if is_prompt_response {
+                        let mut turn = active.take().expect("active turn exists");
+                        // Requests the agent gave up on when the turn ended;
+                        // their cards are already cleared by `agent_end`.
+                        permission_params.clear();
+                        let error = value
+                            .get("error")
+                            .map(Value::to_string)
+                            .or_else(|| acp_stop_reason_error(&value));
+                        emit_protocol(
+                            &turn.sink,
+                            &conversation_id,
+                            turn.translator.finish(error.as_deref()),
+                        );
+                        let streamed = turn.translator.opened;
+                        let _ = turn.outcome.send(CliTurnOutcome {
+                            resume_id: Some(session_id.clone()),
+                            messages: turn.translator.take_messages(),
+                            aborted: false,
+                            streamed,
+                            resume_rejected: false,
+                        });
+                        continue;
+                    }
+                    // We deliberately advertise no client filesystem/terminal
+                    // capabilities. Reject unexpected reverse requests rather
+                    // than leaving the agent waiting forever.
+                    if value.get("method").is_some() && value.get("id").is_some() {
+                        acp_decline_request(&mut stdin, &value).await;
+                    }
+                }
+            }
+        }
+        if let Some(mut turn) = active {
+            emit_protocol(
+                &turn.sink,
+                &conversation_id,
+                turn.translator
+                    .finish(Some("ACP process exited unexpectedly")),
+            );
+            let streamed = turn.translator.opened;
+            let _ = turn.outcome.send(CliTurnOutcome {
+                resume_id: Some(session_id),
+                messages: turn.translator.take_messages(),
+                aborted: false,
+                streamed,
+                resume_rejected: false,
+            });
+        }
         let _ = child.wait().await;
     });
 
@@ -6745,6 +7575,7 @@ mod tests {
                 images: Vec::new(),
                 image_blocks: Vec::new(),
                 append_system_prompt: Some("host hint".into()),
+                ..Default::default()
             },
         );
         assert!(args.contains(&"--output-format".to_string()));
@@ -6775,6 +7606,7 @@ mod tests {
                 images: vec!["/tmp/shot.png".into()],
                 image_blocks: Vec::new(),
                 append_system_prompt: None,
+                ..Default::default()
             },
         );
         assert_eq!(args[0], "exec");
@@ -7005,5 +7837,417 @@ mod tests {
             assert_eq!(artifact_details(&path, None, None).unwrap()["artifactKind"], json!(expected));
         }
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn acp_updates_translate_text_tools_and_commands() {
+        let mut tr = EventTranslator::new(CliBackend::OpenCode);
+        let mut events = tr.start();
+        events.extend(tr.on_acp_update(&json!({
+            "sessionUpdate": "agent_thought_chunk",
+            "content": { "type": "text", "text": "checking" }
+        })));
+        events.extend(tr.on_acp_update(&json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "type": "text", "text": "hello" }
+        })));
+        events.extend(tr.on_acp_update(&json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "tool-1",
+            "title": "Read file",
+            "kind": "read",
+            "status": "in_progress",
+            "rawInput": { "path": "README.md" }
+        })));
+        events.extend(tr.on_acp_update(&json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-1",
+            "status": "completed",
+            "rawOutput": "contents"
+        })));
+        events.extend(tr.on_acp_update(&json!({
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [{
+                "name": "review",
+                "description": "Review changes",
+                "input": "[path]"
+            }]
+        })));
+        events.extend(tr.finish(None));
+
+        let event_types = types(&events);
+        assert!(event_types.contains(&"message_update:thinking_delta".to_string()));
+        assert!(event_types.contains(&"message_update:text_delta".to_string()));
+        assert!(event_types.contains(&"message_update:toolcall_end".to_string()));
+        assert!(event_types.contains(&"tool_execution_start".to_string()));
+        assert!(event_types.contains(&"tool_execution_end".to_string()));
+        assert!(event_types.contains(&"cli_commands".to_string()));
+        assert_eq!(
+            event_types.last().map(String::as_str),
+            Some("agent_settled")
+        );
+        let messages = tr.take_messages();
+        assert!(messages
+            .iter()
+            .any(|message| message.to_string().contains("hello")));
+        assert!(messages
+            .iter()
+            .any(|message| message.to_string().contains("contents")));
+    }
+
+    #[test]
+    fn acp_permission_never_upgrades_a_deny_into_an_allow() {
+        let params = json!({ "options": [
+            { "optionId": "always", "kind": "allow_always" },
+            { "optionId": "once", "kind": "allow_once" },
+            { "optionId": "no", "kind": "reject_once" },
+        ]});
+        // Once-scoped wins, so one Allow never becomes a standing grant.
+        assert_eq!(
+            acp_permission_response(&params, true)["outcome"]["optionId"],
+            json!("once")
+        );
+        assert_eq!(
+            acp_permission_response(&params, false)["outcome"]["optionId"],
+            json!("no")
+        );
+
+        // An agent offering nothing to reject with must not have the first
+        // (allowing) option picked on its behalf.
+        let allow_only = json!({ "options": [{ "optionId": "yes", "kind": "allow_once" }] });
+        assert_eq!(
+            acp_permission_response(&allow_only, false),
+            json!({ "outcome": { "outcome": "cancelled" } })
+        );
+        let unknown_kinds = json!({ "options": [{ "optionId": "weird", "kind": "proceed" }] });
+        assert_eq!(
+            acp_permission_response(&unknown_kinds, false),
+            json!({ "outcome": { "outcome": "cancelled" } })
+        );
+        assert_eq!(
+            acp_permission_response(&json!({}), true),
+            json!({ "outcome": { "outcome": "cancelled" } })
+        );
+    }
+
+    #[test]
+    fn acp_stop_reasons_surface_only_when_abnormal() {
+        let reason = |value: &str| {
+            acp_stop_reason_error(&json!({ "result": { "stopReason": value } }))
+        };
+        assert_eq!(reason("end_turn"), None);
+        assert_eq!(reason("cancelled"), None);
+        assert!(reason("refusal").unwrap().contains("declined"));
+        assert!(reason("max_tokens").unwrap().contains("token limit"));
+        assert!(reason("something_new").unwrap().contains("something_new"));
+        assert_eq!(acp_stop_reason_error(&json!({ "result": {} })), None);
+    }
+
+    #[test]
+    fn acp_command_hints_read_the_object_form() {
+        let event = acp_commands_event(&json!({
+            "availableCommands": [
+                { "name": "review", "description": "Review", "input": { "hint": "[path]" } },
+                { "name": "plain" },
+            ]
+        }));
+        assert_eq!(event["commands"][0]["argumentHint"], json!("[path]"));
+        assert_eq!(event["commands"][0]["description"], json!("Review"));
+        assert_eq!(event["commands"][1]["argumentHint"], json!(""));
+    }
+
+    #[test]
+    fn native_acp_runtime_descriptors_are_stable() {
+        assert_eq!(CliBackend::from_id("opencode"), Some(CliBackend::OpenCode));
+        assert_eq!(CliBackend::OpenCode.default_bin(), "opencode");
+        assert_eq!(CliBackend::OpenCode.acp_args(), ["acp"]);
+        assert_eq!(CliBackend::from_id("grok"), Some(CliBackend::Grok));
+        assert_eq!(CliBackend::Grok.acp_args(), ["agent", "stdio"]);
+        assert_eq!(CliBackend::from_id("kimi"), Some(CliBackend::Kimi));
+        assert_eq!(CliBackend::Kimi.acp_args(), ["acp"]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn acp_session_end_to_end_with_permission_and_tool_updates() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-acp-e2e-{}-{}",
+            std::process::id(),
+            ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-acp.py");
+        std::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json, sys
+prompt_id = None
+for raw in sys.stdin:
+    msg = json.loads(raw)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{
+            "protocolVersion":1,
+            "agentCapabilities":{"loadSession":True}
+        }}), flush=True)
+    elif method == "session/new":
+        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{
+            "sessionId":"fake-session"
+        }}), flush=True)
+    elif method == "session/prompt":
+        prompt_id = msg["id"]
+        sid = msg["params"]["sessionId"]
+        print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{
+            "sessionId":sid,
+            "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ACP "}}
+        }}), flush=True)
+        print(json.dumps({"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{
+            "sessionId":sid,
+            "toolCall":{"toolCallId":"tool-1","title":"Run check","kind":"execute"},
+            "options":[
+                {"optionId":"allow-once","name":"Allow","kind":"allow_once"},
+                {"optionId":"reject-once","name":"Reject","kind":"reject_once"}
+            ]
+        }}), flush=True)
+    elif msg.get("id") == 90:
+        sid = "fake-session"
+        print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{
+            "sessionId":sid,
+            "update":{"sessionUpdate":"tool_call","toolCallId":"tool-1","title":"Run check",
+                      "kind":"execute","status":"completed","rawInput":{"command":"true"},
+                      "rawOutput":"ok"}
+        }}), flush=True)
+        print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{
+            "sessionId":sid,
+            "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"works"}}
+        }}), flush=True)
+        print(json.dumps({"jsonrpc":"2.0","id":prompt_id,"result":{"stopReason":"end_turn"}}), flush=True)
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        for backend in [CliBackend::OpenCode, CliBackend::Grok, CliBackend::Kimi] {
+            let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+            let session = spawn_acp_session(
+                backend,
+                &script.to_string_lossy(),
+                &dir,
+                Some(dir.join("artifacts")),
+                Some(format!("conv-{}", backend.as_str())),
+                Vec::new(),
+                CliRunOpts {
+                    bypass_approvals: false,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let outcome_rx = session
+                .start_turn(
+                    "test".into(),
+                    Vec::new(),
+                    sink.clone() as Arc<dyn EventSink>,
+                )
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if sink
+                        .0
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .any(|event| event["type"] == "cli_control_request")
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("ACP permission request did not arrive");
+            session.respond_permission(json!(90), true).unwrap();
+            let outcome = tokio::time::timeout(Duration::from_secs(10), outcome_rx)
+                .await
+                .expect("ACP turn timed out")
+                .expect("ACP outcome channel closed");
+            session.shutdown();
+
+            assert_eq!(outcome.resume_id.as_deref(), Some("fake-session"));
+            assert!(outcome.streamed);
+            let messages = serde_json::to_string(&outcome.messages).unwrap();
+            assert!(
+                messages.contains("ACP ") && messages.contains("works"),
+                "{}: {messages}",
+                backend.as_str()
+            );
+            assert!(
+                messages.contains("\"ok\""),
+                "{}: {messages}",
+                backend.as_str()
+            );
+            let events = sink.0.lock().unwrap();
+            let event_types = types(&events);
+            assert!(event_types.contains(&"cli_control_request".to_string()));
+            assert!(event_types.contains(&"tool_execution_end".to_string()));
+            assert_eq!(
+                event_types.last().map(String::as_str),
+                Some("agent_settled")
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An agent that can't `session/load` starts an empty session, so the host's
+    /// cold-start preamble has to ride the first prompt or the conversation
+    /// silently loses its context. Also covers the two things an agent does
+    /// before any turn exists: announcing its commands, and (badly behaved)
+    /// asking for permission.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn acp_cold_start_replays_context_commands_and_cancels_orphan_requests() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-acp-cold-{}-{}",
+            std::process::id(),
+            ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-acp-cold.py");
+        std::fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json, sys
+orphan = "unanswered"
+for raw in sys.stdin:
+    msg = json.loads(raw)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{
+            "protocolVersion":1,
+            "agentCapabilities":{"loadSession":False}
+        }}), flush=True)
+        # Reverse request before any turn exists — must not wedge the handshake.
+        print(json.dumps({"jsonrpc":"2.0","id":91,"method":"session/request_permission","params":{
+            "sessionId":"fresh-session",
+            "toolCall":{"toolCallId":"t0","title":"Early"},
+            "options":[{"optionId":"allow-once","kind":"allow_once"}]
+        }}), flush=True)
+    elif method == "session/new":
+        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{
+            "sessionId":"fresh-session"
+        }}), flush=True)
+        # Commands are announced here, long before the first turn's sink exists.
+        print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{
+            "sessionId":"fresh-session",
+            "update":{"sessionUpdate":"available_commands_update","availableCommands":[
+                {"name":"review","description":"Review","input":{"hint":"[path]"}}
+            ]}
+        }}), flush=True)
+    elif msg.get("id") == 91:
+        orphan = json.dumps(msg.get("result") or msg.get("error"))
+    elif method == "session/prompt":
+        text = msg["params"]["prompt"][0]["text"]
+        print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{
+            "sessionId":"fresh-session",
+            "update":{"sessionUpdate":"agent_message_chunk",
+                      "content":{"type":"text","text":"saw:" + text + "|orphan:" + orphan}}
+        }}), flush=True)
+        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"stopReason":"end_turn"}}), flush=True)
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let session = spawn_acp_session(
+            CliBackend::OpenCode,
+            &script.to_string_lossy(),
+            &dir,
+            None,
+            Some("conv-cold".into()),
+            Vec::new(),
+            CliRunOpts {
+                bypass_approvals: true,
+                // A token left over from a process that no longer exists.
+                resume: Some("stale-session".into()),
+                cold_start_preamble: Some("HANDOFF_MARKER".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let outcome_rx = session
+            .start_turn("hi".into(), Vec::new(), sink.clone() as Arc<dyn EventSink>)
+            .unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(10), outcome_rx)
+            .await
+            .expect("ACP cold-start turn timed out")
+            .expect("ACP outcome channel closed");
+        session.shutdown();
+
+        // A fresh session id replaces the stale one...
+        assert_eq!(outcome.resume_id.as_deref(), Some("fresh-session"));
+        let messages = serde_json::to_string(&outcome.messages).unwrap();
+        // ...and the context handoff went with the first prompt.
+        assert!(messages.contains("HANDOFF_MARKER"), "{messages}");
+        // The pre-turn permission request was answered, not dropped.
+        assert!(messages.contains("cancelled"), "{messages}");
+
+        let events = sink.0.lock().unwrap();
+        let commands = events
+            .iter()
+            .find(|event| event["type"] == "cli_commands")
+            .expect("commands announced before the turn should replay into it");
+        assert_eq!(commands["commands"][0]["name"], json!("review"));
+        assert_eq!(commands["commands"][0]["argumentHint"], json!("[path]"));
+        drop(events);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Real native-ACP smoke test. Run manually with:
+    /// `cargo test -p cetus-bridge live_opencode_acp_smoke -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_opencode_acp_smoke() {
+        let dir = std::env::temp_dir().join("cetus-live-opencode-acp");
+        std::fs::create_dir_all(&dir).unwrap();
+        let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+        let session = match spawn_acp_session(
+            CliBackend::OpenCode,
+            "opencode",
+            &dir,
+            Some(dir.join("artifacts")),
+            Some("live-opencode".into()),
+            std::env::vars().collect(),
+            CliRunOpts {
+                bypass_approvals: true,
+                ..Default::default()
+            },
+        ) {
+            Ok(session) => session,
+            Err(error) => {
+                eprintln!("opencode unavailable; skipping: {error}");
+                return;
+            }
+        };
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(180),
+            session
+                .start_turn(
+                    "Reply with exactly CETUS_ACP_OK. Do not use tools.".into(),
+                    Vec::new(),
+                    sink.clone() as Arc<dyn EventSink>,
+                )
+                .unwrap(),
+        )
+        .await
+        .expect("live OpenCode ACP turn timed out")
+        .expect("live OpenCode outcome channel closed");
+        session.shutdown();
+        let messages = serde_json::to_string(&outcome.messages).unwrap();
+        eprintln!("OpenCode ACP messages: {messages}");
+        assert!(messages.contains("CETUS_ACP_OK"), "{messages}");
     }
 }

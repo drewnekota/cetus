@@ -17,7 +17,9 @@ import {
 } from "@/components/brand-icons";
 import {
   ArchiveRestore,
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   AudioLines,
   Cloud,
   Check,
@@ -37,6 +39,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { BACKENDS, useRuntimeSlots } from "@/components/chat/backend-picker";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -118,6 +121,7 @@ import {
 } from "@/lib/notifications";
 import {
   DEFAULT_QUICK_SETTINGS,
+  type BackendId,
   type QuickGesture,
   type QuickSessionMode,
   type QuickSettings,
@@ -128,13 +132,22 @@ import {
   type VoicePermissions,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import {
+  DEFAULT_CLI_AGENT_SETTINGS,
+  isBackendEnabled,
+  normalizeRuntimeOrder,
+  OPEN_RUNTIME_SETTINGS_EVENT,
+  runtimeSlotDisplay,
+} from "@/lib/runtime-settings";
 import { HotkeyRecorder } from "./hotkey-recorder";
 import {
+  RUNTIME_SLOT_SHORTCUT_IDS,
   SHORTCUT_DEFINITIONS,
   defaultShortcutMap,
   readKeyboardShortcuts,
   resetKeyboardShortcuts,
   shortcutDisplay,
+  useKeyboardShortcuts,
   writeKeyboardShortcuts,
   type ShortcutId,
   type ShortcutMap,
@@ -196,6 +209,7 @@ const PROVIDERS: { id: string; labelKey: string; envHint: string }[] = [
 
 type SectionId =
   | "general"
+  | "runtimes"
   | "remote"
   | "api-keys"
   | "memory"
@@ -228,6 +242,7 @@ const SECTION_GROUPS: { labelKey: string; sections: Section[] }[] = [
     labelKey: "group.general",
     sections: [
       { id: "general", labelKey: "nav.general" },
+      { id: "runtimes", labelKey: "nav.runtimes" },
       { id: "remote", labelKey: "nav.remote" },
       { id: "appearance", labelKey: "nav.appearance" },
       { id: "keyboard-shortcuts", labelKey: "nav.keyboard-shortcuts" },
@@ -310,6 +325,13 @@ export const SettingsPage = memo(function SettingsPage({
     } catch {}
   }, [section]);
 
+  useEffect(() => {
+    const showRuntimeSettings = () => setSection("runtimes");
+    window.addEventListener(OPEN_RUNTIME_SETTINGS_EVENT, showRuntimeSettings);
+    return () =>
+      window.removeEventListener(OPEN_RUNTIME_SETTINGS_EVENT, showRuntimeSettings);
+  }, []);
+
   // Esc closes the page. Capture phase + stopPropagation so it wins over the
   // app-level Esc handler (which also aborts streams).
   useEffect(() => {
@@ -384,6 +406,8 @@ export const SettingsPage = memo(function SettingsPage({
           <div className="mx-auto w-full max-w-3xl px-6 py-8">
             {section === "general" ? (
               <GeneralSection />
+            ) : section === "runtimes" ? (
+              <RuntimesSection />
             ) : section === "remote" ? (
               <RemoteSection />
             ) : section === "api-keys" ? (
@@ -539,6 +563,214 @@ function SettingsList({
 }
 
 // =============================================================================
+// Runtimes
+// =============================================================================
+
+const RUNTIME_COMMANDS: Record<BackendId, string> = {
+  pi: "Built into Cetus",
+  "claude-code": "claude --output-format stream-json",
+  codex: "codex app-server",
+  opencode: "opencode acp",
+  grok: "grok agent stdio",
+  kimi: "kimi acp",
+};
+
+function runtimeEnabledPatch(
+  backend: BackendId,
+  enabled: boolean,
+): Partial<CliAgentSettings> {
+  switch (backend) {
+    case "claude-code":
+      return { claudeCodeEnabled: enabled };
+    case "codex":
+      return { codexEnabled: enabled };
+    case "opencode":
+      return { opencodeEnabled: enabled };
+    case "grok":
+      return { grokEnabled: enabled };
+    case "kimi":
+      return { kimiEnabled: enabled };
+    case "pi":
+      return {};
+  }
+}
+
+function RuntimesSection() {
+  const { t } = useTranslation("settings");
+  const [settings, setSettings] = useState<CliAgentSettings>(
+    DEFAULT_CLI_AGENT_SETTINGS,
+  );
+  const [runtimeStatus, setRuntimeStatus] = useState<Awaited<
+    ReturnType<typeof api.getCliRuntimeStatus>
+  > | null>(null);
+  const shortcuts = useKeyboardShortcuts();
+
+  useEffect(() => {
+    api
+      .getCliAgentSettings()
+      .then((value) =>
+        setSettings({ ...DEFAULT_CLI_AGENT_SETTINGS, ...value }),
+      )
+      .catch(() => {});
+    api.getCliRuntimeStatus().then(setRuntimeStatus).catch(() => {});
+  }, []);
+
+  function save(next: CliAgentSettings) {
+    setSettings(next);
+    api.setCliAgentSettings(next).catch(() => {});
+  }
+
+  function update(patch: Partial<CliAgentSettings>) {
+    save({ ...settings, ...patch });
+  }
+
+  function moveRuntime(backend: BackendId, offset: -1 | 1) {
+    const order = normalizeRuntimeOrder(settings.runtimeOrder);
+    const from = order.indexOf(backend);
+    const to = from + offset;
+    if (from < 0 || to < 0 || to >= order.length) return;
+    const next = [...order];
+    [next[from], next[to]] = [next[to], next[from]];
+    update({ runtimeOrder: next });
+  }
+
+  const order = normalizeRuntimeOrder(settings.runtimeOrder);
+  const byId = new Map(BACKENDS.map((backend) => [backend.id, backend]));
+  const isInstalled = (id: BackendId) => {
+    if (id === "pi") return true;
+    if (!runtimeStatus) return null;
+    if (id === "claude-code") return runtimeStatus.claudeCode;
+    return runtimeStatus[id];
+  };
+
+  return (
+    <section>
+      <SectionHeading
+        title={t("runtimes.title")}
+        description={t("runtimes.description")}
+      />
+
+      <SettingsList className="mt-6">
+        {order.map((id, index) => {
+          const runtime = byId.get(id);
+          if (!runtime) return null;
+          const Icon = runtime.icon;
+          const enabled = isBackendEnabled(id, settings);
+          const installed = isInstalled(id);
+          // Read off the section's own state so the chip moves with the row the
+          // instant it's reordered, not a save round-trip later.
+          const slotKey = runtimeSlotDisplay(id, settings, shortcuts);
+          return (
+            <div
+              key={id}
+              data-testid={`runtime-settings-row-${id}`}
+              className="flex items-center gap-3 px-4 py-3"
+            >
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <Icon className="size-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{runtime.label}</span>
+                  {slotKey && (
+                    <span
+                      className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                      title={t("runtimes.shortcutHint")}
+                    >
+                      {slotKey}
+                    </span>
+                  )}
+                  {id === "pi" ? (
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                      {t("runtimes.builtIn")}
+                    </span>
+                  ) : installed !== null ? (
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[10px]",
+                        installed
+                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {installed
+                        ? t("runtimes.installed")
+                        : t("runtimes.notInstalled")}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {RUNTIME_COMMANDS[id]}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  data-testid={`runtime-move-up-${id}`}
+                  aria-label={t("runtimes.moveUp")}
+                  title={t("runtimes.moveUp")}
+                  disabled={index === 0}
+                  onClick={() => moveRuntime(id, -1)}
+                >
+                  <ArrowUp className="size-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  data-testid={`runtime-move-down-${id}`}
+                  aria-label={t("runtimes.moveDown")}
+                  title={t("runtimes.moveDown")}
+                  disabled={index === order.length - 1}
+                  onClick={() => moveRuntime(id, 1)}
+                >
+                  <ArrowDown className="size-3.5" />
+                </Button>
+              </div>
+              <Switch
+                id={`runtime-enabled-${id}`}
+                data-testid={`runtime-enabled-${id}`}
+                checked={enabled}
+                disabled={id === "pi"}
+                aria-label={t("runtimes.enabled", { runtime: runtime.label })}
+                onCheckedChange={(value) =>
+                  update(runtimeEnabledPatch(id, value))
+                }
+              />
+            </div>
+          );
+        })}
+      </SettingsList>
+
+      <div className="mt-8">
+        <h3 className="text-sm font-semibold">{t("runtimes.behavior.title")}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t("runtimes.behavior.description")}
+        </p>
+        <div className="mt-2">
+          <ToggleRow
+            id="cli-agents-bypass"
+            label={t("general.cliAgents.label")}
+            description={t("general.cliAgents.description")}
+            checked={settings.bypassApprovals}
+            onCheckedChange={(value) => update({ bypassApprovals: value })}
+          />
+          <ToggleRow
+            id="cli-agents-worktree"
+            label={t("general.cliWorktree.label")}
+            description={t("general.cliWorktree.description")}
+            checked={settings.isolateInWorktree}
+            onCheckedChange={(value) => update({ isolateInWorktree: value })}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// =============================================================================
 // General
 // =============================================================================
 
@@ -552,10 +784,6 @@ function GeneralSection() {
   const { preference: localePref, setPreference: setLocalePref } = useLocale();
   const autoSortConversations = useConversationAutoSort();
   const [settings, setSettings] = useState<QuickSettings>(DEFAULT_QUICK_SETTINGS);
-  const [cliSettings, setCliSettings] = useState<CliAgentSettings>({
-    bypassApprovals: true,
-    isolateInWorktree: false,
-  });
   const [appVersion, setAppVersion] = useState("");
   const [checkState, setCheckState] = useState<
     "idle" | "checking" | "upToDate" | "available" | "installing" | "ready" | "failed"
@@ -566,7 +794,6 @@ function GeneralSection() {
 
   useEffect(() => {
     api.getQuickSettings().then(setSettings).catch(() => {});
-    api.getCliAgentSettings().then(setCliSettings).catch(() => {});
     api
       .pendingUpdateVersion()
       .then((version) => {
@@ -614,12 +841,6 @@ function GeneralSection() {
     const next = { ...settings, ...patch };
     setSettings(next);
     api.setQuickSettings(next).catch(() => {});
-  }
-
-  function updateCli(patch: Partial<CliAgentSettings>) {
-    const next = { ...cliSettings, ...patch };
-    setCliSettings(next);
-    api.setCliAgentSettings(next).catch(() => {});
   }
 
   async function checkUpdates() {
@@ -714,20 +935,6 @@ function GeneralSection() {
           description={t("general.autoUpdate.description")}
           checked={settings.autoUpdate}
           onCheckedChange={(v) => update({ autoUpdate: v })}
-        />
-        <ToggleRow
-          id="cli-agents-bypass"
-          label={t("general.cliAgents.label")}
-          description={t("general.cliAgents.description")}
-          checked={cliSettings.bypassApprovals}
-          onCheckedChange={(v) => updateCli({ bypassApprovals: v })}
-        />
-        <ToggleRow
-          id="cli-agents-worktree"
-          label={t("general.cliWorktree.label")}
-          description={t("general.cliWorktree.description")}
-          checked={cliSettings.isolateInWorktree}
-          onCheckedChange={(v) => updateCli({ isolateInWorktree: v })}
         />
         <div className="flex items-center justify-between gap-4 pt-1">
           <div className="min-w-0 space-y-0.5">
@@ -1587,6 +1794,22 @@ function KeyboardShortcutsSection() {
   const [query, setQuery] = useState("");
   const [shortcuts, setShortcuts] = useState<ShortcutMap>(readKeyboardShortcuts);
   const defaults = defaultShortcutMap();
+  // The runtime slots are positional, so spell out who currently occupies each
+  // one instead of leaving the user to count rows in the Runtimes page.
+  const runtimeSlots = useRuntimeSlots();
+  const slotDescription = (id: ShortcutId): string | null => {
+    const slot = RUNTIME_SLOT_SHORTCUT_IDS.indexOf(
+      id as (typeof RUNTIME_SLOT_SHORTCUT_IDS)[number],
+    );
+    if (slot < 0) return null;
+    const backend = runtimeSlots[slot];
+    if (!backend) return t("keyboard.runtimeSlot.empty");
+    const label =
+      BACKENDS.find((runtime) => runtime.id === backend)?.label ?? backend;
+    return backend === "pi"
+      ? t("keyboard.runtimeSlot.pinned", { runtime: label })
+      : t("keyboard.runtimeSlot.current", { runtime: label });
+  };
 
   const conflictById = useMemo(() => {
     const byAccelerator = new Map<string, ShortcutId[]>();
@@ -1678,7 +1901,7 @@ function KeyboardShortcutsSection() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{shortcut.label}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {shortcut.description}
+                    {slotDescription(shortcut.id) ?? shortcut.description}
                   </p>
                   {conflictText && (
                     <p className="mt-1 text-xs text-destructive">

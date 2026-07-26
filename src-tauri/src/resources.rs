@@ -66,6 +66,12 @@ fn classify(name: &str) -> (&'static str, String) {
         ("agent", "Claude Code".to_string())
     } else if lower == "codex" {
         ("agent", "Codex".to_string())
+    } else if lower == "opencode" {
+        ("agent", "OpenCode".to_string())
+    } else if lower == "grok" {
+        ("agent", "Grok Build".to_string())
+    } else if lower == "kimi" {
+        ("agent", "Kimi CLI".to_string())
     } else if lower.contains("speech-helper") || lower.contains("spawn-disclaim") {
         ("helper", "Speech helper".to_string())
     } else {

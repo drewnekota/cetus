@@ -98,6 +98,17 @@ export function CliControlCard({ convId }: { convId: string }) {
     );
   }
 
+  if (current.source === "acp") {
+    return (
+      <ApprovalCard
+        key={current.requestId}
+        request={current}
+        onAllow={() => respond({ behavior: "allow" })}
+        onDeny={() => respond({ behavior: "deny" })}
+      />
+    );
+  }
+
   if (current.toolName === "AskUserQuestion") {
     return (
       <AskQuestionCard
