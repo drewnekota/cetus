@@ -71,8 +71,16 @@ export function SlashMenu({
   const { t } = useTranslation("chat");
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Keep the highlighted row in view as the user arrows through.
+  // Keep the highlighted row in view as the user arrows through. Hover moves
+  // the same highlight, but scrolling then is wrong: pulling a half-visible row
+  // into view slides the list under a stationary pointer, which drops a
+  // different row under the cursor and can chase itself.
+  const hoverDrivenRef = useRef(false);
   useEffect(() => {
+    if (hoverDrivenRef.current) {
+      hoverDrivenRef.current = false;
+      return;
+    }
     const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${activeIndex}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
@@ -133,7 +141,11 @@ export function SlashMenu({
                   e.preventDefault();
                   onSelect(item);
                 }}
-                onMouseMove={() => onHover(idx)}
+                onMouseMove={() => {
+                  if (idx === activeIndex) return;
+                  hoverDrivenRef.current = true;
+                  onHover(idx);
+                }}
                 className={cn(
                   "flex w-full items-start gap-2 rounded-md px-3 py-1.5 text-left transition-colors motion-reduce:transition-none",
                   active ? "bg-muted text-foreground" : "hover:bg-muted/60",
@@ -179,7 +191,13 @@ export function SlashMenu({
                   title={t("slash.editCommand")}
                   aria-label={t("slash.editCommand")}
                   className={cn(
-                    "absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground transition-opacity hover:bg-background hover:text-foreground motion-reduce:transition-none",
+                    // `transform-gpu` keeps the button on its own compositor
+                    // layer at all times. Without it WebKit promotes the layer
+                    // when the hover fade starts and drops it when the fade
+                    // ends; each promote/demote re-rounds the neighbouring
+                    // content to the device-pixel grid, so the row's leading
+                    // icon twitches as hover moves between rows.
+                    "absolute right-1.5 top-1/2 -translate-y-1/2 transform-gpu rounded p-1 text-muted-foreground transition-opacity hover:bg-background hover:text-foreground motion-reduce:transition-none",
                     active ? "opacity-100" : "opacity-0 group-hover/row:opacity-100",
                   )}
                 >

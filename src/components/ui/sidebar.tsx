@@ -509,12 +509,17 @@ function SidebarMenuButton({
 
   const button = (
     <Comp
+      className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
+      {...props}
+      // After the spread on purpose: when a caller wraps this button in an
+      // `asChild` trigger (Tooltip, Popover…), Radix's Slot forwards the
+      // trigger's own `data-slot` down as a prop, which would otherwise
+      // clobber our identity and silently break any
+      // `[data-slot=sidebar-menu-button]` styling from the outside.
       data-slot="sidebar-menu-button"
       data-sidebar="menu-button"
       data-size={size}
       data-active={isActive || undefined}
-      className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
-      {...props}
     />
   )
 
@@ -554,8 +559,6 @@ function SidebarMenuAction({
 
   return (
     <Comp
-      data-slot="sidebar-menu-action"
-      data-sidebar="menu-action"
       className={cn(
         "absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 after:absolute after:-inset-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 md:after:hidden [&>svg]:size-4 [&>svg]:shrink-0",
         showOnHover &&
@@ -563,6 +566,10 @@ function SidebarMenuAction({
         className
       )}
       {...props}
+      // See SidebarMenuButton: the row archive action is wrapped in a Tooltip
+      // trigger, so keep our `data-slot` last or Radix's Slot overwrites it.
+      data-slot="sidebar-menu-action"
+      data-sidebar="menu-action"
     />
   )
 }

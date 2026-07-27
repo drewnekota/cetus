@@ -2,9 +2,11 @@
 
 <h1 align="center">Cetus</h1>
 
-<p align="center"><strong>The open-source macOS control plane for Codex, Claude Code, and persistent AI agents.</strong></p>
+<p align="center"><strong>One macOS app for Claude Code, Codex, and every agent runtime you use.</strong></p>
 
-<p align="center">Run agents with optional worktree isolation, schedule background jobs, and review results on a single Kanban board — with the context and memory to keep work moving across sessions.</p>
+<p align="center">They live in one place, so you can schedule them to run while you're away, summon one over any app with a hotkey, give each its own git worktree, and review every result on one board.</p>
+
+<p align="center"><strong>Scheduled runs</strong> · <strong>Global hotkey launcher</strong> · <strong>Per-run git worktrees</strong> · <strong>One review board</strong></p>
 
 <p align="center">
   <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="Download for macOS" src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-111111?style=for-the-badge&logo=apple" /></a>
@@ -18,7 +20,7 @@
 
 <p align="center"><strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a></p>
 
-![Cetus runtime picker — run Cetus, Claude Code, or Codex in the same desktop app](docs/screenshot-runtime-picker.png)
+![Cetus runtime picker — Claude Code, Codex, OpenCode, Grok Build, and Kimi CLI in one macOS app](docs/screenshot-runtime-picker.png)
 
 ## Why developers use Cetus
 

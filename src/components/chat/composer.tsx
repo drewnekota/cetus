@@ -29,7 +29,7 @@ import {
   writeDraft,
   writeDraftAttachments,
 } from "@/lib/draft-store";
-import type { BackendId, ModelChoice } from "@/lib/types";
+import type { BackendId, CliSlashCommand, ModelChoice } from "@/lib/types";
 
 function GitBranchIndicator({
   conversationId,
@@ -494,6 +494,14 @@ export function Composer({
   // ---- Slash menu (commands + skills) -------------------------------------
   // Native commands the conversation's CLI session reported on boot.
   const nativeCommands = useCliCommands(conversationId);
+  // Catalog probed straight from the runtime, for composers with no live
+  // session behind them (new chat, or a conversation whose CLI hasn't booted).
+  // Keyed by the runtime it was probed for, so switching runtimes in the
+  // composer can't leave the previous one's commands on the menu.
+  const [probed, setProbed] = useState<{ backend: BackendId; commands: CliSlashCommand[] }>({
+    backend: "pi",
+    commands: [],
+  });
   const [slashCommands, setSlashCommands] = useState<SlashItem[]>([]);
   const [slashSkills, setSlashSkills] = useState<SlashItem[]>([]);
   const [slashOpen, setSlashOpen] = useState(false);
@@ -581,6 +589,27 @@ export function Composer({
     };
   }, [conversationId, slashOpen]);
 
+  // No live session reported a catalog (new chat, or a conversation whose CLI
+  // process hasn't booted yet) → ask the runtime directly, in the workspace the
+  // conversation will run in, so project skills are included. Rust caches per
+  // runtime + workspace, so reopening the menu costs nothing.
+  useEffect(() => {
+    if (!slashOpen || nativeCommands.length > 0) return;
+    const cwd = workspaceDir ?? defaultWorkspace;
+    let alive = true;
+    (async () => {
+      try {
+        const commands = await api.probeCliCommands(backend, cwd || undefined);
+        if (alive) setProbed({ backend, commands });
+      } catch {
+        // Probe is best-effort; the built-in fallback list still shows.
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [slashOpen, nativeCommands.length, backend, workspaceDir, defaultWorkspace]);
+
   const slashItems = useMemo(() => {
     const q = slashQuery.toLowerCase();
     const match = (it: SlashItem) =>
@@ -596,7 +625,14 @@ export function Composer({
     // in its initialize ack; Codex reports skills via app-server skills/list.
     // Do not merge Cetus/pi's managed/discovered skills into either runtime:
     // seeing a skill in the menu must mean the selected runtime can invoke it.
-    const native: SlashItem[] = nativeCommands.map((c) => {
+    // Live session catalog when there is one, probed catalog otherwise.
+    const catalog =
+      nativeCommands.length > 0
+        ? nativeCommands
+        : probed.backend === backend
+          ? probed.commands
+          : [];
+    const native: SlashItem[] = catalog.map((c) => {
       const description = c.argumentHint
         ? `${c.description} — ${c.argumentHint}`
         : c.description;
@@ -630,7 +666,7 @@ export function Composer({
       return byKind([...native.filter(match), ...slashCommands.filter(match)]);
     }
     return byKind([...slashCommands.filter(match), ...slashSkills.filter(match)]);
-  }, [slashCommands, slashSkills, slashQuery, backend, nativeCommands]);
+  }, [slashCommands, slashSkills, slashQuery, backend, nativeCommands, probed]);
 
   const slashVisible = slashOpen && slashItems.length > 0;
   const slashIdx = Math.min(slashActive, slashItems.length - 1);

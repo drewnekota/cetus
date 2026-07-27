@@ -2,9 +2,11 @@
 
 <h1 align="center">Cetus</h1>
 
-<p align="center"><strong>面向 Codex、Claude Code 与持久化 AI agent 的开源 macOS 控制台。</strong></p>
+<p align="center"><strong>一个 macOS app，跑 Claude Code、Codex，以及你在用的每一个 agent runtime。</strong></p>
 
-<p align="center">按需让 agent 在独立 worktree 中工作、按计划在后台运行，再从一张看板审阅全部结果；上下文与记忆会把工作延续到下一次对话。</p>
+<p align="center">它们待在同一个地方，所以你可以让它们定时在你不在时开工、用快捷键在任何 app 之上唤起一个、给每次运行分配独立的 git worktree，再从一张看板审阅全部结果。</p>
+
+<p align="center"><strong>定时任务</strong> · <strong>全局快捷键唤起</strong> · <strong>每次运行独立 worktree</strong> · <strong>一张审阅看板</strong></p>
 
 <p align="center">
   <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="下载 macOS 版" src="https://img.shields.io/badge/下载_macOS_版-Apple_Silicon-111111?style=for-the-badge&logo=apple" /></a>
@@ -18,7 +20,7 @@
 
 <p align="center"><a href="./README.md">English</a> · <strong>简体中文</strong></p>
 
-![Cetus runtime 选择器 —— 在同一个桌面 app 中运行 Cetus、Claude Code 或 Codex](docs/screenshot-runtime-picker.png)
+![Cetus runtime 选择器 —— Claude Code、Codex、OpenCode、Grok Build、Kimi CLI 都在同一个 macOS app 里](docs/screenshot-runtime-picker.png)
 
 ## 为什么开发者会用 Cetus
 

@@ -29,32 +29,35 @@ check_no_matches() {
 section "bridge package boundary"
 check_no_matches \
   "Rust bridge source has no app/Tauri/model coupling" \
-  'AppEvent|app_event|use tauri|TauriEventSink|TauriTaskSpawner|AppHandle|Emitter|tauri::async_runtime|crate::plugins|handle\.state|crate::automation|crate::store|ModelChoice|DsModel|ReasoningLevel|DeepSeek|drewnekota|/Users/' \
+  'AppEvent|app_event|use tauri|TauriEventSink|TauriTaskSpawner|AppHandle|Emitter|tauri::async_runtime|crate::plugins|handle\.state|crate::automation|crate::store|ModelChoice|DsModel|ReasoningLevel|DeepSeek|/Users/jinqiu' \
   src-tauri/cetus-bridge/src
 
 check_no_matches \
   "TypeScript bridge protocol has no app/Tauri/private coupling" \
-  'AppEvent|app_event|TauriEventSink|TauriTaskSpawner|DeepSeek|drewnekota|/Users/' \
+  'AppEvent|app_event|TauriEventSink|TauriTaskSpawner|DeepSeek|/Users/jinqiu' \
   packages/cetus-bridge-protocol/src
 
 section "generated artifacts"
+# Checked against git, not the filesystem: these paths are gitignored build
+# output, so a local `cargo build` / `pnpm build` legitimately creates them.
+# What matters is that they never get committed.
 for path in \
   packages/cetus-bridge-protocol/dist \
   src-tauri/cetus-bridge/target \
   src-tauri/cetus-bridge/Cargo.lock
 do
-  if [[ -e "$path" ]]; then
-    echo "FAIL: generated artifact present: $path"
+  if [[ -n "$(git ls-files "$path")" ]]; then
+    echo "FAIL: generated artifact is tracked: $path"
     fail=1
   else
-    echo "ok: $path absent"
+    echo "ok: $path untracked"
   fi
 done
 
 section "full repo sensitive strings"
 tmp="$(mktemp)"
 rg -n \
-  'gho_|github_pat_|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|APPLE_PASSWORD=|TAURI_SIGNING_PRIVATE_KEY=|/Users/jinqiu|drewnekota' \
+  'gho_|github_pat_|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|APPLE_PASSWORD=|TAURI_SIGNING_PRIVATE_KEY=|/Users/jinqiu|\bsoku\b|nex-studio|nex\.ad|productlabs' \
   README.md README.zh-CN.md docs evals packages src src-tauri scripts \
   --glob '!src-tauri/target/**' \
   --glob '!src-tauri/pi-install/**' \

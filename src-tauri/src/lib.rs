@@ -147,6 +147,10 @@ pub struct AppState {
     /// Unlike the matching UI event, this survives a renderer reload, so the
     /// composer can hydrate the menu without restarting the vendor process.
     cli_commands: std::sync::Mutex<HashMap<String, Vec<serde_json::Value>>>,
+    /// Same catalog, but keyed by "{backend}\n{cwd}" and resolved by probing
+    /// the runtime directly, so the new-chat composer (which has no
+    /// conversation yet) can show the runtime's real commands and skills.
+    cli_command_catalogs: std::sync::Mutex<HashMap<String, Vec<serde_json::Value>>>,
 }
 
 /// One line bound for a running CLI turn's stdin.
@@ -307,6 +311,17 @@ impl AppState {
             .lock()
             .unwrap()
             .insert(conv_id.to_string(), commands);
+    }
+
+    pub fn cache_cli_command_catalog(&self, key: &str, commands: Vec<serde_json::Value>) {
+        self.cli_command_catalogs
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), commands);
+    }
+
+    pub fn cli_command_catalog(&self, key: &str) -> Option<Vec<serde_json::Value>> {
+        self.cli_command_catalogs.lock().unwrap().get(key).cloned()
     }
 
     pub fn cli_commands(&self, conv_id: &str) -> Vec<serde_json::Value> {
@@ -1065,6 +1080,7 @@ pub fn run() {
                 codex_sessions: std::sync::Mutex::new(HashMap::new()),
                 acp_sessions: std::sync::Mutex::new(HashMap::new()),
                 cli_commands: std::sync::Mutex::new(HashMap::new()),
+                cli_command_catalogs: std::sync::Mutex::new(HashMap::new()),
             });
             let remote_runtime = remote::RemoteRuntime::new(&app.state::<AppState>().store);
             app.manage(remote_runtime);
@@ -1447,6 +1463,7 @@ pub fn run() {
         cli_backend::get_cli_defaults,
         cli_backend::get_cli_runtime_status,
         cli_backend::get_cli_commands,
+        cli_backend::probe_cli_commands,
         cli_backend::cli_control_respond,
         commands::retry_last_turn,
         commands::abort,
@@ -1620,6 +1637,7 @@ pub fn run() {
         cli_backend::get_cli_defaults,
         cli_backend::get_cli_runtime_status,
         cli_backend::get_cli_commands,
+        cli_backend::probe_cli_commands,
         cli_backend::cli_control_respond,
         commands::retry_last_turn,
         commands::abort,

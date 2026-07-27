@@ -95,7 +95,13 @@ function CopyablePre({
         onClick={copy}
         title={label}
         aria-label={label}
-        className="not-prose absolute right-2 top-2 flex h-7 items-center gap-1 rounded-md border border-border/60 bg-background/80 px-2 text-[11px] text-muted-foreground opacity-70 shadow-sm backdrop-blur-sm transition-[color,background-color,opacity] hover:bg-background hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        // h-6 at a 1.5 inset keeps the button clear of the rounded corners of a
+        // one-line block (36px tall, its shortest form) — h-7 at top-2 ended
+        // exactly flush with the bottom border and bled over the radius.
+        // Opaque background rather than translucent + backdrop-blur: the blur
+        // promoted a compositing layer over a scrollable <pre> for no visual
+        // gain, and solid keeps the label readable over scrolled code.
+        className="not-prose absolute right-1.5 top-1.5 flex h-6 items-center gap-1 rounded-md border border-border/60 bg-background px-1.5 text-[11px] text-muted-foreground opacity-70 shadow-sm transition-[color,background-color,opacity] hover:bg-background hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
         <span>{label}</span>

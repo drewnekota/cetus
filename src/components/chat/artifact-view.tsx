@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -8,6 +8,8 @@ import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import {
   FileText,
+  Check,
+  Copy,
   Download,
   ExternalLink,
   FolderOpen,
@@ -59,9 +61,13 @@ const RICH_PREVIEW_KINDS = new Set([
   "pdf",
 ]);
 
+/** Kinds whose source is plain text, so the preview can offer a copy button
+ *  that puts the raw file contents on the clipboard. */
+const COPYABLE_KINDS = new Set(["markdown", "text", "html"]);
+
 /** Unified file-card used both inline in chat bubbles and in the artifacts
  *  panel. Previewable kinds get an aspect-square preview on top with a
- *  filename + metadata footer (modelled after nex-studio's PreviewCard);
+ *  filename + metadata footer;
  *  non-previewable kinds get a compact attachment row. Click opens a full
  *  preview either way. */
 export function ArtifactView({ artifact }: Props) {
@@ -436,6 +442,9 @@ function ArtifactPreviewDialog({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {COPYABLE_KINDS.has(artifact.artifactKind) && (
+              <CopySourceButton path={artifact.path} />
+            )}
             <Button
               type="button"
               size="sm"
@@ -486,6 +495,42 @@ function ArtifactPreviewDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Copies the artifact's raw source (not the rendered DOM) to the clipboard.
+ *  Reads on click so opening a preview never pays for a file read it may not
+ *  need — the rendered preview loads the same text on its own. */
+function CopySourceButton({ path }: { path: string }) {
+  const { t: tc } = useTranslation("common");
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current != null) window.clearTimeout(resetTimerRef.current);
+    },
+    [],
+  );
+
+  const copy = useCallback(async () => {
+    try {
+      const text = await invoke<string>("read_text_file", { path });
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      if (resetTimerRef.current != null) window.clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.error("copy artifact source failed", e);
+    }
+  }, [path]);
+
+  const label = copied ? tc("action.copied") : tc("action.copy");
+  return (
+    <Button type="button" size="sm" variant="ghost" onClick={copy} title={label}>
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      {label}
+    </Button>
   );
 }
 

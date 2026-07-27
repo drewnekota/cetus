@@ -196,6 +196,39 @@ pub async fn get_cli_commands(
     Ok(state.cli_commands(&conversation_id))
 }
 
+/// Resolve a runtime's native slash-command/skill catalog *before* any session
+/// exists — the new-chat composer has no conversation to read a live catalog
+/// from, and otherwise falls back to a hardcoded handful of built-ins.
+/// Claude Code answers this from its initialize handshake; the result is cached
+/// per (backend, cwd) for the app's lifetime because the probe costs a process
+/// spawn. Live sessions keep updating their own catalog through `cli_commands`
+/// events, so this only ever fills the pre-session gap.
+#[tauri::command]
+pub async fn probe_cli_commands(
+    state: State<'_, AppState>,
+    backend: String,
+    cwd: Option<String>,
+) -> Result<Vec<Value>, String> {
+    if backend != "claude-code" {
+        // Codex/ACP runtimes announce their catalogs over their own protocols
+        // only after a session opens; there is nothing to probe here.
+        return Ok(Vec::new());
+    }
+    let dir = cwd.unwrap_or_default();
+    let key = format!("{backend}\n{dir}");
+    if let Some(cached) = state.cli_command_catalog(&key) {
+        return Ok(cached);
+    }
+    let commands = match probe_claude_initialize(Some(Path::new(&dir))).await {
+        Some(ack) => claude_commands_from_initialize(&ack),
+        None => Vec::new(),
+    };
+    if !commands.is_empty() {
+        state.cache_cli_command_catalog(&key, commands.clone());
+    }
+    Ok(commands)
+}
+
 /// Mirror Cetus's archive state into Codex's own saved-thread inventory so
 /// clients backed by the same CODEX_HOME (including the Codex app) put the
 /// conversation in the same bucket. This is deliberately best-effort at the
@@ -261,12 +294,19 @@ fn claude_defaults(home: &Path) -> CliDefaults {
     }
 }
 
-/// Ask Claude Code for the account's resolved default and live model catalog.
-/// `--safe-mode` prevents user hooks/plugins from running during this read-only
-/// probe. Keep stdin open until the initialize response arrives, then terminate
-/// the idle process without sending a model request.
 async fn probe_claude_defaults() -> Option<CliDefaults> {
-    let mut child = TokioCommand::new("claude")
+    claude_defaults_from_initialize(&probe_claude_initialize(None).await?)
+}
+
+/// Run Claude Code's initialize handshake and return the raw ack. It carries
+/// both the account's resolved model catalog and the full slash-command/skill
+/// catalog for `cwd` (project skills are cwd-dependent, so pass the workspace
+/// the conversation will run in). `--safe-mode` prevents user hooks/plugins
+/// from running during this read-only probe. Keep stdin open until the
+/// response arrives, then terminate the idle process without sending a turn.
+async fn probe_claude_initialize(cwd: Option<&Path>) -> Option<Value> {
+    let mut command = TokioCommand::new("claude");
+    command
         .args([
             "--safe-mode",
             "-p",
@@ -281,9 +321,11 @@ async fn probe_claude_defaults() -> Option<CliDefaults> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .ok()?;
+        .kill_on_drop(true);
+    if let Some(dir) = cwd.filter(|dir| dir.is_dir()) {
+        command.current_dir(dir);
+    }
+    let mut child = command.spawn().ok()?;
     let mut stdin = child.stdin.take()?;
     let stdout = child.stdout.take()?;
     let init = serde_json::json!({
@@ -297,14 +339,14 @@ async fn probe_claude_defaults() -> Option<CliDefaults> {
     stdin.flush().await.ok()?;
 
     let mut lines = BufReader::new(stdout).lines();
-    let result = tokio::time::timeout(Duration::from_secs(5), async {
+    let result = tokio::time::timeout(Duration::from_secs(10), async {
         while let Ok(Some(line)) = lines.next_line().await {
             let value: Value = match serde_json::from_str(&line) {
                 Ok(value) => value,
                 Err(_) => continue,
             };
-            if let Some(defaults) = claude_defaults_from_initialize(&value) {
-                return Some(defaults);
+            if value.pointer("/response/response").is_some() {
+                return Some(value);
             }
         }
         None
@@ -350,6 +392,41 @@ fn claude_defaults_from_initialize(value: &Value) -> Option<CliDefaults> {
         effort: None,
         models: (!catalog.is_empty()).then_some(catalog),
     })
+}
+
+/// The slash-command/skill catalog carried by the initialize ack, in the same
+/// shape the bridge emits as `cli_commands` (see `cetus_bridge::cli_agent`):
+/// descriptions ending in "(user)"/"(project)"/"(plugin)"/"(builtin)" are
+/// skills, everything else is a built-in command.
+fn claude_commands_from_initialize(value: &Value) -> Vec<Value> {
+    let Some(commands) = value
+        .pointer("/response/response/commands")
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    commands
+        .iter()
+        .filter_map(|command| {
+            let name = command.get("name").and_then(Value::as_str)?;
+            let description = command
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let is_skill = ["(user)", "(project)", "(plugin)", "(builtin)"]
+                .iter()
+                .any(|suffix| description.trim_end().ends_with(suffix));
+            Some(serde_json::json!({
+                "name": name,
+                "description": description,
+                "argumentHint": command
+                    .get("argumentHint")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+                "kind": if is_skill { "skill" } else { "command" },
+            }))
+        })
+        .collect()
 }
 
 /// Top-level `model` from ~/.claude.json, where the `/model` picker persists an
@@ -1341,6 +1418,25 @@ mod tests {
         assert_eq!(models[0].id, "opus[1m]");
         assert_eq!(models[0].label, "Opus");
         assert_eq!(models[1].label, "Fable");
+    }
+
+    #[test]
+    fn claude_initialize_yields_slash_catalog_for_sessionless_composers() {
+        let response = json!({
+            "type": "control_response",
+            "response": { "response": { "commands": [
+                { "name": "usage", "description": "Show session cost", "argumentHint": "" },
+                { "name": "simplify", "description": "Clean up the diff (user)", "argumentHint": "[<target>]" }
+            ]}}
+        });
+        let commands = claude_commands_from_initialize(&response);
+        assert_eq!(commands.len(), 2);
+        assert_eq!(commands[0]["name"], "usage");
+        assert_eq!(commands[0]["kind"], "command");
+        assert_eq!(commands[1]["kind"], "skill");
+        assert_eq!(commands[1]["argumentHint"], "[<target>]");
+        // A models-only ack (no catalog) must not fabricate entries.
+        assert!(claude_commands_from_initialize(&json!({"response":{"response":{}}})).is_empty());
     }
 
     #[test]

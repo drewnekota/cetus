@@ -27,9 +27,9 @@ const EMPTY: ArtifactDetails[] = [];
 /** Board-mode artifact viewer: a large centered dialog showing every artifact a
  *  conversation produced as a grid of preview cards. Replaces the docked
  *  right-hand panel on the kanban so artifacts don't compete with the columns.
- *  Sized like nex-studio's deliverables gallery — `sm:max-w-5xl` overrides the
- *  base DialogContent's `sm:max-w-md` (cn()'s tailwind-merge drops the loser),
- *  which otherwise capped this at a tiny 28rem. */
+ *  `sm:max-w-5xl` overrides the base DialogContent's `sm:max-w-md` (cn()'s
+ *  tailwind-merge drops the loser), which otherwise capped this at a tiny
+ *  28rem. */
 export function ArtifactsDialog({ convId, title, open, onOpenChange }: Props) {
   const { t } = useTranslation("board");
   // Stable-shallow selector: re-renders only when the artifact set changes.

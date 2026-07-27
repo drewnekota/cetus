@@ -77,12 +77,9 @@ export function AutomationsView({
   const [sortBy, setSortBy] = useState<AutomationSort>(loadAutomationSort);
   const sortedAutomations = useMemo(
     () =>
-      [...automations].sort((a, b) => {
-        const aIsStudio = isStudioAutomation(a);
-        const bIsStudio = isStudioAutomation(b);
-        if (aIsStudio !== bIsStudio) return aIsStudio ? 1 : -1;
-        return b[sortBy] - a[sortBy] || a.name.localeCompare(b.name);
-      }),
+      [...automations].sort(
+        (a, b) => b[sortBy] - a[sortBy] || a.name.localeCompare(b.name),
+      ),
     [automations, sortBy],
   );
   return (
@@ -159,13 +156,6 @@ export function AutomationsView({
         )}
       </div>
     </div>
-  );
-}
-
-function isStudioAutomation(automation: Automation): boolean {
-  const haystack = `${automation.name}\n${automation.workspaceDir}\n${automation.prompt}`;
-  return /(?:^|[^a-z0-9])(soku(?:-gtm)?|nex-studio)(?:$|[^a-z0-9])/i.test(
-    haystack,
   );
 }
 
