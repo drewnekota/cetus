@@ -1,9 +1,9 @@
 name: Release (macOS + Windows)
 
-# Supports artifact-only builds for either platform, same-version single-platform
-# release repairs, and complete cross-platform releases. A single-platform
-# publish must merge into a same-version manifest that already contains the
-# other platform; this prevents an old package from being advertised as newer.
+# Releases macOS by default. Windows is built only when explicitly selected.
+# The Windows-only compatibility workflow still merges into an existing
+# same-version manifest, while a macOS-only publish replaces the release with
+# macOS assets and a macOS-only updater manifest.
 #
 # Required repository secrets:
 #
@@ -34,10 +34,10 @@ on:
         required: true
         type: choice
         options:
-          - both
           - macos
+          - both
           - windows
-        default: both
+        default: macos
       publish:
         description: Publish to GitHub Release (otherwise keep Actions artifacts only)
         required: true
@@ -53,7 +53,7 @@ on:
         description: Platforms to build
         required: false
         type: string
-        default: both
+        default: macos
       publish:
         description: Publish to GitHub Release
         required: false
@@ -172,7 +172,7 @@ jobs:
 
   windows:
     name: Build Windows x64
-    if: github.event_name == 'push' || inputs.platform == 'both' || inputs.platform == 'windows'
+    if: inputs.platform == 'both' || inputs.platform == 'windows'
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -272,22 +272,23 @@ jobs:
               --windows-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${WINDOWS_ASSET}" \
               --windows-signature-file "release-assets/$WINDOWS_ASSET.sig"
             echo "PUBLISH_MODE=replace" >> "$GITHUB_ENV"
+          elif [[ "$MAC_BUILT" == true ]]; then
+            test -s "release-assets/Cetus.app.tar.gz.sig"
+            node scripts/updater-manifest.mjs create-platform \
+              --output release-assets/latest.json \
+              --version "$VERSION" \
+              --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --platform darwin-aarch64 \
+              --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.app.tar.gz" \
+              --signature-file release-assets/Cetus.app.tar.gz.sig
+            echo "PUBLISH_MODE=replace" >> "$GITHUB_ENV"
           else
             EXISTING="$RUNNER_TEMP/existing-latest.json"
             curl --fail --location --retry 3 --retry-all-errors \
               "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/latest.json?run=${GITHUB_RUN_ID}" \
               --output "$EXISTING"
 
-            if [[ "$MAC_BUILT" == true ]]; then
-              test -s "release-assets/Cetus.app.tar.gz.sig"
-              node scripts/updater-manifest.mjs merge \
-                --manifest "$EXISTING" \
-                --output release-assets/latest.json \
-                --version "$VERSION" \
-                --platform darwin-aarch64 \
-                --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.app.tar.gz" \
-                --signature-file release-assets/Cetus.app.tar.gz.sig
-            elif [[ "$WINDOWS_BUILT" == true ]]; then
+            if [[ "$WINDOWS_BUILT" == true ]]; then
               test -s "release-assets/$WINDOWS_ASSET.sig"
               node scripts/updater-manifest.mjs merge \
                 --manifest "$EXISTING" \
@@ -344,7 +345,7 @@ jobs:
           node -e '
             const fs = require("node:fs");
             const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-            for (const platform of ["darwin-aarch64", "windows-x86_64"]) {
-              process.stdout.write(`${platform}: ${manifest.platforms[platform].url}\n`);
+            for (const [platform, entry] of Object.entries(manifest.platforms)) {
+              process.stdout.write(`${platform}: ${entry.url}\n`);
             }
           ' "$PUBLISHED"

@@ -52,11 +52,13 @@ function validateManifest(manifest, expectedVersion) {
   }
 
   const keys = Object.keys(manifest.platforms ?? {}).sort();
-  if (JSON.stringify(keys) !== JSON.stringify([...PLATFORM_KEYS].sort())) {
-    fail(`manifest platforms must be exactly: ${PLATFORM_KEYS.join(", ")}`);
+  if (keys.length === 0 || keys.some((key) => !PLATFORM_KEYS.includes(key))) {
+    fail(
+      `manifest platforms must contain at least one of: ${PLATFORM_KEYS.join(", ")}`,
+    );
   }
 
-  for (const platform of PLATFORM_KEYS) {
+  for (const platform of keys) {
     const entry = manifest.platforms[platform];
     if (!entry?.signature?.trim()) {
       fail(`${platform} signature is missing`);
@@ -126,6 +128,29 @@ if (command === "create") {
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
   process.stdout.write(`created ${output} for ${version}\n`);
+} else if (command === "create-platform") {
+  const output = required(values, "output");
+  const version = required(values, "version");
+  const platform = required(values, "platform");
+  if (!PLATFORM_KEYS.includes(platform)) {
+    fail(`unsupported platform: ${platform}`);
+  }
+  const manifest = {
+    version,
+    notes: "See the GitHub release page for details.",
+    pub_date: required(values, "pub-date"),
+    platforms: {
+      [platform]: {
+        signature: readSignature(required(values, "signature-file")),
+        url: required(values, "url"),
+      },
+    },
+  };
+
+  validateManifest(manifest, version);
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+  process.stdout.write(`created ${output} for ${version} (${platform})\n`);
 } else if (command === "merge") {
   const file = required(values, "manifest");
   const output = required(values, "output");
@@ -152,8 +177,8 @@ if (command === "create") {
   const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
   validateManifest(manifest, version);
   process.stdout.write(
-    `verified ${file}: ${version}, ${PLATFORM_KEYS.join(", ")}\n`,
+    `verified ${file}: ${version}, ${Object.keys(manifest.platforms).join(", ")}\n`,
   );
 } else {
-  fail("expected command: create, merge, or verify");
+  fail("expected command: create, create-platform, merge, or verify");
 }
