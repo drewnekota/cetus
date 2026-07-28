@@ -22,6 +22,8 @@ import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
 import { api } from "@/lib/tauri";
 import { composeWithAmbient } from "@/lib/quick-context";
 import { prepareImageAttachment } from "@/lib/image-attachment";
+import { readDroppedFiles } from "@/lib/dropped-files";
+import { FILE_DRAG_EVENT, FILE_DROP_EVENT } from "@/components/file-drop-host";
 import {
   readDraft,
   readDraftAttachments,
@@ -992,6 +994,37 @@ export function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 
+  /** Attach files dropped anywhere in the window. A drop hands us paths rather
+   *  than bytes, so read them into `File`s and reuse the paste/file-picker
+   *  pipeline; folders and anything too big to inline get named in the draft
+   *  instead, which is what the agent needs to open them off disk anyway. */
+  async function addPaths(paths: string[]) {
+    const { files, hints, referenced } = await readDroppedFiles(paths, MAX_FILE_BYTES);
+    if (files.length) await addFiles(files, hints);
+    if (referenced.length) insertPaths(referenced);
+  }
+
+  // Drops are delivered by FileDropHost as events on this composer's root.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const onFileDrag = (event: Event) =>
+      setIsDragging((event as CustomEvent<boolean>).detail);
+    const onFileDrop = (event: Event) => {
+      const paths = (event as CustomEvent<string[]>).detail;
+      setIsDragging(false);
+      if (Array.isArray(paths) && paths.length) void addPaths(paths);
+    };
+    root.addEventListener(FILE_DRAG_EVENT, onFileDrag);
+    root.addEventListener(FILE_DROP_EVENT, onFileDrop);
+    return () => {
+      root.removeEventListener(FILE_DRAG_EVENT, onFileDrag);
+      root.removeEventListener(FILE_DROP_EVENT, onFileDrop);
+    };
+    // addPaths → insertPaths reads the live draft and caret.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+
   function removeAttachment(i: number) {
     updateAttachments((prev) => {
       const dropped = prev[i];
@@ -1060,29 +1093,12 @@ export function Composer({
     <div
       ref={rootRef}
       data-chat-composer
+      // Claims drops made anywhere in the window; FileDropHost delivers them
+      // here. There are no HTML5 drag handlers on purpose — the Tauri runtime
+      // answers the OS drag itself, so `drop` never fires on the webview.
+      data-file-drop-target
       data-streaming={streaming && !bashMode ? "true" : undefined}
       data-backend={backend}
-      onDragOver={(e) => {
-        // Hijack drag enter only when files are involved — text-from-textarea
-        // drags would otherwise highlight the drop zone too.
-        if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) {
-          e.preventDefault();
-          setIsDragging(true);
-        }
-      }}
-      onDragLeave={(e) => {
-        // Fires for every nested child enter/leave too; only clear when leaving
-        // the composer entirely.
-        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-        setIsDragging(false);
-      }}
-      onDrop={(e) => {
-        if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) {
-          e.preventDefault();
-          setIsDragging(false);
-          if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
-        }
-      }}
       className={cn(
         "relative rounded-2xl border border-border",
         // Soft, wide, low-opacity shadow (large blur, ~6% alpha) for a premium
@@ -1203,7 +1219,7 @@ export function Composer({
               <button
                 type="button"
                 onClick={() => removeAttachment(i)}
-                className="absolute -right-1.5 -top-1.5 rounded-full bg-foreground text-background opacity-0 transition-opacity group-hover:opacity-100"
+                className="fade-layer absolute -right-1.5 -top-1.5 rounded-full bg-foreground text-background opacity-0 transition-opacity group-hover:opacity-100"
                 aria-label={t("composer.removeAttachment", { name: a.name })}
               >
                 <X className="size-3.5 p-0.5" />

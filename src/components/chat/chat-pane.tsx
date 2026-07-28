@@ -459,6 +459,12 @@ const SCROLL_TO_BOTTOM_BUTTON_VIEWPORT_RATIO = 0.5;
 // do not add mounting pressure at the streaming/bottom edge.
 const OVERSCAN_PX = { top: 800, bottom: 0 } as const;
 
+// The turn navigator occupies the left 48px from `sm` upward. Before the
+// max-w-3xl reading column has enough viewport space to center itself clear of
+// that rail (896px), reserve the rail explicitly so its ticks never overlap
+// message text. At wider sizes the column's normal centering provides the gap.
+const MESSAGE_ROW_GUTTER_CLASS = "px-4 sm:pl-14 min-[896px]:px-4";
+
 /** Reading position per conversation, so a half-read history resumes where it
  *  was left instead of snapping to the newest turn. Only conversations the
  *  reader scrolled AWAY from the bottom get an entry: sitting at the bottom is
@@ -846,7 +852,7 @@ function MessageList({
     (index: number, item: MessageListItem) => {
       if (item.kind === "thinking") {
         return (
-          <div className="px-4">
+          <div className={MESSAGE_ROW_GUTTER_CLASS}>
             <div
               className={`mx-auto max-w-3xl ${
                 opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
@@ -859,7 +865,7 @@ function MessageList({
       }
       if (item.kind === "error") {
         return (
-          <div className="px-4">
+          <div className={MESSAGE_ROW_GUTTER_CLASS}>
             <div
               className={`mx-auto max-w-3xl ${
                 opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
@@ -912,10 +918,10 @@ function MessageList({
           />
         );
       // Center each turn on the reading column. Virtuoso measures the outer
-      // wrapper. Same geometry as the composer column (outer px-4 gutter,
-      // inner max-w-3xl box) so full-width rows line up with the input box.
+      // wrapper. Once the viewport can center max-w-3xl clear of the navigator,
+      // this returns to the composer's px-4 geometry so both columns line up.
       return (
-        <div className="px-4">
+        <div className={MESSAGE_ROW_GUTTER_CLASS}>
           <div
             className={`mx-auto max-w-3xl ${
               opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
@@ -1150,7 +1156,7 @@ function ScrollToBottomButton({
       aria-label={t("pane.scrollToBottom")}
       title={t("pane.scrollToBottom")}
       onClick={scrollToBottom}
-      className={`absolute bottom-4 right-[max(1rem,calc((100%-48rem)/2))] z-30 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] transition-all duration-150 hover:bg-muted ${
+      className={`fade-layer absolute bottom-4 right-[max(1rem,calc((100%-48rem)/2))] z-30 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] transition-all duration-150 hover:bg-muted ${
         opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
       } ${
         show

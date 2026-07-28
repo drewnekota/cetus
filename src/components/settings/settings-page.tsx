@@ -343,8 +343,8 @@ export const SettingsPage = memo(function SettingsPage({
       window.removeEventListener(OPEN_RUNTIME_SETTINGS_EVENT, showRuntimeSettings);
   }, []);
 
-  // Esc closes the page. Capture phase + stopPropagation so it wins over the
-  // app-level Esc handler (which also aborts streams).
+  // Esc closes the page. Capture phase + stopPropagation keeps the shortcut
+  // scoped to Settings instead of reaching the page underneath.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {

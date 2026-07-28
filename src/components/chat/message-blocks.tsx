@@ -101,7 +101,9 @@ function CopyablePre({
         // Opaque background rather than translucent + backdrop-blur: the blur
         // promoted a compositing layer over a scrollable <pre> for no visual
         // gain, and solid keeps the label readable over scrolled code.
-        className="not-prose absolute right-1.5 top-1.5 flex h-6 items-center gap-1 rounded-md border border-border/60 bg-background px-1.5 text-[11px] text-muted-foreground opacity-70 shadow-sm transition-[color,background-color,opacity] hover:bg-background hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        // `fade-layer` because the hover opacity transition would otherwise
+        // make WebKit promote/demote the button and nudge the icon a subpixel.
+        className="not-prose fade-layer absolute right-1.5 top-1.5 flex h-6 items-center gap-1 rounded-md border border-border/60 bg-background px-1.5 text-[11px] text-muted-foreground opacity-70 shadow-sm transition-[color,background-color,opacity] hover:bg-background hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
         <span>{label}</span>
@@ -301,7 +303,7 @@ function ImageBlock({ dataUrl, name }: { dataUrl: string; name?: string }) {
         type="button"
         onClick={() => setOpen(true)}
         title={t("bubble.expandImage")}
-        className="block cursor-zoom-in overflow-hidden rounded-lg border border-border/40 transition-opacity hover:opacity-90"
+        className="fade-layer block cursor-zoom-in overflow-hidden rounded-lg border border-border/40 transition-opacity hover:opacity-90"
       >
         <img
           src={dataUrl}

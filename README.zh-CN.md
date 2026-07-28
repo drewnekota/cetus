@@ -22,6 +22,8 @@
 
 ![Cetus runtime 选择器 —— Claude Code、Codex、OpenCode、Grok Build、Kimi CLI 都在同一个 macOS app 里](docs/screenshot-runtime-picker.png)
 
+![Cetus 操作演示 —— 唤起 agent、创建自动化任务并切换 runtime](docs/cetus-demo.gif)
+
 ## 为什么开发者会用 Cetus
 
 - **所有 agent 共用一个工作台。** 每个对话都可以选择 Cetus 内置 runtime、Claude Code 或 Codex，同时保留一致的桌面工作流。
@@ -66,7 +68,7 @@ CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（P
 
 ### 定时运行 agent
 
-按计划触发（`at` / `every` / `cron` / `daily`）的保存 prompt。每次触发都会开出一个全新的后台对话 —— 比如工作日 09:00 的 Daily news digest，在你不在时搜索过去 24 小时的新闻并渲染成 HTML 摘要。
+按计划触发（`at` / `every` / `cron` / `daily`）的保存 prompt。Automations 把不同 runtime 的定时任务聚合在一处管理 —— Claude Code、Codex 与 Cetus 的任务可以并排存在，各自保留独立的 runtime 和模型设置。每次触发都会开出一个全新的后台对话，比如工作日 09:00 的 Daily news digest，在你不在时搜索过去 24 小时的新闻并渲染成 HTML 摘要。
 
 ![Cetus 自动化任务](docs/screenshot-automations.png)
 
@@ -102,7 +104,7 @@ CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（P
 - **手动** —— 全局热键（默认 **⌘⇧M**）手动开关，用于无法被自动识别的线下面对面会议。
 - **对话双方都收录** —— 你的麦克风是你；系统音频是其他所有人，分轨采集，纪要知道每句话是谁说的（需 macOS 14.2+；更低版本回退为仅麦克风）。
 
-转写 100% 在设备端完成，走 Apple 的 Speech 框架，流式、带标点、在自然停顿处分段。会话进行中，屏幕顶部浮出一个小药丸（红点 + 计时 + 停止按钮），不抢焦点。会议结束后，一次 DeepSeek V4.1 Pro 调用把转写蒸馏成标题和 markdown **纪要** —— 要点、决议、待办事项。
+转写 100% 在设备端完成，走 Apple 的 Speech 框架，流式、带标点、在自然停顿处分段。会话进行中，屏幕顶部浮出一个小药丸（红点 + 计时 + 停止按钮），不抢焦点。
 
 这些纪要会成为 agent 能触达的 context：直接问"我们关于上线日期定了什么？"，Cetus 就会检索会议历史（`search_meeting_history`）—— 全部来自本地日志，没有东西离开这台机器。默认关闭；总开关意味着在你显式开启前，Cetus 绝不监听。目前仅支持 macOS。
 

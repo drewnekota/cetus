@@ -348,7 +348,7 @@ const Card = memo(function Card({
         }}
         title={archived ? t("card.unarchive") : t("card.archive")}
         aria-label={archived ? t("card.unarchive") : t("card.archive")}
-        className="absolute top-1.5 right-1.5 inline-flex size-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover:opacity-100 focus-visible:opacity-100"
+        className="fade-layer absolute top-1.5 right-1.5 inline-flex size-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover:opacity-100 focus-visible:opacity-100"
       >
         {archived ? (
           <ArchiveRestore className="size-3.5" />

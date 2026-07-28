@@ -48,12 +48,18 @@ import {
 } from "@/lib/backend-choice";
 import { cn } from "@/lib/utils";
 import { prepareImageAttachment } from "@/lib/image-attachment";
+import { readDroppedFiles } from "@/lib/dropped-files";
+import { FILE_DRAG_EVENT, FILE_DROP_EVENT } from "@/components/file-drop-host";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+
+/** Inline budget for a non-image attachment. Bigger files (and folders) are
+ *  named in the prompt by path instead — same limit the chat composer uses. */
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 /** The frameless global launcher. Lives in the `quick` window (vibrancy applied
  *  natively behind a transparent webview), stays mounted + hidden, and wakes on
@@ -115,6 +121,8 @@ export function QuickPanel() {
   const [insertingReply, setInsertingReply] = useState(false);
 
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Mirrors for the mount-once blur listener (which closes over stale state).
   const submittingRef = useRef(false);
@@ -456,7 +464,7 @@ export function QuickPanel() {
     const next: QuickAttachment[] = [];
     for (const file of Array.from(files)) {
       const isImage = file.type.startsWith("image/");
-      const limit = 25 * 1024 * 1024;
+      const limit = MAX_ATTACHMENT_BYTES;
       if (!isImage && file.size > limit) {
         setAttachError(t("attachment.tooLarge", { name: file.name, limit: limit / 1024 / 1024 }));
         continue;
@@ -475,6 +483,42 @@ export function QuickPanel() {
     }
     if (next.length) setAttachments((current) => [...current, ...next]);
   }, [t]);
+
+  /** Files dropped on the launcher, routed here by FileDropHost. Drops carry
+   *  paths, so read them into `File`s and reuse the paste pipeline; a folder or
+   *  an oversized file is named in the prompt instead, for the agent to open
+   *  off disk. */
+  const addPaths = useCallback(
+    async (paths: string[]) => {
+      const { files, referenced } = await readDroppedFiles(paths, MAX_ATTACHMENT_BYTES);
+      if (files.length) await addFiles(files);
+      if (referenced.length) {
+        setText((value) => {
+          const head = value.replace(/\s+$/, "");
+          return (head ? `${head}\n` : "") + referenced.join("\n") + " ";
+        });
+      }
+    },
+    [addFiles],
+  );
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const onFileDrag = (event: Event) =>
+      setIsDragging((event as CustomEvent<boolean>).detail);
+    const onFileDrop = (event: Event) => {
+      const paths = (event as CustomEvent<string[]>).detail;
+      setIsDragging(false);
+      if (Array.isArray(paths) && paths.length) void addPaths(paths);
+    };
+    root.addEventListener(FILE_DRAG_EVENT, onFileDrag);
+    root.addEventListener(FILE_DROP_EVENT, onFileDrop);
+    return () => {
+      root.removeEventListener(FILE_DRAG_EVENT, onFileDrag);
+      root.removeEventListener(FILE_DROP_EVENT, onFileDrop);
+    };
+  }, [addPaths]);
 
   function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(e.clipboardData.items)
@@ -537,7 +581,19 @@ export function QuickPanel() {
   // normalize the shared pickers (workspace/model) that carry their own
   // solid-token hover styles; alpha overlays keep the vibrancy visible.
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-[11px] dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]">
+    <div
+      ref={rootRef}
+      // Takes file drops made anywhere in the launcher window; FileDropHost
+      // delivers them here (the Tauri runtime answers the OS drag itself, so
+      // there is no HTML5 `drop` to listen for).
+      data-file-drop-target
+      className={cn(
+        "flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-[11px] dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]",
+        // Drop affordance: overrides the panel's own hairline ring in both
+        // themes so the launcher reads as "release here".
+        isDragging && "ring-2 ring-inset ring-primary dark:ring-2 dark:ring-primary",
+      )}
+    >
       {/* The input owns the whole region above the action strip: the textarea
           fills it so typing wraps and uses the full height, and the screenshot
           chip (when present) tucks in at the bottom of the same region. */}
@@ -576,7 +632,7 @@ export function QuickPanel() {
                     <div className="min-w-0"><div className="truncate text-xs">{attachment.name}</div><div className="text-[10px] opacity-60">{formatBytes(attachment.sizeBytes)}</div></div>
                   </div>
                 )}
-                <button type="button" onClick={() => setAttachments((items) => items.filter((_, i) => i !== index))} aria-label={t("attachment.remove", { name: attachment.name })} className="absolute -top-1.5 -right-1.5 inline-flex size-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 ring-1 ring-white/20 transition-opacity hover:bg-black/90 group-hover/shot:opacity-100"><X className="size-3" /></button>
+                <button type="button" onClick={() => setAttachments((items) => items.filter((_, i) => i !== index))} aria-label={t("attachment.remove", { name: attachment.name })} className="fade-layer absolute -top-1.5 -right-1.5 inline-flex size-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 ring-1 ring-white/20 transition-opacity hover:bg-black/90 group-hover/shot:opacity-100"><X className="size-3" /></button>
               </div>
             ))}
             {screenshot ? (
@@ -595,7 +651,7 @@ export function QuickPanel() {
                   }}
                   title={t("screenshot.remove")}
                   aria-label={t("screenshot.remove")}
-                  className="absolute -top-1.5 -right-1.5 inline-flex size-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 ring-1 ring-white/20 transition-opacity hover:bg-black/90 group-hover/shot:opacity-100"
+                  className="fade-layer absolute -top-1.5 -right-1.5 inline-flex size-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 ring-1 ring-white/20 transition-opacity hover:bg-black/90 group-hover/shot:opacity-100"
                 >
                   <X className="size-3" />
                 </button>

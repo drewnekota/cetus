@@ -191,13 +191,12 @@ export function SlashMenu({
                   title={t("slash.editCommand")}
                   aria-label={t("slash.editCommand")}
                   className={cn(
-                    // `transform-gpu` keeps the button on its own compositor
-                    // layer at all times. Without it WebKit promotes the layer
-                    // when the hover fade starts and drops it when the fade
-                    // ends; each promote/demote re-rounds the neighbouring
-                    // content to the device-pixel grid, so the row's leading
-                    // icon twitches as hover moves between rows.
-                    "absolute right-1.5 top-1/2 -translate-y-1/2 transform-gpu rounded p-1 text-muted-foreground transition-opacity hover:bg-background hover:text-foreground motion-reduce:transition-none",
+                    // `fade-layer` (see globals.css): without the permanent
+                    // compositor layer the hover fade's promote/demote
+                    // re-rounds neighbouring content to the device-pixel grid
+                    // and the row's leading icon twitches as hover moves
+                    // between rows.
+                    "fade-layer absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground transition-opacity hover:bg-background hover:text-foreground motion-reduce:transition-none",
                     active ? "opacity-100" : "opacity-0 group-hover/row:opacity-100",
                   )}
                 >

@@ -22,6 +22,8 @@
 
 ![Cetus runtime picker — Claude Code, Codex, OpenCode, Grok Build, and Kimi CLI in one macOS app](docs/screenshot-runtime-picker.png)
 
+![Cetus demo — launch an agent, schedule an automation, and switch runtimes](docs/cetus-demo.gif)
+
 ## Why developers use Cetus
 
 - **One home for your agents.** Switch any conversation between Cetus's built-in runtime, Claude Code, and Codex without losing the desktop workflow around it.
@@ -66,7 +68,7 @@ Every conversation is a card tracked across **In progress · Needs review · Don
 
 ### Schedule recurring agents
 
-Saved prompts that fire on a schedule (`at` / `every` / `cron` / `daily`). Each run starts a fresh background conversation — e.g. a weekday-09:00 news digest that searches the last 24 hours and renders an HTML summary while you're away.
+Saved prompts that fire on a schedule (`at` / `every` / `cron` / `daily`). Automations gives you one place to create and manage scheduled jobs across different runtimes — a Claude Code job, a Codex job, and a Cetus job can all live side by side, each keeping its own runtime and model settings. Every trigger starts a fresh background conversation — e.g. a weekday-09:00 news digest that searches the last 24 hours and renders an HTML summary while you're away.
 
 ![Cetus Automations](docs/screenshot-automations.png)
 
@@ -102,7 +104,7 @@ Turn on **meeting memory** and Cetus quietly transcribes your calls into searcha
 - **Manual** — global hotkey (default **⌘⇧M**) for in-person meetings that auto-detect can't pick up.
 - **Both sides** — your mic is you; system audio is everyone else, captured separately so the transcript knows who said what (macOS 14.2+; falls back to mic-only below that).
 
-Transcription is 100% on-device via Apple's Speech framework — streaming, punctuated, segmented on natural pauses. While a session is live, a small floating pill (red dot + elapsed timer + stop button) sits at the top of your screen without stealing focus. When the call ends, one DeepSeek V4.1 Pro pass distills a title and clean markdown **minutes** — key points, decisions, action items.
+Transcription is 100% on-device via Apple's Speech framework — streaming, punctuated, segmented on natural pauses. While a session is live, a small floating pill (red dot + elapsed timer + stop button) sits at the top of your screen without stealing focus.
 
 Those notes become context the agent can reach: ask "what did we decide about the launch date?" and Cetus searches your meeting history (`search_meeting_history`) — all local, nothing uploaded. Off by default; the master switch means Cetus never listens until you opt in. macOS only for now.
 

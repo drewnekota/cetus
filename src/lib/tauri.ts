@@ -294,6 +294,13 @@ export const api = {
   trashWorkspaceEntry: (workspaceDir: string, path: string) =>
     invoke<void>("trash_workspace_entry", { workspaceDir, path }),
   readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  /** Read a dropped path for attachment. `data` is base64 bytes, or null for a
+   *  directory or a file past `maxBytes` — see lib/dropped-files.ts. */
+  readDroppedFile: (path: string, maxBytes: number) =>
+    invoke<{ name: string; sizeBytes: number; isDir: boolean; data: string | null }>(
+      "read_dropped_file",
+      { path, maxBytes },
+    ),
   readWorkspaceTextFile: (workspaceDir: string, path: string) =>
     invoke<WorkspaceTextPreview>("read_workspace_text_file", { workspaceDir, path }),
   revealInFinder: (path: string) => invoke<void>("reveal_in_finder", { path }),

@@ -25,7 +25,11 @@ use uuid::Uuid;
 type CmdResult<T> = Result<T, String>;
 
 const BROWSER_ANNOTATION_TITLE_PREFIX: &str = "__CETUS_BROWSER_ANNOTATION__";
-const BROWSER_PANEL_LABEL: &str = "browser-panel";
+pub(crate) const BROWSER_PANEL_LABEL: &str = "browser-panel";
+/// The standalone in-app browser window. Named here so the navigation guard in
+/// `run()` can tell "cetus' own UI" apart from "a webview whose job is to
+/// navigate anywhere the user points it".
+pub(crate) const BROWSER_WINDOW_LABEL: &str = "browser";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1205,6 +1209,38 @@ pub async fn pick_workspace_dir(app: tauri::AppHandle) -> CmdResult<Option<Strin
     Ok(result.map(|p| p.to_string_lossy().to_string()))
 }
 
+/// Save a copy of an artifact somewhere the user picks.
+///
+/// Artifacts already live on disk, so "download" is really "copy to a chosen
+/// location". It has to run through a native save panel rather than an
+/// `<a href="asset://…" download>`: WKWebView does not honour the download
+/// attribute for a custom scheme, so that anchor *navigates* — replacing the
+/// whole cetus UI with the raw file, which no in-page code can undo.
+/// Returns the destination, or `None` if the user cancelled.
+#[tauri::command]
+pub async fn save_artifact_copy(app: tauri::AppHandle, path: String) -> CmdResult<Option<String>> {
+    let source = PathBuf::from(&path);
+    if !source.is_file() {
+        return Err(format!("artifact is missing: {path}"));
+    }
+    let name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "artifact".to_string());
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_file_name(&name)
+        .save_file(move |path| {
+            let _ = tx.send(path.and_then(|p| p.into_path().ok()));
+        });
+    let Some(target) = rx.await.map_err(err)? else {
+        return Ok(None);
+    };
+    std::fs::copy(&source, &target).map_err(err)?;
+    Ok(Some(target.to_string_lossy().to_string()))
+}
+
 #[tauri::command]
 pub async fn list_workspace_files(
     state: State<'_, AppState>,
@@ -2088,6 +2124,49 @@ fn sanitize_segment(s: &str) -> String {
         .to_string()
 }
 
+/// A file the user dropped on a cetus window, ready for the composer to turn
+/// into an attachment. `data` is base64 file bytes, or `None` when the path is
+/// a directory or larger than the caller's budget — the frontend then references
+/// the path in the prompt instead of inlining megabytes the agent can read off
+/// disk itself.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DroppedFile {
+    name: String,
+    size_bytes: u64,
+    is_dir: bool,
+    data: Option<String>,
+}
+
+/// Read a dropped path. Drops arrive from the OS as paths (not web `File`s), so
+/// the bytes have to come from here rather than from a `DataTransfer`.
+#[tauri::command]
+pub async fn read_dropped_file(path: String, max_bytes: u64) -> CmdResult<DroppedFile> {
+    use base64::Engine;
+    let meta = std::fs::metadata(&path).map_err(err)?;
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    let is_dir = meta.is_dir();
+    let size_bytes = if is_dir { 0 } else { meta.len() };
+    if is_dir || size_bytes > max_bytes {
+        return Ok(DroppedFile {
+            name,
+            size_bytes,
+            is_dir,
+            data: None,
+        });
+    }
+    let bytes = std::fs::read(&path).map_err(err)?;
+    Ok(DroppedFile {
+        name,
+        size_bytes,
+        is_dir,
+        data: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
+    })
+}
+
 #[tauri::command]
 pub async fn read_text_file(path: String) -> CmdResult<String> {
     const MAX_BYTES: u64 = 4 * 1024 * 1024;
@@ -2255,7 +2334,7 @@ pub(crate) async fn open_browser_window_with_app_data_dir(
             parsed.scheme()
         ));
     }
-    if let Some(win) = app.get_webview_window("browser") {
+    if let Some(win) = app.get_webview_window(BROWSER_WINDOW_LABEL) {
         win.navigate(parsed).map_err(err)?;
         win.show().map_err(err)?;
         return Ok(());
@@ -2270,7 +2349,8 @@ pub(crate) async fn open_browser_window_with_app_data_dir(
     );
     let annotation_script =
         browser_annotation_script(&annotation_token, &BrowserAnnotationLabels::default(), true);
-    match WebviewWindowBuilder::new(app, "browser", WebviewUrl::External(parsed.clone()))
+    let browser_url = WebviewUrl::External(parsed.clone());
+    match WebviewWindowBuilder::new(app, BROWSER_WINDOW_LABEL, browser_url)
         .title("Cetus Browser")
         .inner_size(1200.0, 820.0)
         .resizable(true)
@@ -2294,7 +2374,7 @@ pub(crate) async fn open_browser_window_with_app_data_dir(
     {
         Ok(_) => {}
         Err(e) => {
-            if let Some(win) = app.get_webview_window("browser") {
+            if let Some(win) = app.get_webview_window(BROWSER_WINDOW_LABEL) {
                 win.navigate(parsed).map_err(err)?;
                 win.show().map_err(err)?;
             } else {

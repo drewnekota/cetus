@@ -572,7 +572,7 @@ const ROW_ACCENT_CLASS =
   "group-has-[:focus-visible]/project-row:bg-sidebar-accent group-has-[:focus-visible]/project-row:text-sidebar-accent-foreground";
 
 const ROW_ACTION_CLASS =
-  "flex size-4 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-hidden transition-opacity " +
+  "fade-layer flex size-4 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-hidden transition-opacity " +
   "hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring " +
   "group-hover/project-row:opacity-100 group-has-[[data-state=open]]/project-row:opacity-100 group-has-[:focus-visible]/project-row:opacity-100";
 
@@ -1201,7 +1201,7 @@ const ConversationRow = memo(function ConversationRow({
             <span className="min-w-0 flex-1 truncate">{title}</span>
             <span
               className={cn(
-                "absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center text-[11px] tabular-nums text-muted-foreground/70 transition-opacity",
+                "fade-layer absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center text-[11px] tabular-nums text-muted-foreground/70 transition-opacity",
                 "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
                 active && "text-sidebar-accent-foreground/70",
               )}

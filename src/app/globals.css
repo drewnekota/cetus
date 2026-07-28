@@ -260,6 +260,18 @@
   animation: shake 0.3s ease;
 }
 
+/* Keep an element that fades (or slides) on its own compositor layer for its
+   whole lifetime. Without this, WebKit promotes the element when the opacity
+   transition starts and demotes it when the transition ends; each
+   promote/demote re-rasterizes and re-rounds the layer to the device-pixel
+   grid, which at fractional page zoom (⌘+ = 1.1/1.25…) nudges the content by a
+   subpixel and back. Reads as an icon or label "twitching" every time you
+   hover. Apply to anything with a hover/state opacity transition — the
+   elements are small, so the extra layers cost a few MB at most. */
+@utility fade-layer {
+  transform: translateZ(0);
+}
+
 /* Keep a message toolbar scoped to its own turn. Not `:hover`: WebKit only
    recomputes hover on real mouse events, so when the streaming transcript
    auto-scrolls turns under a stationary pointer, `:hover` latches on each one
@@ -268,13 +280,9 @@
    cleared on scroll, so at most one toolbar can ever show. */
 [data-message-hover-target] > [data-message-actions] {
   opacity: 0;
-  /* Keep the row on its own compositor layer at all times. Without this,
-     WebKit promotes it when the hover fade starts and drops it when the fade
-     ends; each promote/demote re-rasterizes and re-rounds the layer to the
-     device-pixel grid, which at fractional page zoom (⌘+ = 1.1/1.25…) nudges
-     the row — and the activity bar right above it — by a subpixel and back.
-     Reads as the bar "twitching" on hover. The rows are small and the list is
-     virtualized, so the extra layers are a few MB at most. */
+  /* Same permanent compositing layer as the `fade-layer` utility (see its
+     comment): without it the promote/demote around the hover fade nudges the
+     row — and the activity bar right above it — by a subpixel and back. */
   transform: translateZ(0);
 }
 

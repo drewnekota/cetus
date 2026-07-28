@@ -457,11 +457,23 @@ function ArtifactPreviewDialog({
               <ExternalLink className="size-3.5" />
               {t("artifact.openExternal")}
             </Button>
-            <Button asChild size="sm" variant="ghost">
-              <a href={url} download={artifact.name} title={t("artifact.download")}>
-                <Download className="size-3.5" />
-                {t("artifact.download")}
-              </a>
+            {/* A native save panel, NOT `<a href={url} download>`: WKWebView
+                ignores the download attribute on the asset:// scheme and
+                navigates instead, so that anchor replaced the whole cetus UI
+                with the raw file — unrecoverable without relaunching. */}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                invoke("save_artifact_copy", { path: artifact.path }).catch(
+                  console.error,
+                )
+              }
+              title={t("artifact.download")}
+            >
+              <Download className="size-3.5" />
+              {t("artifact.download")}
             </Button>
             <Button
               type="button"

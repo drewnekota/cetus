@@ -723,6 +723,27 @@ export function useStreamingIds(): Set<string> {
   return useChatStore((s) => s.streamingIds);
 }
 
+/** Conversation ids that should look active in navigation surfaces. This is
+ *  deliberately broader than `streamingIds`: an async Agent/Workflow may keep
+ *  working after its foreground model turn settles. Background Bash/Monitors
+ *  do not count — they can live for hours and must not pin a sidebar spinner. */
+export function useActivityIds(): Set<string> {
+  const [streamingIds, backgroundTasks] = useChatStore(
+    useShallow((s) => [s.streamingIds, s.backgroundTasks] as const),
+  );
+  return useMemo(() => {
+    let activityIds = streamingIds;
+    for (const [id, tasks] of Object.entries(backgroundTasks)) {
+      if (!tasks.some((task) => task.kind !== "Bash") || activityIds.has(id)) {
+        continue;
+      }
+      if (activityIds === streamingIds) activityIds = new Set(streamingIds);
+      activityIds.add(id);
+    }
+    return activityIds;
+  }, [backgroundTasks, streamingIds]);
+}
+
 /** A background subagent (claude-code Task/Agent tool) still running in the
  *  current turn. Surfaced above the composer so the user knows *why* the run
  *  is held open after the main reply already landed. */

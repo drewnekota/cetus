@@ -59,6 +59,7 @@ import {
   useIsStreaming,
   useHasArtifacts,
   useHasMessages,
+  useActivityIds,
   useStreamingIds,
   copyCachedMessages,
   installChatPersistence,
@@ -445,6 +446,7 @@ export default function Home() {
     [conversations, activeId],
   );
   const streamingIds = useStreamingIds();
+  const activityIds = useActivityIds();
   const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -1513,7 +1515,6 @@ export default function Home() {
   //   ⌥⌘↑/↓ — switch to the previous / next chat
   //   ⌘9    — switch to the last chat in the sidebar
   //   ⌘⇧A   — toggle artifacts panel (chat view, when artifacts exist)
-  //   Esc   — close artifacts panel, else abort current stream (palette closed)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const shortcut = (id: keyof typeof keyboardShortcuts) =>
@@ -1545,9 +1546,8 @@ export default function Home() {
         switchToPreviousPage();
         return;
       }
-      // A modal owns the keyboard while open — don't fire app shortcuts (or
-      // Esc-abort) behind it. Settings closes itself on Esc via a capture-phase
-      // listener; the dialogs handle their own ⌘↵/Esc.
+      // A modal owns the keyboard while open — don't fire app shortcuts behind
+      // it. Settings and dialogs handle their own ⌘↵/Esc.
       if (
         settingsOpen ||
         automationDialogOpen ||
@@ -1555,20 +1555,6 @@ export default function Home() {
         detailId !== null
       )
         return;
-      const mod = e.metaKey || e.ctrlKey;
-      // Esc — abort the current stream. (No mod key; palette owns its own Esc.)
-      // Through onAbort, not a bare api.abort: the local endStream there flags
-      // the run aborted. pi echoes an "aborted" error event that does the same,
-      // but the CLI backends (claude-code / codex) don't — their trailing
-      // agent_end would misread a thinking-only turn as an empty completion
-      // and surface a spurious "model returned an empty response" error.
-      if (e.key === "Escape" && !mod && !paletteOpen) {
-        if (isStreaming && activeId) {
-          e.preventDefault();
-          onAbort().catch(console.error);
-          return;
-        }
-      }
       if (sideWorkspace.open && shortcut("previousWorkspaceTab")) {
         e.preventDefault();
         switchWorkspaceTab("side", -1);
@@ -1688,9 +1674,6 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     view,
-    paletteOpen,
-    isStreaming,
-    activeId,
     settingsOpen,
     automationDialogOpen,
     newTaskOpen,
@@ -3482,7 +3465,7 @@ export default function Home() {
       <AppSidebar
         conversations={conversations}
         activeId={activeId}
-        streamingIds={streamingIds}
+        streamingIds={activityIds}
         unreadCompletedIds={unreadCompletedIds}
         workspaceDirs={[...recentWorkspaces, ...temporaryWorkspaces]}
         hiddenWorkspaceDirs={hiddenWorkspaces.filter(
@@ -3583,7 +3566,7 @@ export default function Home() {
                 conversations={conversations}
                 workspaceFilter={boardWorkspaceFilter}
                 defaultWorkspace={defaultWorkspace}
-                streamingIds={streamingIds}
+                streamingIds={activityIds}
                 onOpen={onOpenDetail}
                 onArchive={onArchive}
                 onApproveReview={onApproveReview}

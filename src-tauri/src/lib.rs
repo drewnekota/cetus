@@ -866,6 +866,37 @@ pub fn run() {
                     }
                 })
                 .build(),
+        )
+        // Last line of defence against the app webview navigating away from
+        // cetus' own document. That failure is unrecoverable in practice: the
+        // UI is replaced by whatever was loaded (rendered unstyled over our
+        // transparent window), no in-page code survives to undo it, and even
+        // ⌘R only reloads the *new* URL. Every link in the app is therefore
+        // intercepted and routed to the OS — see `openMarkdownLink` — and this
+        // refuses `file:` for the cases that get missed.
+        //
+        // Scope is deliberately narrow. `on_navigation` cannot tell a main
+        // frame from a subframe, and the local-file previews (`asset:`) and
+        // artifact iframes (`blob:`/`data:`) are subframe navigations that must
+        // keep working, so only `file:` — which nothing in the app legitimately
+        // loads — can be refused here. The in-app browser windows are exempt:
+        // navigating is their entire job.
+        .plugin(
+            // `()` config: the plugin takes no `tauri.conf.json` settings, and
+            // nothing else pins the type parameter for inference.
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("navigation-guard")
+                .on_navigation(|webview, url| {
+                    let label = webview.label();
+                    if url.scheme() != "file"
+                        || label == commands::BROWSER_WINDOW_LABEL
+                        || label == commands::BROWSER_PANEL_LABEL
+                    {
+                        return true;
+                    }
+                    tracing::warn!("blocked file: navigation in webview {label}: {url}");
+                    false
+                })
+                .build(),
         );
 
     // WKWebView runs out-of-process. If macOS reclaims or crashes that content
@@ -1472,6 +1503,7 @@ pub fn run() {
         webview_health::wake_main_webview,
         commands::default_workspace,
         commands::pick_workspace_dir,
+        commands::save_artifact_copy,
         commands::list_workspace_files,
         commands::list_workspace_directory,
         commands::search_workspace_files,
@@ -1489,6 +1521,7 @@ pub fn run() {
         commands::delete_api_key,
         commands::log_fe,
         commands::read_text_file,
+        commands::read_dropped_file,
         commands::read_workspace_text_file,
         commands::reveal_in_finder,
         commands::open_external,
@@ -1646,6 +1679,7 @@ pub fn run() {
         webview_health::wake_main_webview,
         commands::default_workspace,
         commands::pick_workspace_dir,
+        commands::save_artifact_copy,
         commands::list_workspace_files,
         commands::list_workspace_directory,
         commands::search_workspace_files,
@@ -1663,6 +1697,7 @@ pub fn run() {
         commands::delete_api_key,
         commands::log_fe,
         commands::read_text_file,
+        commands::read_dropped_file,
         commands::read_workspace_text_file,
         commands::reveal_in_finder,
         commands::open_external,
