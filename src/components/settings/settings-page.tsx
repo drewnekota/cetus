@@ -311,8 +311,10 @@ type Props = {
   onSaved: () => void;
   /** Open the full-screen Screen history viewer (closes settings first). */
   onOpenHistory: () => void;
-  /** Called after archived chats are deleted/restored so the sidebar refreshes. */
-  onConversationsChanged?: () => void;
+  /** Called after archived chats are deleted/restored so the sidebar refreshes.
+   *  Restores include the fresh row so a hidden automation workspace can be
+   *  surfaced again immediately. */
+  onConversationsChanged?: (restored?: Conversation) => void;
 };
 
 // Memoized because the panel latches mounted after first open (hidden via CSS)
@@ -3226,7 +3228,7 @@ function ArchivedChatsSection({
   onConversationsChanged,
 }: {
   open: boolean;
-  onConversationsChanged?: () => void;
+  onConversationsChanged?: (restored?: Conversation) => void;
 }) {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
@@ -3262,8 +3264,8 @@ function ArchivedChatsSection({
     // it back without waiting for a full settings-page reload.
     setChats((cs) => (cs ? cs.filter((x) => x.id !== c.id) : cs));
     try {
-      await api.archiveConversation(c.id, false);
-      onConversationsChanged?.();
+      const restored = await api.archiveConversation(c.id, false);
+      onConversationsChanged?.(restored);
     } catch (e) {
       setError(String(e));
       setChats((cs) => {

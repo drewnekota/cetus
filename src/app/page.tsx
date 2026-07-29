@@ -115,6 +115,7 @@ import {
   loadRecentWorkspaces,
   RECENT_WORKSPACES_CHANGED,
   RECENT_WORKSPACES_STORAGE_KEY,
+  reconcileTemporaryWorkspaces,
   reorderRecentWorkspaces,
 } from "@/lib/recent-workspaces";
 
@@ -524,7 +525,7 @@ export default function Home() {
   // empty folder from the sidebar naturally.
   useEffect(() => {
     setTemporaryWorkspaces((dirs) =>
-      dirs.filter((dir) => conversations.some((c) => c.workspaceDir === dir)),
+      reconcileTemporaryWorkspaces(dirs, conversations),
     );
   }, [conversations]);
   const [settingsOpen, setSettingsOpen] = useState(
@@ -1282,6 +1283,12 @@ export default function Home() {
       });
       return identical ? prev : next;
     });
+    // Rebuild ephemeral automation workspace visibility from persisted rows.
+    // This also recovers chats restored before the restore callback learned to
+    // surface their workspace explicitly.
+    setTemporaryWorkspaces((dirs) =>
+      reconcileTemporaryWorkspaces(dirs, list),
+    );
     setConversationsLoaded(true);
     return list;
   }, []);
@@ -1306,9 +1313,25 @@ export default function Home() {
   const onSettingsSaved = useCallback(() => {
     refreshKeys().catch(console.error);
   }, [refreshKeys]);
-  const onSettingsConversationsChanged = useCallback(() => {
-    refreshList().catch(console.error);
-  }, [refreshList]);
+  const onSettingsConversationsChanged = useCallback(
+    (restored?: Conversation) => {
+      if (restored) {
+        // Automation chats can belong to a workspace the user deliberately
+        // removed from the persistent sidebar. Their initial fire surfaces that
+        // workspace temporarily; restoring the last archived chat must do the
+        // same or the active row is immediately filtered back out.
+        setConversations((cs) => mergeConversation(cs, restored));
+        setTemporaryWorkspaces((dirs) =>
+          dirs.includes(restored.workspaceDir)
+            ? dirs
+            : [...dirs, restored.workspaceDir],
+        );
+        return;
+      }
+      refreshList().catch(console.error);
+    },
+    [refreshList],
+  );
   const openHistoryFromSettings = useCallback(() => {
     closeSettings();
     setHistoryQuery("");

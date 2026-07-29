@@ -474,8 +474,8 @@ export const api = {
   /** Same catalog resolved by probing the runtime, for the new-chat composer
    *  (no conversation yet → no live session to report one). Cached per
    *  runtime + workspace on the Rust side. */
-  probeCliCommands: (backend: string, cwd?: string) =>
-    invoke<CliSlashCommand[]>("probe_cli_commands", { backend, cwd }),
+  probeCliCommands: (backend: string, cwd?: string, forceRefresh = false) =>
+    invoke<CliSlashCommand[]>("probe_cli_commands", { backend, cwd, forceRefresh }),
   /** Create (no id) or update (with id) a slash command; returns the saved one. */
   upsertSlashCommand: (input: SlashCommandInput) =>
     invoke<SlashCommand>("upsert_slash_command", { input }),

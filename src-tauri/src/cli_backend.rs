@@ -199,33 +199,62 @@ pub async fn get_cli_commands(
 /// Resolve a runtime's native slash-command/skill catalog *before* any session
 /// exists — the new-chat composer has no conversation to read a live catalog
 /// from, and otherwise falls back to a hardcoded handful of built-ins.
-/// Claude Code answers this from its initialize handshake; the result is cached
-/// per (backend, cwd) for the app's lifetime because the probe costs a process
-/// spawn. Live sessions keep updating their own catalog through `cli_commands`
-/// events, so this only ever fills the pre-session gap.
+/// Claude Code answers this from its initialize handshake; Codex answers it
+/// from app-server `skills/list` without creating a thread. The result is
+/// cached per (backend, cwd) for the app's lifetime because either probe costs
+/// a process spawn. Live sessions keep updating their own catalog through
+/// `cli_commands` events, so this only ever fills the pre-session gap.
 #[tauri::command]
 pub async fn probe_cli_commands(
     state: State<'_, AppState>,
     backend: String,
     cwd: Option<String>,
+    force_refresh: Option<bool>,
 ) -> Result<Vec<Value>, String> {
-    if backend != "claude-code" {
-        // Codex/ACP runtimes announce their catalogs over their own protocols
-        // only after a session opens; there is nothing to probe here.
+    if backend != "claude-code" && backend != "codex" {
+        // ACP runtimes announce their catalogs only after a session opens.
         return Ok(Vec::new());
     }
     let dir = cwd.unwrap_or_default();
     let key = format!("{backend}\n{dir}");
-    if let Some(cached) = state.cli_command_catalog(&key) {
-        return Ok(cached);
+    let cached = state.cli_command_catalog(&key);
+    if !force_refresh.unwrap_or(false) {
+        if let Some(cached) = cached.clone() {
+            return Ok(cached);
+        }
     }
-    let commands = match probe_claude_initialize(Some(Path::new(&dir))).await {
-        Some(ack) => claude_commands_from_initialize(&ack),
-        None => Vec::new(),
+    let resolved = match backend.as_str() {
+        "claude-code" => probe_claude_initialize(Some(Path::new(&dir)))
+            .await
+            .map(|ack| claude_commands_from_initialize(&ack)),
+        "codex" => {
+            let probe_dir = match Path::new(&dir).is_dir() {
+                true => PathBuf::from(&dir),
+                false => std::env::current_dir().map_err(|e| e.to_string())?,
+            };
+            match cetus_bridge::cli_agent::probe_codex_skills(
+                "codex",
+                &probe_dir,
+                force_refresh.unwrap_or(false),
+            )
+            .await
+            {
+                Ok(commands) => Some(commands),
+                Err(error) => {
+                    tracing::warn!("Codex skill catalog probe failed: {error}");
+                    None
+                }
+            }
+        }
+        _ => None,
     };
-    if !commands.is_empty() {
-        state.cache_cli_command_catalog(&key, commands.clone());
-    }
+    let Some(commands) = resolved else {
+        // A transient runtime failure must not throw away the last good menu.
+        return Ok(cached.unwrap_or_default());
+    };
+    // Cache empty successful responses too: a refresh after the user removes
+    // their last skill must clear the stale catalog.
+    state.cache_cli_command_catalog(&key, commands.clone());
     Ok(commands)
 }
 

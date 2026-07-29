@@ -305,6 +305,10 @@ const CODEX_CLI_COMMANDS: SlashItem[] = [
   },
 ];
 
+// Skills rarely change, so a recently checked catalog can serve repeated menu
+// opens without spawning another vendor CLI process.
+const RUNTIME_CATALOG_REFRESH_MS = 30_000;
+
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB — docx/xlsx/pdf etc., read on disk by the agent
 const FOCUS_TRIGGER_CHARS = new Set(["/", "、", "／"]);
 
@@ -504,6 +508,11 @@ export function Composer({
     backend: "pi",
     commands: [],
   });
+  const catalogProbeRef = useRef<{
+    key: string;
+    request: Promise<CliSlashCommand[]>;
+  } | null>(null);
+  const catalogCheckedAtRef = useRef(new Map<string, number>());
   const [slashCommands, setSlashCommands] = useState<SlashItem[]>([]);
   const [slashSkills, setSlashSkills] = useState<SlashItem[]>([]);
   const [slashOpen, setSlashOpen] = useState(false);
@@ -591,26 +600,53 @@ export function Composer({
     };
   }, [conversationId, slashOpen]);
 
-  // No live session reported a catalog (new chat, or a conversation whose CLI
-  // process hasn't booted yet) → ask the runtime directly, in the workspace the
-  // conversation will run in, so project skills are included. Rust caches per
-  // runtime + workspace, so reopening the menu costs nothing.
+  const probeRuntimeCatalog = useCallback(
+    (refreshIfStale: boolean) => {
+      if (backend !== "claude-code" && backend !== "codex") return;
+      const cwd = workspaceDir ?? defaultWorkspace;
+      const key = `${backend}\n${cwd}`;
+      const inFlight = catalogProbeRef.current;
+      if (inFlight?.key === key) return;
+
+      const checkedAt = catalogCheckedAtRef.current.get(key) ?? 0;
+      const forceRefresh =
+        refreshIfStale && Date.now() - checkedAt >= RUNTIME_CATALOG_REFRESH_MS;
+      const request = api.probeCliCommands(backend, cwd || undefined, forceRefresh);
+      catalogProbeRef.current = { key, request };
+      void request
+        .then((commands) => {
+          catalogCheckedAtRef.current.set(key, Date.now());
+          // A slower probe for a previously selected runtime must not replace
+          // the current runtime's catalog.
+          if (catalogProbeRef.current?.request === request) {
+            setProbed({ backend, commands });
+          }
+        })
+        .catch(() => {
+          // Runtime discovery is best-effort; retain the last good catalog.
+        })
+        .finally(() => {
+          if (catalogProbeRef.current?.request === request) {
+            catalogProbeRef.current = null;
+          }
+        });
+    },
+    [backend, workspaceDir, defaultWorkspace],
+  );
+
+  // Prewarm as soon as the composer knows which runtime + workspace a new
+  // conversation will use. In the common path this finishes before `/` opens.
+  useEffect(() => {
+    if (nativeCommands.length > 0) return;
+    probeRuntimeCatalog(false);
+  }, [nativeCommands.length, probeRuntimeCatalog]);
+
+  // Revalidate stale catalogs when the menu opens. The current catalog remains
+  // visible while a changed result is fetched in the background.
   useEffect(() => {
     if (!slashOpen || nativeCommands.length > 0) return;
-    const cwd = workspaceDir ?? defaultWorkspace;
-    let alive = true;
-    (async () => {
-      try {
-        const commands = await api.probeCliCommands(backend, cwd || undefined);
-        if (alive) setProbed({ backend, commands });
-      } catch {
-        // Probe is best-effort; the built-in fallback list still shows.
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [slashOpen, nativeCommands.length, backend, workspaceDir, defaultWorkspace]);
+    probeRuntimeCatalog(true);
+  }, [slashOpen, nativeCommands.length, probeRuntimeCatalog]);
 
   const slashItems = useMemo(() => {
     const q = slashQuery.toLowerCase();

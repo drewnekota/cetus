@@ -20,6 +20,31 @@ describe("workspace grouping", () => {
     expect(groups.map((g) => g.dir)).toEqual([DEFAULT, "/repo/a"]);
   });
 
+  test("a temporary workspace resurfaces a restored chat from a hidden folder", () => {
+    const restored = {
+      id: "scheduled-chat",
+      workspaceDir: "/repo/automation",
+      createdAt: 1,
+    };
+    const temporary = [restored.workspaceDir];
+    const hidden = [restored.workspaceDir].filter(
+      (dir) => !temporary.includes(dir),
+    );
+
+    const groups = groupByWorkspace(
+      [restored],
+      temporary,
+      hidden,
+      DEFAULT,
+    );
+
+    expect(groups.map((g) => g.dir)).toEqual([
+      DEFAULT,
+      restored.workspaceDir,
+    ]);
+    expect(groups[1].items).toEqual([restored]);
+  });
+
   // Why the sidebar must NOT gate its "Chat" section on finding this group:
   // `defaultWorkspace` starts as "" and is filled in by an async `invoke`, and
   // an empty dir is skipped here — so between mount and that response there is

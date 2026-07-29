@@ -1,5 +1,7 @@
 "use client";
 
+import type { Conversation } from "@/lib/types";
+
 export const RECENT_WORKSPACES_STORAGE_KEY = "cetus:recentWorkspaces";
 export const HIDDEN_WORKSPACES_STORAGE_KEY = "cetus:hiddenWorkspaces";
 export const RECENT_WORKSPACES_CHANGED = "cetus:recent-workspaces-changed";
@@ -81,6 +83,27 @@ export function hideWorkspace(dir: string): {
   saveRecentWorkspaces(recent);
   saveHiddenWorkspaces(hidden);
   return { recent, hidden: dedupeWorkspaces(hidden) };
+}
+
+/** Keep temporary workspace visibility in sync with active conversations.
+ *  Automation workspaces are reconstructed from persisted conversation rows so
+ *  restored chats (and app restarts) cannot leave active runs stranded behind
+ *  the user's hidden-workspace filter. */
+export function reconcileTemporaryWorkspaces(
+  current: string[],
+  conversations: Conversation[],
+): string[] {
+  const active = new Set(conversations.map((c) => c.workspaceDir));
+  const next = current.filter((dir) => active.has(dir));
+  for (const c of conversations) {
+    if (c.sourceAutomationId && !next.includes(c.workspaceDir)) {
+      next.push(c.workspaceDir);
+    }
+  }
+  return next.length === current.length &&
+    next.every((dir, index) => dir === current[index])
+    ? current
+    : next;
 }
 
 function dedupeWorkspaces(dirs: string[]): string[] {

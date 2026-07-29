@@ -4084,6 +4084,76 @@ fn codex_skill_commands(result: &Value) -> Vec<Value> {
         .collect()
 }
 
+/// Read Codex's workspace-aware skill catalog without creating a thread.
+///
+/// `skills/list` is available immediately after the app-server initialize
+/// handshake, so new-chat surfaces can prewarm their slash menu without
+/// polluting Codex's saved thread inventory.
+pub async fn probe_codex_skills(
+    bin: &str,
+    cwd: &Path,
+    force_reload: bool,
+) -> Result<Vec<Value>> {
+    let mut cmd = TokioCommand::new(bin);
+    cmd.args(["app-server", "--listen", "stdio://"])
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("failed to launch `{bin} app-server` for skill discovery"))?;
+    let mut stdin = child.stdin.take().context("Codex app-server stdin missing")?;
+    let stdout = child.stdout.take().context("Codex app-server stdout missing")?;
+    let mut reader = BufReader::new(stdout).lines();
+    let cwd_string = cwd.to_string_lossy().into_owned();
+
+    let result = tokio::time::timeout(Duration::from_secs(10), async {
+        write_json_line(
+            &mut stdin,
+            &json!({
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {
+                        "name": "cetus",
+                        "title": "Cetus",
+                        "version": "0.1.0"
+                    },
+                    "capabilities": {
+                        "experimentalApi": true,
+                        "requestAttestation": false
+                    }
+                }
+            }),
+        )
+        .await?;
+        read_rpc_response(&mut reader, 1).await?;
+        write_json_line(&mut stdin, &json!({ "method": "initialized" })).await?;
+        write_json_line(
+            &mut stdin,
+            &json!({
+                "id": 2,
+                "method": "skills/list",
+                "params": {
+                    "cwds": [cwd_string],
+                    "forceReload": force_reload,
+                }
+            }),
+        )
+        .await?;
+        let skills = read_rpc_response(&mut reader, 2).await?;
+        Ok::<_, anyhow::Error>(codex_skill_commands(&skills))
+    })
+    .await
+    .context("Codex skills/list probe timed out")?;
+
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    result
+}
+
 fn normalize_codex_app_item(mut item: Value) -> Value {
     let Some(object) = item.as_object_mut() else {
         return item;
@@ -5808,6 +5878,53 @@ mod tests {
         assert_eq!(commands[0]["name"], json!("writer"));
         assert_eq!(commands[0]["kind"], json!("skill"));
         assert_eq!(commands[1]["name"], json!("reviewer"));
+    }
+
+    #[tokio::test]
+    async fn codex_skill_probe_does_not_create_a_thread() {
+        let dir = std::env::temp_dir().join(format!(
+            "cetus-codex-skill-probe-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-codex.sh");
+        let requests = dir.join("requests.ndjson");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\n\
+                 while IFS= read -r line; do\n\
+                   echo \"$line\" >> '{}'\n\
+                   case \"$line\" in\n\
+                     *'\"method\":\"initialize\"'*) echo '{{\"id\":1,\"result\":{{\"userAgent\":\"fake\"}}}}' ;;\n\
+                     *'\"method\":\"skills/list\"'*) echo '{{\"id\":2,\"result\":{{\"data\":[{{\"skills\":[{{\"name\":\"writer\",\"description\":\"Write clearly\",\"enabled\":true}}]}}]}}}}' ;;\n\
+                   esac\n\
+                 done\n",
+                requests.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let commands = probe_codex_skills(&script.to_string_lossy(), &dir, true)
+            .await
+            .unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0]["name"], json!("writer"));
+        let requests = std::fs::read_to_string(requests).unwrap();
+        assert!(requests.contains(r#""method":"skills/list""#));
+        assert!(requests.contains(r#""forceReload":true"#));
+        assert!(!requests.contains(r#""method":"thread/start""#));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
