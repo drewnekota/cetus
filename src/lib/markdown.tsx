@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { defaultUrlTransform, type Components } from "react-markdown";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
 /**
  * Shared rehype-katex options. Assistant output routinely drops CJK text or
@@ -116,6 +116,20 @@ export const markdownComponents: Components = {
       >
         {children}
       </a>
+    );
+  },
+  img({ src, alt, ...props }) {
+    // WKWebView cannot load file:// URLs (or absolute filesystem paths treated
+    // as web-root URLs) directly. Route local images through Tauri's asset
+    // protocol, just like artifact previews do.
+    const localPath =
+      typeof src === "string" ? localPathFromHref(src) : null;
+    return (
+      <img
+        {...props}
+        src={localPath ? convertFileSrc(localPath) : src}
+        alt={alt ?? ""}
+      />
     );
   },
 };

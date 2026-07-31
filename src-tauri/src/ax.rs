@@ -362,14 +362,16 @@ fn focused_selected_text(pid: i32) -> Option<String> {
 // (`focused_window_title`, 2 reads) runs every tick; the full walk runs only
 // when the cheap probe saw a change.
 
-/// Node/depth/wall-clock bounds for [`visible_text`]. ~300 nodes × 2–3 reads is
-/// tens of ms against a healthy app; the budget cuts off a busy/hung one.
+/// Node/depth/wall-clock bounds for [`visible_text`]. ~800 nodes × 2–3 reads is
+/// still well under the wall-clock budget against a healthy app; the budget
+/// cuts off a busy/hung one. Depth 20 matters for Chromium web areas, whose
+/// content commonly nests past 12 levels before the first text node.
 #[cfg(target_os = "macos")]
-const WALK_MAX_NODES: usize = 300;
+const WALK_MAX_NODES: usize = 800;
 #[cfg(target_os = "macos")]
-const WALK_MAX_DEPTH: usize = 12;
+const WALK_MAX_DEPTH: usize = 20;
 #[cfg(target_os = "macos")]
-const WALK_BUDGET_MS: u128 = 150;
+const WALK_BUDGET_MS: u128 = 250;
 
 /// Title of `pid`'s focused window (falls back to the main window). Two AX
 /// reads — cheap enough to poll. None when AX is untrusted or the app exposes
@@ -388,8 +390,8 @@ pub fn focused_window_title(pid: i32) -> Option<String> {
         }
         let app_owner = CFType::wrap_under_create_rule(app as CFTypeRef);
         let app_ref = app_owner.as_CFTypeRef() as accessibility_sys::AXUIElementRef;
-        let win = copy_attr(app_ref, "AXFocusedWindow")
-            .or_else(|| copy_attr(app_ref, "AXMainWindow"))?;
+        let win =
+            copy_attr(app_ref, "AXFocusedWindow").or_else(|| copy_attr(app_ref, "AXMainWindow"))?;
         let win_ref = win.as_CFTypeRef() as accessibility_sys::AXUIElementRef;
         attr_string(win_ref, "AXTitle").filter(|t| !t.trim().is_empty())
     }
@@ -417,12 +419,15 @@ pub fn visible_text(pid: i32, max_chars: usize) -> Option<String> {
         }
         let app_owner = CFType::wrap_under_create_rule(app as CFTypeRef);
         let app_ref = app_owner.as_CFTypeRef() as AXUIElementRef;
-        let win = copy_attr(app_ref, "AXFocusedWindow")
-            .or_else(|| copy_attr(app_ref, "AXMainWindow"))?;
+        let win =
+            copy_attr(app_ref, "AXFocusedWindow").or_else(|| copy_attr(app_ref, "AXMainWindow"))?;
 
         let mut out: Vec<String> = Vec::new();
         let mut chars = 0usize;
         let mut visited = 0usize;
+        // Exact strings already collected — sidebar/tab labels repeat across
+        // non-adjacent subtrees and are the dominant noise in big windows.
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         // Owned CFTypes keep the elements alive while they sit in the stack.
         let mut stack: Vec<(CFType, usize)> = vec![(win, 0)];
 
@@ -446,8 +451,9 @@ pub fn visible_text(pid: i32, max_chars: usize) -> Option<String> {
                 }
             }
             let text = match role.as_str() {
-                "AXStaticText" | "AXHeading" => attr_string(el, "AXValue")
-                    .or_else(|| attr_string(el, "AXTitle")),
+                "AXStaticText" | "AXHeading" => {
+                    attr_string(el, "AXValue").or_else(|| attr_string(el, "AXTitle"))
+                }
                 "AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField" => {
                     attr_string(el, "AXValue")
                 }
@@ -456,10 +462,14 @@ pub fn visible_text(pid: i32, max_chars: usize) -> Option<String> {
             };
             if let Some(t) = text {
                 let t = t.trim();
-                // Drop empties and immediate repeats (labels duplicated across
-                // subtrees are the dominant noise).
-                if !t.is_empty() && out.last().map(String::as_str) != Some(t) {
+                // Drop empties, immediate repeats, and — for strings long
+                // enough to be content rather than coincidence ("OK", digits) —
+                // anything already collected elsewhere in the window.
+                let dup = out.last().map(String::as_str) == Some(t)
+                    || (t.chars().count() >= 4 && seen.contains(t));
+                if !t.is_empty() && !dup {
                     chars += t.chars().count() + 1;
+                    seen.insert(t.to_string());
                     out.push(t.to_string());
                 }
             }
@@ -610,6 +620,19 @@ fn browser_url(bundle: &str) -> Option<(String, String)> {
     }
 }
 
+/// Seconds since the user last touched keyboard/mouse, session-wide. Used by
+/// the ambient collector to skip slow-refresh walks while the user is away —
+/// the frontmost window is still there, but nothing on it is being *looked at*.
+#[cfg(target_os = "macos")]
+pub fn seconds_since_last_input() -> f64 {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventSourceSecondsSinceLastEventType(state_id: u32, event_type: u32) -> f64;
+    }
+    // kCGEventSourceStateCombinedSessionState (0), kCGAnyInputEventType (~0).
+    unsafe { CGEventSourceSecondsSinceLastEventType(0, u32::MAX) }
+}
+
 /// Build an NSString from a Rust &str (UTF-8). None only if NSString is missing.
 #[cfg(target_os = "macos")]
 unsafe fn ns_string_from_rust(s: &str) -> Option<*mut objc2::runtime::AnyObject> {
@@ -668,4 +691,9 @@ pub fn focused_window_title(_pid: i32) -> Option<String> {
 #[cfg(not(target_os = "macos"))]
 pub fn visible_text(_pid: i32, _max_chars: usize) -> Option<String> {
     None
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn seconds_since_last_input() -> f64 {
+    0.0
 }

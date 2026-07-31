@@ -30,13 +30,13 @@
 
 **同时按住左右 ⌘**，即可在任意 app 之上唤出 agent。Cetus 会把当前截图、前台 app、浏览器 URL 和选中文字作为可移除的 context 一起带进来，让你直接就地提问，不必先花时间解释自己正在看什么。
 
-![Cetus 快捷启动器](docs/screenshot-launcher.png)
+![Cetus 快捷启动器演示](docs/quick-launcher.gif)
 
 ### Automations：你不在时，也让它继续工作
 
 把任意 prompt 变成单次或周期任务（`at` / `every` / `cron` / `daily`）。每次运行都保留所选 runtime 和模型设置，在新的后台对话中完成工作，并把结果留在审阅队列里。
 
-![Cetus 自动化任务](docs/screenshot-automations.png)
+![Cetus 自动化任务演示](docs/automation.gif)
 
 ### Screen Context：让它记得你之前在做什么
 

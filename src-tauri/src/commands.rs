@@ -774,7 +774,10 @@ pub async fn delete_conversation(state: State<'_, AppState>, id: String) -> CmdR
         }
     }
     state.store.delete_cli_messages(&id).ok();
-    let _ = std::fs::remove_dir_all(crate::cli_backend::attachments_dir(&state.app_data_dir, &id));
+    let _ = std::fs::remove_dir_all(crate::cli_backend::attachments_dir(
+        &state.app_data_dir,
+        &id,
+    ));
     let _ = std::fs::remove_dir_all(crate::cli_backend::artifacts_dir(&state.app_data_dir, &id));
     state.store.delete(&id).map_err(err)
 }
@@ -853,15 +856,17 @@ pub struct ImageAttachment {
     pub mime_type: String,
 }
 
-/// Strip a leading quick-launcher `<context source="cetus-quick"> … </context>`
-/// block (with its trailing blank line) so titling sees only the user's prose.
-/// Returns the input unchanged when no such fence is present.
+/// Strip a leading `<context source="cetus-…"> … </context>` block (with its
+/// trailing blank line) so titling sees only the user's prose. Covers every
+/// composer-injected fence — quick launcher AND ambient — since either can
+/// lead the first message of a conversation. Returns the input unchanged when
+/// no such fence is present.
 fn strip_context_fence(msg: &str) -> &str {
-    const OPEN: &str = "<context source=\"cetus-quick\">";
+    const OPEN: &str = "<context source=\"cetus-";
     const CLOSE: &str = "</context>";
-    if let Some(rest) = msg.strip_prefix(OPEN) {
-        if let Some(idx) = rest.find(CLOSE) {
-            return rest[idx + CLOSE.len()..].trim_start_matches(['\n', '\r']);
+    if msg.starts_with(OPEN) {
+        if let Some(idx) = msg.find(CLOSE) {
+            return msg[idx + CLOSE.len()..].trim_start_matches(['\n', '\r']);
         }
     }
     msg
@@ -1002,7 +1007,11 @@ pub async fn set_conversation_backend(
         );
     }
     let now = now_ms();
-    let Some(old) = state.store.switch_backend(&id, &backend, now).map_err(err)? else {
+    let Some(old) = state
+        .store
+        .switch_backend(&id, &backend, now)
+        .map_err(err)?
+    else {
         return Ok(()); // missing conversation or same backend — nothing to do
     };
     // An idle vendor process owns background terminals and configuration for
@@ -1290,7 +1299,9 @@ fn list_local_workspace_directory(
     max_children: usize,
 ) -> CmdResult<WorkspaceDirectoryListing> {
     let root = workspace.canonicalize().map_err(err)?;
-    let requested = directory_path.map(PathBuf::from).unwrap_or_else(|| root.clone());
+    let requested = directory_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.clone());
     let dir = requested.canonicalize().map_err(err)?;
     if !dir.starts_with(&root) || !dir.is_dir() {
         return Err("directory is outside the workspace".to_string());
@@ -1341,10 +1352,14 @@ fn list_local_workspace_directory(
                 is_ignored,
                 git_status,
                 is_symlink,
-                symlink_target: is_symlink.then(|| std::fs::read_link(&path).ok()).flatten().map(
-                    |target| target.to_string_lossy().to_string(),
-                ),
-                size_bytes: meta.as_ref().filter(|value| value.is_file()).map(|value| value.len()),
+                symlink_target: is_symlink
+                    .then(|| std::fs::read_link(&path).ok())
+                    .flatten()
+                    .map(|target| target.to_string_lossy().to_string()),
+                size_bytes: meta
+                    .as_ref()
+                    .filter(|value| value.is_file())
+                    .map(|value| value.len()),
                 modified_ms: meta
                     .as_ref()
                     .and_then(|value| value.modified().ok())
@@ -1361,7 +1376,11 @@ fn list_local_workspace_directory(
             continue;
         }
         entries.push(WorkspaceFileEntry {
-            name: path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
             path: path.to_string_lossy().to_string(),
             relative_path: path
                 .strip_prefix(&root)
@@ -1386,7 +1405,12 @@ fn list_local_workspace_directory(
 
 fn workspace_git_status(root: &Path, scope: &Path) -> Vec<(PathBuf, String)> {
     let repo = std::process::Command::new("git")
-        .args(["-C", &root.to_string_lossy(), "rev-parse", "--show-toplevel"])
+        .args([
+            "-C",
+            &root.to_string_lossy(),
+            "rev-parse",
+            "--show-toplevel",
+        ])
         .output()
         .ok()
         .filter(|output| output.status.success())
@@ -1413,7 +1437,9 @@ fn workspace_git_status(root: &Path, scope: &Path) -> Vec<(PathBuf, String)> {
         ])
         .arg(scope_arg)
         .output();
-    let Ok(output) = output else { return Vec::new() };
+    let Ok(output) = output else {
+        return Vec::new();
+    };
     if !output.status.success() {
         return Vec::new();
     }
@@ -1527,7 +1553,11 @@ fn list_remote_workspace_directory(
             is_symlink: record[2] == b"1",
             symlink_target: (!record[3].is_empty()).then(|| text(record[3])),
             size_bytes: text(record[4]).trim().parse().ok(),
-            modified_ms: text(record[5]).trim().parse::<u64>().ok().map(|value| value * 1000),
+            modified_ms: text(record[5])
+                .trim()
+                .parse::<u64>()
+                .ok()
+                .map(|value| value * 1000),
         });
     }
     entries.sort_by(|a, b| {
@@ -1586,9 +1616,11 @@ pub async fn search_workspace_files(
         .await
         .map_err(err)?;
     }
-    tokio::task::spawn_blocking(move || search_local_workspace_files(&workspace, &query, MAX_RESULTS))
-        .await
-        .map_err(err)?
+    tokio::task::spawn_blocking(move || {
+        search_local_workspace_files(&workspace, &query, MAX_RESULTS)
+    })
+    .await
+    .map_err(err)?
 }
 
 fn search_local_workspace_files(
@@ -1599,7 +1631,11 @@ fn search_local_workspace_files(
     let root = PathBuf::from(workspace).canonicalize().map_err(err)?;
     let git_records = workspace_git_status(&root, &root);
     let mut entries = Vec::new();
-    for result in ignore::WalkBuilder::new(&root).hidden(false).follow_links(false).build() {
+    for result in ignore::WalkBuilder::new(&root)
+        .hidden(false)
+        .follow_links(false)
+        .build()
+    {
         let Ok(entry) = result else { continue };
         if entry.path() == root || entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
             continue;
@@ -1614,7 +1650,10 @@ fn search_local_workspace_files(
             continue;
         }
         let meta = entry.metadata().ok();
-        let is_symlink = entry.file_type().map(|kind| kind.is_symlink()).unwrap_or(false);
+        let is_symlink = entry
+            .file_type()
+            .map(|kind| kind.is_symlink())
+            .unwrap_or(false);
         entries.push(WorkspaceFileEntry {
             name: entry.file_name().to_string_lossy().to_string(),
             path: entry.path().to_string_lossy().to_string(),
@@ -1869,7 +1908,10 @@ fn collect_workspace_files(
                 is_dir,
                 is_ignored,
                 git_status: None,
-                is_symlink: entry.file_type().map(|kind| kind.is_symlink()).unwrap_or(false),
+                is_symlink: entry
+                    .file_type()
+                    .map(|kind| kind.is_symlink())
+                    .unwrap_or(false),
                 symlink_target: std::fs::read_link(&path)
                     .ok()
                     .map(|target| target.to_string_lossy().to_string()),
@@ -2205,7 +2247,11 @@ pub async fn read_workspace_text_file(
         if !output.status.success() {
             return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
         }
-        let split = output.stdout.iter().position(|byte| *byte == 0).unwrap_or(0);
+        let split = output
+            .stdout
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(0);
         let total_bytes = String::from_utf8_lossy(&output.stdout[..split])
             .trim()
             .parse::<u64>()
@@ -2794,10 +2840,19 @@ mod tests {
         std::os::unix::fs::symlink("tracked.txt", root.join("linked.txt")).unwrap();
 
         let listing = list_local_workspace_directory(&root, None, 100).unwrap();
-        let entry = |name: &str| listing.entries.iter().find(|entry| entry.name == name).unwrap();
+        let entry = |name: &str| {
+            listing
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .unwrap()
+        };
         assert_eq!(entry("cache").git_status.as_deref(), Some("ignored"));
         assert_eq!(entry("tracked.txt").git_status.as_deref(), Some("modified"));
-        assert_eq!(entry("untracked.txt").git_status.as_deref(), Some("untracked"));
+        assert_eq!(
+            entry("untracked.txt").git_status.as_deref(),
+            Some("untracked")
+        );
         assert_eq!(entry("deleted.txt").git_status.as_deref(), Some("deleted"));
         #[cfg(unix)]
         assert!(entry("linked.txt").is_symlink);
@@ -2805,14 +2860,21 @@ mod tests {
 
         let limited = list_local_workspace_directory(&root, None, 2).unwrap();
         assert!(limited.truncated);
-        assert_eq!(limited.entries.len(), 3, "deleted Git entries remain visible");
+        assert_eq!(
+            limited.entries.len(),
+            3,
+            "deleted Git entries remain visible"
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn remote_paths_are_normalized_before_boundary_checks() {
-        assert_eq!(normalize_remote_path("/srv/repo/./src/../README.md").unwrap(), "/srv/repo/README.md");
+        assert_eq!(
+            normalize_remote_path("/srv/repo/./src/../README.md").unwrap(),
+            "/srv/repo/README.md"
+        );
         assert!(normalize_remote_path("relative/path").is_err());
     }
 
@@ -2846,7 +2908,10 @@ mod tests {
 
         #[cfg(unix)]
         {
-            let outside = root.parent().unwrap().join(format!("outside-{}.txt", Uuid::new_v4()));
+            let outside = root
+                .parent()
+                .unwrap()
+                .join(format!("outside-{}.txt", Uuid::new_v4()));
             std::fs::write(&outside, "secret").unwrap();
             let link = root.join("outside.txt");
             std::os::unix::fs::symlink(&outside, &link).unwrap();

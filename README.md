@@ -30,13 +30,13 @@
 
 Hold **both ⌘ keys** to summon your agent over any app. Cetus brings along the current screenshot, frontmost app, browser URL, and selected text as removable context chips, so you can ask in place instead of stopping to explain what you are looking at.
 
-![Cetus quick launcher](docs/screenshot-launcher.png)
+![Cetus quick launcher demo](docs/quick-launcher.gif)
 
 ### Automations — let it work while you are away
 
 Turn any prompt into a one-off or recurring job (`at` / `every` / `cron` / `daily`). Each run keeps its chosen runtime and model settings, works in a fresh background conversation, and leaves the result ready for you to review.
 
-![Cetus Automations](docs/screenshot-automations.png)
+![Cetus Automations demo](docs/automation.gif)
 
 ### Screen Context — let it remember what you were doing
 

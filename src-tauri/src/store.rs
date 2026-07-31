@@ -99,6 +99,33 @@ pub struct AxContextEntry {
     pub text_hash: Option<i64>,
 }
 
+/// [`AxContextEntry`] minus the text body: what timeline aggregation reads. A
+/// day of collection is thousands of rows × up to `MAX_TEXT_CHARS` each, so the
+/// range scan must not haul the bodies through the row mapper.
+#[derive(Debug, Clone)]
+pub struct AxContextMeta {
+    pub id: String,
+    pub ts: i64,
+    pub app_name: Option<String>,
+    pub bundle_id: Option<String>,
+    pub window_title: Option<String>,
+    pub url: Option<String>,
+    pub page_title: Option<String>,
+    pub text_chars: i64,
+}
+
+/// One FTS hit with a match-centered snippet instead of the full body.
+#[derive(Debug, Clone)]
+pub struct AxSearchHit {
+    pub id: String,
+    pub ts: i64,
+    pub app_name: Option<String>,
+    pub window_title: Option<String>,
+    pub url: Option<String>,
+    pub page_title: Option<String>,
+    pub snippet: String,
+}
+
 /// One recorded meeting (ambient-audio transcription session). Transcript text
 /// lives in `meeting_segments`; this is the session header the UI lists.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -505,10 +532,7 @@ impl Store {
         if session_file.is_empty() {
             tokens.remove(&old_backend);
         } else {
-            tokens.insert(
-                old_backend.clone(),
-                serde_json::Value::String(session_file),
-            );
+            tokens.insert(old_backend.clone(), serde_json::Value::String(session_file));
         }
         let restored = tokens
             .get(new_backend)
@@ -1268,6 +1292,105 @@ impl Store {
         tx.commit()?;
         let _ = conn.execute_batch("PRAGMA incremental_vacuum; PRAGMA wal_checkpoint(TRUNCATE);");
         Ok(())
+    }
+
+    /// Metadata of every entry in `[from_ts, to_ts)`, oldest first — the input
+    /// to timeline aggregation. Text bodies stay in the DB (`text_chars` only).
+    pub fn ax_context_range_meta(
+        &self,
+        from_ts: i64,
+        to_ts: i64,
+        limit: u32,
+    ) -> Result<Vec<AxContextMeta>> {
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, app_name, bundle_id, window_title, url, page_title, length(text)
+             FROM ax_context WHERE ts >= ?1 AND ts < ?2 ORDER BY ts ASC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![from_ts, to_ts, limit], |r| {
+            Ok(AxContextMeta {
+                id: r.get(0)?,
+                ts: r.get(1)?,
+                app_name: r.get(2)?,
+                bundle_id: r.get(3)?,
+                window_title: r.get(4)?,
+                url: r.get(5)?,
+                page_title: r.get(6)?,
+                text_chars: r.get(7)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// One entry by id — the drill-down step after a timeline/search hit.
+    pub fn get_ax_context(&self, id: &str) -> Result<Option<AxContextEntry>> {
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, app_name, bundle_id, window_title, url, page_title, text, text_hash
+             FROM ax_context WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![id], row_to_ax_context)?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// FTS search returning match-centered snippets (not full bodies), newest
+    /// first, with an optional case-insensitive app-name/bundle filter. The
+    /// snippet keeps agent-side token cost flat no matter how big the body is.
+    pub fn search_ax_context_snippets(
+        &self,
+        query: &str,
+        from_ts: i64,
+        to_ts: i64,
+        app_filter: &str,
+        limit: u32,
+    ) -> Result<Vec<AxSearchHit>> {
+        let match_expr = fts_match_expr(query);
+        if match_expr.is_empty() {
+            return Ok(Vec::new());
+        }
+        let app = app_filter.trim().to_lowercase();
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.ts, c.app_name, c.window_title, c.url, c.page_title,
+                    snippet(ax_context_fts, 1, '[', ']', ' … ', 24)
+             FROM ax_context c JOIN ax_context_fts ON ax_context_fts.id = c.id
+             WHERE ax_context_fts MATCH ?1 AND c.ts >= ?2 AND c.ts < ?3
+               AND (?4 = '' OR instr(lower(coalesce(c.app_name,'') || ' ' || coalesce(c.bundle_id,'')), ?4) > 0)
+             ORDER BY c.ts DESC LIMIT ?5",
+        )?;
+        let rows = stmt.query_map(params![match_expr, from_ts, to_ts, app, limit], |r| {
+            Ok(AxSearchHit {
+                id: r.get(0)?,
+                ts: r.get(1)?,
+                app_name: r.get(2)?,
+                window_title: r.get(3)?,
+                url: r.get(4)?,
+                page_title: r.get(5)?,
+                snippet: r.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Oldest/newest observation timestamps, None when the table is empty.
+    pub fn ax_context_span(&self) -> Result<Option<(i64, i64)>> {
+        let conn = self.read_conn.lock().unwrap();
+        let span: (Option<i64>, Option<i64>) =
+            conn.query_row("SELECT MIN(ts), MAX(ts) FROM ax_context", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
+        Ok(match span {
+            (Some(a), Some(b)) => Some((a, b)),
+            _ => None,
+        })
     }
 
     // ---- meetings (ambient audio transcription) ----------------------------
