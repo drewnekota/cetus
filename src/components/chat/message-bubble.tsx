@@ -16,9 +16,6 @@ interface Props {
   messageKey?: string;
   /** Legacy direct-prop mode (used by callers that already hold the message). */
   message?: RenderedMessage;
-  /** Roll back + rerun this turn. Wired only on a trailing user bubble that the
-   *  agent never replied to (interrupted before its first message). */
-  onRegenerate?: () => void;
   /** Copy this conversation through this message into a new conversation. */
   onFork?: () => void;
 }
@@ -30,7 +27,6 @@ export function MessageBubble({
   convId,
   messageKey,
   message: directMessage,
-  onRegenerate,
   onFork,
 }: Props) {
   // Pull from the store when we got a key — fine-grained re-renders during
@@ -38,7 +34,7 @@ export function MessageBubble({
   const subscribed = useMessage(convId, messageKey ?? "");
   const message = directMessage ?? subscribed;
   if (!message) return null;
-  return <MessageBubbleView message={message} onRegenerate={onRegenerate} onFork={onFork} />;
+  return <MessageBubbleView message={message} onFork={onFork} />;
 }
 
 /** Concatenate a message's text blocks (markdown source) for the clipboard. */
@@ -52,11 +48,9 @@ function messageText(message: RenderedMessage): string {
 
 function MessageBubbleView({
   message,
-  onRegenerate,
   onFork,
 }: {
   message: RenderedMessage;
-  onRegenerate?: () => void;
   onFork?: () => void;
 }) {
   const { t } = useTranslation("chat");
@@ -126,7 +120,6 @@ function MessageBubbleView({
           hasText={message.blocks.some((b) => b.kind === "text" && b.text.trim().length > 0)}
           createdAt={message.createdAt}
           isUser={isUser}
-          onRegenerate={isUser ? onRegenerate : undefined}
           onFork={onFork}
         />
       </div>

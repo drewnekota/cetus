@@ -387,6 +387,47 @@ unsafe fn mouse_screen_frame() -> Option<NSRect> {
     None
 }
 
+/// Resize `ns_window` to exactly cover the screen that currently holds the
+/// mouse cursor, and return that frame in CG "global display" coordinates
+/// (top-left origin, points) — the space `screencapture -R` expects. AppKit's
+/// global space is bottom-left-origin anchored at the primary screen; CG's is
+/// top-left-origin at that same screen, so y flips against the primary
+/// screen's top edge.
+pub fn cover_mouse_screen(ns_window: *mut c_void) -> Option<(f64, f64, f64, f64)> {
+    if ns_window.is_null() {
+        return None;
+    }
+    let obj = ns_window as *mut AnyObject;
+    unsafe {
+        let frame = mouse_screen_frame()?;
+        let window: &AnyObject = &*obj;
+        let _: () = msg_send![window, setFrame: frame, display: Bool::YES];
+        // The primary screen (screens[0], AppKit origin (0,0)) defines both
+        // coordinate spaces' anchor.
+        let ns_screen = AnyClass::get(c"NSScreen")?;
+        let screens: *mut AnyObject = msg_send![ns_screen, screens];
+        if screens.is_null() {
+            return None;
+        }
+        let count: usize = msg_send![screens, count];
+        if count == 0 {
+            return None;
+        }
+        let primary: *mut AnyObject = msg_send![screens, objectAtIndex: 0usize];
+        if primary.is_null() {
+            return None;
+        }
+        let pf: NSRect = msg_send![primary, frame];
+        let primary_top = pf.origin.y + pf.size.height;
+        Some((
+            frame.origin.x,
+            primary_top - (frame.origin.y + frame.size.height),
+            frame.size.width,
+            frame.size.height,
+        ))
+    }
+}
+
 /// Bring the panel to the current Space and give it key focus WITHOUT
 /// activating cetus. Re-asserts collection behavior in case it was reset.
 ///

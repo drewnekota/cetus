@@ -76,11 +76,7 @@ interface Props {
   /** Route a leading-`!` command from the Composer to the Terminal surface. */
   onBash?: (command: string) => void;
   onAbort: () => void;
-  /** Roll back + rerun the last turn. Wired only on the last assistant message.
-   *  Omitted (e.g. detail dialog) → no Regenerate button. */
-  onRegenerate?: () => void;
-  /** Roll back + rerun the last (failed) turn — drives the inline error row's
-   *  Retry button. Same handler as onRegenerate but shown on send failure. */
+  /** Roll back + rerun the last failed turn — drives the inline error row's Retry button. */
   onRetry?: () => void;
   /** Copy the current conversation through a specific message into a new chat. */
   onForkMessage?: (messageKey: string, messageIndex: number) => void;
@@ -141,7 +137,6 @@ export function ChatPane({
   onSend,
   onBash,
   onAbort,
-  onRegenerate,
   onRetry,
   onForkMessage,
   retrying,
@@ -290,7 +285,6 @@ export function ChatPane({
         <MessageList
           convId={convId}
           isStreaming={isStreaming}
-          onRegenerate={onRegenerate}
           onRetry={onRetry}
           onForkMessage={onForkMessage}
           retrying={retrying}
@@ -537,7 +531,6 @@ function buildGroups(keys: string[], roles: string[]): MessageGroup[] {
 function MessageList({
   convId,
   isStreaming,
-  onRegenerate,
   onRetry,
   onForkMessage,
   retrying,
@@ -546,7 +539,6 @@ function MessageList({
 }: {
   convId: string | null;
   isStreaming: boolean;
-  onRegenerate?: () => void;
   onRetry?: () => void;
   onForkMessage?: (messageKey: string, messageIndex: number) => void;
   retrying?: boolean;
@@ -560,8 +552,6 @@ function MessageList({
   // timeline — instead of a header + tool cards per round.
   const groups = useMemo(() => buildGroups(keys, roles), [keys, roles]);
   const awaiting = useAwaitingAssistant(convId);
-  // When the turn errored, the inline MessageError row owns the Retry action —
-  // don't also put a Regenerate on the trailing user bubble (avoid two buttons).
   const hasError = !!useChatError(convId);
   // Keep every visible tail inside Virtuoso's measured data. In particular,
   // Thinking used to live in components.Footer, below the item addressed by
@@ -891,7 +881,6 @@ function MessageList({
             convId={convId}
             keys={g.keys}
             active={isStreaming && isLast}
-            onRegenerate={onRegenerate && !isStreaming && isLast ? onRegenerate : undefined}
             onFork={
               onForkMessage && messageIndex >= 0
                 ? () => onForkMessage(forkMessageKey, messageIndex)
@@ -902,14 +891,6 @@ function MessageList({
           <MessageBubble
             convId={convId}
             messageKey={g.key}
-            // A trailing user bubble means the agent was interrupted before it
-            // replied (no assistant group followed). Offer Regenerate there too —
-            // retryLastTurn already handles a user-only tail.
-            onRegenerate={
-              onRegenerate && isLast && !isStreaming && !awaiting && !hasError
-                ? onRegenerate
-                : undefined
-            }
             onFork={
               onForkMessage && messageIndex >= 0
                 ? () => onForkMessage(forkMessageKey, messageIndex)
@@ -936,7 +917,6 @@ function MessageList({
       items.length,
       keys,
       convId,
-      onRegenerate,
       isStreaming,
       onForkMessage,
       awaiting,

@@ -143,7 +143,6 @@ export const chat = {
     "bubble.revealInFinder": "{path} — reveal in Finder",
     "bubble.copy": "Copy",
     "bubble.copied": "Copied",
-    "bubble.regenerate": "Regenerate",
     "bubble.fork": "Fork",
     "bubble.runtimeSwitch": "Runtime switched:",
 
@@ -351,7 +350,6 @@ export const chat = {
     "bubble.revealInFinder": "{path} — 在访达中显示",
     "bubble.copy": "复制",
     "bubble.copied": "已复制",
-    "bubble.regenerate": "重新生成",
     "bubble.fork": "Fork 分支",
     "bubble.runtimeSwitch": "运行时已切换：",
 
@@ -451,7 +449,6 @@ export const chat = {
     "bubble.revealInFinder": "{path} — Finder で表示",
     "bubble.copy": "コピー",
     "bubble.copied": "コピーしました",
-    "bubble.regenerate": "再生成",
     "bubble.fork": "フォーク",
     "bubble.runtimeSwitch": "ランタイムを切替:",
 
@@ -545,7 +542,6 @@ export const chat = {
     "bubble.revealInFinder": "{path} — Finder에서 보기",
     "bubble.copy": "복사",
     "bubble.copied": "복사됨",
-    "bubble.regenerate": "다시 생성",
     "bubble.fork": "포크",
     "bubble.runtimeSwitch": "런타임 전환:",
 
@@ -639,7 +635,6 @@ export const chat = {
     "bubble.revealInFinder": "{path} — mostrar en Finder",
     "bubble.copy": "Copiar",
     "bubble.copied": "Copiado",
-    "bubble.regenerate": "Regenerar",
     "bubble.fork": "Bifurcar",
     "bubble.runtimeSwitch": "Runtime cambiado:",
 
@@ -734,7 +729,6 @@ export const chat = {
     "bubble.revealInFinder": "{path} — mostrar no Finder",
     "bubble.copy": "Copiar",
     "bubble.copied": "Copiado",
-    "bubble.regenerate": "Regenerar",
     "bubble.fork": "Bifurcar",
     "bubble.runtimeSwitch": "Runtime alterado:",
 
@@ -829,7 +823,6 @@ export const chat = {
     "bubble.revealInFinder": "{path} — afficher dans le Finder",
     "bubble.copy": "Copier",
     "bubble.copied": "Copié",
-    "bubble.regenerate": "Régénérer",
     "bubble.fork": "Dupliquer",
     "bubble.runtimeSwitch": "Runtime changé :",
 
@@ -924,7 +917,6 @@ export const chat = {
     "bubble.revealInFinder": "{path} — im Finder anzeigen",
     "bubble.copy": "Kopieren",
     "bubble.copied": "Kopiert",
-    "bubble.regenerate": "Neu generieren",
     "bubble.fork": "Forken",
     "bubble.runtimeSwitch": "Runtime gewechselt:",
 
@@ -1019,7 +1011,6 @@ export const chat = {
     "bubble.revealInFinder": "{path} — mostra nel Finder",
     "bubble.copy": "Copia",
     "bubble.copied": "Copiato",
-    "bubble.regenerate": "Rigenera",
     "bubble.fork": "Biforca",
     "bubble.runtimeSwitch": "Runtime cambiato:",
 
@@ -1114,7 +1105,6 @@ export const chat = {
     "bubble.revealInFinder": "{path} — показать в Finder",
     "bubble.copy": "Копировать",
     "bubble.copied": "Скопировано",
-    "bubble.regenerate": "Сгенерировать заново",
     "bubble.fork": "Форк",
     "bubble.runtimeSwitch": "Среда выполнения переключена:",
 

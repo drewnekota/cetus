@@ -211,7 +211,7 @@ export const settings = {
     "launcher.fn.plain.description": "Open the launcher (no screenshot).",
     "launcher.fn.shot.label": "Quick launch + screenshot",
     "launcher.fn.shot.description":
-      "Open the launcher with a screenshot of your screen attached.",
+      "Select a screen area to attach — click for the full screen — then launch.",
     "launcher.fn.reply.label": "Visual quick reply",
     "launcher.fn.reply.description":
       "Capture the current screen, draft replies directly with a vision model, and insert one back into the focused app.",
@@ -802,7 +802,7 @@ export const settings = {
     "launcher.fn.plain.label": "快速启动",
     "launcher.fn.plain.description": "唤出启动器（不带截图）。",
     "launcher.fn.shot.label": "快速启动 + 截图",
-    "launcher.fn.shot.description": "唤出启动器并附带当前屏幕截图。",
+    "launcher.fn.shot.description": "先框选屏幕区域作为截图（单击=全屏），再唤出启动器。",
     "launcher.fn.reply.label": "视觉快速回复",
     "launcher.fn.reply.description":
       "截取当前屏幕，由视觉模型直接生成回复候选，并将选中的回复写回原应用。",
@@ -1258,7 +1258,7 @@ export const settings = {
     "launcher.fn.plain.description": "ランチャーを開きます（スクリーンショットなし）。",
     "launcher.fn.shot.label": "クイック起動 + スクリーンショット",
     "launcher.fn.shot.description":
-      "画面のスクリーンショットを添付してランチャーを開きます。",
+      "画面の範囲を選択して添付（クリックで全画面）し、ランチャーを開きます。",
     "launcher.summon.label": "Cetus を呼び出す",
     "launcher.summon.description":
       "Cetus を最前面に表示するグローバルショートカット。別のデスクトップにある場合はそちらに切り替えます。",
@@ -1633,7 +1633,8 @@ export const settings = {
     "launcher.fn.plain.label": "빠른 실행",
     "launcher.fn.plain.description": "런처를 엽니다(스크린샷 없음).",
     "launcher.fn.shot.label": "빠른 실행 + 스크린샷",
-    "launcher.fn.shot.description": "화면 스크린샷을 첨부하여 런처를 엽니다.",
+    "launcher.fn.shot.description":
+      "화면 영역을 선택해 첨부한 뒤(클릭 = 전체 화면) 런처를 엽니다.",
     "launcher.summon.label": "Cetus 불러오기",
     "launcher.summon.description":
       "Cetus를 앞으로 가져오는 전역 단축키입니다. 다른 데스크톱에 있으면 그쪽으로 전환합니다.",

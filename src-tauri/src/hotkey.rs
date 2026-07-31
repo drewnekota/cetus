@@ -540,8 +540,12 @@ fn trigger(app: &AppHandle, action: u8) {
     tauri::async_runtime::spawn(async move {
         if action == quick::ACT_REPLY {
             quick::open_reply(&app).await;
+        } else if action == quick::ACT_SHOT {
+            // Contextful mode goes through region-select first: drag to snip,
+            // click for the full screen, Esc to cancel.
+            crate::snip::begin(&app).await;
         } else {
-            quick::open_panel(&app, action == quick::ACT_SHOT).await;
+            quick::open_panel(&app, false).await;
         }
     });
 }

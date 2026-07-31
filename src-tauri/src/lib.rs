@@ -57,6 +57,7 @@ mod skill_review;
 mod skill_tool;
 mod skills;
 mod slash_commands;
+mod snip;
 mod store;
 mod tauri_bridge;
 mod terminal;
@@ -1377,6 +1378,16 @@ pub fn run() {
                         // and cursor screen.
                     }
                 }
+                // The region-select ("snip") overlay: same non-activating,
+                // key-capable panel treatment as the launcher (Esc must reach
+                // its webview), but no vibrancy — it's a transparent sheet the
+                // user drags a selection on. Sized to the target screen at
+                // gesture time (see snip.rs).
+                if let Some(win) = app.get_webview_window("snip") {
+                    if let Ok(ptr) = win.ns_window() {
+                        panel::configure(ptr);
+                    }
+                }
                 // The dictation HUD: a never-key panel so the app being dictated
                 // into keeps focus and the injected keystrokes land there. No
                 // vibrancy — the HUD draws its own solid black capsule, and a
@@ -1622,6 +1633,8 @@ pub fn run() {
         quick::screen_recording_trusted,
         quick::request_screen_recording,
         quick::open_screen_recording_settings,
+        snip::snip_finish,
+        snip::snip_cancel,
         voice::voice_permissions,
         voice::request_voice_permissions,
         voice::open_microphone_settings,
@@ -1798,6 +1811,8 @@ pub fn run() {
         quick::screen_recording_trusted,
         quick::request_screen_recording,
         quick::open_screen_recording_settings,
+        snip::snip_finish,
+        snip::snip_cancel,
         voice::voice_permissions,
         voice::request_voice_permissions,
         voice::open_microphone_settings,

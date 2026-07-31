@@ -12,8 +12,6 @@ interface Props {
   convId: string | null;
   /** Keys of the consecutive assistant (+tool) messages merged into this turn. */
   keys: string[];
-  /** Wired only on the final group, once settled — shows Regenerate. */
-  onRegenerate?: () => void;
   /** Copy this conversation through this assistant turn into a new conversation. */
   onFork?: () => void;
   /** This is the trailing assistant group of an agent turn that is still open. */
@@ -82,7 +80,7 @@ function answerText(messages: RenderedMessage[]): string {
 /** A whole assistant turn — one or more consecutive assistant messages rendered
  *  under a single ASSISTANT header. Tool calls + thinking collapse into compact
  *  activity widgets; the natural-language answer stays expanded below. */
-export function AssistantGroup({ convId, keys, onRegenerate, onFork, active = false }: Props) {
+export function AssistantGroup({ convId, keys, onFork, active = false }: Props) {
   const { t } = useTranslation("chat");
   const messages = useMessagesByKeys(convId, keys);
   // Recompute segments only when the merged messages actually change (the array
@@ -156,7 +154,6 @@ export function AssistantGroup({ convId, keys, onRegenerate, onFork, active = fa
           hasText={hasAnswerText}
           createdAt={lastCreatedAt}
           isUser={false}
-          onRegenerate={onRegenerate}
           onFork={onFork}
         />
       </div>

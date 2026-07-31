@@ -11,7 +11,6 @@ export type ShortcutId =
   | "switchChats"
   | "switchBoard"
   | "switchAutomations"
-  | "switchPlugins"
   | "switchPreviousView"
   | "navigateBack"
   | "navigateForward"
@@ -117,12 +116,6 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: "Switch to automations",
     description: "Show scheduled automations",
     defaultAccelerator: "Cmd+3",
-  },
-  {
-    id: "switchPlugins",
-    label: "Switch to plugins",
-    description: "Show installed plugins",
-    defaultAccelerator: "Cmd+4",
   },
   {
     id: "switchPreviousView",

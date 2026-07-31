@@ -7,10 +7,10 @@ import {
 } from "@/lib/keyboard-shortcuts";
 
 // "chat" and "board" are two layouts of the same data (conversations); the
-// toggle switches between them. Automations and Plugins are separate
-// destinations reached from sidebar nav rows, not this toggle — so they render
-// with neither side active here.
-export type SidebarView = "chat" | "board" | "automations" | "plugins";
+// toggle switches between them. Automations is a separate destination reached
+// from a sidebar nav row, not this toggle — so it renders with neither side
+// active here.
+export type SidebarView = "chat" | "board" | "automations";
 
 interface Props {
   view: SidebarView;

@@ -18,7 +18,7 @@ import {
   KATEX_OPTIONS,
   REMARK_MATH_OPTIONS,
 } from "@/lib/markdown";
-import { Check, Copy, FileText, GitFork, RotateCcw } from "lucide-react";
+import { Check, Copy, FileText, GitFork } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { RenderedBlock } from "@/lib/types";
 import { ArtifactView } from "./artifact-view";
@@ -382,15 +382,12 @@ export const AnswerBlock = memo(function AnswerBlock({
   return null;
 });
 
-/** Hover toolbar under a turn: copy the answer text, and (on the last assistant
- *  turn) regenerate it. Hidden until the row is hovered so it stays out of the
- *  way while reading. */
+/** Hover toolbar under a turn. */
 export function MessageActions({
   getText,
   hasText,
   createdAt,
   isUser,
-  onRegenerate,
   onFork,
 }: {
   /** Lazily build the clipboard string — only invoked on actual copy, so the
@@ -400,7 +397,6 @@ export function MessageActions({
   hasText: boolean;
   createdAt: number;
   isUser: boolean;
-  onRegenerate?: () => void;
   onFork?: () => void;
 }) {
   const { t } = useTranslation("chat");
@@ -436,17 +432,6 @@ export function MessageActions({
         >
           {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
           {copied ? t("bubble.copied") : t("bubble.copy")}
-        </button>
-      )}
-      {onRegenerate && (
-        <button
-          type="button"
-          onClick={onRegenerate}
-          title={t("bubble.regenerate")}
-          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <RotateCcw className="size-3" />
-          {t("bubble.regenerate")}
         </button>
       )}
       {onFork && (

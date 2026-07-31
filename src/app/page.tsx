@@ -19,7 +19,6 @@ import { BoardView } from "@/components/board/board-view";
 import { CreateTaskDialog } from "@/components/board/create-task-dialog";
 import { AutomationsView } from "@/components/automation/automations-view";
 import { AutomationDialog } from "@/components/automation/automation-dialog";
-import { PluginsView } from "@/components/plugins/plugins-view";
 import {
   WorkspacePanel,
   createTerminalViewState,
@@ -192,12 +191,7 @@ function ChatLoadingPane({ opticalCenter }: { opticalCenter: boolean }) {
 }
 
 function isSidebarView(value: unknown): value is SidebarView {
-  return (
-    value === "chat" ||
-    value === "board" ||
-    value === "automations" ||
-    value === "plugins"
-  );
+  return value === "chat" || value === "board" || value === "automations";
 }
 
 function readAppViewState(): PersistedAppViewState {
@@ -563,7 +557,7 @@ export default function Home() {
     if (typeof window === "undefined") return "chat";
     try {
       const v = localStorage.getItem("cetus:lastView");
-      if (v === "chat" || v === "board" || v === "automations" || v === "plugins") return v;
+      if (v === "chat" || v === "board" || v === "automations") return v;
     } catch {}
     return "chat";
   });
@@ -1687,9 +1681,6 @@ export default function Home() {
       } else if (shortcut("switchAutomations")) {
         e.preventDefault();
         setView("automations");
-      } else if (shortcut("switchPlugins")) {
-        e.preventDefault();
-        setView("plugins");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -2675,10 +2666,8 @@ export default function Home() {
     await api.abort(activeId);
   }
 
-  /** ChatGPT-style "regenerate": roll the last turn out of history (so a
-   *  failed/empty turn can't poison future sends), then resubmit the last user
-   *  message. Drives both the header "Retry" button (on error) and the
-   *  per-message "Regenerate" action on the final assistant turn. */
+  /** Roll the last failed/empty turn out of history, then resubmit the last
+   *  user message. Drives the inline error row's Retry button. */
   function onRetry() {
     return retryConversation(activeId, onSend);
   }
@@ -3582,8 +3571,6 @@ export default function Home() {
                   onSelect(id);
                 }}
               />
-            ) : view === "plugins" ? (
-              <PluginsView />
             ) : view === "board" ? (
               <BoardView
                 conversations={conversations}
@@ -3613,7 +3600,6 @@ export default function Home() {
                 onSend={onSend}
                 onBash={onBash}
                 onAbort={onAbort}
-                onRegenerate={retrying ? undefined : onRetry}
                 onRetry={onRetry}
                 onForkMessage={(messageKey, messageIndex) => {
                   const c = conversationsRef.current.find(

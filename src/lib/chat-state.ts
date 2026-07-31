@@ -465,7 +465,7 @@ function assistantHasVisibleContent(m: RenderedMessage): boolean {
 /** End the active run: stop streaming and, if the turn produced NO visible
  *  answer (empty/degenerate completion — see assistantHasVisibleContent),
  *  surface a recoverable hint instead of leaving the user on a blank bubble.
- *  Regenerate is already wired, so this just makes the dead-end visible.
+ *  The inline error row provides the Retry action.
  *  Shared by `agent_end` and `agent_settled` so both settle identically. */
 function settleRun(state: ChatState): ChatState {
   const idx = state.activeAssistantIdx ?? state.messages.length - 1;
@@ -479,7 +479,7 @@ function settleRun(state: ChatState): ChatState {
     activeAssistantIdx: null,
     error:
       emptyAnswer && !state.error && !state.aborted
-        ? "The model returned an empty response — no answer was produced. Tap Regenerate to try again."
+        ? "The model returned an empty response — no answer was produced. Tap Retry to try again."
         : state.error,
   };
 }

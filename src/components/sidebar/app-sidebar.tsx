@@ -17,7 +17,6 @@ import { ResourcesPopover } from "@/components/sidebar/resources-popover";
 import {
   Archive,
   ArchiveRestore,
-  Blocks,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -182,7 +181,6 @@ export const AppSidebar = memo(function AppSidebar({
       switchChats: shortcutDisplay(shortcuts.switchChats),
       switchBoard: shortcutDisplay(shortcuts.switchBoard),
       switchAutomations: shortcutDisplay(shortcuts.switchAutomations),
-      switchPlugins: shortcutDisplay(shortcuts.switchPlugins),
     }),
     [shortcuts],
   );
@@ -368,19 +366,6 @@ export const AppSidebar = memo(function AppSidebar({
               <span>{t("nav.automations")}</span>
               <Kbd className="ml-auto border-transparent">
                 {shortcutLabels.switchAutomations}
-              </Kbd>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              tooltip={t("nav.plugins")}
-              isActive={view === "plugins"}
-              onClick={() => onViewChange("plugins")}
-            >
-              <Blocks />
-              <span>{t("nav.plugins")}</span>
-              <Kbd className="ml-auto border-transparent">
-                {shortcutLabels.switchPlugins}
               </Kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>

@@ -52,7 +52,7 @@ interface Props {
   onAbort: () => void;
   onForkMessage?: (messageKey: string, messageIndex: number) => void;
   focusToken: number;
-  /** Roll back + rerun the last turn (Regenerate action + error-row Retry). */
+  /** Roll back + rerun the last failed turn from the inline error row. */
   onRetry?: () => void;
   retrying?: boolean;
   /** Follow-up queue for this conversation (typed while the agent is mid-run). */
@@ -426,7 +426,6 @@ export function SessionDetailDialog({
                 onSend={onSend}
                 onBash={openTerminalWithCommand}
                 onAbort={onAbort}
-                onRegenerate={retrying ? undefined : onRetry}
                 onRetry={onRetry}
                 retrying={retrying}
                 onForkMessage={onForkMessage}

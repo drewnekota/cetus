@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { QuickPanel } from "@/components/quick/quick-panel";
+import { SnipOverlay } from "@/components/quick/snip-overlay";
 import { VoiceHud } from "@/components/quick/voice-hud";
 import { MeetingHud } from "@/components/quick/meeting-hud";
 import { Toaster } from "@/components/ui/sonner";
@@ -31,6 +32,7 @@ export function WindowRouter({ children }: { children: React.ReactNode }) {
 
   if (label === null) return null;
   if (label === "quick") return <QuickPanel />;
+  if (label === "snip") return <SnipOverlay />;
   if (label === "voice") return <VoiceHud />;
   if (label === "meeting") return <MeetingHud />;
   // Main window only: toasts (e.g. a notification pointing at a deleted chat).

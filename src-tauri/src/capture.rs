@@ -261,8 +261,11 @@ pub fn ocr_screen_now(app_data: &Path) -> Option<String> {
 /// optimized image stack. Avoid doing this resize through the Rust `image` crate
 /// in debug builds: that pure-Rust path takes multiple seconds on large Retina
 /// frames, which makes the screenshot launcher feel stuck.
+/// When `region` is given, the grab is bounded to `(x, y, w, h)` in CG global
+/// display coordinates (top-left origin, points — `screencapture -R` captures
+/// at native scale, so the output is still full-resolution Retina pixels).
 #[cfg(target_os = "macos")]
-pub fn capture_primary_jpeg_native(max_edge: u32) -> Option<Vec<u8>> {
+pub fn capture_region_jpeg_native(region: Option<(f64, f64, f64, f64)>, max_edge: u32) -> Option<Vec<u8>> {
     let started = Instant::now();
     let path = std::env::temp_dir().join(format!(
         "cetus-launch-shot-{}-{}.jpg",
@@ -270,8 +273,12 @@ pub fn capture_primary_jpeg_native(max_edge: u32) -> Option<Vec<u8>> {
         now_ms()
     ));
     let grab_started = Instant::now();
-    let ok = std::process::Command::new("/usr/sbin/screencapture")
-        .args(["-x", "-t", "jpg"])
+    let mut cmd = std::process::Command::new("/usr/sbin/screencapture");
+    cmd.args(["-x", "-t", "jpg"]);
+    if let Some((x, y, w, h)) = region {
+        cmd.arg("-R").arg(format!("{:.0},{:.0},{:.0},{:.0}", x, y, w, h));
+    }
+    let ok = cmd
         .arg(&path)
         .status()
         .map(|s| s.success())
@@ -279,7 +286,7 @@ pub fn capture_primary_jpeg_native(max_edge: u32) -> Option<Vec<u8>> {
     let grab_ms = grab_started.elapsed().as_millis();
     if !ok {
         let _ = std::fs::remove_file(&path);
-        tracing::info!("capture_primary_jpeg_native: screencapture failed after {grab_ms}ms");
+        tracing::info!("capture_region_jpeg_native: screencapture failed after {grab_ms}ms");
         return None;
     }
     let resize_started = Instant::now();
@@ -291,7 +298,7 @@ pub fn capture_primary_jpeg_native(max_edge: u32) -> Option<Vec<u8>> {
         .unwrap_or(false);
     let resize_ms = resize_started.elapsed().as_millis();
     if !resized {
-        tracing::debug!("capture_primary_jpeg_native: sips resize failed; using original frame");
+        tracing::debug!("capture_region_jpeg_native: sips resize failed; using original frame");
     }
     let read_started = Instant::now();
     let bytes = std::fs::read(&path).ok();
@@ -302,7 +309,7 @@ pub fn capture_primary_jpeg_native(max_edge: u32) -> Option<Vec<u8>> {
         return None;
     }
     tracing::debug!(
-        "capture_primary_jpeg_native: grab={grab_ms}ms resize={resize_ms}ms read={read_ms}ms total={}ms bytes={}",
+        "capture_region_jpeg_native: grab={grab_ms}ms resize={resize_ms}ms read={read_ms}ms total={}ms bytes={}",
         started.elapsed().as_millis(),
         bytes.len()
     );

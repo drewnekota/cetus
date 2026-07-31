@@ -394,6 +394,15 @@ pub struct QuickRuntime {
     /// tell a gesture-driven activation apart from a real dock click, so the
     /// launcher never drags the hidden main window up. 0 = never opened.
     pub last_open_ms: Arc<AtomicI64>,
+    /// True while the region-select ("snip") overlay is up, between
+    /// `snip::begin` and the finish/cancel command. The gesture listener reads
+    /// it so a second contextful gesture cancels the snip instead of stacking
+    /// a launcher on top of the overlay.
+    pub snip_active: Arc<AtomicBool>,
+    /// Overlay frame + pre-focus context stashed by `snip::begin` for the
+    /// overlay's `snip_finish` command. Written on the main thread before the
+    /// overlay presents, so the finish command always sees it populated.
+    pub snip_stash: Arc<std::sync::Mutex<Option<crate::snip::SnipStash>>>,
 
     // ---- Global voice dictation (read live by the hotkey thread) ----
     pub voice_enabled: Arc<AtomicBool>,
@@ -435,6 +444,8 @@ impl QuickRuntime {
             recapturing: Arc::new(AtomicBool::new(false)),
             shown: Arc::new(AtomicBool::new(false)),
             last_open_ms: Arc::new(AtomicI64::new(0)),
+            snip_active: Arc::new(AtomicBool::new(false)),
+            snip_stash: Arc::new(std::sync::Mutex::new(None)),
             voice_enabled: Arc::new(AtomicBool::new(s.voice_enabled)),
             voice_gesture: Arc::new(AtomicU8::new(voice_gesture_code(&s.voice_gesture))),
             voice_handsfree_shortcut: Arc::new(AtomicBool::new(s.voice_handsfree_shortcut)),
@@ -515,6 +526,13 @@ pub struct Screenshot {
 /// Grab the main display. macOS-only (uses the built-in `screencapture`); other
 /// platforms return None and the panel degrades to a text-only launcher.
 pub fn capture_screenshot() -> Option<Screenshot> {
+    capture_screenshot_region(None)
+}
+
+/// Like [`capture_screenshot`], but bounded to `region` (CG global display
+/// coordinates, top-left origin, points) when given — the snip overlay's
+/// selection path.
+pub fn capture_screenshot_region(region: Option<(f64, f64, f64, f64)>) -> Option<Screenshot> {
     #[cfg(target_os = "macos")]
     {
         use base64::{engine::general_purpose::STANDARD, Engine};
@@ -530,7 +548,7 @@ pub fn capture_screenshot() -> Option<Screenshot> {
         // thing the panel waits on before presenting. `screencapture` returns in
         // ~100ms; the one subprocess + temp file is well worth it. The 1600px cap
         // keeps the IPC payload and vision input bounded.
-        let bytes = crate::capture::capture_primary_jpeg_native(1600)?;
+        let bytes = crate::capture::capture_region_jpeg_native(region, 1600)?;
         if bytes.is_empty() {
             return None;
         }
@@ -541,6 +559,7 @@ pub fn capture_screenshot() -> Option<Screenshot> {
     }
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = region;
         None
     }
 }
@@ -590,22 +609,25 @@ fn center_on_cursor_monitor(win: &tauri::WebviewWindow) {
 /// screenshot. `capture` is decided by which gesture fired — the "with
 /// screenshot" function passes `true`, the plain one `false`.
 pub async fn open_panel(app: &AppHandle, capture: bool) {
-    let (recapturing, settings) = {
+    let recapturing = {
         let state = app.state::<AppState>();
-        (
-            state.quick.recapturing.load(Ordering::Relaxed),
-            load_settings(&state.store),
-        )
+        state.quick.recapturing.load(Ordering::Relaxed)
     };
     // Mid re-capture the panel is intentionally hidden — don't treat that as
     // "closed" and pop a fresh panel that would clobber the user's typed text.
     if recapturing {
         return;
     }
-    let win = match app.get_webview_window("quick") {
-        Some(w) => w,
-        None => return,
-    };
+    // A stray snip overlay (e.g. plain gesture fired while region-select was
+    // up) must come down before the launcher presents over it.
+    if app
+        .state::<AppState>()
+        .quick
+        .snip_active
+        .load(Ordering::Relaxed)
+    {
+        crate::snip::cancel(app);
+    }
     // A second gesture while the panel is up dismisses it. The window is parked
     // (kept warm, still ordered-in) rather than hidden, so consult the explicit
     // `shown` flag instead of `is_visible()`, which would always read true.
@@ -613,19 +635,8 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
         park_quick(app);
         return;
     }
-    // Reply mode grows this same warm window to fit its candidates. Restore the
-    // launcher's compact geometry on every normal open before centering it.
-    let _ = win.set_size(tauri::LogicalSize::new(800.0, 196.0));
-    // Stamp the open so the reopen handler can ignore the activation this show
-    // may cause (see the macOS Reopen branch in lib.rs). The same stamp doubles
-    // as this open's token, threaded through both the `quick-open` event and the
-    // deferred `quick-open-url` follow-up so a late URL from a prior open can't
-    // bleed into a newer one.
-    let open_id = crate::store::now_ms();
-    app.state::<AppState>()
-        .quick
-        .last_open_ms
-        .store(open_id, Ordering::Relaxed);
+    // Mark shown before the capture below so a second gesture during the
+    // capture's ~300ms dismisses instead of double-opening.
     app.state::<AppState>()
         .quick
         .shown
@@ -663,6 +674,45 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
     } else {
         (None, None)
     };
+    present_launcher(app, shot, context, capture).await;
+}
+
+/// Present the launcher with an already-captured screenshot + pre-focus
+/// context. Shared tail of [`open_panel`] (which captures the full screen
+/// inline) and the snip overlay's finish path (which captured a user-selected
+/// region first). `screenshot_default` mirrors `open_panel`'s `capture` flag in
+/// the `quick-open` payload.
+pub async fn present_launcher(
+    app: &AppHandle,
+    shot: Option<Screenshot>,
+    context: Option<crate::ocr::AmbientContext>,
+    screenshot_default: bool,
+) {
+    let settings = {
+        let state = app.state::<AppState>();
+        load_settings(&state.store)
+    };
+    let win = match app.get_webview_window("quick") {
+        Some(w) => w,
+        None => return,
+    };
+    // Reply mode grows this same warm window to fit its candidates. Restore the
+    // launcher's compact geometry on every normal open before centering it.
+    let _ = win.set_size(tauri::LogicalSize::new(800.0, 196.0));
+    // Stamp the open so the reopen handler can ignore the activation this show
+    // may cause (see the macOS Reopen branch in lib.rs). The same stamp doubles
+    // as this open's token, threaded through both the `quick-open` event and the
+    // deferred `quick-open-url` follow-up so a late URL from a prior open can't
+    // bleed into a newer one.
+    let open_id = crate::store::now_ms();
+    app.state::<AppState>()
+        .quick
+        .last_open_ms
+        .store(open_id, Ordering::Relaxed);
+    app.state::<AppState>()
+        .quick
+        .shown
+        .store(true, Ordering::Relaxed);
     // On macOS, present as a non-activating panel: it surfaces on the current
     // Space and takes key focus WITHOUT activating cetus (no menu-bar switch, and
     // crucially no app activation that would yank the hidden main window up).
@@ -704,9 +754,8 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
             });
         });
         tracing::info!(
-            "quick open_panel present: {}ms (total since gesture-capture {}ms)",
-            present_started.elapsed().as_millis(),
-            cap_started.elapsed().as_millis()
+            "quick present_launcher present: {}ms",
+            present_started.elapsed().as_millis()
         );
     }
     #[cfg(not(target_os = "macos"))]
@@ -722,7 +771,7 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
             // The effective capture decision for *this* open (⌘ vs ⌥⌥), so the
             // panel's "include screenshot" state and the grant-permission hint
             // match the trigger that actually fired.
-            "screenshotDefault": capture,
+            "screenshotDefault": screenshot_default,
             // Lets the panel tell "permission denied" apart from "shot not loaded
             // yet" — so it only shows the grant-permission hint when truly denied,
             // never as a flash on the first open before the capture lands.
@@ -741,7 +790,7 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
     // stream it in as a follow-up. The AppleScript probe (bounded to 2s) would
     // otherwise have delayed the panel's first paint by that much. Only the
     // contextful gesture carries context, and only browsers yield a URL.
-    if capture {
+    if screenshot_default {
         if let Some(bundle) = context.as_ref().map(|c| c.bundle_id.clone()) {
             if !bundle.is_empty() {
                 let app_for_url = app.clone();
@@ -785,6 +834,14 @@ pub async fn open_reply(app: &AppHandle) {
     };
     if recapturing.load(Ordering::Relaxed) {
         return;
+    }
+    if app
+        .state::<AppState>()
+        .quick
+        .snip_active
+        .load(Ordering::Relaxed)
+    {
+        crate::snip::cancel(app);
     }
     if shown.load(Ordering::Relaxed) {
         park_quick(app);
@@ -928,7 +985,7 @@ pub async fn quick_recapture_screenshot(
 /// Dismiss the launcher. Clears the `shown` flag and, on macOS, orders the native
 /// panel fully out on the main thread so it cannot interfere with Mission
 /// Control's ordering of the main window; elsewhere, use Tauri's hide path.
-fn park_quick(app: &AppHandle) {
+pub(crate) fn park_quick(app: &AppHandle) {
     app.state::<AppState>()
         .quick
         .shown

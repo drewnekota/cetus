@@ -534,6 +534,12 @@ export const api = {
   quickRecaptureScreenshot: () =>
     invoke<QuickScreenshot | null>("quick_recapture_screenshot"),
   quickDismiss: () => invoke<void>("quick_dismiss"),
+  /** Region-select overlay: capture the given selection (CSS px, top-left
+   *  origin within the overlay's screen), or the full screen when null. */
+  snipFinish: (rect: { x: number; y: number; w: number; h: number } | null) =>
+    invoke<void>("snip_finish", { rect }),
+  /** Dismiss the region-select overlay without capturing (Esc). */
+  snipCancel: () => invoke<void>("snip_cancel"),
   /** Accept a direct visual reply and type it back into the previously focused app. */
   quickReplyInsert: (text: string) =>
     invoke<void>("quick_reply_insert", { text }),
