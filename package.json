@@ -1,7 +1,7 @@
 {
   "name": "cetus",
-  "version": "0.3.46",
-  "description": "Key of the Twilight — an affordable desktop agent, made possible by DeepSeek V4. Built on pi; perceives (screen context), remembers (memory), and acts (tools, automations, parallel runs).",
+  "version": "0.3.47",
+  "description": "Turn Codex, Claude Code, or your favorite agent runtime into an always-on desktop assistant.",
   "private": true,
   "packageManager": "pnpm@10.27.0",
   "scripts": {

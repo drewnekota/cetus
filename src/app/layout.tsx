@@ -17,7 +17,8 @@ import { I18nProvider } from "@/lib/i18n";
 
 export const metadata: Metadata = {
   title: "cetus",
-  description: "Key of the Twilight — DeepSeek desktop agent on top of pi.",
+  description:
+    "Turn Codex, Claude Code, or your favorite agent runtime into an always-on desktop assistant.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

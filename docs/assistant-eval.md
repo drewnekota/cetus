@@ -23,8 +23,8 @@
 - 真实用户不会说「我要测试 tool-use card 的 error highlight」；他会说
   「把我下载文件夹里的截图按月份归一下类」。一个请求会**横跨多个功能**，
   也会在**功能的接缝处**翻车——而接缝正是能力维度测不到的地方。
-- Cetus 的产品论点本身就是「one all-capable assistant」（README: _Key of the Twilight_）。
-  一个全能助手的好坏，**只能用「用户请求的覆盖度 × 达成率」来度量**，这正是 eval 的形态。
+- Cetus 的产品论点是把通用 agent runtime 变成一个常驻桌面的助手。
+  这层 assistant 能力的好坏，**只能用「用户请求的覆盖度 × 达成率」来度量**，这正是 eval 的形态。
 
 所以本文档把主轴从「功能」换成「**用户想达成什么 (job-to-be-done)**」，每个 case 是：
 

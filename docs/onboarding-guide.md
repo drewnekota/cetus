@@ -18,7 +18,7 @@
 
 ## 1. 项目概览
 
-**Cetus**（Key of the Twilight）是一个 macOS 桌面 AI Agent，利用 DeepSeek V4 的极致性价比，把屏幕感知、记忆、工具执行、自动化调度整合成一个本地原生应用。
+**Cetus** 是通用 agent runtime 的 macOS 桌面助手层。Codex、Claude Code 或内置 pi runtime 继续负责智能与执行；Cetus 在外围补上全局唤起、屏幕 context、持久记忆、自动化调度和结果审阅。
 
 | 维度 | 技术选型 |
 | --- | --- |
@@ -29,7 +29,7 @@
 | **本地存储** | SQLite（对话元数据 + 截屏索引 + 应用设置），JSON 文件（跨进程 Memory），macOS Keychain（API 密钥） |
 | **包管理** | pnpm（全项目统一） |
 
-**核心公式**：`agent = context × intelligence × abilities` —— 三个因子相乘，最弱的一项决定了整体天花板。Cetus 的选择是在 intelligence（DeepSeek V4）已经够强够便宜的前提下，把资源投入到 context（屏幕感知、Memory）和 abilities（工具、技能、自动化）上。
+**核心分工**：agent runtime 提供 intelligence 与 execution，Cetus 提供围绕桌面工作的 context、continuity 与 orchestration。两层彼此独立：用户可以更换 runtime，同时保留屏幕感知、Memory、工具、技能、自动化和审阅工作流。
 
 ---
 

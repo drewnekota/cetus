@@ -1,7 +1,7 @@
 [package]
 name = "cetus"
 version = "0.1.0"
-description = "Key of the Twilight — any-model desktop agent UI on top of pi."
+description = "The desktop assistant layer for Codex, Claude Code, and your favorite agent runtime."
 authors = ["Cetus"]
 edition = "2021"
 rust-version = "1.77"

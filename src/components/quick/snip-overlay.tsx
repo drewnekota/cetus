@@ -23,15 +23,24 @@ export function SnipOverlay() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    listen("snip-open", () => {
+    const reset = () => {
       doneRef.current = false;
       setDrag(null);
-    }).then((u) => {
+    };
+    // `snip-open` is the explicit lifecycle signal from Rust. Focus is a
+    // second, native-backed reset path: an ordered-out WKWebView can defer or
+    // drop an event sent just as it is brought back, but every presentation
+    // makes this panel key again. Without this fallback `doneRef` stays true
+    // after the first capture and the next overlay looks live while ignoring
+    // pointer input and Esc.
+    window.addEventListener("focus", reset);
+    listen("snip-open", reset).then((u) => {
       if (disposed) u();
       else unlisten = u;
     });
     return () => {
       disposed = true;
+      window.removeEventListener("focus", reset);
       unlisten?.();
     };
   }, []);

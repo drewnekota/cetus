@@ -12,9 +12,9 @@ use crate::quick;
 use crate::AppState;
 use serde::Deserialize;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Manager, State};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+use tauri::{AppHandle, Manager, State};
 
 /// Selection reported by the overlay webview: CSS pixels (== AppKit points),
 /// top-left origin, relative to the overlay window (which covers one screen).
@@ -71,7 +71,7 @@ pub async fn begin(app: &AppHandle) {
             quick::open_panel(app, true).await;
             return;
         }
-        let Some(win) = app.get_webview_window("snip") else {
+        let Some(_win) = app.get_webview_window("snip") else {
             return;
         };
         // Pre-focus ambient context, same contract as `open_panel`: gathered
@@ -110,6 +110,11 @@ pub async fn begin(app: &AppHandle) {
                 *stash = Some(SnipStash { frame_cg, context });
             }
             crate::panel::present(ptr);
+            // Reset the persistent overlay webview only after it is ordered
+            // front. Emitting while it is still ordered out can leave WebKit
+            // with the previous open's `done` guard, producing a visible but
+            // inert overlay on the next invocation.
+            let _ = w.emit("snip-open", serde_json::json!({}));
             if !main_was_visible {
                 if let Some(p) = main.as_ref().and_then(|m| m.ns_window().ok()) {
                     crate::panel::order_out(p);
@@ -124,7 +129,6 @@ pub async fn begin(app: &AppHandle) {
                 cancel(&app_for_monitor);
             });
         });
-        let _ = win.emit("snip-open", serde_json::json!({}));
     }
 }
 

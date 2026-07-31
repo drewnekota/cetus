@@ -2,11 +2,11 @@
 
 <h1 align="center">Cetus</h1>
 
-<p align="center"><strong>一个 macOS app，跑 Claude Code、Codex，以及你在用的每一个 agent runtime。</strong></p>
+<p align="center"><strong>把你惯用的 agent runtime，变成一个常驻桌面的智能助手。</strong></p>
 
-<p align="center">它们待在同一个地方，所以你可以让它们定时在你不在时开工、用快捷键在任何 app 之上唤起一个、给每次运行分配独立的 git worktree，再从一张看板审阅全部结果。</p>
+<p align="center">Codex、Claude Code 或内置 runtime 仍是核心；Cetus 在它们之外补上桌面助手这一层：从任何 app 随时唤起、定时安排工作，并理解你在屏幕上看过的内容。</p>
 
-<p align="center"><strong>定时任务</strong> · <strong>全局快捷键唤起</strong> · <strong>每次运行独立 worktree</strong> · <strong>一张审阅看板</strong></p>
+<p align="center"><strong>Quick Launcher</strong> · <strong>Automations</strong> · <strong>Screen Context</strong></p>
 
 <p align="center">
   <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="下载 macOS 版" src="https://img.shields.io/badge/下载_macOS_版-Apple_Silicon-111111?style=for-the-badge&logo=apple" /></a>
@@ -24,14 +24,25 @@
 
 ![Cetus 操作演示 —— 唤起 agent、创建自动化任务并切换 runtime](docs/cetus-demo.gif)
 
-## 为什么开发者会用 Cetus
+## Cetus 为你的 agent 补上的三件事
 
-- **所有 agent 共用一个工作台。** 每个对话都可以选择 Cetus 内置 runtime、Claude Code 或 Codex，同时保留一致的桌面工作流。
-- **从手机继续工作。** 可选的 Tailscale 手机伴侣支持跟踪实时运行、发送消息和图片、切换 runtime、处理确认请求及归档对话，同时不把 Cetus 暴露到公网。参见 [Cetus Remote](docs/remote-access.md)。
-- **安全地并行处理代码。** 需要隔离时可为 CLI 对话启用独立 git worktree，避免 agent 直接修改当前 checkout。
-- **后台工作也能有序审阅。** 定时启动任务，离开一会儿，回来时从看板的**待审阅**列接手结果，不必再翻找终端 session。
-- **上下文不会随聊天结束而消失。** Workspace、持久笔记、会议记忆和可选的设备端屏幕 context，能让下一次运行从上次停下的位置继续。
-- **控制权留在本机。** 屏幕 OCR、会议转写和语音听写都在设备端运行；敏感能力默认关闭，由你选择是否启用。
+### Quick Launcher：一个快捷键，随时叫出 agent
+
+**同时按住左右 ⌘**，即可在任意 app 之上唤出 agent。Cetus 会把当前截图、前台 app、浏览器 URL 和选中文字作为可移除的 context 一起带进来，让你直接就地提问，不必先花时间解释自己正在看什么。
+
+![Cetus 快捷启动器](docs/screenshot-launcher.png)
+
+### Automations：你不在时，也让它继续工作
+
+把任意 prompt 变成单次或周期任务（`at` / `every` / `cron` / `daily`）。每次运行都保留所选 runtime 和模型设置，在新的后台对话中完成工作，并把结果留在审阅队列里。
+
+![Cetus 自动化任务](docs/screenshot-automations.png)
+
+### Screen Context：让它记得你之前在做什么
+
+开启后，Cetus 会定期截帧、去重，并在设备端使用 Apple Vision 完成 OCR。Agent 之后可以回忆屏幕上出现过什么，也可以按文字或 app 检索历史。图片和文字都留在你的 Mac 上；这项能力默认关闭，并提供保留时长和敏感 app 排除列表。
+
+![Cetus 屏幕 context 设置](docs/screenshot-screen-history.png)
 
 ## 立即使用
 
@@ -46,49 +57,33 @@ Claude Code 和 Codex 会复用现有 CLI 登录，不需要再配置一个账�
 
 > **早期版本：** Cetus 仍在快速开发。如果遇到问题或缺少需要的工作流，欢迎[提交 Issue](https://github.com/drewnekota/cetus/issues)。
 
-## 让 agent 真正开始工作
+## 其它能力
 
-### 并排运行 Codex、Claude Code 与 DeepSeek Agent
+### 继续用你已经信任的 runtime
 
-选择 **workspace** 和 runtime，可选附上文件或截图，然后发送。回复实时流式展示 thinking 与 tool use 卡片。并行处理代码任务时可开启 worktree 隔离，让每个 CLI 对话编辑独立的 checkout。
+内置 pi runtime、**Claude Code** 或 **Codex** 都可以直接使用，并沿用你现有的模型、工具和登录状态。Cetus 把不同 runtime 的事件转换成一致的桌面工作流，同时让对话 context 和后台终端跨回复继续存在。
+
+选择 **workspace** 和 runtime，可选附上文件或截图，然后发送。并行处理代码任务时，还可以为每个对话启用独立 git worktree。
 
 ![Cetus 对话](docs/screenshot-chat.png)
 
-### 为每项工作选择合适的 runtime
+### 在一个地方审阅所有后台工作
 
-**Cetus** 使用内置的 pi harness。将对话切换到 **Claude Code** 或 **Codex**，就能通过对应的官方 CLI 运行，并按对话设置模型与推理力度。
-
-CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（PATH 上找），**不需要单独登录**。Cetus 为每个对话保持一个常驻 runtime（Claude streaming-input session / Codex app-server thread），把结构化事件流翻译进同一套聊天 UI（文本、thinking、工具卡片），并让本地开发服务器等后台终端跨回复继续运行。上下文和进程清理由对话生命周期统一管理，改动也可以放进每个对话独立的 **git worktree**。自动化任务同样可以指定 runtime —— 定时 job 跑在 Claude Code 上、日常聊天留在 Cetus 上，互不影响。
-
-### 把工作交给后台
-
-每个对话都是一张卡片，按**进行中 · 待审阅 · 已完成**跟踪，可按 workspace 筛选或查看全部。后台运行（自动化任务、并行解法）都会落在这里，让跨越多次坐下才完成的工作不会淹没在聊天列表里。
+每个对话都是一张卡片，按**进行中 · 待审阅 · 已完成**跟踪。自动化任务、长时间运行的工作和并行解法都会集中到这里，不会埋在终端 session 中。
 
 ![Cetus 看板](docs/screenshot-kanban.png)
 
-### 定时运行 agent
-
-按计划触发（`at` / `every` / `cron` / `daily`）的保存 prompt。Automations 把不同 runtime 的定时任务聚合在一处管理 —— Claude Code、Codex 与 Cetus 的任务可以并排存在，各自保留独立的 runtime 和模型设置。每次触发都会开出一个全新的后台对话，比如工作日 09:00 的 Daily news digest，在你不在时搜索过去 24 小时的新闻并渲染成 HTML 摘要。
-
-![Cetus 自动化任务](docs/screenshot-automations.png)
-
-### 带着当前屏幕开始对话
-
-**同时按住左右 ⌘** 唤出全局磨砂面板：不离开当前 app，就能直接向 Cetus 提问。它读取你眼前的内容，以可移除标签的形式附上：屏幕截图、当前 app、浏览器 URL、以及选中的文本。留下有用的、去掉多余的，然后开启新对话或接续上一次。
-
-处理聊天和邮件时，**双击右 ⌥** 可唤出视觉快速回复：Cetus 截取当前屏幕，直接交给已配置的 Gemini 或火山方舟视觉模型生成三条可发送候选；你可以选择或编辑其中一条，再写回原应用。这是一条独立的单次模型链路，不会启动完整 agent，也绝不会替你按下发送。需要屏幕录制与辅助功能权限。
-
-![Cetus 快捷启动器](docs/screenshot-launcher.png)
-
-## 不只是 coding agent 的外壳
+### 继续扩展你的 runtime
 
 - **持久记忆**：用户和 agent 都能编辑，并注入未来的对话
 - **并行解法**：把一个 prompt 铺开成 N 个候选运行，然后留一个、归档其余
-- **Ultra Code** 模式：为单次请求编写 workflow 并编排子 agent
-- **语音听写**（设备端，macOS）：在 app 内可用，也支持全局按住说话
-- **会议记忆**（设备端，macOS）：自动识别、系统音频采集、DeepSeek 蒸馏的纪要，agent 可检索
-- **电脑与浏览器控制**：通过结构化辅助功能元素操作，在执行有后果的动作前请求确认
-- **底层支持 30+ 模型供应商**：包括 Anthropic、OpenAI、Google、Bedrock、Ollama、LM Studio、OpenRouter 及 OpenAI 兼容端点
+- **独立 git worktree**：隔离每个 coding session 的改动
+- **视觉快速回复**：根据当前屏幕起草回复，不必启动完整 agent run
+- **Cetus Remote**：可选的 Tailscale 手机伴侣，用于跟踪运行和处理确认
+- **Ultra Code**：为单次请求编写 workflow 并编排子 agent
+- **语音听写**与**会议记忆**：在设备端完成处理
+- **电脑与浏览器控制**：执行有后果的操作前请求确认
+- **30+ 模型供应商**：包括 Anthropic、OpenAI、Google、Bedrock、Ollama、LM Studio 和 OpenRouter
 
 ### 在任意 app 中听写
 
@@ -110,12 +105,6 @@ CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（P
 
 ![Cetus 会议记忆](docs/screenshot-meetings.png)
 
-### 记住屏幕上出现过什么
-
-开启后，Cetus 周期性截帧、用感知哈希去重，并在设备端用 Apple Vision 做 OCR —— agent 可以回忆起你当时在做什么，你也能按 OCR 文本或 app 搜索这段历史。图像和文本都留在你的 Mac 上，不上传。默认关闭；控制项包括截取间隔、历史保留时长，以及一份排除 app 列表 —— 1Password、Messages 这类敏感 app 处于前台时自动暂停截取。
-
-![Cetus 屏幕 context 设置](docs/screenshot-screen-history.png)
-
 ### 始终保有控制权
 
 每项能力都是显式开启的。**Computer & Browser control** 让 agent 通过编号的元素列表（而非原始像素）驱动你的浏览器和 Mac app，在任何有后果的操作（发送、删除、购买、提交、认证）前需要确认，Stop 按钮始终触手可及。
@@ -124,9 +113,9 @@ CLI runtime 直接复用你本机已安装、已登录的 `claude` / `codex`（P
 
 ## 为什么做 Cetus
 
-终端 agent 很擅长完成单项任务，但跨 session、仓库与后台进程的长期工作很容易丢失。Cetus 把每次运行变成一项可见的工作，带有 workspace、状态、历史与审阅步骤。
+Codex、Claude Code 这样的通用 agent 已经足够强大，Cetus 并不打算取代它们。它补上那些不适合待在终端里的桌面助手能力：随时可用的入口、来自 Mac 的环境 context、跨 session 的连续性、后台调度，以及统一审阅完成结果的地方。
 
-真正有用的 agent 需要三样东西：了解当前情况的 **context**、来自合适模型的 **intelligence**，以及能够动手的 **abilities**。Cetus 让这些部分保持独立：为每个任务选择 runtime，只加入你愿意提供的上下文，并让执行结果始终可以检查。
+Runtime 继续负责智能与执行，Cetus 则成为包在它周围的 assistant layer。你可以为每项任务选择合适的 runtime，只加入自己愿意提供的 context，并让那些跨越数小时甚至数天的工作始终可见、可检查。
 
 这样，一些不适合塞在终端标签页里的工作流就变得可行：
 

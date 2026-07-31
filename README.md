@@ -2,11 +2,11 @@
 
 <h1 align="center">Cetus</h1>
 
-<p align="center"><strong>One macOS app for Claude Code, Codex, and every agent runtime you use.</strong></p>
+<p align="center"><strong>Turn your favorite agent runtime into an always-on desktop assistant.</strong></p>
 
-<p align="center">They live in one place, so you can schedule them to run while you're away, summon one over any app with a hotkey, give each its own git worktree, and review every result on one board.</p>
+<p align="center">Keep Codex, Claude Code, or the built-in runtime at the core. Cetus adds the desktop layer around it: summon it over any app, schedule work for later, and give it context from what has been on your screen.</p>
 
-<p align="center"><strong>Scheduled runs</strong> · <strong>Global hotkey launcher</strong> · <strong>Per-run git worktrees</strong> · <strong>One review board</strong></p>
+<p align="center"><strong>Quick Launcher</strong> · <strong>Automations</strong> · <strong>Screen Context</strong></p>
 
 <p align="center">
   <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="Download for macOS" src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-111111?style=for-the-badge&logo=apple" /></a>
@@ -24,14 +24,25 @@
 
 ![Cetus demo — launch an agent, schedule an automation, and switch runtimes](docs/cetus-demo.gif)
 
-## Why developers use Cetus
+## Three things Cetus adds to your agent
 
-- **One home for your agents.** Switch any conversation between Cetus's built-in runtime, Claude Code, and Codex without losing the desktop workflow around it.
-- **Continue from your phone.** The optional, Tailscale-backed mobile companion follows live runs, sends messages and images, switches runtimes, handles approvals, and archives chats without exposing a public Cetus service. See [Cetus Remote](docs/remote-access.md).
-- **Safe, parallel coding sessions.** Enable per-conversation git worktrees when you want agents to edit in isolation instead of touching the current checkout.
-- **Background work you can review.** Schedule a task, leave it running, and find the result waiting in **Needs review** instead of buried in a terminal session.
-- **Context that survives the chat.** Workspaces, durable notes, meeting memory, and optional on-device screen context help the next run pick up where the last one stopped.
-- **Local control.** Cetus is a native macOS app. Screen OCR, meeting transcription, and voice dictation run on-device; sensitive capabilities are opt-in.
+### Quick Launcher — your agent, one hotkey away
+
+Hold **both ⌘ keys** to summon your agent over any app. Cetus brings along the current screenshot, frontmost app, browser URL, and selected text as removable context chips, so you can ask in place instead of stopping to explain what you are looking at.
+
+![Cetus quick launcher](docs/screenshot-launcher.png)
+
+### Automations — let it work while you are away
+
+Turn any prompt into a one-off or recurring job (`at` / `every` / `cron` / `daily`). Each run keeps its chosen runtime and model settings, works in a fresh background conversation, and leaves the result ready for you to review.
+
+![Cetus Automations](docs/screenshot-automations.png)
+
+### Screen Context — let it remember what you were doing
+
+With screen context on, Cetus periodically captures frames, dedupes them, and OCRs them on-device with Apple Vision. Your agent can later recall what was on screen or search the history by text and app. Images and text stay on your Mac; capture is opt-in, with retention controls and an excluded-apps list.
+
+![Cetus screen context settings](docs/screenshot-screen-history.png)
 
 ## Get started
 
@@ -46,49 +57,33 @@ Claude Code and Codex reuse their existing CLI login — there is no second acco
 
 > **Early release:** Cetus is under active development. Please [open an issue](https://github.com/drewnekota/cetus/issues) if something breaks or if a workflow is missing.
 
-## Put agents to work
+## Everything else
 
-### Run Codex, Claude Code and DeepSeek Agent side by side
+### Keep the runtime you already trust
 
-Pick a **workspace**, choose a runtime, optionally attach files or a screenshot, and send. Replies stream live with collapsible thinking blocks and tool-use cards. For parallel coding tasks, enable worktree isolation so each CLI conversation edits a separate checkout.
+Use the built-in pi runtime, **Claude Code**, or **Codex** with the models, tools, and login you already have. Cetus translates each runtime into the same desktop workflow while preserving conversation context and background terminals across replies.
+
+Pick a **workspace**, choose a runtime, optionally attach files or a screenshot, and send. For parallel coding tasks, enable per-conversation git worktrees so each agent edits an isolated checkout.
 
 ![Cetus chat — What should we work on?](docs/screenshot-chat.png)
 
-### Pick the right runtime for each job
+### Review background work in one place
 
-**Cetus** uses the bundled pi harness. Switch a conversation to **Claude Code** or **Codex** to run it on the corresponding vendor CLI, with per-conversation model and reasoning-effort overrides.
-
-The CLI runtimes reuse whatever `claude` / `codex` you already have installed and logged in on your `PATH` — no separate sign-in. Cetus keeps a conversation-scoped runtime alive (`claude -p` in streaming-input mode / `codex app-server`), translates its structured event stream into the same chat UI (text, thinking, tool cards), and preserves background terminals such as local dev servers across replies. Context and process cleanup follow the conversation lifecycle, and edits can be isolated in a per-conversation **git worktree**. Automations can fire on any runtime, so a scheduled job can run on Claude Code while your chats stay on Cetus.
-
-### Send work to the background
-
-Every conversation is a card tracked across **In progress · Needs review · Done**, filtered by workspace or across all of them. Background runs (automations, parallel solutions) surface here, so work that spans multiple sessions doesn't get buried in a chat list.
+Every conversation is a card tracked across **In progress · Needs review · Done**. Automations, long-running tasks, and parallel solutions all surface here instead of getting buried in terminal sessions.
 
 ![Cetus Kanban board](docs/screenshot-kanban.png)
 
-### Schedule recurring agents
-
-Saved prompts that fire on a schedule (`at` / `every` / `cron` / `daily`). Automations gives you one place to create and manage scheduled jobs across different runtimes — a Claude Code job, a Codex job, and a Cetus job can all live side by side, each keeping its own runtime and model settings. Every trigger starts a fresh background conversation — e.g. a weekday-09:00 news digest that searches the last 24 hours and renders an HTML summary while you're away.
-
-![Cetus Automations](docs/screenshot-automations.png)
-
-### Bring the current screen with you
-
-Hold **both ⌘ keys** to open the global panel: ask Cetus anything without leaving the app you're in. It reads what's in front of you and attaches it as removable context chips: a screenshot of your screen, the active app, the current browser URL, and any selected text. Keep what's useful, drop the rest, then start a new run or continue the last one.
-
-For messages and email, **double-tap right ⌥** opens visual quick reply: Cetus captures the current screen, asks the configured Gemini or Volcano Ark vision model for three send-ready replies, and lets you choose or edit one before inserting it back into the original app. This is a direct one-shot path rather than a full agent run; it never presses Send. Screen Recording and Accessibility permissions are required.
-
-![Cetus quick launcher](docs/screenshot-launcher.png)
-
-## More than a coding-agent shell
+### More ways to extend your runtime
 
 - **Persistent memory** you and the agent both edit, injected into future turns
 - **Parallel solutions**: fan one prompt into N candidate runs, then keep one and archive the rest
-- **Ultra Code** mode: author a workflow and orchestrate sub-agents for a single request
-- **Voice dictation** (on-device, macOS) — in-app and as a global push-to-talk
-- **Meeting memory** (on-device, macOS) — auto-detect, system-audio capture, DeepSeek-distilled minutes the agent can search
-- **Computer and browser control** through structured accessibility elements, with confirmation before consequential actions
-- **30+ model providers under the hood**, including Anthropic, OpenAI, Google, Bedrock, Ollama, LM Studio, OpenRouter, and OpenAI-compatible endpoints
+- **Per-conversation git worktrees** for isolated coding sessions
+- **Visual quick reply** for drafting replies from the current screen without starting a full agent run
+- **Cetus Remote**, an optional Tailscale-backed mobile companion for following runs and handling approvals
+- **Ultra Code** mode for authoring a workflow and orchestrating sub-agents
+- **Voice dictation** and **meeting memory**, processed on-device
+- **Computer and browser control**, with confirmation before consequential actions
+- **30+ model providers**, including Anthropic, OpenAI, Google, Bedrock, Ollama, LM Studio, and OpenRouter
 
 ### Dictate from any app
 
@@ -110,12 +105,6 @@ Those notes become context the agent can reach: ask "what did we decide about th
 
 ![Cetus meeting memory — Settings → Meetings](docs/screenshot-meetings.png)
 
-### Remember what was on your screen
-
-With screen context on, Cetus periodically captures frames, dedupes them with a perceptual hash, and OCRs on-device with Apple Vision so the agent can recall what you were working on — and you can search by OCR text or app. Images and text stay on your Mac; nothing is uploaded. Off by default; controls include capture interval, retention period, and an excluded-apps list that pauses capture when sensitive apps (1Password, Messages…) are frontmost.
-
-![Cetus screen context settings](docs/screenshot-screen-history.png)
-
 ### Stay in control
 
 Each capability is opt-in. **Computer & Browser control** lets the agent drive your browser and Mac apps through numbered element lists (not raw pixels), with a confirmation step before anything consequential (sending, deleting, purchasing, submitting, authenticating) and a Stop button always in reach.
@@ -124,9 +113,9 @@ Each capability is opt-in. **Computer & Browser control** lets the agent drive y
 
 ## Why Cetus
 
-Terminal agents are excellent at individual tasks, but long-running work is easy to lose across sessions, repositories, and background processes. Cetus turns each run into a visible work item with a workspace, state, history, and review step.
+General-purpose agents such as Codex and Claude Code are already powerful. Cetus does not try to replace them. It gives them the parts of a desktop assistant that do not belong inside a terminal: an always-available entry point, ambient context from your Mac, continuity across sessions, background scheduling, and a place to review completed work.
 
-A useful agent needs **context** about your situation, **intelligence** from the right model, and **abilities** to act. Cetus keeps those pieces independent: choose the runtime for each task, add only the context you want, and make the resulting work inspectable.
+The runtime remains the intelligence and execution engine. Cetus is the assistant layer around it. Choose the runtime for each task, add only the context you want, and make work that spans hours or days visible and inspectable.
 
 That makes workflows practical that do not fit neatly into a terminal tab:
 

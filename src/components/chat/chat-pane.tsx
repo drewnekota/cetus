@@ -738,12 +738,10 @@ function MessageList({
       // getState reads Virtuoso's own size tree and scroll offset: no DOM
       // measurement, so this stays off the forced-layout path.
       virtuosoRef.current?.getState((snapshot) => {
-        if (snapshot.scrollTop <= 0) {
-          // Parked at the very top of a short history that never scrolled —
-          // indistinguishable from a fresh open, so keep nothing.
-          readingAnchors.delete(convId);
-          return;
-        }
+        // scrollTop === 0 is a valid reading position: after deliberately
+        // scrolling a long conversation to its first turn, switching away and
+        // back must resume there. Fresh/short conversations do not create a
+        // false anchor because capture only runs after an actual scroll event.
         rememberReadingAnchor(convId, snapshot);
       });
     };
