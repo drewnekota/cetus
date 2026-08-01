@@ -176,6 +176,8 @@ export const chat = {
     "tool.interrupted": "interrupted",
     "tool.done": "done",
     "tool.args": "args",
+    "tool.command": "command",
+    "tool.diff": "diff",
     "tool.result": "result",
     "tool.outputTruncated": "Preview limited · {size} total",
     "tool.openFullOutput": "Open full output",
@@ -379,6 +381,8 @@ export const chat = {
     "tool.interrupted": "已中断",
     "tool.done": "完成",
     "tool.args": "参数",
+    "tool.command": "命令",
+    "tool.diff": "差异",
     "tool.result": "结果",
     "tool.outputTruncated": "预览已截断 · 共 {size}",
     "tool.openFullOutput": "打开完整输出",
@@ -479,6 +483,8 @@ export const chat = {
     "tool.running": "実行中",
     "tool.done": "完了",
     "tool.args": "引数",
+    "tool.command": "コマンド",
+    "tool.diff": "差分",
     "tool.result": "結果",
 
     "vision.image": "{count} 枚の画像",
@@ -573,6 +579,8 @@ export const chat = {
     "tool.running": "실행 중",
     "tool.done": "완료",
     "tool.args": "인수",
+    "tool.command": "명령",
+    "tool.diff": "diff",
     "tool.result": "결과",
 
     "vision.image": "이미지 {count}개",
@@ -667,6 +675,8 @@ export const chat = {
     "tool.running": "en ejecución",
     "tool.done": "listo",
     "tool.args": "argumentos",
+    "tool.command": "comando",
+    "tool.diff": "diff",
     "tool.result": "resultado",
 
     "vision.image": "{count} imagen",
@@ -761,6 +771,8 @@ export const chat = {
     "tool.running": "em execução",
     "tool.done": "concluído",
     "tool.args": "argumentos",
+    "tool.command": "comando",
+    "tool.diff": "diff",
     "tool.result": "resultado",
 
     "vision.image": "{count} imagem",
@@ -855,6 +867,8 @@ export const chat = {
     "tool.running": "en cours",
     "tool.done": "terminé",
     "tool.args": "arguments",
+    "tool.command": "commande",
+    "tool.diff": "diff",
     "tool.result": "résultat",
 
     "vision.image": "{count} image",
@@ -949,6 +963,8 @@ export const chat = {
     "tool.running": "läuft",
     "tool.done": "fertig",
     "tool.args": "Argumente",
+    "tool.command": "Befehl",
+    "tool.diff": "diff",
     "tool.result": "Ergebnis",
 
     "vision.image": "{count} Bild",
@@ -1043,6 +1059,8 @@ export const chat = {
     "tool.running": "in esecuzione",
     "tool.done": "completato",
     "tool.args": "argomenti",
+    "tool.command": "comando",
+    "tool.diff": "diff",
     "tool.result": "risultato",
 
     "vision.image": "{count} immagine",
@@ -1137,6 +1155,8 @@ export const chat = {
     "tool.running": "выполняется",
     "tool.done": "готово",
     "tool.args": "аргументы",
+    "tool.command": "команда",
+    "tool.diff": "diff",
     "tool.result": "результат",
 
     "vision.image": "{count} изображение",
