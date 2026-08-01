@@ -311,7 +311,7 @@ export const AppSidebar = memo(function AppSidebar({
                 {/* Resources lives at the sidebar's top-right as an icon-only
                     affordance — it's a monitor, not a nav destination. */}
                 <span className="ml-auto">
-                  <ResourcesPopover />
+                  <ResourcesPopover onSelectConversation={onSelect} />
                 </span>
               </div>
             </SidebarMenuButton>
@@ -1234,7 +1234,7 @@ const ConversationRow = memo(function ConversationRow({
             )}
           </div>
           <div className="border-t border-background/15 pt-1.5 text-[10px] tabular-nums text-background/50">
-            {formatDateTimeMinute(conversation.updatedAt)}
+            {formatDateTimeMinute(conversation.createdAt)}
           </div>
         </TooltipContent>
       </Tooltip>

@@ -826,9 +826,9 @@ pub async fn present_launcher(
 
 /// Open the system-wide visual reply surface. Capture happens before the panel
 /// is presented so the screenshot contains the user's app, not Cetus. The panel
-/// appears immediately in a loading state; the one-shot vision request then
-/// streams back one result event. `open_id` makes late results harmless after a
-/// dismiss/reopen race.
+/// appears immediately in a loading state; the one-shot vision turn streams
+/// text deltas into the draft and settles with one result event. `open_id`
+/// makes late deltas and results harmless after a dismiss/reopen race.
 pub async fn open_reply(app: &AppHandle) {
     let settings = {
         let state = app.state::<AppState>();
@@ -874,8 +874,9 @@ pub async fn open_reply(app: &AppHandle) {
     let context = reply_context.ambient;
     let screenshot = screenshot_task.await.ok().flatten();
 
-    // The reply surface needs room for three candidates and an editable draft.
-    let _ = win.set_size(tauri::LogicalSize::new(800.0, 382.0));
+    // The reply surface is a single editable draft that streams in live, with
+    // a captured-input band (screenshot thumbnail + context chips) beneath it.
+    let _ = win.set_size(tauri::LogicalSize::new(800.0, 344.0));
     #[cfg(target_os = "macos")]
     {
         let app_for_main = app.clone();
@@ -907,12 +908,18 @@ pub async fn open_reply(app: &AppHandle) {
         let _ = win.set_focus();
     }
 
+    // The full capture rides along so the panel can show the user exactly what
+    // the model receives: the screenshot (already JPEG, ≤1600px — same payload
+    // the launcher ships), the ambient context, and how much AX text was read.
     let _ = win.emit(
         "quick-reply-open",
         serde_json::json!({
             "openId": open_id,
             "app": context.as_ref().map(|c| c.app.as_str()).unwrap_or(""),
             "screenshotPermission": screen_recording_granted(),
+            "screenshot": &screenshot,
+            "context": &context,
+            "axChars": reply_context.visible_text.chars().count(),
         }),
     );
 
@@ -920,6 +927,7 @@ pub async fn open_reply(app: &AppHandle) {
         Some(ref shot) => {
             crate::quick_reply::generate(
                 app,
+                open_id,
                 shot,
                 context.as_ref(),
                 &reply_context.visible_text,

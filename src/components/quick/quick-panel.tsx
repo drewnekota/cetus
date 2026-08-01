@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AppWindow, CornerDownLeft, File, Globe, ImageOff, Paperclip, TextSelect, X } from "lucide-react";
+import { AppWindow, CornerDownLeft, File, Globe, ImageOff, Paperclip, ScanText, TextSelect, X } from "lucide-react";
 import { formatBytes } from "@/lib/artifact";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
@@ -35,6 +35,7 @@ import {
   type QuickAttachment,
   type QuickOpenPayload,
   type QuickOpenUrlPayload,
+  type QuickReplyDeltaPayload,
   type QuickReplyOpenPayload,
   type QuickReplyResultPayload,
   type QuickScreenshot,
@@ -115,7 +116,6 @@ export function QuickPanel() {
   const [surface, setSurface] = useState<"launcher" | "reply">("launcher");
   const [replyOpen, setReplyOpen] = useState<QuickReplyOpenPayload | null>(null);
   const [replyResult, setReplyResult] = useState<QuickReplyResultPayload | null>(null);
-  const [replyIndex, setReplyIndex] = useState(0);
   const [replyDraft, setReplyDraft] = useState("");
   const [insertingReply, setInsertingReply] = useState(false);
 
@@ -283,46 +283,52 @@ export function QuickPanel() {
   }, [focusSoon]);
 
   // Direct visual reply is a separate state of the same warm, non-activating
-  // window. The open event paints a loading shell immediately; the model result
-  // arrives later and is accepted only for the matching capture token.
+  // window. The open event paints a loading shell immediately; the turn then
+  // streams draft deltas and settles with one result, both accepted only for
+  // the matching capture token.
   useEffect(() => {
-    let unlistenOpen: (() => void) | undefined;
-    let unlistenResult: (() => void) | undefined;
+    let unlisteners: (() => void)[] | undefined;
     let cancelled = false;
     Promise.all([
       listen<QuickReplyOpenPayload>("quick-reply-open", (e) => {
         setSurface("reply");
         setReplyOpen(e.payload);
         setReplyResult(null);
-        setReplyIndex(0);
         setReplyDraft("");
         setInsertingReply(false);
         openingRef.current = true;
         window.setTimeout(() => { openingRef.current = false; }, 400);
       }),
+      listen<QuickReplyDeltaPayload>("quick-reply-delta", (e) => {
+        setReplyOpen((current) => {
+          if (!current || current.openId !== e.payload.openId) return current;
+          setReplyResult((result) => {
+            if (!result) setReplyDraft((draft) => draft + e.payload.delta);
+            return result;
+          });
+          return current;
+        });
+      }),
       listen<QuickReplyResultPayload>("quick-reply-result", (e) => {
         setReplyOpen((current) => {
           if (!current || current.openId !== e.payload.openId) return current;
           setReplyResult(e.payload);
-          const first = e.payload.output?.candidates[0] ?? "";
-          setReplyIndex(0);
-          setReplyDraft(first);
+          // The settled text is authoritative over the streamed concatenation
+          // (some runtimes normalize whitespace or emit preamble blocks).
+          setReplyDraft(e.payload.output?.reply ?? "");
           return current;
         });
       }),
-    ]).then(([open, result]) => {
+    ]).then((fns) => {
       if (cancelled) {
-        open();
-        result();
+        fns.forEach((fn) => fn());
       } else {
-        unlistenOpen = open;
-        unlistenResult = result;
+        unlisteners = fns;
       }
     });
     return () => {
       cancelled = true;
-      unlistenOpen?.();
-      unlistenResult?.();
+      unlisteners?.forEach((fn) => fn());
     };
   }, []);
 
@@ -423,7 +429,9 @@ export function QuickPanel() {
 
   const insertReply = useCallback(async () => {
     const value = replyDraft.trim();
-    if (!value || insertingReply) return;
+    // The draft is insertable only once the turn settled; a partial stream
+    // could otherwise send half a sentence into the focused app.
+    if (!value || insertingReply || !replyResult?.output) return;
     setInsertingReply(true);
     submittingRef.current = true;
     try {
@@ -435,14 +443,7 @@ export function QuickPanel() {
       setInsertingReply(false);
       submittingRef.current = false;
     }
-  }, [replyDraft, insertingReply]);
-
-  const chooseReply = useCallback((index: number) => {
-    const candidate = replyResult?.output?.candidates[index];
-    if (candidate === undefined) return;
-    setReplyIndex(index);
-    setReplyDraft(candidate);
-  }, [replyResult]);
+  }, [replyDraft, insertingReply, replyResult]);
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
     setAttachError(null);
@@ -549,10 +550,8 @@ export function QuickPanel() {
       <QuickReplySurface
         open={replyOpen}
         result={replyResult}
-        selectedIndex={replyIndex}
         draft={replyDraft}
         inserting={insertingReply}
-        onChoose={chooseReply}
         onDraftChange={setReplyDraft}
         onInsert={() => { void insertReply(); }}
         onDismiss={() => { api.quickDismiss().catch(() => {}); }}
@@ -744,26 +743,24 @@ export function QuickPanel() {
 function QuickReplySurface({
   open,
   result,
-  selectedIndex,
   draft,
   inserting,
-  onChoose,
   onDraftChange,
   onInsert,
   onDismiss,
 }: {
   open: QuickReplyOpenPayload | null;
   result: QuickReplyResultPayload | null;
-  selectedIndex: number;
   draft: string;
   inserting: boolean;
-  onChoose: (index: number) => void;
   onDraftChange: (value: string) => void;
   onInsert: () => void;
   onDismiss: () => void;
 }) {
   const { t } = useTranslation("quick");
-  const candidates = result?.output?.candidates ?? [];
+  // The turn streams the draft in before the result settles; show the text as
+  // soon as the first delta lands and keep the footer in "reading" state.
+  const streaming = !result && draft.length > 0;
   const status = open?.app
     ? t("reply.readingApp", { app: open.app })
     : t("reply.readingScreen");
@@ -775,12 +772,6 @@ function QuickReplySurface({
       onDismiss();
       return;
     }
-    if (e.key === "Tab" && candidates.length > 0) {
-      e.preventDefault();
-      const delta = e.shiftKey ? -1 : 1;
-      onChoose((selectedIndex + delta + candidates.length) % candidates.length);
-      return;
-    }
     if (e.key === "Enter" && !e.shiftKey) {
       if ((e.nativeEvent as KeyboardEvent).isComposing) return;
       e.preventDefault();
@@ -789,8 +780,7 @@ function QuickReplySurface({
   }
 
   // Same quiet shell as the launcher: no header, the editable draft owns the
-  // region above a thin muted action strip, and the candidate cards tuck in at
-  // the bottom of the input region the way the launcher's attachments do.
+  // region above a thin muted action strip.
   return (
     <div
       tabIndex={-1}
@@ -798,19 +788,19 @@ function QuickReplySurface({
       onKeyDown={onKeyDown}
       className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground outline-none dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-[11px] dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]"
     >
-      {!result ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+      {!result && !streaming ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
           <Spinner className="size-5" />
           <span>{open?.screenshotPermission === false ? t("reply.permission") : t("reply.generating")}</span>
         </div>
-      ) : result.error ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-10 text-center">
+      ) : result?.error ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-10 text-center">
           <ImageOff className="size-5 text-warning" />
           <div className="max-w-xl text-sm text-foreground">{result.error}</div>
           <div className="text-xs text-muted-foreground">{t("reply.retryHint")}</div>
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col px-6 pt-5 pb-2.5">
+        <div className="flex min-h-0 flex-1 flex-col px-6 pt-5">
           <textarea
             autoFocus
             value={draft}
@@ -819,56 +809,73 @@ function QuickReplySurface({
             aria-label={t("reply.edit")}
             className="w-full flex-1 resize-none overflow-x-hidden overflow-y-auto bg-transparent text-lg font-medium leading-7 text-foreground outline-none"
           />
-          {candidates.length > 1 && (
-            <div className="grid shrink-0 grid-cols-3 gap-2 pt-2">
-              {candidates.map((candidate, index) => (
-                <button
-                  type="button"
-                  key={`${index}-${candidate}`}
-                  onClick={() => onChoose(index)}
-                  className={cn(
-                    "h-[72px] overflow-hidden rounded-lg border px-3 py-2 text-left text-xs leading-[1.45] transition-colors",
-                    index === selectedIndex
-                      ? "border-black/15 bg-black/[0.07] text-foreground dark:border-white/20 dark:bg-white/[0.12]"
-                      : "border-black/[0.06] bg-black/[0.025] text-muted-foreground hover:bg-black/[0.05] hover:text-foreground dark:border-white/[0.08] dark:bg-white/[0.035] dark:hover:bg-white/[0.07] dark:hover:text-foreground",
-                  )}
-                >
-                  <span className="line-clamp-3">{candidate}</span>
-                </button>
-              ))}
-            </div>
+        </div>
+      )}
+
+      {/* Captured-input band — mirrors the launcher's attachments row: exactly
+          what rode along to the model (screenshot, frontmost app, page, AX
+          text volume), visible from the first loading frame. Read-only: the
+          capture is already in flight. */}
+      {(open?.screenshot || open?.context || (open?.axChars ?? 0) > 0) && (
+        <div className="flex shrink-0 items-end gap-2 px-6 pb-2.5 pt-2">
+          {open?.screenshot && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`data:${open.screenshot.mimeType};base64,${open.screenshot.data}`}
+              alt={t("screenshot.alt")}
+              className="h-14 rounded-md border border-black/[0.06] object-cover dark:border-white/[0.08]"
+            />
           )}
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {open?.context?.app && (
+              <ContextChip
+                icon={<AppWindow className="size-3" />}
+                label={open.context.app}
+                title={open.context.title ? `${open.context.app}\n${open.context.title}` : open.context.app}
+              />
+            )}
+            {open?.context?.url && (
+              <ContextChip
+                icon={<Globe className="size-3" />}
+                label={hostOf(open.context.url)}
+                title={open.context.title ? `${open.context.title}\n${open.context.url}` : open.context.url}
+              />
+            )}
+            {open?.context?.selection && (
+              <ContextChip
+                icon={<TextSelect className="size-3" />}
+                label={t("context.selection", { count: open.context.selection.length })}
+                title={open.context.selection}
+              />
+            )}
+            {(open?.axChars ?? 0) > 0 && (
+              <ContextChip
+                icon={<ScanText className="size-3" />}
+                label={t("reply.screenText", { count: open?.axChars ?? 0 })}
+              />
+            )}
+          </div>
         </div>
       )}
 
       <div className="flex shrink-0 items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-[13px] text-muted-foreground dark:border-white/[0.06]">
         {result?.output ? (
-          <>
-            {result.output.context && (
-              <span className="min-w-0 truncate" title={result.output.context}>
-                {result.output.context}
-              </span>
-            )}
-            <span className="shrink-0 text-muted-foreground/70">
-              {t("reply.provider", { provider: result.output.provider })}
-            </span>
-          </>
+          <span className="shrink-0 text-muted-foreground/70">
+            {t("reply.provider", { provider: result.output.provider })}
+          </span>
         ) : (
           <span className="min-w-0 truncate">{status}</span>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-4 pr-1">
-          {candidates.length > 1 && (
+          {result?.output && (
             <>
-              <Kbd>⇥</Kbd>
-              {t("reply.switch")}
+              <Kbd>
+                <CornerDownLeft className="size-2.5" />
+              </Kbd>
+              {inserting ? t("reply.inserting") : t("reply.insert")}
               <span className="text-muted-foreground/40">·</span>
             </>
           )}
-          <Kbd>
-            <CornerDownLeft className="size-2.5" />
-          </Kbd>
-          {inserting ? t("reply.inserting") : t("reply.insert")}
-          <span className="text-muted-foreground/40">·</span>
           <Kbd>esc</Kbd>
           {t("footer.dismiss")}
         </span>
@@ -935,7 +942,9 @@ function hostOf(url: string): string {
   }
 }
 
-/** A removable ambient-context chip in the launcher. */
+/** An ambient-context chip. Removable in the launcher (where dropping a chip
+ *  edits the prompt); read-only in the reply surface (the capture is already
+ *  in flight, so there is nothing to remove). */
 function ContextChip({
   icon,
   label,
@@ -945,25 +954,30 @@ function ContextChip({
   icon: React.ReactNode;
   label: string;
   title?: string;
-  onRemove: () => void;
+  onRemove?: () => void;
 }) {
   const { t } = useTranslation("quick");
   return (
     <span
       title={title}
-      className="group/ctx inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-black/[0.06] bg-black/5 py-1 pl-2 pr-1 text-xs text-muted-foreground dark:border-white/[0.08] dark:bg-white/[0.06]"
+      className={cn(
+        "group/ctx inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-black/[0.06] bg-black/5 py-1 pl-2 text-xs text-muted-foreground dark:border-white/[0.08] dark:bg-white/[0.06]",
+        onRemove ? "pr-1" : "pr-2",
+      )}
     >
       <span className="shrink-0 opacity-70">{icon}</span>
       <span className="truncate">{label}</span>
-      <button
-        type="button"
-        onClick={onRemove}
-        title={t("context.remove")}
-        aria-label={t("context.remove")}
-        className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-black/10 hover:text-foreground dark:hover:bg-white/15"
-      >
-        <X className="size-3" />
-      </button>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          title={t("context.remove")}
+          aria-label={t("context.remove")}
+          className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-black/10 hover:text-foreground dark:hover:bg-white/15"
+        >
+          <X className="size-3" />
+        </button>
+      )}
     </span>
   );
 }

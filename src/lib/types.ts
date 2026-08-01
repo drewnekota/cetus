@@ -166,17 +166,27 @@ export interface QuickOpenUrlPayload {
   openId: number;
 }
 
-/** Initial loading event for the direct visual quick-reply surface. */
+/** Initial loading event for the direct visual quick-reply surface. Carries
+ *  the full captured input so the panel can show what the model receives. */
 export interface QuickReplyOpenPayload {
   openId: number;
   app: string;
   screenshotPermission: boolean;
+  screenshot: QuickScreenshot | null;
+  context: QuickContext | null;
+  /** Characters of focused-window AX text sent alongside the screenshot. */
+  axChars: number;
 }
 
 export interface QuickReplyOutput {
-  candidates: string[];
-  context: string;
+  reply: string;
   provider: string;
+}
+
+/** Streamed slice of the reply draft for the matching quick-reply open. */
+export interface QuickReplyDeltaPayload {
+  openId: number;
+  delta: string;
 }
 
 /** One-shot completion for the matching quick-reply open. */
