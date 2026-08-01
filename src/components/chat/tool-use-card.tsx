@@ -87,16 +87,19 @@ function stringifyArgs(args: unknown): string {
   }
 }
 
-/** Parsed read-style tool call: file path plus optional paging args. */
-interface ReadMeta {
+/** Parsed file-tool (read/write) call: path plus optional paging args, and
+ *  the written content size for write calls. */
+interface FileMeta {
   path: string | null;
   offset?: number;
   limit?: number;
+  /** Length of the `content` arg (write tool). */
+  size?: number;
 }
 
-/** Extract { path, offset, limit } from a read-style tool call (args may be an
- *  object or stringified JSON). */
-function readMeta(args: unknown): ReadMeta {
+/** Extract { path, offset, limit, size } from a read/write tool call (args may
+ *  be an object or stringified JSON). */
+function parseFileMeta(args: unknown): FileMeta {
   let value: unknown = args;
   if (typeof args === "string") {
     try {
@@ -105,7 +108,7 @@ function readMeta(args: unknown): ReadMeta {
       value = args;
     }
   }
-  const meta: ReadMeta = { path: null };
+  const meta: FileMeta = { path: null };
   if (value && typeof value === "object") {
     const obj = value as Record<string, unknown>;
     for (const k of ["path", "file", "file_path", "filename"]) {
@@ -122,6 +125,7 @@ function readMeta(args: unknown): ReadMeta {
     };
     meta.offset = num(obj.offset);
     meta.limit = num(obj.limit);
+    if (typeof obj.content === "string") meta.size = obj.content.length;
   }
   return meta;
 }
@@ -393,9 +397,12 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
       ? flattenResultContent(block.result.content)
       : ""
     : "";
-  const isReadTool = /^read/i.test(block.name);
-  const readMetaInfo = useMemo(() => (isReadTool ? readMeta(block.args) : null), [isReadTool, block.args]);
-  const readPath = readMetaInfo?.path ?? null;
+  const isFileTool = /^(read|write)/i.test(block.name);
+  const fileMeta = useMemo(() => (isFileTool ? parseFileMeta(block.args) : null), [isFileTool, block.args]);
+  const filePath = fileMeta?.path ?? null;
+  // Only read-style calls surface file *content* in the result — write calls
+  // return a confirmation string, so only they get the syntax highlight.
+  const readPath = /^read/i.test(block.name) ? filePath : null;
   const readExt = readPath ? fileExtension(readPath) : "";
   const highlighted = useMemo(
     () =>
@@ -420,6 +427,14 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
     [editInfo],
   );
   const editStat = useMemo(() => (editDiffs ? countDiff(editDiffs) : null), [editDiffs]);
+  // Trailing meta for the file header (read: offset/limit, write: size).
+  const fileMetaParts = useMemo(() => {
+    const parts: string[] = [];
+    if (fileMeta?.offset != null) parts.push(`offset ${fileMeta.offset}`);
+    if (fileMeta?.limit != null) parts.push(`limit ${fileMeta.limit}`);
+    if (fileMeta?.size != null) parts.push(formatBytes(fileMeta.size));
+    return parts;
+  }, [fileMeta]);
   const preview = subagent
     ? [subagent.type, subagent.description].filter(Boolean).join(" — ")
     : editInfo !== null && editStat !== null
@@ -491,9 +506,9 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
       )}
       {open && (
         <div className="space-y-2 px-2 pb-2 pt-1">
-          {/* Read-style tools skip the raw JSON args entirely — the path and
-              paging args surface as a header on the result instead. */}
-          {block.args != null && !isReadTool && (
+          {/* File tools (read/write) skip the raw JSON args entirely — the
+              path and paging/size args surface as a header on the result. */}
+          {block.args != null && !isFileTool && (
             <section>
               <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
                 {editInfo !== null ? t("tool.diff") : cmd !== null ? t("tool.command") : t("tool.args")}
@@ -515,18 +530,14 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
           {block.result && (
             <section>
               <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t("tool.result")}</div>
-              {readPath !== null && (
+              {filePath !== null && (
                 <div className="mb-1 flex items-center gap-1.5 rounded bg-background/60 px-2 py-1 font-mono text-[10px] text-muted-foreground">
                   <FileText className="h-3 w-3 shrink-0" />
-                  <span className="min-w-0 truncate" title={readPath}>
-                    {readPath}
+                  <span className="min-w-0 truncate" title={filePath}>
+                    {filePath}
                   </span>
-                  {(readMetaInfo?.offset != null || readMetaInfo?.limit != null) && (
-                    <span className="ml-auto shrink-0">
-                      {readMetaInfo?.offset != null && `offset ${readMetaInfo.offset}`}
-                      {readMetaInfo?.offset != null && readMetaInfo?.limit != null && " · "}
-                      {readMetaInfo?.limit != null && `limit ${readMetaInfo.limit}`}
-                    </span>
+                  {fileMetaParts.length > 0 && (
+                    <span className="ml-auto shrink-0">{fileMetaParts.join(" · ")}</span>
                   )}
                 </div>
               )}
