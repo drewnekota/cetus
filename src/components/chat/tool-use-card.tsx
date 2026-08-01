@@ -1,6 +1,6 @@
 "use client";
 import { memo, useMemo } from "react";
-import { ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle2, CircleSlash, Bot, Check, FileDiff } from "lucide-react";
+import { ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle2, CircleSlash, Bot, Check, FileDiff, FileText } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { Spinner } from "@/components/ui/spinner";
 import { AnsiText } from "@/components/ui/ansi-text";
@@ -87,9 +87,16 @@ function stringifyArgs(args: unknown): string {
   }
 }
 
-/** Extract the file path from a read-style tool call (path/file/file_path
- *  arg, possibly stringified JSON), or null when there isn't one. */
-function toolFilePath(args: unknown): string | null {
+/** Parsed read-style tool call: file path plus optional paging args. */
+interface ReadMeta {
+  path: string | null;
+  offset?: number;
+  limit?: number;
+}
+
+/** Extract { path, offset, limit } from a read-style tool call (args may be an
+ *  object or stringified JSON). */
+function readMeta(args: unknown): ReadMeta {
   let value: unknown = args;
   if (typeof args === "string") {
     try {
@@ -98,14 +105,25 @@ function toolFilePath(args: unknown): string | null {
       value = args;
     }
   }
+  const meta: ReadMeta = { path: null };
   if (value && typeof value === "object") {
     const obj = value as Record<string, unknown>;
     for (const k of ["path", "file", "file_path", "filename"]) {
       const v = obj[k];
-      if (typeof v === "string" && v.trim()) return v.trim();
+      if (typeof v === "string" && v.trim()) {
+        meta.path = v.trim();
+        break;
+      }
     }
+    const num = (v: unknown): number | undefined => {
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))) return Number(v);
+      return undefined;
+    };
+    meta.offset = num(obj.offset);
+    meta.limit = num(obj.limit);
   }
-  return null;
+  return meta;
 }
 
 /** One oldText→newText replacement inside an edit tool call. */
@@ -375,7 +393,9 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
       ? flattenResultContent(block.result.content)
       : ""
     : "";
-  const readPath = /^read/i.test(block.name) ? toolFilePath(block.args) : null;
+  const isReadTool = /^read/i.test(block.name);
+  const readMetaInfo = useMemo(() => (isReadTool ? readMeta(block.args) : null), [isReadTool, block.args]);
+  const readPath = readMetaInfo?.path ?? null;
   const readExt = readPath ? fileExtension(readPath) : "";
   const highlighted = useMemo(
     () =>
@@ -471,7 +491,9 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
       )}
       {open && (
         <div className="space-y-2 px-2 pb-2 pt-1">
-          {block.args != null && (
+          {/* Read-style tools skip the raw JSON args entirely — the path and
+              paging args surface as a header on the result instead. */}
+          {block.args != null && !isReadTool && (
             <section>
               <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
                 {editInfo !== null ? t("tool.diff") : cmd !== null ? t("tool.command") : t("tool.args")}
@@ -493,6 +515,21 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
           {block.result && (
             <section>
               <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t("tool.result")}</div>
+              {readPath !== null && (
+                <div className="mb-1 flex items-center gap-1.5 rounded bg-background/60 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                  <FileText className="h-3 w-3 shrink-0" />
+                  <span className="min-w-0 truncate" title={readPath}>
+                    {readPath}
+                  </span>
+                  {(readMetaInfo?.offset != null || readMetaInfo?.limit != null) && (
+                    <span className="ml-auto shrink-0">
+                      {readMetaInfo?.offset != null && `offset ${readMetaInfo.offset}`}
+                      {readMetaInfo?.offset != null && readMetaInfo?.limit != null && " · "}
+                      {readMetaInfo?.limit != null && `limit ${readMetaInfo.limit}`}
+                    </span>
+                  )}
+                </div>
+              )}
               {highlighted !== null ? (
                 <pre
                   className={cn(
