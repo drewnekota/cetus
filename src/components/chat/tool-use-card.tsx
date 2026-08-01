@@ -1,9 +1,10 @@
 "use client";
-import { memo } from "react";
-import { ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle2, CircleSlash, Bot, Check } from "lucide-react";
+import { memo, useMemo } from "react";
+import { ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle2, CircleSlash, Bot, Check, FileDiff } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { Spinner } from "@/components/ui/spinner";
 import { AnsiText } from "@/components/ui/ansi-text";
+import { fileExtension, highlightSource, HLJS_THEME_CLASS, languageForExtension } from "@/lib/highlight";
 import type { PiContentBlock, RenderedBlock } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
@@ -86,6 +87,236 @@ function stringifyArgs(args: unknown): string {
   }
 }
 
+/** Extract the file path from a read-style tool call (path/file/file_path
+ *  arg, possibly stringified JSON), or null when there isn't one. */
+function toolFilePath(args: unknown): string | null {
+  let value: unknown = args;
+  if (typeof args === "string") {
+    try {
+      value = JSON.parse(args);
+    } catch {
+      value = args;
+    }
+  }
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    for (const k of ["path", "file", "file_path", "filename"]) {
+      const v = obj[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  }
+  return null;
+}
+
+/** One oldText→newText replacement inside an edit tool call. */
+interface EditSpec {
+  oldText: string;
+  newText: string;
+}
+
+/** A single line of a computed diff. */
+interface DiffLine {
+  type: "add" | "del" | "same";
+  text: string;
+}
+
+interface EditInfo {
+  path: string | null;
+  edits: EditSpec[];
+}
+
+/** Extract the replacement pairs from an edit-style tool call (an `edits`
+ *  array, or a bare { oldText, newText } pair — possibly stringified JSON).
+ *  Null when there's nothing diff-shaped to show. */
+function editChanges(args: unknown): EditInfo | null {
+  let value: unknown = args;
+  if (typeof args === "string") {
+    try {
+      value = JSON.parse(args);
+    } catch {
+      value = args;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+  const obj = value as Record<string, unknown>;
+  let path: string | null = null;
+  for (const k of ["path", "file", "file_path", "filename"]) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) {
+      path = v.trim();
+      break;
+    }
+  }
+  const edits: EditSpec[] = [];
+  const push = (e: Record<string, unknown>) => {
+    const oldText = typeof e.oldText === "string" ? e.oldText : "";
+    const newText = typeof e.newText === "string" ? e.newText : "";
+    if (oldText || newText) edits.push({ oldText, newText });
+  };
+  if (Array.isArray(obj.edits)) {
+    for (const e of obj.edits) {
+      if (e && typeof e === "object") push(e as Record<string, unknown>);
+    }
+  } else if (obj.edits && typeof obj.edits === "object") {
+    push(obj.edits as Record<string, unknown>);
+  } else if (typeof obj.oldText === "string" || typeof obj.newText === "string") {
+    push(obj);
+  }
+  return edits.length > 0 ? { path, edits } : null;
+}
+
+// Guard against pathological oldText/newText sizes that would make the LCS
+// table explode — beyond this cap, fall back to a straight "removals then
+// additions" dump (still correct, just not minimal).
+const MAX_DIFF_LINES = 800;
+
+/** Line diff of two strings via LCS. Empty old/new sides produce pure
+ *  additions / deletions. */
+function diffLines(oldText: string, newText: string): DiffLine[] {
+  if (oldText === "") return newText.split("\n").map((text) => ({ type: "add" as const, text }));
+  if (newText === "") return oldText.split("\n").map((text) => ({ type: "del" as const, text }));
+  const a = oldText.split("\n");
+  const b = newText.split("\n");
+  if (a.length > MAX_DIFF_LINES || b.length > MAX_DIFF_LINES) {
+    return [
+      ...a.map((text) => ({ type: "del" as const, text })),
+      ...b.map((text) => ({ type: "add" as const, text })),
+    ];
+  }
+  const n = a.length;
+  const m = b.length;
+  // dp[i][j] = LCS length of a[i..] and b[j..] — walking backwards keeps the
+  // reconstruction (which only ever looks at dp[i+1] / dp[i][j+1]) in one pass.
+  const dp: Uint32Array[] = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      out.push({ type: "same", text: a[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ type: "del", text: a[i] });
+      i++;
+    } else {
+      out.push({ type: "add", text: b[j] });
+      j++;
+    }
+  }
+  while (i < n) out.push({ type: "del", text: a[i++] });
+  while (j < m) out.push({ type: "add", text: b[j++] });
+  return out;
+}
+
+/** GitHub-style red/green line colors for a unified diff. */
+const DIFF_ADD_CLASS = "bg-[#dafbe1]/40 text-[#116329] dark:bg-[#033a16]/40 dark:text-[#aff5b4]";
+const DIFF_DEL_CLASS = "bg-[#ffebe9]/40 text-[#82071e] dark:bg-[#490202]/40 dark:text-[#ffdcd7]";
+
+function countDiff(diffs: DiffLine[][]): { adds: number; dels: number } {
+  let adds = 0;
+  let dels = 0;
+  for (const d of diffs) {
+    for (const l of d) {
+      if (l.type === "add") adds++;
+      else if (l.type === "del") dels++;
+    }
+  }
+  return { adds, dels };
+}
+
+/** Terminal-ish unified diff for one edit tool call: file header with a
+ *  diffstat, then `-`/`+` lines colored like git. Diffs are computed once by
+ *  the parent (memoized on the args) and passed in. */
+function EditDiffView({
+  path,
+  edits,
+  diffs,
+  stat,
+}: {
+  path: string | null;
+  edits: EditSpec[];
+  diffs: DiffLine[][];
+  stat: { adds: number; dels: number };
+}) {
+  return (
+    <div className="overflow-hidden rounded bg-background/60">
+      {path && (
+        <div className="flex items-center gap-1.5 border-b border-border/40 bg-muted/40 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+          <FileDiff className="h-3 w-3 shrink-0" />
+          <span className="min-w-0 truncate" title={path}>
+            {path}
+          </span>
+          <span className="ml-auto shrink-0 text-success">+{stat.adds}</span>
+          <span className="shrink-0 text-destructive">-{stat.dels}</span>
+        </div>
+      )}
+      <div className="max-h-64 overflow-auto">
+        {diffs.map((d, i) => (
+          <div key={i}>
+            {edits.length > 1 && (
+              <div className="border-y border-border/30 bg-muted/30 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                {i + 1} / {edits.length}
+              </div>
+            )}
+            <pre className="px-2 py-1 font-mono text-[11px] leading-relaxed">
+              {d.map((line, j) => (
+                <div
+                  key={j}
+                  className={cn(
+                    "flex whitespace-pre-wrap break-words",
+                    line.type === "add"
+                      ? DIFF_ADD_CLASS
+                      : line.type === "del"
+                        ? DIFF_DEL_CLASS
+                        : "text-muted-foreground",
+                  )}
+                >
+                  <span className="w-4 shrink-0 select-none text-center">
+                    {line.type === "add" ? "+" : line.type === "del" ? "-" : ""}
+                  </span>
+                  <span className="min-w-0">{line.text || " "}</span>
+                </div>
+              ))}
+            </pre>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Extract the shell command from a bash-style tool call — the tool name
+ *  mentions bash, or the args carry a `command`/`cmd` field (a command runner
+ *  by any name). Handles both object args ({ command: "…" }) and stringified
+ *  JSON. Returns null when there's nothing command-shaped to show; the caller
+ *  then falls back to the raw JSON args. */
+function bashCommand(name: string, args: unknown): string | null {
+  let value: unknown = args;
+  if (typeof args === "string") {
+    try {
+      value = JSON.parse(args);
+    } catch {
+      value = args;
+    }
+  }
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    for (const k of ["command", "cmd"]) {
+      const v = obj[k];
+      if (typeof v === "string" && v.trim()) return v;
+    }
+  }
+  // A bare-string arg on a bash-named tool is the command itself.
+  if (typeof value === "string" && value.trim() && /bash/i.test(name)) return value;
+  return null;
+}
+
 /** A short, single-line preview of a tool's args — the most useful field
  *  flattened to one line (e.g. a bash command, a file path, a query). Shown
  *  dimmed next to the tool name so a collapsed step still says what it did. */
@@ -136,6 +367,23 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
   const { t } = useTranslation("chat");
   const [open, toggle] = useDisclosure(id);
   const isError = block.result?.isError;
+  // Read-style tools surface file contents; highlight the result by the file's
+  // extension when we can pin a language, so a settled `read` shows colored
+  // code instead of a plain dump. Skipped on errors (keep the warning tint).
+  const resultText = block.result
+    ? Array.isArray(block.result.content)
+      ? flattenResultContent(block.result.content)
+      : ""
+    : "";
+  const readPath = /^read/i.test(block.name) ? toolFilePath(block.args) : null;
+  const readExt = readPath ? fileExtension(readPath) : "";
+  const highlighted = useMemo(
+    () =>
+      !isError && readPath !== null && languageForExtension(readExt)
+        ? highlightSource(resultText, readExt)
+        : null,
+    [isError, readPath, readExt, resultText],
+  );
   const subagent = subagentInfo(block.result?.details);
   const outputInfo = toolOutputInfo(block.result?.details);
   // Codex child threads may outlive the root turn, so agent_end can clear the
@@ -145,9 +393,20 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
   // — the run was aborted or pi died before the tool returned. Show a terminal
   // "interrupted" state instead of a spinner that never resolves.
   const isIncomplete = !isRunning && !isError && block.result == null;
+  const cmd = useMemo(() => bashCommand(block.name, block.args), [block.name, block.args]);
+  const editInfo = useMemo(() => editChanges(block.args), [block.args]);
+  const editDiffs = useMemo(
+    () => (editInfo ? editInfo.edits.map((e) => diffLines(e.oldText, e.newText)) : null),
+    [editInfo],
+  );
+  const editStat = useMemo(() => (editDiffs ? countDiff(editDiffs) : null), [editDiffs]);
   const preview = subagent
     ? [subagent.type, subagent.description].filter(Boolean).join(" — ")
-    : summarizeArgs(block.args);
+    : editInfo !== null && editStat !== null
+      ? `${editInfo.path ?? "edit"} · +${editStat.adds} -${editStat.dels}`
+      : cmd !== null
+        ? `$ ${cmd}`
+        : summarizeArgs(block.args);
   // Subagent steps: keep the list glanceable while running — last few steps
   // inline, the full history behind the expander.
   const steps = subagent?.steps ?? [];
@@ -214,25 +473,45 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
         <div className="space-y-2 px-2 pb-2 pt-1">
           {block.args != null && (
             <section>
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t("tool.args")}</div>
-              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-background/60 px-2 py-1.5 font-mono text-[11px]">
-                {stringifyArgs(block.args)}
-              </pre>
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                {editInfo !== null ? t("tool.diff") : cmd !== null ? t("tool.command") : t("tool.args")}
+              </div>
+              {editInfo !== null && editDiffs !== null && editStat !== null ? (
+                <EditDiffView path={editInfo.path} edits={editInfo.edits} diffs={editDiffs} stat={editStat} />
+              ) : cmd !== null ? (
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 px-2 py-1.5 font-mono text-[11px] leading-relaxed">
+                  <span className="select-none text-muted-foreground">$ </span>
+                  {cmd}
+                </pre>
+              ) : (
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-background/60 px-2 py-1.5 font-mono text-[11px]">
+                  {stringifyArgs(block.args)}
+                </pre>
+              )}
             </section>
           )}
           {block.result && (
             <section>
               <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t("tool.result")}</div>
-              <pre
-                className={cn(
-                  "max-h-72 overflow-auto whitespace-pre-wrap rounded bg-background/60 px-2 py-1.5 font-mono text-[11px]",
-                  isError && "text-warning dark:text-warning",
-                )}
-              >
-                <AnsiText>
-                  {Array.isArray(block.result.content) ? flattenResultContent(block.result.content) : ""}
-                </AnsiText>
-              </pre>
+              {highlighted !== null ? (
+                <pre
+                  className={cn(
+                    "max-h-72 overflow-auto rounded bg-background/60 px-2 py-1.5 font-mono text-[11px] leading-relaxed",
+                    HLJS_THEME_CLASS,
+                  )}
+                >
+                  <code dangerouslySetInnerHTML={{ __html: highlighted }} />
+                </pre>
+              ) : (
+                <pre
+                  className={cn(
+                    "max-h-72 overflow-auto whitespace-pre-wrap rounded bg-background/60 px-2 py-1.5 font-mono text-[11px]",
+                    isError && "text-warning dark:text-warning",
+                  )}
+                >
+                  <AnsiText>{resultText}</AnsiText>
+                </pre>
+              )}
               {outputInfo?.truncated && (
                 <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
                   <span>{t("tool.outputTruncated", { size: formatBytes(outputInfo.totalBytes) })}</span>
