@@ -91,6 +91,8 @@ Hold a hotkey from any app and talk — Cetus pops a floating equalizer HUD, tra
 
 ![Cetus voice dictation HUD](docs/voice-hud.jpeg)
 
+This photo was taken with a phone because the floating overlay does not show up in screenshots.
+
 ### Turn meetings into searchable context
 
 Turn on **meeting memory** and Cetus quietly transcribes your calls into searchable notes — on-device, text only, no audio stored.

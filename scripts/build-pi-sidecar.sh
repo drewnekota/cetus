@@ -201,18 +201,20 @@ if [ -n "$DANGLING" ]; then
 fi
 echo "  install tree: $BEFORE_SZ → $(du -sh "$DEST_DIR" | awk '{print $1}')"
 
-# Release gate: Cetus applies this model id through pi RPC on every cold
-# conversation start. A sidecar that does not advertise it would install fine
+# Release gate: Cetus applies these model ids through pi RPC on every cold
+# conversation start. A sidecar that does not advertise them would install fine
 # but every first message would fail at set_model.
 # pi 0.82+ hides providers without configured credentials even for a local
 # catalog listing. Supply a non-secret placeholder so this command enumerates
 # the compiled registry; --list-models makes no API request.
 DEEPSEEK_MODELS="$(DEEPSEEK_API_KEY=cetus-build-check "$DEST_DIR/$PI_FILENAME" --list-models deepseek)"
 echo "$DEEPSEEK_MODELS"
-if ! grep -q 'deepseek-v4-pro' <<< "$DEEPSEEK_MODELS"; then
-  echo "Bundled pi runtime does not provide deepseek-v4-pro" >&2
-  exit 1
-fi
-echo "→ Verified model registry: deepseek-v4-pro"
+for MODEL in deepseek-v4-flash deepseek-v4-pro; do
+  if ! grep -q "$MODEL" <<< "$DEEPSEEK_MODELS"; then
+    echo "Bundled pi runtime does not provide $MODEL" >&2
+    exit 1
+  fi
+done
+echo "→ Verified model registry: deepseek-v4-flash, deepseek-v4-pro"
 
 echo "✓ Done. $DEST_DIR ($(du -sh "$DEST_DIR" | awk '{print $1}'))"

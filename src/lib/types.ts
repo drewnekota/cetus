@@ -1,10 +1,11 @@
 // Shared types between Rust backend and React frontend.
 // pi event JSON is forwarded verbatim; we narrow it per event type below.
 
-// DeepSeek-only: cetus ships a single model (V4 Pro); the per-conversation knob
-// is how hard it thinks. `DsModel` stays as a one-member union so the model id
-// remains a typed value across the Rust/TS boundary. Persisted per conversation.
-export type DsModel = "pro";
+// DeepSeek-only: cetus ships the V4 tiers Flash and Pro; the per-conversation
+// knob is how hard it thinks (off / high / max). `DsModel` stays a closed union
+// so the model id remains a typed value across the Rust/TS boundary. Persisted
+// per conversation.
+export type DsModel = "flash" | "pro";
 export type ReasoningLevel = "non_think" | "think_high" | "think_max";
 
 export interface ModelChoice {

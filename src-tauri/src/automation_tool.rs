@@ -19,7 +19,7 @@
 use crate::app_event::AppEvent;
 use crate::automation::{Automation, AutomationSchedule};
 use crate::host_tunnel::{self, str_field};
-use crate::model::{ModelChoice, ReasoningLevel};
+use crate::model::{DsModel, ModelChoice, ReasoningLevel};
 use crate::pi_rpc::PiRpc;
 use crate::store::{now_ms, Store};
 use serde_json::{json, Value};
@@ -276,12 +276,15 @@ fn describe_schedule(s: &AutomationSchedule) -> String {
 
 // ---- request → domain mapping ---------------------------------------------
 
-/// Build a [`ModelChoice`] from an optional `reasoning`
-/// ("non_think"|"think_high"|"think_max") field, defaulting to the Pro default.
-/// A legacy `model` field is accepted but ignored — cetus ships only DeepSeek V4
-/// Pro now.
+/// Build a [`ModelChoice`] from optional `model` ("flash"|"pro") and `reasoning`
+/// ("non_think"|"think_high"|"think_max") fields, defaulting to the Pro default.
 fn build_model(p: &Value) -> ModelChoice {
     let mut m = ModelChoice::default();
+    if let Some(r) = p.get("model").and_then(|v| v.as_str()) {
+        if let Some(model) = DsModel::parse(r) {
+            m.model = model;
+        }
+    }
     if let Some(r) = p.get("reasoning").and_then(|v| v.as_str()) {
         if let Some(level) = ReasoningLevel::parse(r) {
             m.reasoning = level;

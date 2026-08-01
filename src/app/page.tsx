@@ -102,6 +102,11 @@ import { loadBackendChoice, saveBackendChoice } from "@/lib/backend-choice";
 import { composeWithContext } from "@/lib/quick-context";
 import { useConversationAutoSort } from "@/lib/conversation-order";
 import {
+  loadCollapsedWorkspaceDirs,
+  persistCollapsedWorkspaceDirs,
+  visibleConversationIds,
+} from "@/lib/collapsed-workspaces";
+import {
   KEYBOARD_SHORTCUTS_EVENT,
   KEYBOARD_SHORTCUTS_STORAGE_KEY,
   matchesShortcut,
@@ -561,6 +566,20 @@ export default function Home() {
     } catch {}
     return "chat";
   });
+  // This is shared with the sidebar because folded chat rows are not navigation
+  // targets either: archive fallback and keyboard switching must only walk rows
+  // the user can currently see.
+  const [collapsedWorkspaceDirs, setCollapsedWorkspaceDirs] = useState(
+    loadCollapsedWorkspaceDirs,
+  );
+  const toggleWorkspaceCollapsed = useCallback((dir: string) => {
+    setCollapsedWorkspaceDirs((current) => {
+      const next = new Set(current);
+      if (!next.delete(dir)) next.add(dir);
+      persistCollapsedWorkspaceDirs(next);
+      return next;
+    });
+  }, []);
   const [keyboardShortcuts, setKeyboardShortcuts] = useState(readKeyboardShortcuts);
   useEffect(() => {
     const reload = () => setKeyboardShortcuts(readKeyboardShortcuts());
@@ -731,27 +750,27 @@ export default function Home() {
   activeIdRef.current = activeId;
   viewRef.current = view;
   workspaceDocksByChatRef.current = workspaceDocksByChat;
-  // Chat ids in the sidebar's visual order (workspace groups flattened),
-  // mirrored into a ref so the identity-stable switchChat handler reads the
-  // live order.
-  const orderedChatIds = useMemo(
-    () =>
-      groupByWorkspace(
-        conversations,
-        [...recentWorkspaces, ...temporaryWorkspaces],
-        hiddenWorkspaces.filter((dir) => !temporaryWorkspaces.includes(dir)),
-        defaultWorkspace,
-        autoSortConversations,
-      ).flatMap((g) => g.items.map((c) => c.id)),
-    [
+  // Visible chat ids in the sidebar's visual order (workspace groups flattened),
+  // mirrored into a ref so archive fallback and the identity-stable switchChat
+  // handler both skip rows hidden by a folded workspace.
+  const orderedChatIds = useMemo(() => {
+    const groups = groupByWorkspace(
       conversations,
-      recentWorkspaces,
-      hiddenWorkspaces,
-      temporaryWorkspaces,
+      [...recentWorkspaces, ...temporaryWorkspaces],
+      hiddenWorkspaces.filter((dir) => !temporaryWorkspaces.includes(dir)),
       defaultWorkspace,
       autoSortConversations,
-    ],
-  );
+    );
+    return visibleConversationIds(groups, collapsedWorkspaceDirs);
+  }, [
+    conversations,
+    recentWorkspaces,
+    hiddenWorkspaces,
+    temporaryWorkspaces,
+    defaultWorkspace,
+    autoSortConversations,
+    collapsedWorkspaceDirs,
+  ]);
   const orderedChatIdsRef = useRef<string[]>([]);
   orderedChatIdsRef.current = orderedChatIds;
   const selectChatRef = useRef<(id: string) => void>(() => {});
@@ -3483,6 +3502,7 @@ export default function Home() {
         hiddenWorkspaceDirs={hiddenWorkspaces.filter(
           (dir) => !temporaryWorkspaces.includes(dir),
         )}
+        collapsedWorkspaceDirs={collapsedWorkspaceDirs}
         defaultWorkspace={defaultWorkspace}
         view={view}
         onViewChange={setView}
@@ -3495,6 +3515,7 @@ export default function Home() {
         onArchiveWorkspaceChats={onArchiveWorkspaceChats}
         onRemoveWorkspace={onRemoveWorkspace}
         onReorderWorkspaces={onReorderWorkspaces}
+        onToggleWorkspaceCollapsed={toggleWorkspaceCollapsed}
         onArchive={onArchive}
         onOpenSettings={openSettings}
         updateReadyVersion={updateReadyVersion}

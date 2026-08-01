@@ -117,6 +117,7 @@ interface Props {
   unreadCompletedIds: Set<string>;
   workspaceDirs: string[];
   hiddenWorkspaceDirs: string[];
+  collapsedWorkspaceDirs: ReadonlySet<string>;
   /** The backend's default workspace dir. Rendered as the standalone "Chat"
    *  section rather than a folder — users shouldn't perceive it as one. */
   defaultWorkspace: string;
@@ -132,6 +133,7 @@ interface Props {
   onRemoveWorkspace: (dir: string) => void;
   /** Persist a drag-reordered list of the non-default workspace folders. */
   onReorderWorkspaces: (dirs: string[]) => void;
+  onToggleWorkspaceCollapsed: (dir: string) => void;
   onArchive: (c: Conversation) => void;
   onOpenSettings: () => void;
   /** Version of a downloaded-but-not-yet-applied update, or null. When set, a
@@ -152,6 +154,7 @@ export const AppSidebar = memo(function AppSidebar({
   unreadCompletedIds,
   workspaceDirs,
   hiddenWorkspaceDirs,
+  collapsedWorkspaceDirs,
   defaultWorkspace,
   view,
   onViewChange,
@@ -164,6 +167,7 @@ export const AppSidebar = memo(function AppSidebar({
   onArchiveWorkspaceChats,
   onRemoveWorkspace,
   onReorderWorkspaces,
+  onToggleWorkspaceCollapsed,
   onArchive,
   onOpenSettings,
   updateReadyVersion,
@@ -228,22 +232,14 @@ export const AppSidebar = memo(function AppSidebar({
     }),
   );
   const [activeDragDir, setActiveDragDir] = useState<string | null>(null);
-  // Per-workspace collapsed state, persisted so folded folders stay folded
-  // across launches. Everything starts expanded.
-  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(loadCollapsedDirs);
   // Releasing a reorder drag fires a click on the folder header (it's both the
   // drag handle and the collapse toggle), which would fold the group you just
   // dropped. Stamp drag-end and swallow toggles that land right after it.
   const lastDragEndAtRef = useRef(0);
   const toggleCollapsed = useCallback((dir: string) => {
     if (Date.now() - lastDragEndAtRef.current < 250) return;
-    setCollapsedDirs((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(dir)) next.add(dir);
-      persistCollapsedDirs(next);
-      return next;
-    });
-  }, []);
+    onToggleWorkspaceCollapsed(dir);
+  }, [onToggleWorkspaceCollapsed]);
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       setActiveDragDir(null);
@@ -447,7 +443,7 @@ export const AppSidebar = memo(function AppSidebar({
                 group={defaultGroup}
                 label={t("workspace.default")}
                 isDefault
-                collapsed={collapsedDirs.has(defaultGroup.dir)}
+                collapsed={collapsedWorkspaceDirs.has(defaultGroup.dir)}
                 onToggleCollapse={toggleCollapsed}
                 activeId={activeId}
                 streamingIds={streamingIds}
@@ -467,7 +463,7 @@ export const AppSidebar = memo(function AppSidebar({
                   key={g.dir}
                   group={g}
                   label={workspaceName(g.dir)}
-                  collapsed={collapsedDirs.has(g.dir)}
+                  collapsed={collapsedWorkspaceDirs.has(g.dir)}
                   onToggleCollapse={toggleCollapsed}
                   activeId={activeId}
                   streamingIds={streamingIds}
@@ -831,29 +827,6 @@ function WorkspaceDragGhost({ label }: { label: string }) {
   );
 }
 
-const SIDEBAR_COLLAPSED_KEY = "cetus.sidebar-collapsed-dirs";
-
-/** Workspace dirs whose sidebar group is folded, persisted across launches.
- *  Dirs that no longer exist just sit inert in the set — harmless. */
-function loadCollapsedDirs(): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return new Set(
-      Array.isArray(parsed) ? parsed.filter((d): d is string => typeof d === "string") : [],
-    );
-  } catch {
-    return new Set();
-  }
-}
-
-function persistCollapsedDirs(dirs: Set<string>) {
-  try {
-    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, JSON.stringify([...dirs]));
-  } catch {}
-}
-
 const SIDEBAR_WIDTH_KEY = "cetus.sidebar-width";
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 420;
@@ -1034,7 +1007,10 @@ function runtimeTuning(
       think_max: "Max",
     } as const;
     return {
-      model: "DeepSeek V4 Pro",
+      model:
+        conversation.model.model === "flash"
+          ? "DeepSeek V4 Flash"
+          : "DeepSeek V4 Pro",
       effort: efforts[conversation.model.reasoning] ?? null,
     };
   }
