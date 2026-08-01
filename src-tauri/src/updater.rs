@@ -405,7 +405,7 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateMeta>, Stri
     #[cfg(debug_assertions)]
     {
         let _ = app;
-        return Ok(None);
+        Ok(None)
     }
     #[cfg(not(debug_assertions))]
     {
@@ -437,7 +437,7 @@ pub async fn install_update(app: AppHandle) -> Result<bool, String> {
     #[cfg(debug_assertions)]
     {
         let _ = app;
-        return Err("updates are disabled in development builds".into());
+        Err("updates are disabled in development builds".into())
     }
     #[cfg(not(debug_assertions))]
     {
@@ -469,7 +469,7 @@ pub async fn update_download_progress(
     #[cfg(debug_assertions)]
     {
         let _ = app;
-        return Ok(None);
+        Ok(None)
     }
     #[cfg(not(debug_assertions))]
     {
@@ -484,7 +484,7 @@ pub async fn pending_update_version(app: AppHandle) -> Result<Option<String>, St
     #[cfg(debug_assertions)]
     {
         let _ = app;
-        return Ok(None);
+        Ok(None)
     }
     #[cfg(not(debug_assertions))]
     {

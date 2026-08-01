@@ -246,7 +246,7 @@ async fn dispatch(app: &AppHandle, req: &Value) -> Value {
                 let ctx = app.state::<AppState>().scheduler_ctx();
                 crate::scheduler::run_now(&ctx, &aid)
                     .await
-                    .and_then(|conv| to_value(conv))
+                    .and_then(to_value)
             }
             Err(e) => Err(e),
         },

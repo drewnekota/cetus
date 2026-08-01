@@ -16,7 +16,7 @@
 //! [`resync_active_dir`] rebuilds the GLOBAL active set from the library + enabled
 //! flags after any change — the template legacy conversations fall back to. New
 //! conversations instead get their own frozen copy at first spawn via
-//! [`materialize_skills_into`] (`AppState::pi_for`), so a skill toggle only reaches
+//! [`materialize_skills_into_with_budget`] (`AppState::pi_for`), so a skill toggle only reaches
 //! conversations created afterward (hard freeze) and never disturbs an open chat.
 //!
 //! Metadata (name/description/enabled) is persisted as one JSON blob in the
@@ -206,7 +206,7 @@ fn err(e: impl std::fmt::Display) -> String {
 /// Rebuild the GLOBAL active set (`<agentDir>/skills`) from the library. This is
 /// the template legacy conversations (created before per-conversation freezing)
 /// fall back to; new conversations get their own frozen copy via
-/// [`materialize_skills_into`] in `AppState::pi_for`.
+/// [`materialize_skills_into_with_budget`] in `AppState::pi_for`.
 pub fn resync_active_dir(app_data_dir: &Path, store: &Store) {
     let mut budget = SkillPromptBudget::from_env();
     materialize_skills_into_with_budget(
@@ -216,19 +216,6 @@ pub fn resync_active_dir(app_data_dir: &Path, store: &Store) {
         &mut budget,
         None,
     );
-}
-
-/// Rebuild `target` (a `<agentDir>/skills` directory) from the library + enabled
-/// flags, plus discovered-folder skills when that opt-in is on. Idempotent: the
-/// target is wiped and re-materialised each call, so it always reflects the
-/// store exactly. Files are hard-linked from the library (see `copy_tree`), so a
-/// full rebuild is cheap enough to run on every toggle and on every
-/// per-conversation freeze without an incremental diff. Best-effort — a failure
-/// on one skill is logged, not fatal, so a single bad skill can't strand the
-/// others or break chat.
-pub fn materialize_skills_into(app_data_dir: &Path, target: &Path, store: &Store) {
-    let mut budget = SkillPromptBudget::from_env();
-    materialize_skills_into_with_budget(app_data_dir, target, store, &mut budget, None);
 }
 
 /// Shared budget for skills that pi exposes directly in the system prompt. Once
@@ -438,20 +425,16 @@ fn copy_tree(src: &Path, dst: &Path, bytes: &mut u64, files: &mut usize) -> std:
         } else {
             *files += 1;
             if *files > MAX_IMPORT_FILES {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("skill has too many files (max {MAX_IMPORT_FILES})"),
-                ));
+                return Err(std::io::Error::other(format!(
+                    "skill has too many files (max {MAX_IMPORT_FILES})"
+                )));
             }
             *bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
             if *bytes > MAX_IMPORT_BYTES {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!(
-                        "skill is too large (max {} MiB)",
-                        MAX_IMPORT_BYTES / 1024 / 1024
-                    ),
-                ));
+                return Err(std::io::Error::other(format!(
+                    "skill is too large (max {} MiB)",
+                    MAX_IMPORT_BYTES / 1024 / 1024
+                )));
             }
             // Hard-link rather than byte-copy. The materialised set is a
             // read-only snapshot pi only ever reads — edits go through the

@@ -1,0 +1,78 @@
+name: CI
+
+# Runs on every push to main and every pull request. Release builds are handled
+# separately by release.yml (tagged pushes / manual dispatch), so this stays
+# fast: typecheck + frontend export on Linux, and fmt/check/test on macOS
+# (the app's primary target, matching release.yml).
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend · lint + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm lint
+
+      - name: Build static export
+        run: pnpm build
+
+  rust:
+    name: Rust · fmt + clippy + check + test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Stub frontend + pi-install resource paths
+        # tauri-build validates that the bundled `pi-install` resource path and
+        # the `frontendDist` (`../out`) directory exist at build-script / macro
+        # time, but their content only matters when bundling — release.yml
+        # builds the real frontend (`pnpm build`) and pi tree
+        # (scripts/build-pi-sidecar.sh, needs Bun) there. Empty dirs keep
+        # check/clippy/test green on a fresh checkout without those builds.
+        run: |
+          mkdir -p out
+          mkdir -p src-tauri/pi-install
+
+      - name: Format check
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Clippy (warnings are errors)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Compile check
+        working-directory: src-tauri
+        run: cargo check
+
+      - name: Run tests
+        working-directory: src-tauri
+        run: cargo test

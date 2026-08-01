@@ -362,9 +362,7 @@ async fn take_warm(state: &AppState) -> Option<Warm> {
     if w.child.try_wait().ok().flatten().is_some() {
         return None; // exited while parked
     }
-    if w.stdout.is_none() {
-        return None;
-    }
+    w.stdout.as_ref()?;
     Some(w)
 }
 

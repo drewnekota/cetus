@@ -152,7 +152,7 @@ fn op_create(ctx: &AutomationToolCtx, p: &Value) -> Value {
     let _ = ctx.handle.emit(
         "app-event",
         AppEvent::AutomationUpdated {
-            automation: automation.clone(),
+            automation: Box::new(automation.clone()),
         },
     );
     let note = if enabled {
@@ -240,7 +240,7 @@ fn op_update(ctx: &AutomationToolCtx, p: &Value) -> Value {
     let _ = ctx.handle.emit(
         "app-event",
         AppEvent::AutomationUpdated {
-            automation: updated.clone(),
+            automation: Box::new(updated.clone()),
         },
     );
     json!({ "ok": true, "automation": summarize(&updated) })

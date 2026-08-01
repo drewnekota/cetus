@@ -71,7 +71,7 @@ pub fn create(handle: &AppHandle, input: AutomationInput) -> Result<Automation, 
     emit(
         handle,
         AppEvent::AutomationUpdated {
-            automation: automation.clone(),
+            automation: Box::new(automation.clone()),
         },
     );
     Ok(automation)
@@ -120,7 +120,7 @@ pub fn update(handle: &AppHandle, id: &str, input: AutomationInput) -> Result<Au
     emit(
         handle,
         AppEvent::AutomationUpdated {
-            automation: updated.clone(),
+            automation: Box::new(updated.clone()),
         },
     );
     Ok(updated)
@@ -160,7 +160,7 @@ pub fn set_enabled(handle: &AppHandle, id: &str, enabled: bool) -> Result<Automa
     emit(
         handle,
         AppEvent::AutomationUpdated {
-            automation: updated.clone(),
+            automation: Box::new(updated.clone()),
         },
     );
     Ok(updated)

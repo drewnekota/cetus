@@ -195,7 +195,7 @@ fn learned_terms(app_data_dir: &Path) -> Vec<String> {
         .values()
         .filter(|t| t.count >= LEARN_MIN_COUNT)
         .collect();
-    terms.sort_by(|a, b| b.count.cmp(&a.count));
+    terms.sort_by_key(|b| std::cmp::Reverse(b.count));
     terms.into_iter().map(|t| t.word.clone()).collect()
 }
 
@@ -441,8 +441,7 @@ fn read_learned(path: &Path) -> LearnedStore {
 fn write_learned(path: &Path, store: &LearnedStore) -> std::io::Result<()> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
-    let json = serde_json::to_string_pretty(store)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(store).map_err(std::io::Error::other)?;
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp = path.with_extension(format!("{}.{n}.tmp", std::process::id()));
     std::fs::write(&tmp, json)?;
@@ -459,7 +458,7 @@ fn prune(store: &mut LearnedStore) {
         .iter()
         .map(|(k, v)| (k.clone(), v.count))
         .collect();
-    by_count.sort_by(|a, b| b.1.cmp(&a.1));
+    by_count.sort_by_key(|b| std::cmp::Reverse(b.1));
     let keep: HashSet<String> = by_count
         .into_iter()
         .take(MAX_LEARNED_TERMS)

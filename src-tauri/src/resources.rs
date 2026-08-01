@@ -91,39 +91,48 @@ fn conversation_slug_from_cwd(cwd: &std::path::Path) -> Option<String> {
     (!slug.is_empty()).then(|| slug.to_string())
 }
 
+/// One row of the process-table snapshot: pid, parent, name, cpu, mem, cwd.
+type ProcessRow = (
+    Pid,
+    Option<Pid>,
+    String,
+    f32,
+    u64,
+    Option<std::path::PathBuf>,
+);
+
 #[tauri::command]
 pub async fn resources_snapshot(state: State<'_, AppState>) -> Result<ResourcesSnapshot, String> {
     let self_pid = Pid::from_u32(std::process::id());
 
     // Snapshot the process table. spawn_blocking: the refresh does a full
     // process-table walk, no reason to hold a Tokio worker on it.
-    let procs: Vec<(Pid, Option<Pid>, String, f32, u64, Option<std::path::PathBuf>)> =
-        tokio::task::spawn_blocking(move || {
-            let mut sys = system().lock().unwrap();
-            sys.refresh_processes_specifics(
-                ProcessesToUpdate::All,
-                true,
-                ProcessRefreshKind::nothing()
-                    .with_cpu()
-                    .with_memory()
-                    .with_cwd(UpdateKind::Always),
-            );
-            sys.processes()
-                .iter()
-                .map(|(pid, p)| {
-                    (
-                        *pid,
-                        p.parent(),
-                        p.name().to_string_lossy().to_string(),
-                        p.cpu_usage(),
-                        p.memory(),
-                        p.cwd().map(|c| c.to_path_buf()),
-                    )
-                })
-                .collect()
-        })
-        .await
-        .map_err(|e| e.to_string())?;
+    let procs: Vec<ProcessRow> = tokio::task::spawn_blocking(move || {
+        let mut sys = system().lock().unwrap();
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::nothing()
+                .with_cpu()
+                .with_memory()
+                .with_cwd(UpdateKind::Always),
+        );
+        sys.processes()
+            .iter()
+            .map(|(pid, p)| {
+                (
+                    *pid,
+                    p.parent(),
+                    p.name().to_string_lossy().to_string(),
+                    p.cpu_usage(),
+                    p.memory(),
+                    p.cwd().map(|c| c.to_path_buf()),
+                )
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     // children[ppid] -> pids, plus a by-pid index.
     let mut children: HashMap<Pid, Vec<Pid>> = HashMap::new();
@@ -218,9 +227,11 @@ pub async fn resources_snapshot(state: State<'_, AppState>) -> Result<ResourcesS
         _ => 4,
     };
     rows.sort_by(|a, b| {
-        order(&a.kind)
-            .cmp(&order(&b.kind))
-            .then(b.cpu.partial_cmp(&a.cpu).unwrap_or(std::cmp::Ordering::Equal))
+        order(&a.kind).cmp(&order(&b.kind)).then(
+            b.cpu
+                .partial_cmp(&a.cpu)
+                .unwrap_or(std::cmp::Ordering::Equal),
+        )
     });
 
     let total_cpu = rows.iter().map(|r| r.cpu).sum();

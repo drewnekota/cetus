@@ -210,7 +210,10 @@ async fn sweep(state: &AppState, handle: &AppHandle, settings: &AutoArchiveSetti
         state.kill_codex_session(&c.id);
         state.kill_acp_session(&c.id);
         if let Err(e) = crate::cli_backend::sync_codex_archive_state(&c, true).await {
-            tracing::warn!("auto-archive: failed to sync Codex archive state for {}: {e}", c.id);
+            tracing::warn!(
+                "auto-archive: failed to sync Codex archive state for {}: {e}",
+                c.id
+            );
         }
 
         // Tell the frontend so the sidebar drops it. Re-read the row so the

@@ -639,11 +639,13 @@ pub fn park(ns_window: *mut c_void) {
 ///     windows are left alone, and with `fullSizeContentView` the content
 ///     layout doesn't change. Bonus: a borderless window refuses key status,
 ///     so the parked sliver can never sit there holding keyboard focus.
+///
 /// Stays Space-bound (we do NOT set `canJoinAllSpaces`): a window that joins all
 /// Spaces gets dragged into every Space-switch animation and the 1px sliver
 /// flashes on each desktop change. The cost is that switching Spaces leaves it
 /// occluded on its old Space, so a reopen from a different Space after a long
 /// idle may flash once (cold) — far rarer than flashing on every switch.
+///
 /// Returns the pre-park origin + style mask to stash for restore, or `None` if
 /// there is no window to park.
 pub fn park_main_window(ns_window: *mut c_void) -> Option<(f64, f64, usize)> {

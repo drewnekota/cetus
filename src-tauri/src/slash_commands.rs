@@ -117,7 +117,7 @@ fn clamp(s: &str, max: usize) -> String {
 #[tauri::command]
 pub async fn list_slash_commands(state: State<'_, AppState>) -> CmdResult<Vec<SlashCommand>> {
     let mut commands = load_store(&state.store).commands;
-    commands.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    commands.sort_by_key(|a| a.name.to_lowercase());
     Ok(commands)
 }
 

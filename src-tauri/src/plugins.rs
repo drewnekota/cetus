@@ -727,7 +727,7 @@ fn reveal_path(_app: &AppHandle, path: &Path) -> Result<(), String> {
             .arg(path)
             .spawn()
             .map_err(|e| e.to_string())?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "windows")]
     {
