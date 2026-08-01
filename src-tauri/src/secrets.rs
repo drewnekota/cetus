@@ -21,6 +21,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+#[cfg(not(debug_assertions))]
 const SERVICE: &str = "cetus";
 /// Account name of the single combined keychain item that holds every key.
 #[cfg(not(debug_assertions))]

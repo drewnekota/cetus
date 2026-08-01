@@ -344,6 +344,7 @@ fn parse(data: &[u8]) -> Result<Parsed> {
 /// 3. If both attempts fail but produced partial text, the longest partial is
 ///    returned (with a warning) instead of an error: degraded text beats
 ///    total loss.
+///
 /// Whether the two-pass endpoint is believed usable. Flipped off for the rest
 /// of the process when an attempt dies before producing ANY text — the
 /// signature of a missing `bigmodel_async` entitlement / rejected parameter —

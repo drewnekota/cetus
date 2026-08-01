@@ -25,11 +25,11 @@ pub async fn get_artifact_thumbnail(
     #[cfg(target_os = "macos")]
     {
         let cache_dir = state.app_data_dir.join("artifact-thumbnails");
-        return tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             macos::generate(&source, &metadata, &cache_dir, THUMBNAIL_EDGE)
         })
         .await
-        .map_err(|e| format!("thumbnail task failed: {e}"))?;
+        .map_err(|e| format!("thumbnail task failed: {e}"))?
     }
 
     #[cfg(not(target_os = "macos"))]

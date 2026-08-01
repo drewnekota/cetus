@@ -496,10 +496,8 @@ async fn stop_internal(app: &AppHandle) -> Result<bool, String> {
         if runtime.active.lock().await.is_none() {
             return Ok(true);
         }
-        if i == 60 {
-            if pid.is_some() {
-                kill_active_capture();
-            }
+        if i == 60 && pid.is_some() {
+            kill_active_capture();
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -569,6 +567,9 @@ fn hide_pill(app: &AppHandle) {
 /// Consume the helper's JSONL stream: index segments, then finalize the session
 /// when the helper exits (normal stop, auto-stop, or crash — all the same path).
 #[cfg(target_os = "macos")]
+// Params are a grab-bag of distinct spawn-time context; a struct would just
+// relocate the list, so allow the arity.
+#[allow(clippy::too_many_arguments)]
 async fn run_reader(
     app: AppHandle,
     store: Arc<Store>,
@@ -726,6 +727,14 @@ pub fn shutdown_capture() {
     kill_active_capture();
 }
 
+/// (mic, system) PCM channels plus the spawned task handles. Grouped so the
+/// tuple reads as one thing instead of three free-floating types.
+type CloudAsrChannels = (
+    tokio::sync::mpsc::Sender<Vec<u8>>,
+    tokio::sync::mpsc::Sender<Vec<u8>>,
+    Vec<tokio::task::JoinHandle<()>>,
+);
+
 #[cfg(target_os = "macos")]
 fn spawn_cloud_asr(
     store: Arc<Store>,
@@ -733,11 +742,7 @@ fn spawn_cloud_asr(
     recall: PathBuf,
     app_hint: Option<String>,
     segments: Arc<AtomicI64>,
-) -> (
-    tokio::sync::mpsc::Sender<Vec<u8>>,
-    tokio::sync::mpsc::Sender<Vec<u8>>,
-    Vec<tokio::task::JoinHandle<()>>,
-) {
+) -> CloudAsrChannels {
     let key = crate::secrets::get("doubao")
         .ok()
         .flatten()

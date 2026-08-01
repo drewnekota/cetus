@@ -113,7 +113,7 @@ fn ensure_next_runs(ctx: &SchedulerCtx) {
             emit(
                 ctx,
                 AppEvent::AutomationUpdated {
-                    automation: updated,
+                    automation: Box::new(updated),
                 },
             );
         }
@@ -202,7 +202,7 @@ async fn run_and_record(
                 emit(
                     ctx,
                     AppEvent::AutomationFired {
-                        automation: updated,
+                        automation: Box::new(updated),
                         conversation: conv.clone(),
                     },
                 );
@@ -248,7 +248,7 @@ async fn run_and_record(
                             emit(
                                 &ctx,
                                 AppEvent::AutomationUpdated {
-                                    automation: updated,
+                                    automation: Box::new(updated),
                                 },
                             );
                         }
@@ -266,7 +266,7 @@ async fn run_and_record(
                 emit(
                     ctx,
                     AppEvent::AutomationUpdated {
-                        automation: updated,
+                        automation: Box::new(updated),
                     },
                 );
             }
@@ -324,7 +324,7 @@ async fn fire_cli(
                 emit(
                     ctx,
                     AppEvent::AutomationFired {
-                        automation: updated,
+                        automation: Box::new(updated),
                         conversation: conv.clone(),
                     },
                 );
@@ -341,7 +341,7 @@ async fn fire_cli(
                 emit(
                     ctx,
                     AppEvent::AutomationUpdated {
-                        automation: updated,
+                        automation: Box::new(updated),
                     },
                 );
             }

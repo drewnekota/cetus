@@ -18,6 +18,7 @@
 //!     visible-text walk (`ax::visible_text`, node/depth/char/wall-clock caps).
 //!   * only on a change tick in a known browser: the AppleScript URL fetch
 //!     (2s-bounded) — never on the steady-state path.
+//!
 //! A content hash then drops unchanged snapshots, so an idle screen writes
 //! nothing: the steady-state cost is the title probe, and the disk only sees
 //! actual activity.

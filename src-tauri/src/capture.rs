@@ -265,7 +265,10 @@ pub fn ocr_screen_now(app_data: &Path) -> Option<String> {
 /// display coordinates (top-left origin, points — `screencapture -R` captures
 /// at native scale, so the output is still full-resolution Retina pixels).
 #[cfg(target_os = "macos")]
-pub fn capture_region_jpeg_native(region: Option<(f64, f64, f64, f64)>, max_edge: u32) -> Option<Vec<u8>> {
+pub fn capture_region_jpeg_native(
+    region: Option<(f64, f64, f64, f64)>,
+    max_edge: u32,
+) -> Option<Vec<u8>> {
     let started = Instant::now();
     let path = std::env::temp_dir().join(format!(
         "cetus-launch-shot-{}-{}.jpg",
@@ -276,7 +279,8 @@ pub fn capture_region_jpeg_native(region: Option<(f64, f64, f64, f64)>, max_edge
     let mut cmd = std::process::Command::new("/usr/sbin/screencapture");
     cmd.args(["-x", "-t", "jpg"]);
     if let Some((x, y, w, h)) = region {
-        cmd.arg("-R").arg(format!("{:.0},{:.0},{:.0},{:.0}", x, y, w, h));
+        cmd.arg("-R")
+            .arg(format!("{:.0},{:.0},{:.0},{:.0}", x, y, w, h));
     }
     let ok = cmd
         .arg(&path)

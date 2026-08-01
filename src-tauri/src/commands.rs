@@ -783,7 +783,7 @@ pub async fn delete_conversation(state: State<'_, AppState>, id: String) -> CmdR
 }
 
 /// Where a CLI-backend conversation's isolated changes live: the worktree path
-/// + branch, when the workspace is a git repo. None for pi conversations and
+/// and branch, when the workspace is a git repo. None for pi conversations and
 /// non-repo workspaces — the UI hides the affordance.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1646,7 +1646,7 @@ fn search_local_workspace_files(
             .unwrap_or(entry.path())
             .to_string_lossy()
             .to_string();
-        if !relative_path.to_lowercase().contains(&query) {
+        if !relative_path.to_lowercase().contains(query) {
             continue;
         }
         let meta = entry.metadata().ok();
@@ -2373,7 +2373,7 @@ pub(crate) async fn open_browser_window_with_app_data_dir(
     app_data_dir: &Path,
     url: &str,
 ) -> CmdResult<()> {
-    let parsed = Url::parse(&url).map_err(err)?;
+    let parsed = Url::parse(url).map_err(err)?;
     if !supported_browser_scheme(parsed.scheme()) {
         return Err(format!(
             "refusing to open unsupported browser url scheme: {}",
@@ -2523,7 +2523,7 @@ pub async fn set_browser_panel_annotation_mode(app: AppHandle, enabled: bool) ->
     if let Some(webview) = app.get_webview(BROWSER_PANEL_LABEL) {
         let enabled_js = if enabled { "true" } else { "false" };
         webview
-            .eval(&format!(
+            .eval(format!(
                 "window.dispatchEvent(new CustomEvent('cetus-browser-annotation-mode', {{ detail: {{ enabled: {enabled_js} }} }}));"
             ))
             .map_err(err)?;

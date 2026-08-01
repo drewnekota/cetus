@@ -117,16 +117,14 @@ pub fn restore_or_default(app: &AppHandle, store: &Store) {
         return;
     };
     if let Some(g) = load(store) {
-        if on_some_monitor(&win, &g) {
-            if g.user_set {
-                let _ = win.set_size(PhysicalSize::new(g.width, g.height));
-                let _ = win.set_position(PhysicalPosition::new(g.x, g.y));
-                if g.maximized {
-                    let _ = win.maximize();
-                }
-                *LAST.lock().unwrap() = Some(g);
-                return;
+        if on_some_monitor(&win, &g) && g.user_set {
+            let _ = win.set_size(PhysicalSize::new(g.width, g.height));
+            let _ = win.set_position(PhysicalPosition::new(g.x, g.y));
+            if g.maximized {
+                let _ = win.maximize();
             }
+            *LAST.lock().unwrap() = Some(g);
+            return;
         }
     }
     if let Some(g) = default_geom(&win) {

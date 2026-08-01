@@ -862,49 +862,6 @@ fn collect_tools(resp: &Value) -> Vec<McpToolInfo> {
         .unwrap_or_default()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn agent_add_persists_source_state_and_exports_mcp_json() {
-        let root = std::env::temp_dir().join(format!("cetus-mcp-test-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let store = Store::open(&root.join("state.db")).unwrap();
-
-        let server = agent_add(
-            &root,
-            &store,
-            McpConnectorInput {
-                name: "Test MCP".to_string(),
-                transport: "stdio".to_string(),
-                command: "node".to_string(),
-                args: vec!["server.mjs".to_string()],
-                env: BTreeMap::new(),
-                url: String::new(),
-                headers: BTreeMap::new(),
-                auth: String::new(),
-                oauth_client_id: String::new(),
-                oauth_scope: String::new(),
-                enabled: true,
-            },
-        )
-        .unwrap();
-
-        let list = agent_list(&store);
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].id, server.id);
-
-        let exported: Value =
-            serde_json::from_str(&std::fs::read_to_string(root.join("mcp.json")).unwrap()).unwrap();
-        assert_eq!(exported["mcpServers"]["Test MCP"]["command"], "node");
-        assert_eq!(exported["mcpServers"]["Test MCP"]["args"][0], "server.mjs");
-
-        drop(store);
-        let _ = std::fs::remove_dir_all(root);
-    }
-}
-
 // ---- Handshake: HTTP -------------------------------------------------------
 
 /// Speak JSON-RPC to a Streamable-HTTP MCP endpoint: POST `initialize`, then
@@ -1021,4 +978,47 @@ fn parse_json_or_sse(body: &str) -> Option<Value> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_add_persists_source_state_and_exports_mcp_json() {
+        let root = std::env::temp_dir().join(format!("cetus-mcp-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = Store::open(&root.join("state.db")).unwrap();
+
+        let server = agent_add(
+            &root,
+            &store,
+            McpConnectorInput {
+                name: "Test MCP".to_string(),
+                transport: "stdio".to_string(),
+                command: "node".to_string(),
+                args: vec!["server.mjs".to_string()],
+                env: BTreeMap::new(),
+                url: String::new(),
+                headers: BTreeMap::new(),
+                auth: String::new(),
+                oauth_client_id: String::new(),
+                oauth_scope: String::new(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+
+        let list = agent_list(&store);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, server.id);
+
+        let exported: Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("mcp.json")).unwrap()).unwrap();
+        assert_eq!(exported["mcpServers"]["Test MCP"]["command"], "node");
+        assert_eq!(exported["mcpServers"]["Test MCP"]["args"][0], "server.mjs");
+
+        drop(store);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

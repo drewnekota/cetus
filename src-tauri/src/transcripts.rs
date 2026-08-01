@@ -48,21 +48,13 @@ pub struct TranscriptEntry {
 /// record new transcripts nor let the agent recall them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+// Off by default — dictation content is sensitive; opt-in only.
+#[derive(Default)]
 pub struct TranscriptState {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub entries: Vec<TranscriptEntry>,
-}
-
-impl Default for TranscriptState {
-    fn default() -> Self {
-        // Off by default — dictation content is sensitive; opt-in only.
-        Self {
-            enabled: false,
-            entries: Vec::new(),
-        }
-    }
 }
 
 /// Absolute path of the store. Mirrors the value exported as `CETUS_DICTATION_PATH`

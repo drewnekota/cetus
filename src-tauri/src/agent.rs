@@ -26,7 +26,7 @@ use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
@@ -395,7 +395,7 @@ async fn run_cua(ctx: &AgentCtx, conv: &str, params: Value) -> Value {
 }
 
 /// Capture the screen and OCR it to plain text (AX-blind fallback). Best-effort.
-fn ocr_screen(app_data: &PathBuf) -> Option<String> {
+fn ocr_screen(app_data: &Path) -> Option<String> {
     use base64::{engine::general_purpose::STANDARD, Engine};
     let shot = crate::quick::capture_screenshot()?;
     let bytes = STANDARD.decode(shot.data.as_bytes()).ok()?;

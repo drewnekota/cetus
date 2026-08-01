@@ -31,7 +31,7 @@ pub enum AppEvent {
     /// An automation's state advanced (scheduled next-run computed, enabled
     /// toggled, run recorded). The frontend merges `automation` into its list.
     AutomationUpdated {
-        automation: crate::automation::Automation,
+        automation: Box<crate::automation::Automation>,
     },
     /// An automation was deleted out-of-band (e.g. via the control socket).
     /// The frontend drops it from its list.
@@ -39,7 +39,7 @@ pub enum AppEvent {
     /// An automation fired and minted a conversation. The frontend merges the
     /// updated automation and adds the fresh conversation to its lists.
     AutomationFired {
-        automation: crate::automation::Automation,
+        automation: Box<crate::automation::Automation>,
         conversation: crate::store::Conversation,
     },
     /// Agent memory changed out-of-band. The Memory settings page reloads the

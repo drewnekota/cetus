@@ -2011,7 +2011,7 @@ fn toggle_main(app: &AppHandle) {
                     .map(|w| {
                         w.is_visible().unwrap_or(false)
                             && w.ns_window()
-                                .map(|p| crate::panel::is_on_active_space(p))
+                                .map(crate::panel::is_on_active_space)
                                 .unwrap_or(true)
                     })
                     .unwrap_or(false);
@@ -2255,57 +2255,6 @@ fn replace_pi_install(resource: &Path, target: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod pi_runtime_refresh_tests {
-    use super::*;
-
-    fn temp_root(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("cetus-{name}-{}", uuid::Uuid::new_v4()))
-    }
-
-    #[test]
-    fn marker_requests_refresh_only_for_a_new_bundled_runtime() {
-        let root = temp_root("pi-marker");
-        let resource = root.join("resource");
-        let target = root.join("target");
-        std::fs::create_dir_all(&resource).unwrap();
-        std::fs::create_dir_all(&target).unwrap();
-
-        assert!(!pi_runtime_needs_refresh(&resource, &target));
-        std::fs::write(resource.join(PI_RUNTIME_MARKER), "cetus=1 pi=2\n").unwrap();
-        assert!(pi_runtime_needs_refresh(&resource, &target));
-        std::fs::write(target.join(PI_RUNTIME_MARKER), "cetus=1 pi=2\n").unwrap();
-        assert!(!pi_runtime_needs_refresh(&resource, &target));
-        std::fs::write(target.join(PI_RUNTIME_MARKER), "cetus=1 pi=1\n").unwrap();
-        assert!(pi_runtime_needs_refresh(&resource, &target));
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn replacement_swaps_the_complete_runtime_tree() {
-        let root = temp_root("pi-replace");
-        let resource = root.join("resource");
-        let target = root.join("pi-install");
-        std::fs::create_dir_all(&resource).unwrap();
-        std::fs::create_dir_all(&target).unwrap();
-        std::fs::write(resource.join("new-runtime"), "new").unwrap();
-        std::fs::write(target.join("old-runtime"), "old").unwrap();
-
-        replace_pi_install(&resource, &target).unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(target.join("new-runtime")).unwrap(),
-            "new"
-        );
-        assert!(!target.join("old-runtime").exists());
-        assert!(!root.join("pi-install.next").exists());
-        assert!(!root.join("pi-install.previous").exists());
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-}
-
 /// Re-deploy `<resource>/cetus-extensions` over `<target>/cetus-extensions`.
 /// Cheap (tiny number of small .ts files) and keeps tool updates flowing
 /// without bumping the install version or wiping the cache.
@@ -2484,4 +2433,55 @@ fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod pi_runtime_refresh_tests {
+    use super::*;
+
+    fn temp_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("cetus-{name}-{}", uuid::Uuid::new_v4()))
+    }
+
+    #[test]
+    fn marker_requests_refresh_only_for_a_new_bundled_runtime() {
+        let root = temp_root("pi-marker");
+        let resource = root.join("resource");
+        let target = root.join("target");
+        std::fs::create_dir_all(&resource).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+
+        assert!(!pi_runtime_needs_refresh(&resource, &target));
+        std::fs::write(resource.join(PI_RUNTIME_MARKER), "cetus=1 pi=2\n").unwrap();
+        assert!(pi_runtime_needs_refresh(&resource, &target));
+        std::fs::write(target.join(PI_RUNTIME_MARKER), "cetus=1 pi=2\n").unwrap();
+        assert!(!pi_runtime_needs_refresh(&resource, &target));
+        std::fs::write(target.join(PI_RUNTIME_MARKER), "cetus=1 pi=1\n").unwrap();
+        assert!(pi_runtime_needs_refresh(&resource, &target));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn replacement_swaps_the_complete_runtime_tree() {
+        let root = temp_root("pi-replace");
+        let resource = root.join("resource");
+        let target = root.join("pi-install");
+        std::fs::create_dir_all(&resource).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(resource.join("new-runtime"), "new").unwrap();
+        std::fs::write(target.join("old-runtime"), "old").unwrap();
+
+        replace_pi_install(&resource, &target).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(target.join("new-runtime")).unwrap(),
+            "new"
+        );
+        assert!(!target.join("old-runtime").exists());
+        assert!(!root.join("pi-install.next").exists());
+        assert!(!root.join("pi-install.previous").exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

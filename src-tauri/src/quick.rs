@@ -1222,10 +1222,12 @@ mod tests {
 
     #[test]
     fn migrates_only_the_untouched_old_shortcut_set() {
-        let mut old = QuickSettings::default();
-        old.gesture_shot = "both_opt".into();
-        old.voice_gesture = "right_cmd".into();
-        old.voice_handsfree_shortcut = true;
+        let mut old = QuickSettings {
+            gesture_shot: "both_opt".into(),
+            voice_gesture: "right_cmd".into(),
+            voice_handsfree_shortcut: true,
+            ..Default::default()
+        };
         assert!(apply_shortcut_defaults_v3(&mut old));
         assert_eq!(old.gesture_shot, "off");
         assert_eq!(old.voice_gesture, "right_option");

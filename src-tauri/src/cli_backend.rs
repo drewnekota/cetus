@@ -79,7 +79,12 @@ pub fn load_settings(store: &Store) -> CliAgentSettings {
 
 fn normalize_runtime_order(settings: &mut CliAgentSettings) {
     let mut normalized = Vec::with_capacity(RUNTIME_IDS.len());
-    for id in settings.runtime_order.iter().map(String::as_str).chain(RUNTIME_IDS) {
+    for id in settings
+        .runtime_order
+        .iter()
+        .map(String::as_str)
+        .chain(RUNTIME_IDS)
+    {
         if RUNTIME_IDS.contains(&id) && !normalized.iter().any(|saved| saved == id) {
             normalized.push(id.to_string());
         }
@@ -307,8 +312,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn claude_defaults(home: &Path) -> CliDefaults {
-    let raw =
-        std::fs::read_to_string(home.join(".claude/settings.json")).unwrap_or_default();
+    let raw = std::fs::read_to_string(home.join(".claude/settings.json")).unwrap_or_default();
     let v: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
     let s = |key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_string);
     // settings.json holds an explicit `model` only when the user pinned one; the
@@ -389,9 +393,7 @@ async fn probe_claude_initialize(cwd: Option<&Path>) -> Option<Value> {
 }
 
 fn claude_defaults_from_initialize(value: &Value) -> Option<CliDefaults> {
-    let models = value
-        .pointer("/response/response/models")?
-        .as_array()?;
+    let models = value.pointer("/response/response/models")?.as_array()?;
     let default = models
         .iter()
         .find(|model| model.get("value").and_then(Value::as_str) == Some("default"))?;
@@ -463,9 +465,7 @@ fn claude_commands_from_initialize(value: &Value) -> Vec<Value> {
 fn claude_json_model(home: &Path) -> Option<String> {
     let raw = std::fs::read_to_string(home.join(".claude.json")).ok()?;
     let v: Value = serde_json::from_str(&raw).ok()?;
-    v.get("model")
-        .and_then(|x| x.as_str())
-        .map(str::to_string)
+    v.get("model").and_then(|x| x.as_str()).map(str::to_string)
 }
 
 fn codex_defaults(home: &Path) -> CliDefaults {
@@ -489,8 +489,7 @@ fn codex_defaults(home: &Path) -> CliDefaults {
     }
     // models_cache.json is the catalog codex itself fetched; "hide" entries are
     // internal (auto-review etc.).
-    let cache =
-        std::fs::read_to_string(home.join(".codex/models_cache.json")).unwrap_or_default();
+    let cache = std::fs::read_to_string(home.join(".codex/models_cache.json")).unwrap_or_default();
     let cache: Value = serde_json::from_str(&cache).unwrap_or(Value::Null);
     let entries = cache.get("models").and_then(|m| m.as_array());
     let models: Vec<CliModelEntry> = entries
@@ -865,20 +864,16 @@ pub fn dispatch_turn(
     // the same first-turn preamble for that case and hand it to the session,
     // which uses it only if the load really didn't happen. Cold spawn only, so
     // the transcript read stays a once-per-process cost.
-    let acp_cold_start_preamble = (backend.is_acp()
-        && !resume_before.is_empty()
-        && state.acp_session(&conv.id).is_none())
-    .then(|| {
-        let history = state.store.list_cli_messages(&conv.id).unwrap_or_default();
-        let hint = format!(
-            "<cetus-env>\n{}\n</cetus-env>",
-            crate::control::AGENT_HINT
-        );
-        match handoff_preamble(&history) {
-            Some(handoff) => format!("{hint}\n\n{handoff}"),
-            None => hint,
-        }
-    });
+    let acp_cold_start_preamble =
+        (backend.is_acp() && !resume_before.is_empty() && state.acp_session(&conv.id).is_none())
+            .then(|| {
+                let history = state.store.list_cli_messages(&conv.id).unwrap_or_default();
+                let hint = format!("<cetus-env>\n{}\n</cetus-env>", crate::control::AGENT_HINT);
+                match handoff_preamble(&history) {
+                    Some(handoff) => format!("{hint}\n\n{handoff}"),
+                    None => hint,
+                }
+            });
 
     // Persist the user message first so the transcript replays after a
     // restart (the handoff preamble is NOT persisted — it's rebuilt from the
@@ -1365,10 +1360,8 @@ pub fn message_text(message: &Value) -> String {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(blocks)) => blocks
             .iter()
-            .filter_map(|b| {
-                (b.get("type").and_then(|t| t.as_str()) == Some("text"))
-                    .then(|| b.get("text").and_then(|t| t.as_str()).unwrap_or(""))
-            })
+            .filter(|&b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .map(|b| b.get("text").and_then(|t| t.as_str()).unwrap_or(""))
             .collect::<Vec<_>>()
             .join("\n"),
         _ => String::new(),
@@ -1403,12 +1396,7 @@ mod tests {
     #[test]
     fn runtime_order_deduplicates_discards_unknown_and_appends_new_entries() {
         let mut settings = CliAgentSettings {
-            runtime_order: vec![
-                "kimi".into(),
-                "unknown".into(),
-                "pi".into(),
-                "kimi".into(),
-            ],
+            runtime_order: vec!["kimi".into(), "unknown".into(), "pi".into(), "kimi".into()],
             ..Default::default()
         };
         normalize_runtime_order(&mut settings);

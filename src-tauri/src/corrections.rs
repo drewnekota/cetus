@@ -96,8 +96,7 @@ fn read_store(path: &Path) -> Store {
 }
 
 fn write_store(path: &Path, store: &Store) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(store)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(store).map_err(std::io::Error::other)?;
     let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, path)
