@@ -88,17 +88,17 @@ function stringifyArgs(args: unknown): string {
 }
 
 /** Parsed file-tool (read/write) call: path plus optional paging args, and
- *  the written content size for write calls. */
+ *  the written content for write calls. */
 interface FileMeta {
   path: string | null;
   offset?: number;
   limit?: number;
-  /** Length of the `content` arg (write tool). */
-  size?: number;
+  /** The `content` arg (write tool) — rendered as the card body. */
+  content?: string;
 }
 
-/** Extract { path, offset, limit, size } from a read/write tool call (args may
- *  be an object or stringified JSON). */
+/** Extract { path, offset, limit, content } from a read/write tool call (args
+ *  may be an object or stringified JSON). */
 function parseFileMeta(args: unknown): FileMeta {
   let value: unknown = args;
   if (typeof args === "string") {
@@ -125,7 +125,7 @@ function parseFileMeta(args: unknown): FileMeta {
     };
     meta.offset = num(obj.offset);
     meta.limit = num(obj.limit);
-    if (typeof obj.content === "string") meta.size = obj.content.length;
+    if (typeof obj.content === "string") meta.content = obj.content;
   }
   return meta;
 }
@@ -397,19 +397,30 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
       ? flattenResultContent(block.result.content)
       : ""
     : "";
-  const isFileTool = /^(read|write)/i.test(block.name);
+  const isReadTool = /^read/i.test(block.name);
+  const isWriteTool = /^write/i.test(block.name);
+  const isFileTool = isReadTool || isWriteTool;
   const fileMeta = useMemo(() => (isFileTool ? parseFileMeta(block.args) : null), [isFileTool, block.args]);
   const filePath = fileMeta?.path ?? null;
-  // Only read-style calls surface file *content* in the result — write calls
-  // return a confirmation string, so only they get the syntax highlight.
-  const readPath = /^read/i.test(block.name) ? filePath : null;
-  const readExt = readPath ? fileExtension(readPath) : "";
+  const fileExt = filePath ? fileExtension(filePath) : "";
+  // What the card displays as the body: read → the result text (the file
+  // contents the model saw); write → the `content` arg itself (the result is
+  // only a confirmation string). On errors, fall back to the result text so an
+  // error message still shows with the warning tint.
+  const bodyText =
+    isReadTool || (isWriteTool && isError)
+      ? resultText
+      : isWriteTool
+        ? (fileMeta?.content ?? "")
+        : resultText;
+  // Highlight the body by file extension when a language can be pinned and
+  // there's something to highlight. Skipped on errors (keep the warning tint).
   const highlighted = useMemo(
     () =>
-      !isError && readPath !== null && languageForExtension(readExt)
-        ? highlightSource(resultText, readExt)
+      !isError && filePath !== null && bodyText !== "" && languageForExtension(fileExt)
+        ? highlightSource(bodyText, fileExt)
         : null,
-    [isError, readPath, readExt, resultText],
+    [isError, filePath, fileExt, bodyText],
   );
   const subagent = subagentInfo(block.result?.details);
   const outputInfo = toolOutputInfo(block.result?.details);
@@ -432,7 +443,7 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
     const parts: string[] = [];
     if (fileMeta?.offset != null) parts.push(`offset ${fileMeta.offset}`);
     if (fileMeta?.limit != null) parts.push(`limit ${fileMeta.limit}`);
-    if (fileMeta?.size != null) parts.push(formatBytes(fileMeta.size));
+    if (fileMeta?.content != null) parts.push(formatBytes(fileMeta.content.length));
     return parts;
   }, [fileMeta]);
   const preview = subagent
@@ -557,7 +568,7 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
                     isError && "text-warning dark:text-warning",
                   )}
                 >
-                  <AnsiText>{resultText}</AnsiText>
+                  <AnsiText>{bodyText}</AnsiText>
                 </pre>
               )}
               {outputInfo?.truncated && (
