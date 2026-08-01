@@ -397,8 +397,12 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
       ? flattenResultContent(block.result.content)
       : ""
     : "";
-  const isReadTool = /^read/i.test(block.name);
-  const isWriteTool = /^write/i.test(block.name);
+  // Only treat the built-in file tools as read/write cards. Prefix matching
+  // also catches unrelated tools such as read_mcp_resource and write_stdin,
+  // hiding their args and (for writes without `content`) their result body.
+  const normalizedToolName = block.name.trim().toLowerCase();
+  const isReadTool = normalizedToolName === "read" || normalizedToolName === "read_file";
+  const isWriteTool = normalizedToolName === "write" || normalizedToolName === "write_file";
   const isFileTool = isReadTool || isWriteTool;
   const fileMeta = useMemo(() => (isFileTool ? parseFileMeta(block.args) : null), [isFileTool, block.args]);
   const filePath = fileMeta?.path ?? null;
