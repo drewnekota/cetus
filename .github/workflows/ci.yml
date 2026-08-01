@@ -50,6 +50,14 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Stub pi-install resource tree
+        # tauri-build validates that the `pi-install` bundle resource path
+        # exists at build-script time, but its content only matters when
+        # bundling — release.yml builds the real tree there via
+        # scripts/build-pi-sidecar.sh (needs Bun). An empty dir keeps
+        # check/clippy/test green on a fresh checkout without that build.
+        run: mkdir -p src-tauri/pi-install
+
       - name: Format check
         working-directory: src-tauri
         run: cargo fmt --check
