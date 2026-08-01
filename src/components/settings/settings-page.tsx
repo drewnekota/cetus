@@ -41,7 +41,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { BACKENDS, useRuntimeSlots } from "@/components/chat/backend-picker";
+import {
+  BACKENDS,
+  useRuntimeCatalog,
+  useRuntimeSlots,
+} from "@/components/chat/backend-picker";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -1530,6 +1534,7 @@ function PermissionsSection({ open }: { open: boolean }) {
 
 function LauncherSection() {
   const { t } = useTranslation("settings");
+  const { orderedBackends, enabledBackendIds } = useRuntimeCatalog();
   const [settings, setSettings] = useState<QuickSettings>(DEFAULT_QUICK_SETTINGS);
   const [trusted, setTrusted] = useState<boolean | null>(null);
   const [screenRec, setScreenRec] = useState<boolean | null>(null);
@@ -1592,6 +1597,9 @@ function LauncherSection() {
   // Screenshot launch and direct visual replies both need Screen Recording.
   const wantsScreenshot =
     settings.gestureShot !== "off" || settings.gestureReply !== "off";
+  const replyBackends = orderedBackends.filter((runtime) =>
+    enabledBackendIds.has(runtime.id),
+  );
 
   return (
     <section>
@@ -1748,6 +1756,36 @@ function LauncherSection() {
               ).map((g) => (
                 <SelectItem key={g} value={g}>
                   {gestureName(g)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 space-y-0.5">
+            <Label className="font-medium">{t("launcher.replyRuntime.label")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("launcher.replyRuntime.description")}
+            </p>
+          </div>
+          <Select
+            value={
+              enabledBackendIds.has(settings.replyBackend)
+                ? settings.replyBackend
+                : "pi"
+            }
+            onValueChange={(value) =>
+              update({ replyBackend: value as BackendId })
+            }
+          >
+            <SelectTrigger className="w-52 shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {replyBackends.map((runtime) => (
+                <SelectItem key={runtime.id} value={runtime.id}>
+                  {runtime.label}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -80,7 +80,6 @@ Claude Code 和 Codex 会复用现有 CLI 登录，不需要再配置一个账�
 - **独立 git worktree**：隔离每个 coding session 的改动
 - **视觉快速回复**：根据当前屏幕起草回复，不必启动完整 agent run
 - **Cetus Remote**：可选的 Tailscale 手机伴侣，用于跟踪运行和处理确认
-- **Ultra Code**：为单次请求编写 workflow 并编排子 agent
 - **语音听写**与**会议记忆**：在设备端完成处理
 - **电脑与浏览器控制**：执行有后果的操作前请求确认
 - **30+ 模型供应商**：包括 Anthropic、OpenAI、Google、Bedrock、Ollama、LM Studio 和 OpenRouter

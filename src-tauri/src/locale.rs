@@ -6,7 +6,7 @@
 //! (history, memory notes) happened to be in. We mirror the *resolved* UI locale
 //! into the `app_settings` store and append a concrete "reply in <language>"
 //! anchor to every conversation's system prompt at spawn time. Mirrors the
-//! persisted-toggle pattern in [`crate::ultra`].
+//! persisted setting pattern used by the other app preferences.
 
 use crate::store::Store;
 use crate::AppState;

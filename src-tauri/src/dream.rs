@@ -103,7 +103,7 @@ language. `category` is optional. Emit at most 5 ops. If nothing is durable \
 enough, respond {\"ops\":[]}.";
 
 // =============================================================================
-// Settings (persisted in app_settings, mirrors UltraSettings)
+// Settings (persisted in app_settings)
 // =============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

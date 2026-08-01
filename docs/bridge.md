@@ -94,7 +94,6 @@ source from `packages/cetus-bridge-protocol/src/index.ts`.
 
 Current host tunnels:
 
-- `__cetus_ultra_agent__`: spawn one sub-agent for Ultra workflows.
 - `__cetus_agent_step__`: emit a live browser/computer action step to the UI.
 - `__cetus_cua_request__`: call the native macOS accessibility helper.
 - `__cetus_browser_request__`: open/focus the embedded browser surface.

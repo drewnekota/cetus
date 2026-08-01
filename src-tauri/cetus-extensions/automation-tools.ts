@@ -8,7 +8,7 @@
  * tunnels its request through a sentinel `ctx.ui.input` (title
  * "__cetus_automation__"), which `pi_rpc::dispatch_line` routes to
  * `automation_tool.rs`; the reply (the resulting automation, or an error) comes
- * back as the input's resolved string. Same round-trip the computer-use and Ultra
+ * back as the input's resolved string. Same round-trip the computer-use
  * extensions use.
  *
  *   model tool ──ui.input(title="__cetus_automation__", placeholder=JSON)──► Rust

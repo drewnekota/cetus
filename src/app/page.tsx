@@ -700,8 +700,6 @@ export default function Home() {
       );
     } catch {}
   }, [view, settingsOpen, historyOpen, detailId, boardWorkspaceFilter]);
-  /** Ultra Code master switch, surfaced as a toggle in the composer. */
-  const [ultraEnabled, setUltraEnabled] = useState(false);
   const [detailModelChoice, setDetailModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
   const [detailWorkspaceDir, setDetailWorkspaceDir] = useState<string | null>(null);
   const [detailFocusToken, setDetailFocusToken] = useState(0);
@@ -958,26 +956,6 @@ export default function Home() {
       window.removeEventListener(RECENT_WORKSPACES_CHANGED, refresh);
       window.removeEventListener("storage", onStorage);
     };
-  }, []);
-
-  // Sync the Ultra Code master switch on mount and whenever the settings page
-  // closes (where it can be toggled), so the composer toggle seeds correctly.
-  useEffect(() => {
-    if (settingsOpen) return;
-    api
-      .getUltraSettings()
-      .then((s) => setUltraEnabled(s.enabled))
-      .catch(() => {});
-  }, [settingsOpen]);
-
-  /** Flip Ultra Code right from the composer. Persists the global switch; the
-   *  backend recycles idle pis so the change applies on the next turn. */
-  const onUltraToggle = useCallback(() => {
-    setUltraEnabled((v) => {
-      const next = !v;
-      api.setUltraSettings({ enabled: next }).catch(() => {});
-      return next;
-    });
   }, []);
 
   useEffect(() => {
@@ -2760,13 +2738,11 @@ export default function Home() {
       ),
     ];
 
-    // Adopt the model + Ultra choice the launcher made so the composer and the
-    // launched conversation agree. Ultra is a global switch the launcher already
-    // persisted backend-side; mirror it into the main window's state too.
+    // Adopt the model choice the launcher made so the composer and launched
+    // conversation agree.
     const launchedModel: ModelChoice = { model: p.model, reasoning: p.reasoning };
     // The [modelChoice] effect persists this to localStorage.
     setModelChoice(launchedModel);
-    setUltraEnabled(p.ultra);
 
     let target: string | null = null;
     if (p.sessionMode === "last") {
@@ -3441,8 +3417,6 @@ export default function Home() {
         onRemoveQueued={(id) => {
           if (detailId) removeQueued(detailId, id);
         }}
-        ultra={ultraEnabled}
-        onUltraToggle={onUltraToggle}
       />
       <ArtifactsDialog
         convId={activeId}
@@ -3460,8 +3434,6 @@ export default function Home() {
         workspaceDir={workspaceDir}
         defaultWorkspace={defaultWorkspace}
         onWorkspaceChange={onWorkspaceChange}
-        ultra={ultraEnabled}
-        onUltraToggle={onUltraToggle}
         pendingBackend={pendingBackend}
         onPendingBackendChange={setPendingBackend}
         pendingCliModel={pendingCliModel}
@@ -3646,8 +3618,6 @@ export default function Home() {
                 onRemoveQueued={(id) => {
                   if (activeId) removeQueued(activeId, id);
                 }}
-                ultra={ultraEnabled}
-                onUltraToggle={onUltraToggle}
                 focusToken={focusToken}
                 disabled={!piReady}
                 pendingBackend={pendingBackend}
@@ -3686,8 +3656,6 @@ export default function Home() {
                     onSend={onSend}
                     onBash={onBash}
                     onAbort={onAbort}
-                    ultra={ultraEnabled}
-                    onUltraToggle={onUltraToggle}
                     pendingBackend={pendingBackend}
                     onPendingBackendChange={setPendingBackend}
                     pendingCliModel={pendingCliModel}

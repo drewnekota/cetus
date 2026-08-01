@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Braces, Check, Cpu, Gauge, Zap } from "lucide-react";
+import { Cpu, Gauge, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { DsModel, ModelChoice, ReasoningLevel } from "@/lib/types";
 import {
@@ -14,7 +14,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 
 /** Model tiers offered for the built-in DeepSeek runtime. Ids are the persisted
@@ -45,18 +44,13 @@ const EFFORTS: { id: ReasoningLevel; labelKey: string; hintKey: string }[] = [
 interface Props {
   value: ModelChoice;
   onChange: (next: ModelChoice) => void;
-  /** Ultra Code state + toggle. When omitted, the UltraCode control is hidden. */
-  ultra?: boolean;
-  onUltraToggle?: () => void;
-  /** Disable only the Ultra toggle (e.g. mid-stream) while the rest stay live. */
-  lockUltra?: boolean;
   disabled?: boolean;
 }
 
 const triggerClass =
   "inline-flex h-7 items-center gap-1 rounded-md border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:ring-0 data-[size=sm]:h-7";
 
-export function ModelPicker({ value, onChange, ultra, onUltraToggle, lockUltra, disabled }: Props) {
+export function ModelPicker({ value, onChange, disabled }: Props) {
   const { t } = useTranslation("chat");
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
   const curModel = MODELS.find((m) => m.id === value.model) ?? MODELS[1];
@@ -71,14 +65,14 @@ export function ModelPicker({ value, onChange, ultra, onUltraToggle, lockUltra, 
     onChange({ model: value.model, reasoning });
   }
 
-  function toggleUltra() {
-    if (lockUltra) return;
-    onUltraToggle?.();
-  }
-
   return (
     <>
-      <Select value={value.model} onValueChange={(v) => selectModel(v as DsModel)} disabled={disabled}>
+      <Select
+        value={value.model}
+        onValueChange={(v) => selectModel(v as DsModel)}
+        onOpenChange={(open) => !open && setHoveredKey(null)}
+        disabled={disabled}
+      >
         <SelectTrigger size="sm" className={triggerClass}>
           <ModelIcon className="size-3" />
           <span className="truncate">{t(curModel.labelKey)}</span>
@@ -97,7 +91,6 @@ export function ModelPicker({ value, onChange, ultra, onUltraToggle, lockUltra, 
                   >
                     <Icon className="size-4" />
                     <span className="truncate">{t(m.labelKey)}</span>
-                    {m.id === curModel.id && <Check className="size-3.5" />}
                   </SelectItem>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
@@ -111,6 +104,7 @@ export function ModelPicker({ value, onChange, ultra, onUltraToggle, lockUltra, 
       <Select
         value={value.reasoning}
         onValueChange={(v) => selectEffort(v as ReasoningLevel)}
+        onOpenChange={(open) => !open && setHoveredKey(null)}
         disabled={disabled}
       >
         <SelectTrigger size="sm" className={triggerClass}>
@@ -128,7 +122,6 @@ export function ModelPicker({ value, onChange, ultra, onUltraToggle, lockUltra, 
                   className="text-xs"
                 >
                   <span className="flex-1">{t(e.labelKey)}</span>
-                  {e.id === curEffort.id && <Check className="size-3.5" />}
                 </SelectItem>
               </TooltipTrigger>
               <TooltipContent side="right" sideOffset={8}>
@@ -138,31 +131,6 @@ export function ModelPicker({ value, onChange, ultra, onUltraToggle, lockUltra, 
           ))}
         </SelectContent>
       </Select>
-      {onUltraToggle && (
-        <Tooltip open={hoveredKey === "ultra"}>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={toggleUltra}
-              disabled={disabled || lockUltra}
-              onPointerEnter={() => setHoveredKey("ultra")}
-              onPointerLeave={() => setHoveredKey(null)}
-              aria-pressed={!!ultra}
-              className={cn(
-                triggerClass,
-                ultra && "text-primary hover:text-primary",
-                "disabled:opacity-50",
-              )}
-            >
-              <Braces className="size-3" />
-              <span className="truncate">{t("model.ultra")}</span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right" sideOffset={8}>
-            {t("model.ultraHint")}
-          </TooltipContent>
-        </Tooltip>
-      )}
     </>
   );
 }

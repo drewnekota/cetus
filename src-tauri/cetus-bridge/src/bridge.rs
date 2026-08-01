@@ -3,16 +3,11 @@
 //! This module is intentionally product-light: it defines the stable tunnel
 //! titles, extension directory names, and small classifiers the host uses to
 //! distinguish hidden extension RPCs from user-visible UI requests. Product
-//! handlers live in `automation_tool`, `mcp_tool`, `skill_tool`, `agent`, and
-//! `ultra`.
+//! handlers live in `automation_tool`, `mcp_tool`, `skill_tool`, and `agent`.
 
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-
-/// Sentinel `ctx.ui.input` title the Ultra runtime uses to tunnel a sub-agent
-/// request to the host.
-pub const ULTRA_AGENT_TITLE: &str = "__cetus_ultra_agent__";
 
 /// Sentinel `ctx.ui.input` title used by agent-control extensions to push a live
 /// "watch" step to the host UI.
@@ -87,7 +82,6 @@ pub struct PluginExtensionConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostTunnelKind {
-    UltraAgent,
     Automation,
     Mcp,
     Skill,
@@ -145,7 +139,6 @@ pub fn host_tunnel_kind(value: &Value) -> Option<HostTunnelKind> {
         return None;
     }
     match value.get("title").and_then(|t| t.as_str()) {
-        Some(ULTRA_AGENT_TITLE) => Some(HostTunnelKind::UltraAgent),
         Some(AUTOMATION_TOOL_TITLE) => Some(HostTunnelKind::Automation),
         Some(MCP_TOOL_TITLE) => Some(HostTunnelKind::Mcp),
         Some(SKILL_TOOL_TITLE) => Some(HostTunnelKind::Skill),
@@ -182,10 +175,6 @@ mod tests {
             })
         };
 
-        assert_eq!(
-            host_tunnel_kind(&req(ULTRA_AGENT_TITLE)),
-            Some(HostTunnelKind::UltraAgent)
-        );
         assert_eq!(
             host_tunnel_kind(&req(AUTOMATION_TOOL_TITLE)),
             Some(HostTunnelKind::Automation)

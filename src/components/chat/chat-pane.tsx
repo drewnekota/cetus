@@ -93,9 +93,6 @@ interface Props {
   ) => void;
   onSteerQueued?: (id: string) => void;
   onRemoveQueued?: (id: string) => void;
-  /** Ultra Code state + toggle, forwarded to the composer. */
-  ultra?: boolean;
-  onUltraToggle?: () => void;
   focusToken: number;
   /** Persist the composer's unsent draft under this key (forwarded to Composer).
    *  Omit to keep the draft ephemeral (e.g. the detail dialog). */
@@ -144,8 +141,6 @@ export function ChatPane({
   onQueue,
   onSteerQueued,
   onRemoveQueued,
-  ultra,
-  onUltraToggle,
   focusToken,
   draftKey,
   emptyHeadline,
@@ -263,8 +258,6 @@ export function ChatPane({
             onSend={onSend}
             onBash={onBash}
             onAbort={onAbort}
-            ultra={ultra}
-            onUltraToggle={onUltraToggle}
             quoteRequest={quoteRequest}
             pendingBackend={pendingBackend}
             onPendingBackendChange={onPendingBackendChange}
@@ -332,8 +325,6 @@ export function ChatPane({
             onBash={onBash}
             onAbort={onAbort}
             draftRequest={queuedDraft?.request}
-            ultra={ultra}
-            onUltraToggle={onUltraToggle}
             quoteRequest={quoteRequest}
             backendSwitch={backendSwitch}
             onRequestBackendSwitch={onRequestBackendSwitch}
@@ -355,7 +346,7 @@ function CompactionBar({ reason }: { reason: string | null }) {
 }
 
 /** Awareness strip for background work owned by this conversation: subagents
- *  (claude-code run_in_background Agent/Task, e.g. an UltraCode workflow) and
+ *  (for example, a CLI backend's run_in_background Agent/Task) and
  *  session-scoped tasks (Monitors, background Bash) that outlive model turns.
  *  Without it the composer just says "Agent is running…" with no hint of
  *  *what* — or, worse, the conversation looks idle while a Monitor is watching

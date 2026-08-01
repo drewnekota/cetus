@@ -404,11 +404,9 @@ impl PiRpc {
         // (preflight ok / queued / handled) — not when the turn finishes. So a
         // successful return here means "the turn started", and the turn's real
         // end is the `agent_end` + `agent_settled` event pair on the stream.
-        // Callers that must wait for completion do so on events (run_engine
-        // parks on the sub-agent's `emit_node_result`); nobody may treat this
-        // `Ok(())` as "the model is done". Still use the stall-based wait: pi
-        // can take a while to accept a prompt on a cold session, and a wedged
-        // child must not hang the caller forever.
+        // Nobody may treat this `Ok(())` as "the model is done". Still use the
+        // stall-based wait: pi can take a while to accept a prompt on a cold
+        // session, and a wedged child must not hang the caller forever.
         let resp = self.request_streaming(payload).await?;
         let ok = resp
             .get("success")
@@ -982,35 +980,6 @@ fn route_host_tunnel(
     conversation_id: &Option<String>,
 ) {
     match kind {
-        crate::bridge::HostTunnelKind::UltraAgent => {
-            // The Ultra runtime's agent() tunnels a sub-agent request through a
-            // sentinel ctx.ui.input. Route it to the Rust handler (not the frontend
-            // dialog host) so it works headless and reuses the node machinery.
-            if let (Some(conv), Some(id)) = (
-                conversation_id.clone(),
-                value.get("id").and_then(|v| v.as_str()).map(String::from),
-            ) {
-                let params = crate::bridge::tunnel_params(&value);
-                emit_runtime_event(
-                    sink,
-                    RuntimeEvent::HostTunnelRequest {
-                        conversation_id: conv,
-                        request_id: id,
-                        kind,
-                        params,
-                    },
-                );
-            } else {
-                // No conversation id to reply through — surface as a normal event.
-                emit_runtime_event(
-                    sink,
-                    RuntimeEvent::Protocol {
-                        conversation_id: conversation_id.clone(),
-                        event: value,
-                    },
-                );
-            }
-        }
         crate::bridge::HostTunnelKind::Automation => {
             // The automation-tools extension tunnels a create/list/update request
             // through a sentinel ctx.ui.input. Route it to the Rust handler so it

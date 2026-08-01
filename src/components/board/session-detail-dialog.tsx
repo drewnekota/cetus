@@ -65,9 +65,6 @@ interface Props {
   ) => void;
   onSteerQueued?: (id: string) => void;
   onRemoveQueued?: (id: string) => void;
-  /** Ultra Code state + toggle, forwarded to the composer. */
-  ultra?: boolean;
-  onUltraToggle?: () => void;
 }
 
 export function SessionDetailDialog({
@@ -91,8 +88,6 @@ export function SessionDetailDialog({
   onQueue,
   onSteerQueued,
   onRemoveQueued,
-  ultra,
-  onUltraToggle,
 }: Props) {
   const { t } = useTranslation("board");
   const { t: tc } = useTranslation("chat");
@@ -433,8 +428,6 @@ export function SessionDetailDialog({
                 onQueue={onQueue}
                 onSteerQueued={onSteerQueued}
                 onRemoveQueued={onRemoveQueued}
-                ultra={ultra}
-                onUltraToggle={onUltraToggle}
                 backendSwitch={backendSwitch}
                 onRequestBackendSwitch={requestBackendSwitch}
                 focusToken={focusToken}

@@ -21,6 +21,14 @@
 //! finish (cleanup context) and at +1.2s/+10s (correction mining), all well
 //! after the wake-up sent at session start.
 
+/// Rich, one-shot context for quick reply. `ambient` carries app/window/browser
+/// metadata and the focused selection; `visible_text` is the bounded AX walk of
+/// the focused window. Both are captured before the quick panel takes focus.
+pub struct ReplyContext {
+    pub ambient: Option<crate::ocr::AmbientContext>,
+    pub visible_text: String,
+}
+
 /// Best-effort, blocking (one AX round-trip + a stat): poke the frontmost
 /// app's accessibility tree awake if it's an Electron app. Debounced per pid —
 /// the flag sticks for the app's lifetime, so once per process is enough (a
@@ -251,6 +259,33 @@ pub fn gather_pre_focus_context() -> Option<crate::ocr::AmbientContext> {
         None
     } else {
         Some(ctx)
+    }
+}
+
+/// Capture the full current reply context in one blocking job. Unlike the
+/// launcher's lightweight context path, quick reply benefits from the focused
+/// window's visible AX text and can afford the bounded browser/title probes
+/// because screenshot capture runs alongside this function.
+#[cfg(target_os = "macos")]
+pub fn gather_reply_context() -> ReplyContext {
+    let mut ambient = gather_pre_focus_context().unwrap_or_default();
+    let (_, bundle, pid) = frontmost_identity().unwrap_or_default();
+    if ambient.bundle_id.is_empty() {
+        ambient.bundle_id = bundle.clone();
+    }
+    let visible_text = visible_text(pid, 8_000).unwrap_or_default();
+    ambient.title = focused_window_title(pid).unwrap_or_default();
+    if !bundle.is_empty() {
+        if let Some((url, page_title)) = fetch_browser_url(&bundle) {
+            ambient.url = url;
+            if !page_title.is_empty() {
+                ambient.title = page_title;
+            }
+        }
+    }
+    ReplyContext {
+        ambient: (!ambient.is_empty()).then_some(ambient),
+        visible_text,
     }
 }
 
@@ -671,6 +706,14 @@ pub fn wake_frontmost_app() {}
 #[cfg(not(target_os = "macos"))]
 pub fn gather_pre_focus_context() -> Option<crate::ocr::AmbientContext> {
     None
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn gather_reply_context() -> ReplyContext {
+    ReplyContext {
+        ambient: None,
+        visible_text: String::new(),
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

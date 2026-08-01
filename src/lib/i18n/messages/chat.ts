@@ -157,8 +157,6 @@ export const chat = {
     "model.highHint": "High thinking — stronger reasoning",
     "model.max": "Max",
     "model.maxHint": "Max thinking — deepest reasoning",
-    "model.ultra": "UltraCode",
-    "model.ultraHint": "Max thinking + autonomous workflow orchestration",
 
     // Workspace picker
     "workspace.label": "Workspace",
@@ -365,8 +363,6 @@ export const chat = {
     "model.highHint": "高思考——更强推理",
     "model.max": "最高",
     "model.maxHint": "最高思考——最深入推理",
-    "model.ultra": "UltraCode",
-    "model.ultraHint": "最高思考 + 自主工作流编排",
 
     "workspace.label": "工作区",
     "workspace.addFolder": "添加文件夹……",
@@ -468,8 +464,6 @@ export const chat = {
     "model.highHint": "高推論——より強力な推論",
     "model.max": "マックス",
     "model.maxHint": "最大推論——最も深い推論",
-    "model.ultra": "UltraCode",
-    "model.ultraHint": "最大推論 + 自律的なワークフロー編成",
 
     "workspace.label": "ワークスペース",
     "workspace.addFolder": "フォルダを追加…",
@@ -564,8 +558,6 @@ export const chat = {
     "model.highHint": "높은 사고 — 더 강력한 추론",
     "model.max": "맥스",
     "model.maxHint": "최대 사고 — 가장 깊은 추론",
-    "model.ultra": "UltraCode",
-    "model.ultraHint": "최대 사고 + 자율 워크플로 오케스트레이션",
 
     "workspace.label": "작업 공간",
     "workspace.addFolder": "폴더 추가…",
@@ -660,8 +652,6 @@ export const chat = {
     "model.highHint": "pensamiento alto — razonamiento más sólido",
     "model.max": "Máximo",
     "model.maxHint": "pensamiento máximo — razonamiento más profundo",
-    "model.ultra": "UltraCode",
-    "model.ultraHint": "pensamiento máximo + orquestación autónoma del flujo de trabajo",
 
     "workspace.label": "Espacio de trabajo",
     "workspace.addFolder": "Añadir carpeta…",
@@ -756,8 +746,6 @@ export const chat = {
     "model.highHint": "raciocínio alto — raciocínio mais forte",
     "model.max": "Máximo",
     "model.maxHint": "raciocínio máximo — raciocínio mais profundo",
-    "model.ultra": "UltraCode",
-    "model.ultraHint": "raciocínio máximo + orquestração autônoma de fluxo de trabalho",
 
     "workspace.label": "Espaço de trabalho",
     "workspace.addFolder": "Adicionar pasta…",
@@ -852,8 +840,6 @@ export const chat = {
     "model.highHint": "réflexion élevée — raisonnement plus poussé",
     "model.max": "Max",
     "model.maxHint": "réflexion maximale — raisonnement le plus profond",
-    "model.ultra": "UltraCode",
-    "model.ultraHint": "réflexion maximale + orchestration autonome du flux de travail",
 
     "workspace.label": "Espace de travail",
     "workspace.addFolder": "Ajouter un dossier…",
@@ -948,8 +934,6 @@ export const chat = {
     "model.highHint": "hohes Nachdenken — stärkeres Schlussfolgern",
     "model.max": "Max",
     "model.maxHint": "maximales Nachdenken — tiefstes Schlussfolgern",
-    "model.ultra": "UltraCode",
-    "model.ultraHint": "maximales Nachdenken + autonome Workflow-Orchestrierung",
 
     "workspace.label": "Arbeitsbereich",
     "workspace.addFolder": "Ordner hinzufügen…",
@@ -1044,8 +1028,6 @@ export const chat = {
     "model.highHint": "ragionamento alto — ragionamento più forte",
     "model.max": "Max",
     "model.maxHint": "ragionamento massimo — ragionamento più profondo",
-    "model.ultra": "UltraCode",
-    "model.ultraHint": "ragionamento massimo + orchestrazione autonoma del flusso di lavoro",
 
     "workspace.label": "Area di lavoro",
     "workspace.addFolder": "Aggiungi cartella…",
@@ -1140,8 +1122,6 @@ export const chat = {
     "model.highHint": "высокое мышление — более сильные рассуждения",
     "model.max": "Максимум",
     "model.maxHint": "максимальное мышление — самые глубокие рассуждения",
-    "model.ultra": "UltraCode",
-    "model.ultraHint": "максимальное мышление + автономная оркестрация рабочего процесса",
 
     "workspace.label": "Рабочая область",
     "workspace.addFolder": "Добавить папку…",

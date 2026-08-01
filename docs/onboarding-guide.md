@@ -66,8 +66,6 @@
 │  │  cetus-bridge crate  pi --mode rpc 子进程封装与 bridge 协议          │ │
 │  │  store.rs            SQLite 元数据存储（对话、截屏、应用设置）        │ │
 │  │  agent.rs            浏览器/电脑控制设置 + host-tunnel handler        │ │
-│  │  ultra.rs            Ultra Code 模式设置                             │ │
-│  │  run_engine.rs       Ultra 子 Agent 编排引擎（并发池 + 结果注册表）   │ │
 │  │  scheduler.rs        自动化定时任务调度器（20s 间隔 tick）            │ │
 │  │  memory.rs           跨进程 Memory（JSON 文件, 原子写入）             │ │
 │  │  ocr.rs              Apple Vision OCR（Swift 辅助程序）              │ │
@@ -90,8 +88,6 @@
 │  │     ├─ computer-use.ts     桌面自动化（macOS）                        │ │
 │  │     ├─ vision-bridge.ts    视觉 / 图片处理                            │ │
 │  │     ├─ web-search.ts       网络搜索                                   │ │
-│  │     ├─ ultra-runtime.ts    Ultra Code 工作流引擎                      │ │
-│  │     ├─ emit-result.ts      子 Agent 结果上报                          │ │
 │  │     ├─ mcp-bridge.ts       MCP 协议桥接                               │ │
 │  │     ├─ automation-tools.ts 自动化管理工具                             │ │
 │  │     └─ dictation-recall.ts 语音输入历史查询                           │ │
@@ -107,7 +103,7 @@
 | **聊天界面** | `src/components/chat/` | 消息气泡（Markdown 渲染 + 代码高亮）、thinking 折叠块、tool-use 卡片（参数 + 结果 + 错误高亮）、agent-control 卡片（浏览器/桌面操作直播）、附件/artifacts 面板。 |
 | **聊天状态** | `src/lib/chat-state.ts` | 纯函数 reducer：将 pi 的流式 JSON 事件（`agent_start`、`message_update`、`tool_execution_start` 等）折叠为稳定的 `RenderedMessage[]` 数组，按 `contentIndex` 索引块，用 `toolCallId → block` 侧表快速路由工具执行更新。 |
 | **聊天 Store** | `src/lib/chat-store.ts` | Zustand store 封装 reducer，支持按 `(convId, messageKey)` 精准订阅（流式 token 更新只重渲染当前气泡，不重渲整个列表）。附带 IndexedDB 缓存，启动时秒开上次会话。 |
-| **看板** | `src/components/board/` | Kanban 三列视图（In progress / Needs review / Done），卡片 = 一次对话。支持侧-by-side 比较 Ultra Code 的并行候选方案。 |
+| **看板** | `src/components/board/` | Kanban 三列视图（In progress / Needs review / Done），卡片 = 一次对话。 |
 | **自动化** | `src/components/automation/` | 定时任务管理：cron / every / daily / at 四种调度模式，每次触发生成一条新的后台对话。 |
 | **全局启动器** | `src/components/quick/` | double-⌘ 唤出的浮动面板：非激活 NSPanel，自动附带当前屏幕截屏。 |
 | **设置** | `src/components/settings/` | 左侧分组导航（Intelligence / Input & Capture / App），管理 API Keys、Memory、Dreaming、Skills、Connectors、Voice、Screen Context、Appearance 等。 |
@@ -123,7 +119,6 @@
 | **`store.rs`** | SQLite 封装：conversations 表（id、title、session_file、workspace_dir、model、timestamps、review_state 等）、screenshots 表（OCR 文本 + 感知哈希索引）、app_settings 键值表。Schema 版本管理，大版本变更自动重建。 |
 | **`agent.rs`** | 浏览器/电脑控制的两层 gate：设置持久化 + env 标记导出（`CETUS_BROWSER_USE` / `CETUS_COMPUTER_USE`），host-tunnel handler（接收 pi 扩展的 `agent_control_request` 事件，分发给 cua.rs 执行或推向 UI 直播）。 |
 | **`scheduler.rs`** | 后台定时器（20s tick）：扫描 `next_run_at` 到期的 automation → 创建新对话 → spawn pi → 发送 prompt → 更新调度状态。与手动触发共享 `inflight` 去重集。 |
-| **`ultra.rs`** + **`run_engine.rs`** | Ultra Code 模式：模型编写 JS workflow → `run_workflow` 工具在 pi 的 Bun 运行时执行 → `agent()` 原语通过 sentinel title 隧穿回 Rust host → `run_agent_node` 创建子 Agent（独立 pi 子进程、独立 Conversation）→ 子 Agent 通过 `emit_node_result` 工具上报结果 → host 的 `app-event` 监听器 resolve pending oneshot。 |
 | **`memory.rs`** | 跨进程 Memory 存储（JSON 文件 + 原子写入 rename）。pi 扩展和 Rust 后端共享同一文件（通过 `CETUS_MEMORY_PATH` env），每个 turn 前注入到系统提示词。 |
 | **`ocr.rs`** + **`capture.rs`** | 屏幕上下文：定期截图（感知哈希去重）→ 调 Apple Vision OCR（Swift 辅助程序，首次使用时 `swiftc` 编译）→ 存入 SQLite + 磁盘 → 前端可按文本/时间/应用搜索。 |
 | **`voice.rs`** | 语音输入：macOS 语音识别 + Swift 辅助程序。支持应用内和全局 push-to-talk。 |
@@ -139,8 +134,6 @@
 | --- | --- |
 | `browser-use.ts`（~50KB）| 浏览器自动化工具集：`browser_open`、`browser_observe`、`browser_click`、`browser_type` 等，通过 numbered element list 操作（非像素坐标）。 |
 | `computer-use.ts`（~25KB）| 桌面自动化工具集：`computer_observe`、`computer_click`、`computer_type` 等，通过 macOS AX API 操作。 |
-| `ultra-runtime.ts` | Ultra Code JS workflow 运行时：提供 `Cetus` 全局（`agent()`、`parallel()`、`pipeline()`、`phase()`、`log()`），在 pi 的 Bun 中执行模型编写的脚本。 |
-| `emit-result.ts` | 子 Agent 结果上报：`emit_node_result` 工具，将结构化结果通过 `app-event` 发送回 host。 |
 | `vision-bridge.ts` | 视觉桥接：处理图片输入，调用 Gemini 视觉模型生成描述。 |
 | `web-search.ts` | 网络搜索：`web_search` 和 `web_fetch` 工具（Tavily / DDG）。 |
 | `mcp-bridge.ts` | MCP 协议桥接：读取 `CETUS_MCP_CONFIG`，通过 mcporter 连接各 MCP server 并注册其工具。 |
@@ -182,7 +175,7 @@ commands::send_prompt() 被调用
   │   │   ├─ pi_rpc::PiRpc::spawn()
   │   │   │   ├─ 计算 cwd = <app_data>/pi-install/
   │   │   │   ├─ 加载 env (DEEPSEEK_API_KEY 等，从 Keychain)
-  │   │   │   ├─ 拼接系统提示词（Cetus 身份 + 产品指南 + 可选 Ultra/Agent）
+  │   │   │   ├─ 拼接系统提示词（Cetus 身份 + 产品指南 + 可选 Agent）
   │   │   │   ├─ 启动 tokio::process::Command("pi", ["--mode", "rpc"])
   │   │   │   ├─ 启动 stdout 读取循环（BufReader, 按 \n 分割 JSONL）
   │   │   │   └─ 等待 pi 的 ready 信号
@@ -236,8 +229,7 @@ cetus-bridge 的 stdout 读取循环：
   │   │   └─ app_event.rs 映射为 AppEvent::PiEvent 后 emit("app-event")
   │   │       → Tauri 全局事件，前端 page.tsx 的监听器收到
   │   │
-  │   ├─ 特定 sentinel title（Ultra agent / Agent step / CUA）→ 路由到 Rust handler
-  │   │   ├─ __cetus_ultra_agent__ → ultra.rs → run_engine.rs 启动子 Agent
+  │   ├─ 特定 sentinel title（Agent step / CUA）→ 路由到 Rust handler
   │   │   ├─ __cetus_agent_step__ → agent.rs → 推送到前端 AgentControlCard
   │   │   └─ __cetus_cua_request__ → agent.rs → cua.rs 执行 AX 操作
   │   │
@@ -297,7 +289,7 @@ page.tsx 的 app-event 监听器：
                                                    ╱        ╲
                                                   ╱          ╲
                                      Tauri app-event      Rust handlers
-                                           │              (Ultra / Agent / CUA)
+                                           │              (Agent / CUA)
                                            ▼
                                      page.tsx 监听器
                                            │

@@ -8,7 +8,7 @@
  * sentinel `ctx.ui.input` (title "__cetus_skill__"), which `pi_rpc::dispatch_line`
  * routes to `skill_tool.rs`; the reply (the resulting skill, or an error) comes
  * back as the input's resolved string. Same round-trip the automation-tools and
- * Ultra extensions use.
+ * other host-tunnel extensions use.
  *
  *   model tool ──ui.input(title="__cetus_skill__", placeholder=JSON)──► Rust
  *              ◄────────────────── JSON reply (value) ──────────────────

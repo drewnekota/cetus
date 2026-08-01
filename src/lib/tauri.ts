@@ -30,7 +30,6 @@ import type {
   DiscoveredSkill,
   SlashCommand,
   SlashCommandInput,
-  UltraSettings,
   QuickLaunchPayload,
   QuickScreenshot,
   QuickSettings,
@@ -400,11 +399,6 @@ export const api = {
     invoke<void>("set_transcripts_enabled", { enabled }),
   /** Delete all saved transcripts (the master switch is left untouched). */
   clearTranscripts: () => invoke<void>("clear_transcripts"),
-
-  // Ultra Code (autonomous workflow orchestration) ------------------------
-  getUltraSettings: () => invoke<UltraSettings>("get_ultra_settings"),
-  setUltraSettings: (settings: UltraSettings) =>
-    invoke<void>("set_ultra_settings", { settings }),
 
   // Mirror the resolved UI locale into the backend so it can anchor the
   // conversation system prompt to a concrete reply language. Fire-and-forget.

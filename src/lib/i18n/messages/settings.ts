@@ -214,7 +214,10 @@ export const settings = {
       "Select a screen area to attach — click for the full screen — then launch.",
     "launcher.fn.reply.label": "Visual quick reply",
     "launcher.fn.reply.description":
-      "Capture the current screen, draft replies directly with a vision model, and insert one back into the focused app.",
+      "Capture the current screen and AX context, ask your chosen agent runtime for reply options, and insert one back into the focused app.",
+    "launcher.replyRuntime.label": "Quick-reply runtime",
+    "launcher.replyRuntime.description":
+      "Use one of the agent runtimes enabled in Settings → Runtimes.",
     "launcher.summon.label": "Summon Cetus",
     "launcher.summon.description":
       "Global shortcut to bring Cetus to the front, switching desktops if it's on another.",
@@ -805,7 +808,10 @@ export const settings = {
     "launcher.fn.shot.description": "先框选屏幕区域作为截图（单击=全屏），再唤出启动器。",
     "launcher.fn.reply.label": "视觉快速回复",
     "launcher.fn.reply.description":
-      "截取当前屏幕，由视觉模型直接生成回复候选，并将选中的回复写回原应用。",
+      "读取当前屏幕与 AX 上下文，交给所选 agent runtime 生成回复候选，并将选中的回复写回原应用。",
+    "launcher.replyRuntime.label": "快速回复 Runtime",
+    "launcher.replyRuntime.description":
+      "从「设置 → Runtimes」中已启用的 agent runtime 里选择。",
     "launcher.summon.label": "唤起 Cetus",
     "launcher.summon.description":
       "全局快捷键，将 Cetus 切到最前；若它在其他桌面会直接切换过去。",

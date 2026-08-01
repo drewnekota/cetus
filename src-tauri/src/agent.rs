@@ -16,7 +16,7 @@
 //!   React main window, which opens/focuses the right-side Browser tab.
 //!
 //! Replies go back through the parent pi's `extension_ui_response`, the exact
-//! mechanism Ultra uses (see [`crate::ultra`]).
+//! mechanism used by other host-tunnel extensions.
 
 use crate::app_event::AppEvent;
 use crate::cua::CuaRuntime;
@@ -35,7 +35,7 @@ use tokio::sync::Mutex;
 // Settings
 // =============================================================================
 
-/// Persisted switches, one JSON blob in `app_settings` (mirrors Ultra). The two
+/// Persisted switches, one JSON blob in `app_settings`. The two
 /// surfaces are toggled independently — browser-use and computer-use each gate
 /// their own pi extension and prompt section.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -205,7 +205,7 @@ pub async fn agent_stop(state: State<'_, AppState>, conv_id: String) -> Result<(
 
 /// Clone-friendly bundle the app-event listener captures so it can answer
 /// `AgentControlRequest`s without holding a borrow on managed state. Mirrors the
-/// role of `run_engine::RunCtx` for the Ultra path.
+/// role of the context bundles used by the other host-tunnel handlers.
 #[derive(Clone)]
 pub struct AgentCtx {
     /// The shared pi pool (same `Arc` as `AppState.pis`), used to reply to the

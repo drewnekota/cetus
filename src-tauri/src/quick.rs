@@ -34,6 +34,11 @@ pub struct QuickSettings {
     /// double-tap Option, mirroring the fastest common reply-assistant gesture.
     #[serde(default = "default_gesture_reply")]
     pub gesture_reply: String,
+    /// Agent runtime used for one-shot quick replies. Uses the same stable ids
+    /// as conversations ("pi" | "claude-code" | "codex" | ACP runtimes).
+    /// Disabled or unknown runtimes fall back to Cetus at invocation time.
+    #[serde(default = "crate::store::default_backend")]
+    pub reply_backend: String,
     /// Optional configurable global hotkey that brings the main cetus window to
     /// the front (switching to its Space/desktop if it's on another one). A
     /// Tauri accelerator string, e.g. "Cmd+Shift+K"; empty = no hotkey. Unlike
@@ -152,6 +157,7 @@ impl Default for QuickSettings {
             gesture_plain: default_gesture_plain(),
             gesture_shot: default_gesture_shot(),
             gesture_reply: default_gesture_reply(),
+            reply_backend: crate::store::default_backend(),
             summon_hotkey: String::new(),
             session_mode: "new".into(),
             voice_enabled: false,
@@ -824,6 +830,10 @@ pub async fn present_launcher(
 /// streams back one result event. `open_id` makes late results harmless after a
 /// dismiss/reopen race.
 pub async fn open_reply(app: &AppHandle) {
+    let settings = {
+        let state = app.state::<AppState>();
+        load_settings(&state.store)
+    };
     let (recapturing, shown, last_open_ms) = {
         let state = app.state::<AppState>();
         (
@@ -855,9 +865,13 @@ pub async fn open_reply(app: &AppHandle) {
     last_open_ms.store(open_id, Ordering::Relaxed);
     shown.store(true, Ordering::Relaxed);
 
-    let context_task = tauri::async_runtime::spawn_blocking(crate::ax::gather_pre_focus_context);
+    let context_task = tauri::async_runtime::spawn_blocking(crate::ax::gather_reply_context);
     let screenshot_task = tauri::async_runtime::spawn_blocking(capture_screenshot);
-    let context = context_task.await.ok().flatten();
+    let reply_context = context_task.await.ok().unwrap_or(crate::ax::ReplyContext {
+        ambient: None,
+        visible_text: String::new(),
+    });
+    let context = reply_context.ambient;
     let screenshot = screenshot_task.await.ok().flatten();
 
     // The reply surface needs room for three candidates and an editable draft.
@@ -903,7 +917,16 @@ pub async fn open_reply(app: &AppHandle) {
     );
 
     let result = match screenshot {
-        Some(ref shot) => crate::quick_reply::generate(shot, context.as_ref()).await,
+        Some(ref shot) => {
+            crate::quick_reply::generate(
+                app,
+                shot,
+                context.as_ref(),
+                &reply_context.visible_text,
+                &settings.reply_backend,
+            )
+            .await
+        }
         None if !screen_recording_granted() => Err(anyhow::anyhow!(
             "Screen Recording permission is required for visual quick reply."
         )),
@@ -1056,8 +1079,6 @@ pub struct QuickSubmit {
     /// Model + reasoning preset chosen in the launcher's model picker.
     pub model: String,
     pub reasoning: String,
-    /// Ultra Code (workflow orchestration) state chosen in the launcher.
-    pub ultra: bool,
     /// Ambient context (frontmost app / browser URL / selection) the user kept
     /// on the panel. None when no screenshot rode along or all chips were removed.
     #[serde(default)]
@@ -1089,7 +1110,6 @@ pub async fn quick_submit(app: AppHandle, payload: QuickSubmit) -> Result<(), St
             "workspaceDir": payload.workspace_dir,
             "model": payload.model,
             "reasoning": payload.reasoning,
-            "ultra": payload.ultra,
             "context": payload.context,
             "backend": payload.backend,
             "cliModel": payload.cli_model,

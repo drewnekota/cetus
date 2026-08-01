@@ -7,7 +7,6 @@
  */
 
 export const HOST_TUNNELS = {
-  ultraAgent: "__cetus_ultra_agent__",
   agentStep: "__cetus_agent_step__",
   cuaRequest: "__cetus_cua_request__",
   browserRequest: "__cetus_browser_request__",

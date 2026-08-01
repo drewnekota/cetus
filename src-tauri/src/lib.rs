@@ -50,7 +50,6 @@ mod quick;
 mod quick_reply;
 mod remote;
 mod resources;
-mod run_engine;
 mod scheduler;
 mod secrets;
 mod skill_review;
@@ -68,7 +67,6 @@ mod text_input;
 mod text_input;
 mod titling;
 mod transcripts;
-mod ultra;
 mod updater;
 mod voice;
 mod webview_health;
@@ -120,11 +118,6 @@ pub struct AppState {
     /// Live view of the quick-launcher gesture config, shared with the native
     /// key-tap thread so settings changes apply without a restart.
     pub quick: quick::QuickRuntime,
-    /// Per-sub-agent result waiters for Ultra Code (run_engine.rs), fulfilled by
-    /// the `app-event` listener when a sub-agent calls `emit_node_result`.
-    run_registry: run_engine::NodeResultRegistry,
-    /// Shared concurrency cap across all Ultra sub-agents (≈ min(16, cores-2)).
-    run_semaphore: Arc<tokio::sync::Semaphore>,
     /// Browser/computer "agent control": the macOS AX helper child + the
     /// emergency-stop flags. Shared with the app-event listener's AgentCtx.
     pub cua: cua::CuaRuntime,
@@ -390,10 +383,7 @@ impl AppState {
     /// Return the settlement signal only when a registered turn has already
     /// emitted `agent_end`. Native steer is no longer valid in this narrow
     /// phase; callers should wait and dispatch a normal next turn instead.
-    pub fn cli_turn_done_if_closing(
-        &self,
-        conv_id: &str,
-    ) -> Option<Arc<tokio::sync::Notify>> {
+    pub fn cli_turn_done_if_closing(&self, conv_id: &str) -> Option<Arc<tokio::sync::Notify>> {
         let turns = self.cli_turns.lock().unwrap();
         let handle = turns.get(conv_id)?;
         handle
@@ -547,12 +537,7 @@ impl AppState {
         for (k, v) in self.conv_agent_env(conv_id, &workspace) {
             env.push((k, v));
         }
-        // Ultra Code (global toggle) appends the workflow-authoring contract to
-        // this conversation's system prompt so the agent can orchestrate.
         let mut extra = String::new();
-        if ultra::load_settings(&self.store).enabled {
-            extra.push_str(prompts::ULTRA_SYSTEM_PROMPT);
-        }
         if let Some(p) = plugins::extra_system_prompt(&self.store) {
             extra.push_str(&p);
         }
@@ -689,17 +674,6 @@ impl AppState {
     }
     pub fn handle(&self) -> &AppHandle {
         &self.handle
-    }
-
-    /// Clone of the workflow-engine result registry (shared with the app-event
-    /// listener, which resolves a node's pending result on `emit_node_result`).
-    pub fn run_registry(&self) -> run_engine::NodeResultRegistry {
-        self.run_registry.clone()
-    }
-
-    /// Clone of the shared run concurrency limiter.
-    pub fn run_semaphore(&self) -> Arc<tokio::sync::Semaphore> {
-        self.run_semaphore.clone()
     }
 
     /// Bundle the dependencies the background scheduler needs into a cheap,
@@ -911,7 +885,8 @@ pub fn run() {
         }
     });
 
-    let builder = builder.setup(|app| {
+    let builder = builder
+        .setup(|app| {
             // Started as a login item (the autostart plugin appends `--autostart`):
             // keep cetus resident in the tray instead of popping the main window in
             // the user's face right after they log in.
@@ -1022,16 +997,7 @@ pub fn run() {
                         == quick::VOICE_CAPS_LOCK,
             );
 
-            // Ultra Code sub-agents: a per-node result registry the host awaits
-            // and a shared concurrency cap. The host-side observer listens on the
-            // SAME `app-event` channel pi_rpc emits to, resolving a sub-agent's
-            // pending result the instant it calls `emit_node_result` — no UI
-            // window required. The same listener answers Ultra `agent()` requests
-            // (run a sub-agent, reply to the waiting in-pi script).
-            let run_registry = run_engine::new_registry();
-            let run_semaphore = run_engine::new_semaphore();
-            // The pool + dedup set are shared by AppState, the scheduler, and the
-            // listener's RunCtx, so a node spawned anywhere lands in one pool.
+            // The pool + dedup set are shared by AppState and the scheduler.
             let pis: Arc<Mutex<HashMap<String, Arc<pi_rpc::PiRpc>>>> =
                 Arc::new(Mutex::new(HashMap::new()));
             let inflight: scheduler::InFlight =
@@ -1040,20 +1006,6 @@ pub fn run() {
             // emergency-stop flags, shared by AppState and the app-event listener.
             let cua = cua::CuaRuntime::new();
             {
-                let registry = run_registry.clone();
-                let listener_ctx = run_engine::RunCtx {
-                    sched: scheduler::SchedulerCtx {
-                        store: store.clone(),
-                        pool: pis.clone(),
-                        inflight: inflight.clone(),
-                        handle: handle.clone(),
-                        pi_bin: pi_bin.clone(),
-                        sessions_dir: sessions_dir.clone(),
-                        default_workspace: default_workspace.clone(),
-                    },
-                    registry: run_registry.clone(),
-                    semaphore: run_semaphore.clone(),
-                };
                 let agent_ctx = agent::AgentCtx {
                     pool: pis.clone(),
                     handle: handle.clone(),
@@ -1080,8 +1032,6 @@ pub fn run() {
                 };
                 app.handle().listen("app-event", move |event| {
                     let payload = event.payload();
-                    run_engine::handle_app_event(&registry, payload);
-                    ultra::maybe_handle_agent_request(&listener_ctx, payload);
                     agent::maybe_handle_control_request(&agent_ctx, payload);
                     automation_tool::maybe_handle_automation_request(&automation_ctx, payload);
                     skill_tool::maybe_handle_skill_request(&skill_ctx, payload);
@@ -1104,8 +1054,6 @@ pub fn run() {
                 dictation: voice::DictationState::default(),
                 default_workspace,
                 quick: quick_runtime.clone(),
-                run_registry,
-                run_semaphore,
                 cua: cua.clone(),
                 cli_turns: std::sync::Mutex::new(HashMap::new()),
                 claude_sessions: std::sync::Mutex::new(HashMap::new()),
@@ -1439,24 +1387,15 @@ pub fn run() {
             {
                 use tauri::menu::{MenuItem, MenuItemKind};
 
-                let reload = MenuItem::with_id(
-                    app,
-                    "view_reload",
-                    "Reload",
-                    true,
-                    Some("CmdOrCtrl+R"),
-                )?;
-                if let Some(MenuItemKind::Submenu(view)) = menu
-                    .items()?
-                    .into_iter()
-                    .find(|item| {
-                        matches!(
-                            item,
-                            MenuItemKind::Submenu(submenu)
-                                if matches!(submenu.text().as_deref(), Ok("View"))
-                        )
-                    })
-                {
+                let reload =
+                    MenuItem::with_id(app, "view_reload", "Reload", true, Some("CmdOrCtrl+R"))?;
+                if let Some(MenuItemKind::Submenu(view)) = menu.items()?.into_iter().find(|item| {
+                    matches!(
+                        item,
+                        MenuItemKind::Submenu(submenu)
+                            if matches!(submenu.text().as_deref(), Ok("View"))
+                    )
+                }) {
                     view.prepend(&reload)?;
                 }
             }
@@ -1580,8 +1519,6 @@ pub fn run() {
         transcripts::list_transcripts,
         transcripts::set_transcripts_enabled,
         transcripts::clear_transcripts,
-        ultra::get_ultra_settings,
-        ultra::set_ultra_settings,
         provider::get_deepseek_base_url,
         provider::set_deepseek_base_url_cmd,
         locale::get_ui_locale,
@@ -1758,8 +1695,6 @@ pub fn run() {
         transcripts::list_transcripts,
         transcripts::set_transcripts_enabled,
         transcripts::clear_transcripts,
-        ultra::get_ultra_settings,
-        ultra::set_ultra_settings,
         provider::get_deepseek_base_url,
         provider::set_deepseek_base_url_cmd,
         locale::get_ui_locale,

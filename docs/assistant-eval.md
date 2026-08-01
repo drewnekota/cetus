@@ -199,15 +199,6 @@ teardown: rm -rf ~/cetus-e2e/inbox
 
 压测：scheduler **真实触发**、board 看板、后台对话生成。难度：**L2–L3**。
 
-### S10 · 又大又乱的活（Complex / Long-horizon — Ultra Code）
-
-> 「这活太大，自己拆开、并行干、最后给我一份。」
-
-- 「把这个仓库每个 .md 一句话总结」（fan out 子 agent → 子对话 → synthesis）
-- 「研究这三家竞品，每家产一页对比，最后汇总成一张表」（拆解 + parallel + 综合）
-
-压测：Ultra Code、`agent()` / `parallel()` 扇出、子对话呈现、综合质量、不过度扇出。难度：**L3**。
-
 ---
 
 ## 5. 难度分层

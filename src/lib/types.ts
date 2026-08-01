@@ -32,8 +32,10 @@ export interface QuickSettings {
   /** Gesture that opens the launcher *with* a screenshot attached. */
   gestureShot: QuickGesture;
   /** Gesture that captures the current UI and directly drafts reply options
-   *  with a vision model. */
+   *  with the selected agent runtime. */
   gestureReply: QuickGesture;
+  /** Agent runtime used for the one-shot quick-reply turn. */
+  replyBackend: BackendId;
   /** Configurable global hotkey (for example "Cmd+Shift+K" on macOS or
    *  "Ctrl+Shift+K" on Windows) that
    *  brings cetus to the front, switching desktops if it's on another. Empty
@@ -76,6 +78,7 @@ export const DEFAULT_QUICK_SETTINGS: QuickSettings = {
   gesturePlain: "both_cmd",
   gestureShot: "off",
   gestureReply: "double_opt",
+  replyBackend: "pi",
   summonHotkey: "",
   sessionMode: "new",
   voiceEnabled: false,
@@ -331,8 +334,6 @@ export interface QuickLaunchPayload {
   /** Model + reasoning chosen in the launcher's model picker. */
   model: DsModel;
   reasoning: ReasoningLevel;
-  /** Ultra Code (workflow orchestration) state chosen in the launcher. */
-  ultra: boolean;
   /** Ambient context the user kept on the panel; null when none/all removed. */
   context: QuickContext | null;
   /** Coding-agent runtime chosen in the launcher (Cetus / Claude Code /
@@ -409,19 +410,6 @@ export interface TranscriptState {
   enabled: boolean;
   entries: TranscriptEntry[];
 }
-
-// ---- Ultra Code (autonomous workflow orchestration) -----------------------
-
-/** Master switch for Ultra Code. When on, conversations get the workflow-
- *  authoring system prompt and the agent orchestrates substantial tasks by
- *  writing a JS workflow (run via `ultra-runtime.ts` in pi's Bun runtime). */
-export interface UltraSettings {
-  enabled: boolean;
-}
-
-export const DEFAULT_ULTRA_SETTINGS: UltraSettings = {
-  enabled: false,
-};
 
 // ---- DEV-ONLY eval bridge (devtest Cargo feature) -------------------------
 

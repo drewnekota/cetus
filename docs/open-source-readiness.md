@@ -84,7 +84,6 @@ pnpm exec tsc -p packages/cetus-bridge-protocol/tsconfig.json
 NODE_PATH="$PWD/src-tauri/pi-install/node_modules" bun build \
   src-tauri/cetus-extensions/automation-tools.ts \
   src-tauri/cetus-extensions/skill-tools.ts \
-  src-tauri/cetus-extensions/ultra-runtime.ts \
   --outdir /tmp/cetus-extension-check
 ```
 

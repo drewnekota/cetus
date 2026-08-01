@@ -16,9 +16,6 @@ interface Props {
   workspaceDir: string | null;
   defaultWorkspace: string;
   onWorkspaceChange: (dir: string) => void;
-  /** Ultra Code state + toggle, forwarded to the shared composer. */
-  ultra?: boolean;
-  onUltraToggle?: () => void;
   /** Runtime chosen for the new task, held by the parent (shared with the chat
    *  hero + quick launcher so the choice is sticky and consistent). */
   pendingBackend: BackendId;
@@ -35,7 +32,7 @@ interface Props {
 /** Linear-style quick-create task dialog. Compact centered modal; opens with
  *  ⌘N from anywhere. Embeds the same <Composer> as the chat hero so the
  *  two "start something new" surfaces feel identical to compose in (attachments,
- *  slash menu, runtime picker, Ultra toggle all shared). ⏎ submits and closes
+ *  slash menu, and runtime picker all shared). ⏎ submits and closes
  *  (or resets when "Create more" is on); Esc closes via Radix Dialog. */
 export function CreateTaskDialog({
   open,
@@ -45,8 +42,6 @@ export function CreateTaskDialog({
   workspaceDir,
   defaultWorkspace,
   onWorkspaceChange,
-  ultra,
-  onUltraToggle,
   pendingBackend,
   onPendingBackendChange,
   pendingCliModel,
@@ -141,8 +136,6 @@ export function CreateTaskDialog({
             onWorkspaceChange={onWorkspaceChange}
             onSend={handleSend}
             onAbort={() => {}}
-            ultra={ultra}
-            onUltraToggle={onUltraToggle}
             pendingBackend={pendingBackend}
             onPendingBackendChange={onPendingBackendChange}
             pendingCliModel={pendingCliModel}

@@ -20,7 +20,7 @@
 //! conversations created afterward (hard freeze) and never disturbs an open chat.
 //!
 //! Metadata (name/description/enabled) is persisted as one JSON blob in the
-//! `app_settings` table, mirroring [`crate::ultra`]; the markdown lives on disk.
+//! `app_settings` table; the markdown lives on disk.
 
 use crate::store::{now_ms, Store};
 use crate::AppState;

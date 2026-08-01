@@ -736,7 +736,7 @@ Cetus 自己只需补充 host-specific extensions，例如打开 workspace tab�
 
 ### 7. 增加 durable run primitives
 
-先服务 Cetus automation 和 Ultra workflow，不急着对用户暴露 DAG 编辑器。让 run 能：
+先服务 Cetus automation workflow，不急着对用户暴露 DAG 编辑器。让 run 能：
 
 - 等待时间/事件/人；
 - checkpoint；
@@ -825,4 +825,3 @@ Cetus 当前最独特的机会，是把 ambient desktop context、runtime plural
 - [MCP Apps：Overview](https://apps.extensions.modelcontextprotocol.io/api/documents/Overview.html)
 - [LangGraph：Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
 - [LangGraph：Time travel](https://docs.langchain.com/oss/python/langchain/frontend/time-travel)
-

@@ -411,9 +411,7 @@ unsafe fn release_snapshot(
 }
 
 fn pbpaste() -> Option<String> {
-    let out = std::process::Command::new("/usr/bin/pbpaste")
-        .output()
-        .ok()?;
+    let out = utf8_pasteboard_command("/usr/bin/pbpaste").output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -421,7 +419,8 @@ fn pbpaste() -> Option<String> {
 }
 
 fn pbcopy(text: &str) -> Result<(), String> {
-    let mut child = std::process::Command::new("/usr/bin/pbcopy")
+    let mut command = utf8_pasteboard_command("/usr/bin/pbcopy");
+    let mut child = command
         .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -430,6 +429,43 @@ fn pbcopy(text: &str) -> Result<(), String> {
             .write_all(text.as_bytes())
             .map_err(|e| e.to_string())?;
     }
-    child.wait().map_err(|e| e.to_string())?;
-    Ok(())
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("pbcopy exited with {status}"))
+    }
+}
+
+/// `pbcopy`/`pbpaste` infer their text encoding from the process locale. A
+/// Finder-launched GUI app commonly has no UTF-8 locale at all, which makes
+/// Chinese UTF-8 bytes land on the pasteboard as MacRoman mojibake (`Ê…Ã…`).
+/// Pin both commands to UTF-8 instead of inheriting that launch environment.
+fn utf8_pasteboard_command(program: &str) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    command
+        .env("LANG", "en_US.UTF-8")
+        .env("LC_CTYPE", "en_US.UTF-8")
+        .env("LC_ALL", "en_US.UTF-8");
+    command
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utf8_pasteboard_command;
+
+    #[test]
+    fn pasteboard_commands_force_utf8_even_under_gui_launch_environment() {
+        let command = utf8_pasteboard_command("/usr/bin/pbcopy");
+        let envs: std::collections::HashMap<_, _> = command
+            .get_envs()
+            .filter_map(|(key, value)| value.map(|value| (key, value)))
+            .collect();
+        for key in ["LANG", "LC_CTYPE", "LC_ALL"] {
+            assert_eq!(
+                envs.get(std::ffi::OsStr::new(key)).copied(),
+                Some(std::ffi::OsStr::new("en_US.UTF-8"))
+            );
+        }
+    }
 }

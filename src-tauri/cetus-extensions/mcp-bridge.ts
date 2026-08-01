@@ -26,7 +26,7 @@
  *     browser system-prompt references `mcp__chrome-devtools__*` by literal name
  *     and those calls are latency-sensitive, so they must never hide behind a search.
  *
- * Design / safety (this runs inside EVERY pi — every conversation, every Ultra
+ * Design / safety (this runs inside EVERY pi — every conversation and every
  * sub-agent, every parallel candidate — so it has to be cheap and unbreakable):
  *   - No config (`CETUS_MCP_CONFIG` unset) or zero servers → a complete no-op.
  *   - Runs in `session_start` (pi AWAITS it) so tools exist before the first turn.
@@ -197,7 +197,7 @@ async function buildCatalog(
         // remote needing sign-in) is expected and non-fatal: its tools simply
         // don't get catalogued. Log to stderr for diagnosis, but DON'T fire a
         // UI toast — session_start runs in every pi (main conversation AND
-        // every Ultra sub-agent / parallel candidate), so a single bad server
+        // every background session), so a single bad server
         // would otherwise spam a burst of identical warning toasts on each turn.
         console.warn(`[cetus mcp-bridge] server "${server}" unavailable: ${errMsg(err)}`);
         return;

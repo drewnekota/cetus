@@ -9,7 +9,7 @@
 //!
 //! Storage is deliberately simple and local: the whole list is persisted as one
 //! JSON blob in the `app_settings` table (key `slash_commands`), mirroring how
-//! `skills.rs` / `ultra.rs` keep their metadata. No pi recycle is needed because
+//! `skills.rs` keeps its metadata. No pi recycle is needed because
 //! nothing here changes what the agent loads.
 
 use crate::store::{now_ms, Store};

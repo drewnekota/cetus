@@ -80,7 +80,6 @@ Every conversation is a card tracked across **In progress · Needs review · Don
 - **Per-conversation git worktrees** for isolated coding sessions
 - **Visual quick reply** for drafting replies from the current screen without starting a full agent run
 - **Cetus Remote**, an optional Tailscale-backed mobile companion for following runs and handling approvals
-- **Ultra Code** mode for authoring a workflow and orchestrating sub-agents
 - **Voice dictation** and **meeting memory**, processed on-device
 - **Computer and browser control**, with confirmation before consequential actions
 - **30+ model providers**, including Anthropic, OpenAI, Google, Bedrock, Ollama, LM Studio, and OpenRouter

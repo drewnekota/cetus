@@ -223,11 +223,6 @@ interface Props {
    *  (the `!` is then just a normal character). */
   onBash?: (command: string) => void;
   onAbort: () => void;
-  /** Ultra Code state + toggle. When provided, the model picker exposes an
-   *  "UltraCode" preset so the user enables/disables autonomous orchestration at
-   *  the input (not buried in settings). Omit both to hide it. */
-  ultra?: boolean;
-  onUltraToggle?: () => void;
   /** Visual variant: hero (large, centered with headline) vs docked (bottom). */
   variant?: "hero" | "docked";
   placeholder?: string;
@@ -337,8 +332,6 @@ export function Composer({
   onSendFirstQueued,
   onBash,
   onAbort,
-  ultra,
-  onUltraToggle,
   variant = "docked",
   placeholder,
   focusToken,
@@ -1490,11 +1483,6 @@ export function Composer({
             <ModelPicker
               value={modelChoice}
               onChange={onModelChange}
-              ultra={ultra}
-              onUltraToggle={onUltraToggle}
-              // Recycling pis to apply the prompt change mid-stream would abort
-              // the active run, so only allow toggling Ultra when idle.
-              lockUltra={streaming}
               disabled={disabled}
             />
           )}

@@ -6,7 +6,7 @@
 //! The extension tunnels a request through a sentinel `ctx.ui.input`
 //! ([`crate::bridge::AUTOMATION_TOOL_TITLE`]); `dispatch_line` surfaces it as
 //! [`AppEvent::AutomationToolRequest`]; we answer here and reply via the parent
-//! pi's `extension_ui_response` — the same round-trip the agent-control and Ultra
+//! pi's `extension_ui_response` — the same round-trip the agent-control
 //! paths use.
 //!
 //! ## Enabling

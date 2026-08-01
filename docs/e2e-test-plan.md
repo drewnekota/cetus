@@ -4,9 +4,6 @@
 
 End-to-end test plan for the Cetus desktop agent (Tauri + Next.js + pi sidecar).
 
-> **Scope note:** README mentions _Parallel solutions_ (并行候选). That path has been
-> removed — **Ultra Code is the only orchestration path**. Do not test parallel candidates.
-
 ---
 
 ## 0. Test layers
@@ -123,7 +120,6 @@ cases `skip` and **log it** — avoid a false all-green.
 - [ ] Voice dictation: global push-to-talk + composer mic, HUD waveform, Apple on-device, Whisper fallback, type vs paste insert, optional DeepSeek cleanup
 - [ ] Screen capture + OCR: background frames, perceptual-hash dedup, FTS5 search, excluded apps, retention prune, history lightbox
 - [ ] CUA (computer/browser control): observe/act/screenshot loop, agent-control card live screenshots, **Stop interrupts**, AX permission
-- [ ] Ultra Code: enable → model authors workflow → `agent()` sub-spawn → parallel → sub-agents appear as temp conversations → synthesis
 - [ ] Memory loop + Dreaming: agent writes via `manage_memory` → idle triggers dream merge → next turn injects
 
 ### P2 — Permissions & degradation
@@ -154,12 +150,7 @@ A "test case" for the agent ≈ a prompt + assertions. Representative prompts pe
 - "Generate a simple SVG smiley artifact" → right panel auto-opens + preview + copy
 - "Write a single-file HTML counter" → HTML artifact
 
-### Bucket D — Ultra Code orchestration (toggle Ultra ON first)
-
-- "Summarize every .md file in this project in one line each" (fan out sub-agents) → sub-conversations appear + synthesis
-- A decomposable task that exercises real `agent()` / `parallel()` fan-out
-
-### Bucket E — CUA computer control (Agent control ON + AX perm)
+### Bucket D — CUA computer control (Agent control ON + AX perm)
 
 - "Open a browser and search for Cetus github" → observe→act loop + control-card screenshots
 - Hit **Stop** mid-control → interruption verified

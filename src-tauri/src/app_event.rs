@@ -51,15 +51,6 @@ pub enum AppEvent {
     /// MCP servers changed out-of-band. The MCP settings page reloads the store
     /// when it sees this.
     McpUpdated,
-    /// The Ultra Code in-process runtime (`ultra-runtime.ts`) is asking the host
-    /// to run one sub-agent. Internal: the frontend ignores this event type.
-    UltraAgentRequest {
-        #[serde(rename = "conversationId")]
-        conversation_id: String,
-        #[serde(rename = "requestId")]
-        request_id: String,
-        params: Value,
-    },
     /// One browser/computer-use action executed for the frontend's agent-control
     /// card. The model never receives this; it is for the human watcher only.
     AgentStep {
@@ -143,11 +134,6 @@ impl From<crate::bridge::RuntimeEvent> for AppEvent {
                 kind,
                 params,
             } => match kind {
-                HostTunnelKind::UltraAgent => Self::UltraAgentRequest {
-                    conversation_id,
-                    request_id,
-                    params,
-                },
                 HostTunnelKind::Automation => Self::AutomationToolRequest {
                     conversation_id,
                     request_id,
