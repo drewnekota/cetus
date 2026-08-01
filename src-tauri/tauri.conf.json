@@ -20,7 +20,7 @@
         "minWidth": 700,
         "minHeight": 480,
         "decorations": true,
-        "transparent": true,
+        "transparent": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "backgroundThrottling": "throttle",
