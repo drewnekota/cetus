@@ -429,7 +429,11 @@
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  filter: drop-shadow(0 0 2px color-mix(in oklab, var(--composer-runner) 55%, transparent));
+  /* No filter here, deliberately: a drop-shadow on a layer whose background
+     is animated re-runs the whole blur every animation frame (steady GPU
+     work — the ring is small, but the filter forces a separate raster pass
+     plus a window-sized backdrop read on each tick). The moving gradient
+     highlight reads as the glow on its own. */
   animation: composer-border-spin 2.8s linear infinite;
 }
 
