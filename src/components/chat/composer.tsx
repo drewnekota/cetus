@@ -1,6 +1,15 @@
 "use client";
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from "react";
-import { ArrowUp, Square, Paperclip, X, File, Terminal, Radar } from "lucide-react";
+import {
+  ArrowUp,
+  Square,
+  Paperclip,
+  X,
+  File,
+  Terminal,
+  Radar,
+  CornerDownRight,
+} from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
@@ -355,6 +364,18 @@ export function Composer({
     [locale, focusToken],
   );
   const [text, setText] = useState(() => (draftKey ? readDraft(draftKey) : ""));
+  // Quoted selection ("Add to chat") held apart from the typed text, ChatGPT
+  // style: shown as a dismissable bar above the textarea and only merged into
+  // the outgoing message (as a Markdown blockquote) at send time. Persisted
+  // under a derived draft key so it survives view/conversation switches.
+  const [quote, setQuote] = useState(() => (draftKey ? readDraft(quoteKey(draftKey)) : ""));
+  const updateQuote = useCallback(
+    (v: string) => {
+      setQuote(v);
+      if (draftKey) writeDraft(quoteKey(draftKey), v);
+    },
+    [draftKey],
+  );
   const restoreAttachments = useCallback(
     (key?: string): ComposerAttachment[] =>
       key
@@ -389,6 +410,7 @@ export function Composer({
     if (draftKeyRef.current === draftKey) return;
     draftKeyRef.current = draftKey;
     setText(draftKey ? readDraft(draftKey) : "");
+    setQuote(draftKey ? readDraft(quoteKey(draftKey)) : "");
     setAttachments(restoreAttachments(draftKey));
   }, [draftKey, restoreAttachments]);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
@@ -853,14 +875,10 @@ export function Composer({
   useEffect(() => {
     if (!quoteRequest || quoteRequest.id === lastQuoteIdRef.current) return;
     lastQuoteIdRef.current = quoteRequest.id;
-    const quote = formatQuoteForComposer(quoteRequest.text);
-    if (!quote) return;
-    setText((prev) => {
-      const trimmed = prev.trimEnd();
-      const next = `${trimmed ? `${trimmed}\n\n` : ""}${quote}\n\n`;
-      if (draftKey) writeDraft(draftKey, next);
-      return next;
-    });
+    const cleaned = cleanQuoteText(quoteRequest.text);
+    if (!cleaned) return;
+    // A new selection replaces the pending one — one quote bar at a time.
+    updateQuote(cleaned);
     requestAnimationFrame(() => {
       const node = taRef.current;
       if (!node || disabled) return;
@@ -868,7 +886,7 @@ export function Composer({
       const pos = node.value.length;
       node.setSelectionRange(pos, pos);
     });
-  }, [disabled, draftKey, quoteRequest]);
+  }, [disabled, quoteRequest, updateQuote]);
 
   useEffect(() => {
     if (!draftRequest || draftRequest.id === lastDraftRequestIdRef.current) return;
@@ -1078,6 +1096,10 @@ export function Composer({
     // when the user typed only `@goal` with no objective — treated as no message.
     const trimmedText = text.trim();
     let outgoing = expandGoalDirective(trimmedText);
+    // Pending quote leads the message as a Markdown blockquote — the bubble
+    // renderer splits it back out into the quote header above the bubble.
+    const quoteMarkdown = quote ? formatQuoteMarkdown(quote) : "";
+    if (quoteMarkdown) outgoing = outgoing ? `${quoteMarkdown}\n\n${outgoing}` : quoteMarkdown;
     if (!outgoing && attachments.length === 0) {
       // Only a truly blank draft triggers the queue shortcut. A visible token
       // that happens to expand to nothing should remain a no-op.
@@ -1115,6 +1137,7 @@ export function Composer({
       return [];
     });
     updateText("");
+    updateQuote("");
     setAttachError(null);
   }
 
@@ -1220,6 +1243,30 @@ export function Composer({
           onSelect={applyMention}
           onHover={setMentionActive}
         />
+      )}
+
+      {quote && !bashMode && (
+        <div
+          className={cn(
+            // Flush with the card's top edge (cancel the container padding) so
+            // the quote reads as its own section above the input, ChatGPT-style.
+            "mb-1 flex items-center gap-2 rounded-t-[15px] border-b border-border/50 bg-muted/30 px-3 pb-2 pt-2.5",
+            variant === "hero" ? "-mx-2 -mt-2" : "-mx-1.5 -mt-1.5",
+          )}
+        >
+          <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            &ldquo;{quote.replace(/\s+/g, " ")}&rdquo;
+          </span>
+          <button
+            type="button"
+            onClick={() => updateQuote("")}
+            className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+            aria-label={t("composer.removeQuote")}
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
       )}
 
       {attachments.length > 0 && (
@@ -1532,7 +1579,7 @@ export function Composer({
             type="button"
             size="icon-sm"
             onClick={submit}
-            disabled={disabled || (!text.trim() && attachments.length === 0)}
+            disabled={disabled || (!text.trim() && !quote && attachments.length === 0)}
             title={t("composer.send")}
           >
             <ArrowUp className="h-4 w-4" />
@@ -1543,13 +1590,22 @@ export function Composer({
   );
 }
 
-function formatQuoteForComposer(text: string): string {
-  const cleaned = text
+/** Draft-store key for the pending quote attached to a composer draft. */
+function quoteKey(draftKey: string): string {
+  return `${draftKey}#quote`;
+}
+
+function cleanQuoteText(text: string): string {
+  return text
     .replace(/\r\n?/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  if (!cleaned) return "";
-  return cleaned
+}
+
+/** The wire format for a quote: a leading `>` blockquote the bubble renderer
+ *  recognizes and lifts back out as the quote header. */
+function formatQuoteMarkdown(text: string): string {
+  return text
     .split("\n")
     .map((line) => `> ${line}`)
     .join("\n");

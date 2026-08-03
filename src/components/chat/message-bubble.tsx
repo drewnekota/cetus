@@ -1,5 +1,5 @@
 "use client";
-import { ArrowLeftRight } from "lucide-react";
+import { ArrowLeftRight, CornerDownRight } from "lucide-react";
 import type { RenderedBlock, RenderedMessage } from "@/lib/types";
 import { useMessage } from "@/lib/chat-store";
 import { BACKENDS } from "./backend-picker";
@@ -55,6 +55,11 @@ function MessageBubbleView({
 }) {
   const { t } = useTranslation("chat");
   const isUser = message.role === "user";
+  // A user message that leads with a `>` blockquote was composed via "Add to
+  // chat": lift the quote back out and show it as a ChatGPT-style header above
+  // the bubble instead of raw `> ` lines inside it.
+  const quoteSplit = isUser ? splitUserQuote(message.blocks) : null;
+  const blocks = quoteSplit?.blocks ?? message.blocks;
 
   // Custom messages (e.g. vision_describe) sit center-aligned and unstyled —
   // they're extension breadcrumbs, not a participant in the conversation. The
@@ -105,16 +110,26 @@ function MessageBubbleView({
             {t("pane.assistant")}
           </div>
         )}
-        <div
-          className={cn(
-            "flex w-fit max-w-full flex-col gap-2",
-            isUser && "rounded-2xl bg-primary/15 px-4 py-2 dark:bg-primary/20",
-          )}
-        >
-          {message.blocks.map((b, i) => (
-            <AnswerBlock key={i} block={b} isUser={isUser} />
-          ))}
-        </div>
+        {quoteSplit && (
+          <div className="flex max-w-full items-start gap-1.5 px-1 text-[13px] leading-relaxed text-muted-foreground">
+            <CornerDownRight className="mt-1 size-3.5 shrink-0 opacity-70" />
+            <span className="line-clamp-2 min-w-0 whitespace-pre-wrap break-words">
+              {quoteSplit.quote}
+            </span>
+          </div>
+        )}
+        {blocks.length > 0 && (
+          <div
+            className={cn(
+              "flex w-fit max-w-full flex-col gap-2",
+              isUser && "rounded-2xl bg-primary/15 px-4 py-2 dark:bg-primary/20",
+            )}
+          >
+            {blocks.map((b, i) => (
+              <AnswerBlock key={i} block={b} isUser={isUser} />
+            ))}
+          </div>
+        )}
         <MessageActions
           getText={() => messageText(message)}
           hasText={message.blocks.some((b) => b.kind === "text" && b.text.trim().length > 0)}
@@ -125,6 +140,33 @@ function MessageBubbleView({
       </div>
     </div>
   );
+}
+
+/** Split a leading `>` blockquote (the "Add to chat" wire format) off a user
+ *  message's first text block. Returns the quote plus the blocks with the
+ *  quote removed, or null when the message doesn't start with a blockquote. */
+function splitUserQuote(
+  blocks: RenderedBlock[],
+): { quote: string; blocks: RenderedBlock[] } | null {
+  const idx = blocks.findIndex((b) => b.kind === "text");
+  if (idx === -1) return null;
+  const block = blocks[idx];
+  if (block.kind !== "text") return null;
+  const lines = block.text.split("\n");
+  let end = 0;
+  while (end < lines.length && /^>(\s|$)/.test(lines[end])) end++;
+  if (end === 0) return null;
+  const quote = lines
+    .slice(0, end)
+    .map((line) => line.replace(/^> ?/, ""))
+    .join("\n")
+    .trim();
+  if (!quote) return null;
+  const rest = lines.slice(end).join("\n").trim();
+  const next = blocks.slice();
+  if (rest) next[idx] = { ...block, text: rest };
+  else next.splice(idx, 1);
+  return { quote, blocks: next };
 }
 
 /** Display label for a backend id carried by a runtime_switch marker. */

@@ -14,6 +14,7 @@ export const chat = {
     // Composer
     "composer.dropFiles": "Drop files to attach",
     "composer.removeAttachment": "Remove {name}",
+    "composer.removeQuote": "Remove quote",
     "composer.fileTooLarge": "{name} is larger than {limit}MB and was skipped.",
     "composer.pastedImageName": "(pasted)",
     "composer.unnamedFile": "file",
@@ -232,6 +233,7 @@ export const chat = {
     "mention.title": "提及",
     "composer.dropFiles": "拖放文件以添加附件",
     "composer.removeAttachment": "移除 {name}",
+    "composer.removeQuote": "移除引用",
     "composer.fileTooLarge": "{name} 超过 {limit}MB，已跳过。",
     "composer.pastedImageName": "（粘贴）",
     "composer.unnamedFile": "文件",
@@ -426,6 +428,7 @@ export const chat = {
   ja: {
     "composer.dropFiles": "ファイルをドロップして添付",
     "composer.removeAttachment": "{name} を削除",
+    "composer.removeQuote": "引用を削除",
     "composer.fileTooLarge": "{name} は {limit}MB を超えているためスキップしました。",
     "composer.pastedImageName": "（貼り付け）",
     "composer.unnamedFile": "ファイル",
@@ -522,6 +525,7 @@ export const chat = {
   ko: {
     "composer.dropFiles": "파일을 드롭하여 첨부",
     "composer.removeAttachment": "{name} 제거",
+    "composer.removeQuote": "인용 제거",
     "composer.fileTooLarge": "{name}은(는) {limit}MB를 초과하여 건너뛰었습니다.",
     "composer.pastedImageName": "(붙여넣기)",
     "composer.unnamedFile": "파일",
@@ -618,6 +622,7 @@ export const chat = {
   es: {
     "composer.dropFiles": "Suelta archivos para adjuntar",
     "composer.removeAttachment": "Quitar {name}",
+    "composer.removeQuote": "Quitar cita",
     "composer.fileTooLarge": "{name} supera los {limit}MB y se omitió.",
     "composer.pastedImageName": "(pegado)",
     "composer.unnamedFile": "archivo",
@@ -714,6 +719,7 @@ export const chat = {
   pt: {
     "composer.dropFiles": "Solte arquivos para anexar",
     "composer.removeAttachment": "Remover {name}",
+    "composer.removeQuote": "Remover citação",
     "composer.fileTooLarge": "{name} é maior que {limit}MB e foi ignorado.",
     "composer.pastedImageName": "(colado)",
     "composer.unnamedFile": "arquivo",
@@ -810,6 +816,7 @@ export const chat = {
   fr: {
     "composer.dropFiles": "Déposez des fichiers à joindre",
     "composer.removeAttachment": "Supprimer {name}",
+    "composer.removeQuote": "Supprimer la citation",
     "composer.fileTooLarge": "{name} dépasse {limit} Mo et a été ignoré.",
     "composer.pastedImageName": "(collé)",
     "composer.unnamedFile": "fichier",
@@ -906,6 +913,7 @@ export const chat = {
   de: {
     "composer.dropFiles": "Dateien zum Anhängen ablegen",
     "composer.removeAttachment": "{name} entfernen",
+    "composer.removeQuote": "Zitat entfernen",
     "composer.fileTooLarge": "{name} ist größer als {limit} MB und wurde übersprungen.",
     "composer.pastedImageName": "(eingefügt)",
     "composer.unnamedFile": "Datei",
@@ -1002,6 +1010,7 @@ export const chat = {
   it: {
     "composer.dropFiles": "Trascina i file da allegare",
     "composer.removeAttachment": "Rimuovi {name}",
+    "composer.removeQuote": "Rimuovi citazione",
     "composer.fileTooLarge": "{name} supera i {limit}MB ed è stato saltato.",
     "composer.pastedImageName": "(incollato)",
     "composer.unnamedFile": "file",
@@ -1098,6 +1107,7 @@ export const chat = {
   ru: {
     "composer.dropFiles": "Перетащите файлы для прикрепления",
     "composer.removeAttachment": "Удалить {name}",
+    "composer.removeQuote": "Удалить цитату",
     "composer.fileTooLarge": "{name} больше {limit} МБ и был пропущен.",
     "composer.pastedImageName": "(вставлено)",
     "composer.unnamedFile": "файл",

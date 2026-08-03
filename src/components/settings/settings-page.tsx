@@ -558,6 +558,8 @@ function RemoteSection() {
                 <div className="rounded-lg border border-border bg-background p-3">
                   <p className="truncate font-mono text-xs text-foreground/80">{remote.accessUrl}</p>
                   <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("remote.scanHint")}</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("remote.phoneRequirement")}</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-500">{t("remote.proxyHint")}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={copyUrl}><Copy className="size-3.5" />{t("remote.copy")}</Button>

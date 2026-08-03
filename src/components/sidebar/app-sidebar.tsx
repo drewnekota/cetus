@@ -325,9 +325,25 @@ export const AppSidebar = memo(function AppSidebar({
             board: shortcutLabels.switchBoard,
           }}
         />
-        {/* New task + Automations are pinned with the header (logo + toggle) so
-            they stay put while the conversation / workspace list scrolls. */}
+        {/* Automations completes the ⌘1/⌘2/⌘3 destination sequence;
+            New task follows as an action. Both stay pinned while the list scrolls. */}
         <SidebarMenu>
+          {/* Automations is its own destination (a scheduled-prompt feature),
+              not a layout of the conversations — so it lives as a nav row here
+              rather than in the Chat/Kanban toggle. */}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip={t("nav.automations")}
+              isActive={view === "automations"}
+              onClick={() => onViewChange("automations")}
+            >
+              <Clock />
+              <span>{t("nav.automations")}</span>
+              <Kbd className="ml-auto border-transparent">
+                {shortcutLabels.switchAutomations}
+              </Kbd>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -348,22 +364,6 @@ export const AppSidebar = memo(function AppSidebar({
                 <Kbd>{shortcutLabels.newDefaultChat}</Kbd>
               </TooltipContent>
             </Tooltip>
-          </SidebarMenuItem>
-          {/* Automations is its own destination (a scheduled-prompt feature),
-              not a layout of the conversations — so it lives as a nav row here
-              rather than in the Chat/Kanban toggle. */}
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              tooltip={t("nav.automations")}
-              isActive={view === "automations"}
-              onClick={() => onViewChange("automations")}
-            >
-              <Clock />
-              <span>{t("nav.automations")}</span>
-              <Kbd className="ml-auto border-transparent">
-                {shortcutLabels.switchAutomations}
-              </Kbd>
-            </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -1162,7 +1162,7 @@ const ConversationRow = memo(function ConversationRow({
             <span className="min-w-0 flex-1 truncate">{title}</span>
             <span
               className={cn(
-                "fade-layer absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center text-[11px] tabular-nums text-muted-foreground/70 transition-opacity",
+                "fade-layer absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center font-mono text-[11px] tracking-tight tabular-nums text-muted-foreground/70 transition-opacity",
                 "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
                 active && "text-sidebar-accent-foreground/70",
               )}

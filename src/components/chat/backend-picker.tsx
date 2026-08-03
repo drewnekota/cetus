@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Check, ChevronDown, Settings2 } from "lucide-react";
+import { Check, ChevronDown, Settings2 } from "lucide-react";
 import { api } from "@/lib/tauri";
 import { useChatStore } from "@/lib/chat-store";
 import type { BackendId, CliDefaults, CliRateLimitInfo } from "@/lib/types";
 import {
+  CetusIcon,
   ClaudeCodeIcon,
   CodexIcon,
   GrokIcon,
@@ -46,7 +47,7 @@ import {
 } from "@/lib/keyboard-shortcuts";
 
 export const BACKENDS: { id: BackendId; label: string; icon: AppIcon }[] = [
-  { id: "pi", label: "Cetus", icon: Bot },
+  { id: "pi", label: "Cetus", icon: CetusIcon },
   { id: "claude-code", label: "Claude Code", icon: ClaudeCodeIcon },
   { id: "codex", label: "Codex", icon: CodexIcon },
   { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },

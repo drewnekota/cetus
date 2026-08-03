@@ -110,6 +110,9 @@ mac-notification-sys = "0.6"
 # cancelled (the helper it spawns is disclaimed into the same group).
 libc = "0.2"
 
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

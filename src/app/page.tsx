@@ -1516,7 +1516,7 @@ export default function Home() {
   //   ⌘N    — new chat / new board task
   //   ⌘D    — archive current conversation
   //   ⌘,    — open settings
-  //   ⌘1…⌘4 — switch sidebar view
+  //   ⌘1…⌘3 — switch sidebar view (⌘1 again opens the first chat)
   //   ⌘[/⌘] — go back / forward through the page history (views + settings)
   //   ⌃⇥    — switch to the most recently used page (including chats/settings)
   //   ⌃1…⌃3 — switch the current chat's runtime (Cetus / Claude Code / Codex)
@@ -1671,7 +1671,12 @@ export default function Home() {
         if (target) requestBackendSwitch(target);
       } else if (shortcut("switchChats")) {
         e.preventDefault();
-        setView("chat");
+        if (view === "chat") {
+          const firstId = orderedChatIdsRef.current.at(0);
+          if (firstId) onSelectChat(firstId);
+        } else {
+          setView("chat");
+        }
       } else if (shortcut("switchBoard")) {
         e.preventDefault();
         setView("board");

@@ -229,7 +229,10 @@ pub async fn probe_cli_commands(
         }
     }
     let resolved = match backend.as_str() {
-        "claude-code" => probe_claude_initialize(Some(Path::new(&dir)))
+        // No --safe-mode here: it suppresses skill loading, and skills are the
+        // main thing this catalog exists to surface (user-level skills alone
+        // can be 100+ entries; safe-mode reports none of them).
+        "claude-code" => probe_claude_initialize(Some(Path::new(&dir)), false)
             .await
             .map(|ack| claude_commands_from_initialize(&ack)),
         "codex" => {
@@ -328,20 +331,24 @@ fn claude_defaults(home: &Path) -> CliDefaults {
 }
 
 async fn probe_claude_defaults() -> Option<CliDefaults> {
-    claude_defaults_from_initialize(&probe_claude_initialize(None).await?)
+    claude_defaults_from_initialize(&probe_claude_initialize(None, true).await?)
 }
 
 /// Run Claude Code's initialize handshake and return the raw ack. It carries
 /// both the account's resolved model catalog and the full slash-command/skill
 /// catalog for `cwd` (project skills are cwd-dependent, so pass the workspace
-/// the conversation will run in). `--safe-mode` prevents user hooks/plugins
-/// from running during this read-only probe. Keep stdin open until the
+/// the conversation will run in). `safe_mode` passes `--safe-mode`, which
+/// keeps user hooks/plugins from running during a read-only probe — but it
+/// also strips the entire skill catalog from the ack, so it's only for the
+/// models probe, never the slash-command one. Keep stdin open until the
 /// response arrives, then terminate the idle process without sending a turn.
-async fn probe_claude_initialize(cwd: Option<&Path>) -> Option<Value> {
+async fn probe_claude_initialize(cwd: Option<&Path>, safe_mode: bool) -> Option<Value> {
     let mut command = TokioCommand::new("claude");
+    if safe_mode {
+        command.arg("--safe-mode");
+    }
     command
         .args([
-            "--safe-mode",
             "-p",
             "--output-format",
             "stream-json",

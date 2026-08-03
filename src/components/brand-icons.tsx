@@ -22,6 +22,12 @@ function BrandImage({
   );
 }
 
+export function CetusIcon({ className }: { className?: string }) {
+  return (
+    <BrandImage src="/brands/cetus.svg" label="Cetus" className={className} />
+  );
+}
+
 export function ClaudeCodeIcon({ className }: { className?: string }) {
   return (
     <BrandImage

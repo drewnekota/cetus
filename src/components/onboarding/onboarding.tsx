@@ -7,13 +7,13 @@
 // also be done later from Settings.
 
 import { useEffect, useState } from "react";
-import { ArrowRight, Bot, Check } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useTranslation } from "@/lib/i18n";
 import { api } from "@/lib/tauri";
-import { ClaudeCodeIcon, CodexIcon } from "@/components/brand-icons";
+import { CetusIcon, ClaudeCodeIcon, CodexIcon } from "@/components/brand-icons";
 import { cn } from "@/lib/utils";
 import {
   APPLICABLE_PERMISSIONS,
@@ -115,7 +115,7 @@ export function Onboarding() {
 
             <div className="mt-7 grid w-full grid-cols-3 gap-3 text-left">
               <RuntimeCard
-                icon={Bot}
+                icon={CetusIcon}
                 name="Cetus"
                 description={t("onboarding.runtime.cetus.description")}
                 ready={deepseekReady}

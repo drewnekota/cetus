@@ -453,9 +453,7 @@ function assistantHasVisibleContent(m: RenderedMessage): boolean {
   return m.blocks.some(
     (b) =>
       (b.kind === "text" && b.text.trim().length > 0) ||
-      (b.kind === "tool_use" &&
-        !!b.result &&
-        artifactsFromDetails(b.result.details).length > 0) ||
+      b.kind === "tool_use" ||
       b.kind === "image" ||
       b.kind === "file" ||
       b.kind === "custom",
@@ -468,10 +466,20 @@ function assistantHasVisibleContent(m: RenderedMessage): boolean {
  *  The inline error row provides the Retry action.
  *  Shared by `agent_end` and `agent_settled` so both settle identically. */
 function settleRun(state: ChatState): ChatState {
-  const idx = state.activeAssistantIdx ?? state.messages.length - 1;
-  const last = idx >= 0 ? state.messages[idx] : undefined;
-  const emptyAnswer =
-    last?.role === "assistant" && !assistantHasVisibleContent(last);
+  // Judge the whole turn, not just the final API message. An agent turn that
+  // ends on a tool whose result says "nothing more to do this turn" (e.g. a
+  // wakeup scheduler) legitimately closes with an empty completion after the
+  // tool result — the work is in the earlier messages of the same turn.
+  let sawAssistant = false;
+  let hasContent = false;
+  for (let i = state.messages.length - 1; i >= 0 && !hasContent; i--) {
+    const m = state.messages[i];
+    if (m.role === "user") break;
+    if (m.role !== "assistant") continue;
+    sawAssistant = true;
+    hasContent = assistantHasVisibleContent(m);
+  }
+  const emptyAnswer = sawAssistant && !hasContent;
   return {
     ...state,
     isStreaming: false,
