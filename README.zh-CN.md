@@ -6,7 +6,7 @@
 
 <p align="center">Codex、Claude Code 或内置 runtime 仍是核心；Cetus 在它们之外补上桌面助手这一层：从任何 app 随时唤起、定时安排工作，并理解你在屏幕上看过的内容。</p>
 
-<p align="center"><strong>Quick Launcher</strong> · <strong>Automations</strong> · <strong>Screen Context</strong></p>
+<p align="center"><strong>Quick Launcher</strong> · <strong>Automations</strong> · <strong>Global Quick Reply</strong> · <strong>Screen Context</strong></p>
 
 <p align="center">
   <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="下载 macOS 版" src="https://img.shields.io/badge/下载_macOS_版-Apple_Silicon-111111?style=for-the-badge&logo=apple" /></a>
@@ -25,7 +25,7 @@
 
 ![Cetus 操作演示 —— 唤起 agent、创建自动化任务并切换 runtime](docs/cetus-demo.gif)
 
-## Cetus 为你的 agent 补上的三件事
+## Cetus 为你的 agent 补上的四件事
 
 ### Quick Launcher：一个快捷键，随时叫出 agent
 
@@ -38,6 +38,12 @@
 把任意 prompt 变成单次或周期任务（`at` / `every` / `cron` / `daily`）。每次运行都保留所选 runtime 和模型设置，在新的后台对话中完成工作，并把结果留在审阅队列里。
 
 ![Cetus 自动化任务演示](docs/automation.gif)
+
+### Global Quick Reply：不用离开对话，就把回复写好
+
+在任意对话上**双击右 ⌥** —— 团队频道、邮件、工单后台都行 —— Cetus 会读懂屏幕上正在发生什么，然后把草稿流式写进一个可编辑的面板。它跟随对话本身的语言和语气，并且是真的在回答对方问的问题：对面抛了三个待决问题，回来的就不会是一句"好的"。按 **⏎** 直接填进你原本所在的输入框，按 **⇥** 则用另一个 runtime 重写同一屏。
+
+![Cetus 全局快速回复演示](docs/quick-reply.gif)
 
 ### Screen Context：让它记得你之前在做什么
 

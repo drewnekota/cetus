@@ -6,7 +6,7 @@
 
 <p align="center">Keep Codex, Claude Code, or the built-in runtime at the core. Cetus adds the desktop layer around it: summon it over any app, schedule work for later, and give it context from what has been on your screen.</p>
 
-<p align="center"><strong>Quick Launcher</strong> · <strong>Automations</strong> · <strong>Screen Context</strong></p>
+<p align="center"><strong>Quick Launcher</strong> · <strong>Automations</strong> · <strong>Global Quick Reply</strong> · <strong>Screen Context</strong></p>
 
 <p align="center">
   <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="Download for macOS" src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-111111?style=for-the-badge&logo=apple" /></a>
@@ -25,7 +25,7 @@
 
 ![Cetus demo — launch an agent, schedule an automation, and switch runtimes](docs/cetus-demo.gif)
 
-## Three things Cetus adds to your agent
+## Four things Cetus adds to your agent
 
 ### Quick Launcher — your agent, one hotkey away
 
@@ -38,6 +38,12 @@ Hold **both ⌘ keys** to summon your agent over any app. Cetus brings along the
 Turn any prompt into a one-off or recurring job (`at` / `every` / `cron` / `daily`). Each run keeps its chosen runtime and model settings, works in a fresh background conversation, and leaves the result ready for you to review.
 
 ![Cetus Automations demo](docs/automation.gif)
+
+### Global Quick Reply — draft the answer without leaving the thread
+
+Double-tap **right ⌥** on any conversation — a team channel, an email, a support console — and Cetus reads what is on screen, then streams a draft into an editable panel. It follows the language and register of the thread and answers what was actually asked, so a message with three open questions does not come back as "sounds good". Press **⏎** to drop it into the input you were already in, or **⇥** to redraft the same screen on another runtime.
+
+![Cetus global quick reply demo](docs/quick-reply.gif)
 
 ### Screen Context — let it remember what you were doing
 
