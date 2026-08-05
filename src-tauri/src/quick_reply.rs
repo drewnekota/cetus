@@ -46,6 +46,7 @@ pub struct QuickReplyOutput {
 pub async fn generate(
     app: &tauri::AppHandle,
     open_id: i64,
+    run: u32,
     screenshot: &crate::quick::Screenshot,
     ambient: Option<&crate::ocr::AmbientContext>,
     visible_text: &str,
@@ -54,7 +55,12 @@ pub async fn generate(
     let state = app.state::<crate::AppState>();
     let backend = resolve_backend(&state.store, requested_backend);
     let prompt = build_prompt(ambient, visible_text);
-    let sink = Arc::new(QuickReplySink::new(app.clone(), open_id));
+    let sink = Arc::new(QuickReplySink::new(
+        app.clone(),
+        open_id,
+        run,
+        state.quick.reply_run.clone(),
+    ));
     let (raw, label) = if backend == "pi" {
         (
             call_cetus(app, sink, screenshot, &prompt).await?,
@@ -101,7 +107,10 @@ fn build_prompt(ambient: Option<&crate::ocr::AmbientContext>, visible_text: &str
     prompt
 }
 
-fn resolve_backend(store: &crate::store::Store, requested: &str) -> String {
+/// The runtime a quick reply will actually run on: the request, unless it is
+/// unknown or disabled in settings, in which case the built-in Cetus runtime.
+/// The panel's picker shows this resolved id, not the raw stored preference.
+pub fn resolve_backend(store: &crate::store::Store, requested: &str) -> String {
     if requested == "pi" {
         return "pi".into();
     }
@@ -305,18 +314,34 @@ impl DeltaGate {
 struct QuickReplySink {
     app: tauri::AppHandle,
     open_id: i64,
+    /// This turn's run token, checked against the live counter before each
+    /// delta: after a runtime switch the superseded turn keeps streaming until
+    /// it finishes, and its text must not land in the new draft.
+    run: u32,
+    current_run: Arc<std::sync::atomic::AtomicU32>,
     gate: Mutex<DeltaGate>,
     done: Mutex<Option<tokio::sync::oneshot::Sender<Result<(), String>>>>,
 }
 
 impl QuickReplySink {
-    fn new(app: tauri::AppHandle, open_id: i64) -> Self {
+    fn new(
+        app: tauri::AppHandle,
+        open_id: i64,
+        run: u32,
+        current_run: Arc<std::sync::atomic::AtomicU32>,
+    ) -> Self {
         Self {
             app,
             open_id,
+            run,
+            current_run,
             gate: Mutex::new(DeltaGate::default()),
             done: Mutex::new(None),
         }
+    }
+
+    fn stale(&self) -> bool {
+        self.current_run.load(std::sync::atomic::Ordering::Relaxed) != self.run
     }
 
     fn subscribe(&self) -> tokio::sync::oneshot::Receiver<Result<(), String>> {
@@ -332,7 +357,7 @@ impl QuickReplySink {
     }
 
     fn forward_delta(&self, event: &Value) {
-        if event.get("type").and_then(Value::as_str) != Some("message_update") {
+        if event.get("type").and_then(Value::as_str) != Some("message_update") || self.stale() {
             return;
         }
         let Some(am_event) = event.get("assistantMessageEvent") else {

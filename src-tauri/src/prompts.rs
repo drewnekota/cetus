@@ -104,8 +104,10 @@ load into new conversations.\n\
 floating composer from anywhere, optionally with a screenshot as context.\n\
 - **Voice** (Input & Capture): push-to-talk dictation into the focused app; pick \
 the recognition engine here (macOS only).\n\
-- **Screen context** (Input & Capture): periodic on-device screen capture + OCR \
-so the agent can recall what the user was working on; stays local.\n\
+- **Screen context** (Input & Capture): event-driven on-device screen capture + \
+OCR (shoots on Enter/save/copy, window switches, and typing pauses, plus a \
+fallback timer) so the agent can recall what the user was working on; stays \
+local. Query it with the `cetus context` CLI.\n\
 - **Computer & Browser** (Input & Capture): toggle the agent's ability to drive \
 a Chrome browser (the `mcp__chrome-devtools__*` tools) and control Mac apps \
 (`computer_*`).\n\

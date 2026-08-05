@@ -336,15 +336,19 @@ export const settings = {
     "screen.browse": "Browse captured frames",
     "screen.enable.label": "Enable screen capture",
     "screen.enable.description":
-      "Off by default. When on, Cetus captures the screen on a timer in the background.",
-    "screen.interval.label": "Capture interval",
+      "Off by default. When on, Cetus captures at the moments that matter — pressing Enter, saving or copying, switching windows, pausing after typing — plus a fallback timer.",
+    "screen.interval.label": "Fallback interval",
     "screen.interval.description":
-      "Seconds between captures. Near-identical frames are skipped automatically.",
+      "Seconds between timer captures when no event fires. Near-identical frames are skipped automatically.",
     "screen.interval.unit": "sec",
-    "screen.retention.label": "Keep history for",
+    "screen.retention.label": "Keep text for",
     "screen.retention.description":
-      "Older frames are deleted from disk. Set 0 to keep forever.",
+      "Searchable on-screen text older than this is deleted. Text is tiny — this can be long. Set 0 to keep forever.",
     "screen.retention.unit": "days",
+    "screen.frameRetention.label": "Keep images for",
+    "screen.frameRetention.description":
+      "Full frames and thumbnails older than this are deleted from disk; the searchable text above stays. Images are ~99% of the disk use. Set 0 to keep images as long as the text.",
+    "screen.frameRetention.unit": "days",
     "screen.ocr.label": "Read text on-device (OCR)",
     "screen.ocr.description":
       "Use Apple Vision to extract on-screen text so the agent can search it. Runs locally.",
@@ -923,13 +927,20 @@ export const settings = {
     "screen.macOnly": "屏幕采集针对 macOS 优化；本地 OCR 使用 Apple Vision。",
     "screen.browse": "浏览已采集画面",
     "screen.enable.label": "启用屏幕采集",
-    "screen.enable.description": "默认关闭。开启后，Cetus 会在后台按计时器截取屏幕。",
-    "screen.interval.label": "采集间隔",
-    "screen.interval.description": "每次采集之间的秒数。几乎相同的画面会自动跳过。",
+    "screen.enable.description":
+      "默认关闭。开启后，Cetus 会在关键时刻采集——按下回车、保存或复制、切换窗口、输入停顿——外加一个兜底计时器。",
+    "screen.interval.label": "兜底间隔",
+    "screen.interval.description":
+      "没有事件触发时计时采集的秒数。几乎相同的画面会自动跳过。",
     "screen.interval.unit": "秒",
-    "screen.retention.label": "历史保留时长",
-    "screen.retention.description": "较早的画面会从磁盘删除。设为 0 则永久保留。",
+    "screen.retention.label": "文字保留时长",
+    "screen.retention.description":
+      "早于该时长的可检索屏幕文字会被删除。文字很小，可以放心设长。设为 0 则永久保留。",
     "screen.retention.unit": "天",
+    "screen.frameRetention.label": "图像保留时长",
+    "screen.frameRetention.description":
+      "早于该时长的完整画面和缩略图会从磁盘删除；上面的可检索文字仍会保留。图像约占磁盘用量的 99%。设为 0 则图像与文字保留一样久。",
+    "screen.frameRetention.unit": "天",
     "screen.ocr.label": "本地识别文字（OCR）",
     "screen.ocr.description":
       "用 Apple Vision 提取屏幕上的文字，方便智能体检索。在本地运行。",

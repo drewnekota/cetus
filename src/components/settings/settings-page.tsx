@@ -2478,6 +2478,34 @@ function ScreenContextSection({ onOpenHistory }: { onOpenHistory: () => void }) 
           </div>
         </div>
 
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 space-y-0.5">
+            <Label htmlFor="capture-frame-retention" className="font-medium">
+              {t("screen.frameRetention.label")}
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              {t("screen.frameRetention.description")}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Input
+              id="capture-frame-retention"
+              type="number"
+              min={0}
+              className="w-20"
+              value={settings.frameRetentionDays}
+              onChange={(e) =>
+                update({
+                  frameRetentionDays: Math.max(0, Number(e.target.value) || 0),
+                })
+              }
+            />
+            <span className="text-xs text-muted-foreground">
+              {t("screen.frameRetention.unit")}
+            </span>
+          </div>
+        </div>
+
         <div className="rounded-lg border border-border">
           <ToggleRow
             id="capture-ocr"

@@ -401,6 +401,13 @@ pub fn recent_summary(store: &Store) -> Option<String> {
 // math (the model must never sum minutes itself), match-centered snippets
 // instead of bodies, and a hard segment cap that bounces the caller back with
 // "narrow the range" instead of silently truncating.
+//
+// Two collectors feed it: the AX text stream (`ax_context`, this module's
+// collector) and the screenshot+OCR stream (`screenshots`, capture.rs). Either
+// may be on; timeline/search/get read both, so whichever the user enabled is
+// what agents see. When both run at once the AX stream wins for presence
+// (richer titles + URLs) and screenshot rows near an AX observation only
+// contribute their commit markers — see SHADOW_MS.
 
 /// Safety valve on the timeline range scan (rows, not bytes — meta only).
 const RANGE_SCAN_LIMIT: u32 = 50_000;
@@ -418,6 +425,11 @@ const EXCERPT_CHARS: usize = 280;
 const EXCERPT_MAX_SEGMENTS: usize = 30;
 /// Search result cap (the CLI default is lower).
 pub const SEARCH_MAX_LIMIT: u32 = 40;
+/// A screenshot row this close to an AX observation is presence-redundant (both
+/// collectors watched the same frontmost screen); only its commit marker is
+/// kept. Chosen ≥ the AX slow-refresh (30s) so a steady dual-stream window
+/// doesn't fragment into alternating ax/shot segments with mismatched titles.
+const SHADOW_MS: i64 = 45_000;
 
 /// Resolve a caller-supplied time range. Priority: explicit `[from,to)` ms >
 /// `last` ms > `day` (`today` / `yesterday` / `YYYY-MM-DD`) > today.
@@ -465,32 +477,63 @@ pub fn resolve_range(
     Ok((from, to))
 }
 
-/// Collector status line for agents: whether there is any data to query.
+/// Collector status for agents: what is on and whether there is data to query.
 pub fn context_status(store: &Store) -> String {
-    let settings = load_settings(store);
-    let count = store.ax_context_count().unwrap_or(0);
-    let mut out = format!(
-        "Ambient screen context collector: {}.",
-        if settings.enabled {
-            "enabled"
-        } else {
-            "disabled (the user can turn it on in Cetus Settings → Screen Context)"
-        }
+    let mut out = vec!["Screen-context collectors (timeline/search/get read both):".to_string()];
+
+    let cap = crate::capture::load_settings(store);
+    let mut line = format!(
+        "- Screenshot+OCR capture: {}.",
+        if cap.enabled { "enabled" } else { "disabled" }
     );
-    match store.ax_context_span() {
+    let count = store.screenshots_count().unwrap_or(0);
+    match store.screenshots_span() {
         Ok(Some((oldest, newest))) if count > 0 => {
-            out.push_str(&format!(
-                "\n{count} entries, {} → {}.",
+            line.push_str(&format!(
+                " {count} entries, {} → {}.",
                 fmt_local(oldest),
                 fmt_local(newest)
             ));
-            if settings.retention_days > 0 {
-                out.push_str(&format!(" Retention: {} days.", settings.retention_days));
+            if cap.retention_days > 0 {
+                line.push_str(&format!(" Text kept {}d", cap.retention_days));
+                if cap.frame_retention_days > 0 {
+                    line.push_str(&format!(", pixels {}d", cap.frame_retention_days));
+                }
+                line.push('.');
             }
         }
-        _ => out.push_str("\nNo entries recorded."),
+        _ => line.push_str(" No entries."),
     }
-    out
+    out.push(line);
+
+    let amb = load_settings(store);
+    let mut line = format!(
+        "- AX text (ambient): {}.",
+        if amb.enabled { "enabled" } else { "disabled" }
+    );
+    let count = store.ax_context_count().unwrap_or(0);
+    match store.ax_context_span() {
+        Ok(Some((oldest, newest))) if count > 0 => {
+            line.push_str(&format!(
+                " {count} entries, {} → {}.",
+                fmt_local(oldest),
+                fmt_local(newest)
+            ));
+            if amb.retention_days > 0 {
+                line.push_str(&format!(" Retention {}d.", amb.retention_days));
+            }
+        }
+        _ => line.push_str(" No entries."),
+    }
+    out.push(line);
+
+    if !cap.enabled && !amb.enabled {
+        out.push(
+            "Both are off — the user can enable them in Cetus Settings → Screen Context."
+                .to_string(),
+        );
+    }
+    out.join("\n")
 }
 
 /// One merged run of foreground time on the same window/tab.
@@ -505,11 +548,24 @@ struct Segment {
     /// Entry with the most text in the segment — the drill-down target.
     best_id: String,
     best_chars: i64,
+    /// Commit gestures (Enter/⌘S/⌘C captures) observed during the segment.
+    commits: usize,
+}
+
+/// One observation normalized across the two collectors (AX text rows carry
+/// url/page-title; screenshot rows carry the capture trigger).
+struct TlRow {
+    id: String,
+    ts: i64,
+    app: String,
+    title: String,
+    url: String,
+    text_chars: i64,
 }
 
 /// The workhorse behind "what did I do today": aggregate the raw observation
-/// stream into an app rollup plus a window-level timeline, durations computed
-/// here so the caller never has to.
+/// streams (AX text + screenshot OCR) into an app rollup plus a window-level
+/// timeline, durations computed here so the caller never has to.
 pub fn context_timeline(
     store: &Store,
     from: i64,
@@ -518,26 +574,73 @@ pub fn context_timeline(
     app_filter: &str,
     with_text: bool,
 ) -> Result<String, String> {
-    let rows = store
+    let ax_rows = store
         .ax_context_range_meta(from, to, RANGE_SCAN_LIMIT)
         .map_err(|e| e.to_string())?;
-    // Judged against the raw scan, before the app filter shrinks the set.
-    let truncated = rows.len() as u32 >= RANGE_SCAN_LIMIT;
+    let shot_rows = store
+        .screenshots_range_meta(from, to, RANGE_SCAN_LIMIT)
+        .map_err(|e| e.to_string())?;
+    // Judged against the raw scans, before the app filter shrinks the set.
+    let truncated =
+        ax_rows.len() as u32 >= RANGE_SCAN_LIMIT || shot_rows.len() as u32 >= RANGE_SCAN_LIMIT;
     let filter = app_filter.trim().to_lowercase();
-    let rows: Vec<_> = rows
-        .into_iter()
-        .filter(|r| {
-            filter.is_empty() || {
-                let hay = format!(
-                    "{} {}",
-                    r.app_name.as_deref().unwrap_or(""),
-                    r.bundle_id.as_deref().unwrap_or("")
-                )
-                .to_lowercase();
-                hay.contains(&filter)
-            }
-        })
-        .collect();
+
+    // ax ts index for the shadow rule below (rows come back ts-ascending).
+    let ax_ts: Vec<i64> = ax_rows.iter().map(|r| r.ts).collect();
+    let near_ax = |ts: i64| -> bool {
+        let i = ax_ts.partition_point(|&t| t < ts);
+        (i < ax_ts.len() && ax_ts[i] - ts <= SHADOW_MS) || (i > 0 && ts - ax_ts[i - 1] <= SHADOW_MS)
+    };
+
+    let matches_filter = |hay: &str| filter.is_empty() || hay.to_lowercase().contains(&filter);
+    let mut rows: Vec<TlRow> = Vec::new();
+    for r in &ax_rows {
+        let hay = format!(
+            "{} {}",
+            r.app_name.as_deref().unwrap_or(""),
+            r.bundle_id.as_deref().unwrap_or("")
+        );
+        if !matches_filter(&hay) {
+            continue;
+        }
+        rows.push(TlRow {
+            id: r.id.clone(),
+            ts: r.ts,
+            app: r.app_name.clone().unwrap_or_else(|| "?".into()),
+            title: r
+                .page_title
+                .clone()
+                .filter(|s| !s.is_empty())
+                .or_else(|| r.window_title.clone())
+                .unwrap_or_default(),
+            url: r.url.clone().unwrap_or_default(),
+            text_chars: r.text_chars,
+        });
+    }
+    // Screenshot rows: commit markers always count; presence only where the AX
+    // stream wasn't watching (off, excluded app, or empty AX tree).
+    let mut commits: Vec<i64> = Vec::new();
+    for s in &shot_rows {
+        if !matches_filter(s.app_name.as_deref().unwrap_or("")) {
+            continue;
+        }
+        if s.trigger.as_deref() == Some("commit") {
+            commits.push(s.ts);
+        }
+        if near_ax(s.ts) {
+            continue;
+        }
+        rows.push(TlRow {
+            id: s.id.clone(),
+            ts: s.ts,
+            app: s.app_name.clone().unwrap_or_else(|| "?".into()),
+            title: s.window_title.clone().unwrap_or_default(),
+            url: String::new(),
+            text_chars: s.text_chars,
+        });
+    }
+    rows.sort_by_key(|r| r.ts);
+    commits.sort_unstable();
 
     let mut header = format!("Screen activity {} – {}", fmt_local(from), fmt_local(to));
     if !filter.is_empty() {
@@ -550,13 +653,14 @@ pub fn context_timeline(
         ));
     }
     if rows.is_empty() {
-        let enabled = load_settings(store).enabled;
+        let any_enabled =
+            load_settings(store).enabled || crate::capture::load_settings(store).enabled;
         return Ok(format!(
             "{header}\nNo activity recorded in this range.{}",
-            if enabled {
+            if any_enabled {
                 ""
             } else {
-                " Note: the collector is currently disabled."
+                " Note: both screen-context collectors are currently disabled."
             }
         ));
     }
@@ -564,16 +668,11 @@ pub fn context_timeline(
     // Merge consecutive same-window observations into segments.
     let mut segs: Vec<Segment> = Vec::new();
     for r in &rows {
-        let title = r
-            .page_title
-            .clone()
-            .filter(|s| !s.is_empty())
-            .or_else(|| r.window_title.clone())
-            .unwrap_or_default();
-        let app = r.app_name.clone().unwrap_or_else(|| "?".into());
-        let url = r.url.clone().unwrap_or_default();
         let same = segs.last().is_some_and(|s| {
-            s.app == app && s.title == title && s.url == url && r.ts - s.last <= TIMELINE_GAP_MS
+            s.app == r.app
+                && s.title == r.title
+                && s.url == r.url
+                && r.ts - s.last <= TIMELINE_GAP_MS
         });
         if same {
             let s = segs.last_mut().unwrap();
@@ -587,11 +686,12 @@ pub fn context_timeline(
                 start: r.ts,
                 last: r.ts,
                 end: r.ts,
-                app,
-                title,
-                url,
+                app: r.app.clone(),
+                title: r.title.clone(),
+                url: r.url.clone(),
                 best_id: r.id.clone(),
                 best_chars: r.text_chars,
+                commits: 0,
             });
         }
     }
@@ -606,6 +706,12 @@ pub fn context_timeline(
             _ => (s.last + TIMELINE_TAIL_MS).min(to).min(now),
         }
         .max(s.last);
+    }
+    // Attribute commit gestures to the segment whose span holds them.
+    for s in &mut segs {
+        let a = commits.partition_point(|&t| t < s.start);
+        let b = commits.partition_point(|&t| t <= s.end);
+        s.commits = b.saturating_sub(a);
     }
 
     // App rollup: total duration + top windows per app.
@@ -622,9 +728,15 @@ pub fn context_timeline(
     let mut app_rows: Vec<_> = apps.into_iter().collect();
     app_rows.sort_by_key(|(_, (d, _))| -d);
 
+    let mut legend =
+        "Durations are foreground time observed by the collectors (input-idle stretches over 10m show as [away])."
+            .to_string();
+    if !commits.is_empty() {
+        legend.push_str(" ⏎×N marks commit gestures (Enter / ⌘S / ⌘C) in that window.");
+    }
     let mut out = vec![
         header,
-        "Durations are foreground time observed by the collector (input-idle stretches over 10m show as [away]).".into(),
+        legend,
         format!(
             "Total {} across {} apps, {} window segments.",
             fmt_dur(total),
@@ -694,10 +806,13 @@ pub fn context_timeline(
                 if !s.url.is_empty() {
                     line.push_str(&format!(" <{}>", clip(&s.url, 90)));
                 }
+                if s.commits > 0 {
+                    line.push_str(&format!("  ⏎×{}", s.commits));
+                }
                 out.push(line);
                 if excerpt_ids.contains(&s.best_id.as_str()) {
-                    if let Ok(Some(e)) = store.get_ax_context(&s.best_id) {
-                        let ex = clip(&collapse_ws(&e.text), EXCERPT_CHARS);
+                    if let Some(text) = entry_text(store, &s.best_id) {
+                        let ex = clip(&collapse_ws(&text), EXCERPT_CHARS);
                         if !ex.is_empty() {
                             out.push(format!("      » {ex}"));
                         }
@@ -715,8 +830,20 @@ pub fn context_timeline(
     Ok(out.join("\n"))
 }
 
-/// Full-text search formatted for an agent: one header line per hit plus a
-/// match-centered snippet, ids included for `context get` drill-down.
+/// Text body of an entry from either stream (AX text, else screenshot OCR).
+fn entry_text(store: &Store, id: &str) -> Option<String> {
+    if let Ok(Some(e)) = store.get_ax_context(id) {
+        return Some(e.text);
+    }
+    if let Ok(Some(s)) = store.get_screenshot(id) {
+        return s.ocr_text;
+    }
+    None
+}
+
+/// Full-text search over both streams formatted for an agent: one header line
+/// per hit plus a match-centered snippet, ids included for `context get`
+/// drill-down. Frame hits are tagged — `get` on them can point at the image.
 pub fn context_search(
     store: &Store,
     query: &str,
@@ -729,9 +856,21 @@ pub fn context_search(
         return Err("missing query".into());
     }
     let limit = limit.clamp(1, SEARCH_MAX_LIMIT);
-    let hits = store
+    let ax_hits = store
         .search_ax_context_snippets(query, from, to, app_filter, limit)
         .map_err(|e| e.to_string())?;
+    let shot_hits = store
+        .search_screenshots_snippets(query, from, to, app_filter, limit)
+        .map_err(|e| e.to_string())?;
+    // Merge newest-first and re-apply the cap across the union.
+    let mut hits: Vec<(crate::store::AxSearchHit, bool)> = ax_hits
+        .into_iter()
+        .map(|h| (h, false))
+        .chain(shot_hits.into_iter().map(|h| (h, true)))
+        .collect();
+    hits.sort_by_key(|(h, _)| -h.ts);
+    hits.truncate(limit as usize);
+
     let mut out = vec![format!(
         "{} match(es) for {query:?}, {} – {}{}:",
         hits.len(),
@@ -750,7 +889,7 @@ pub fn context_search(
                 .into(),
         );
     }
-    for h in &hits {
+    for (h, is_frame) in &hits {
         let title = h
             .page_title
             .as_deref()
@@ -766,7 +905,11 @@ pub fn context_search(
         if let Some(url) = h.url.as_deref().filter(|s| !s.is_empty()) {
             line.push_str(&format!(" <{}>", clip(url, 90)));
         }
-        line.push_str(&format!("  [id {}]", h.id));
+        line.push_str(&format!(
+            "  [id {}{}]",
+            h.id,
+            if *is_frame { " · frame" } else { "" }
+        ));
         out.push(line);
         let sn = collapse_ws(&h.snippet);
         if !sn.is_empty() {
@@ -776,27 +919,48 @@ pub fn context_search(
     Ok(out.join("\n"))
 }
 
-/// One full captured entry — the last step of the drill-down ladder.
+/// One full captured entry — the last step of the drill-down ladder. Tries the
+/// AX stream first, then the screenshot stream (whose full frame, when its
+/// pixels haven't been pruned yet, is offered as a viewable image path).
 pub fn context_get(store: &Store, id: &str) -> Result<String, String> {
-    let e = store
-        .get_ax_context(id)
+    if let Some(e) = store.get_ax_context(id).map_err(|e| e.to_string())? {
+        let mut out = format!(
+            "{}  {} — {}",
+            fmt_local(e.ts),
+            e.app_name.as_deref().unwrap_or("?"),
+            e.page_title
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .or(e.window_title.as_deref())
+                .unwrap_or("")
+        );
+        if let Some(url) = e.url.as_deref().filter(|s| !s.is_empty()) {
+            out.push_str(&format!("\nURL: {url}"));
+        }
+        out.push_str("\n--- captured screen text ---\n");
+        out.push_str(e.text.trim());
+        return Ok(out);
+    }
+    let s = store
+        .get_screenshot(id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("no entry with id {id:?} (pruned, or wrong id?)"))?;
     let mut out = format!(
         "{}  {} — {}",
-        fmt_local(e.ts),
-        e.app_name.as_deref().unwrap_or("?"),
-        e.page_title
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .or(e.window_title.as_deref())
-            .unwrap_or("")
+        fmt_local(s.ts),
+        s.app_name.as_deref().unwrap_or("?"),
+        s.window_title.as_deref().unwrap_or("")
     );
-    if let Some(url) = e.url.as_deref().filter(|s| !s.is_empty()) {
-        out.push_str(&format!("\nURL: {url}"));
+    if let Some(trigger) = s.trigger.as_deref() {
+        out.push_str(&format!("\nCaptured on: {trigger}"));
     }
-    out.push_str("\n--- captured screen text ---\n");
-    out.push_str(e.text.trim());
+    if !s.file_path.is_empty() && std::path::Path::new(&s.file_path).exists() {
+        out.push_str(&format!("\nFrame image (viewable): {}", s.file_path));
+    } else {
+        out.push_str("\nFrame pixels pruned — OCR text below is all that remains.");
+    }
+    out.push_str("\n--- OCR text ---\n");
+    out.push_str(s.ocr_text.as_deref().unwrap_or("(no OCR text)").trim());
     Ok(out)
 }
 
@@ -951,6 +1115,72 @@ mod tests {
             .unwrap();
         let full = context_get(&store, &hits[0].id).unwrap();
         assert!(full.contains("git log for your day"), "{full}");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn timeline_merges_shot_stream_and_marks_commits() {
+        let path =
+            std::env::temp_dir().join(format!("cetus-ambient-test-{}.db", uuid::Uuid::new_v4()));
+        let store = Store::open(&path).unwrap();
+        let t0: i64 = 1_700_000_000_000;
+        // AX row: Cursor.
+        store
+            .insert_ax_context(&AxContextEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                ts: t0,
+                app_name: Some("Cursor".into()),
+                bundle_id: Some("com.test.cursor".into()),
+                window_title: Some("main.rs — cetus".into()),
+                url: None,
+                page_title: None,
+                text: "fn main".into(),
+                text_hash: None,
+            })
+            .unwrap();
+        let shot = |ts: i64, app: &str, title: &str, trigger: &str| crate::store::Screenshot {
+            id: uuid::Uuid::new_v4().to_string(),
+            ts,
+            app_name: Some(app.to_string()),
+            window_title: Some(title.to_string()),
+            file_path: String::new(),
+            thumb_path: None,
+            phash: None,
+            bytes: 0,
+            ocr_text: None,
+            trigger: Some(trigger.to_string()),
+        };
+        // Commit frame 10s after the AX row, with a *different* window-title
+        // string (real dual-stream mismatch) — the shadow rule must keep it
+        // out of the timeline while still counting its ⏎.
+        let shadowed = shot(t0 + 10_000, "Cursor", "cetus — main.rs — Cursor", "commit");
+        store.insert_screenshot(&shadowed).unwrap();
+        // Two minutes later, shot-only coverage (AX saw nothing): presence
+        // comes from the OCR stream, including one commit.
+        let hn1 = shot(t0 + 120_000, "Chrome", "Hacker News", "switch");
+        let hn2 = shot(t0 + 150_000, "Chrome", "Hacker News", "commit");
+        store.insert_screenshot(&hn1).unwrap();
+        store.insert_screenshot(&hn2).unwrap();
+        store
+            .set_screenshot_ocr(&hn2.id, "Dayflow git log for your day")
+            .unwrap();
+
+        let out = context_timeline(&store, t0 - 1_000, t0 + 3_600_000, false, "", false).unwrap();
+        // The shadowed frame's divergent title must not fragment the timeline…
+        assert!(!out.contains("cetus — main.rs — Cursor"), "{out}");
+        // …but its commit lands on the Cursor segment, and Chrome's on its own.
+        assert!(out.contains("Cursor — main.rs — cetus"), "{out}");
+        assert!(out.contains("Chrome — Hacker News"), "{out}");
+        assert_eq!(out.matches("⏎×1").count(), 2, "{out}");
+
+        // Search reaches the OCR stream and tags the hit as a frame; get on
+        // that id returns the OCR text and notes the pruned pixels.
+        let found = context_search(&store, "Dayflow", t0 - 1_000, t0 + 3_600_000, "", 10).unwrap();
+        assert!(found.contains("frame"), "{found}");
+        let full = context_get(&store, &hn2.id).unwrap();
+        assert!(full.contains("git log for your day"), "{full}");
+        assert!(full.contains("pruned"), "{full}");
 
         let _ = std::fs::remove_file(&path);
     }

@@ -1,9 +1,33 @@
 //! Rewind-like screen-context collection.
 //!
-//! A background tokio task periodically grabs a frame of the primary monitor,
-//! drops near-identical frames (perceptual hash), writes the pixels as a JPEG
-//! on disk, indexes a row in SQLite, and (on macOS) OCRs the frame on-device
-//! via Apple Vision so the agent can later recall what was on screen.
+//! A background tokio task grabs frames of the primary monitor, drops
+//! near-identical frames (perceptual hash), writes the pixels as a JPEG on
+//! disk, indexes a row in SQLite, and (on macOS) OCRs the frame on-device via
+//! Apple Vision so the agent can later recall what was on screen.
+//!
+//! Capture is *event-driven*: rather than only sampling a fixed interval, the
+//! loop watches for the moments a screen is most worth remembering and shoots
+//! shortly after them —
+//!   * a **commit** gesture (Enter / ⌘Enter / ⌘S / ⌘C, via the timing signals
+//!     `input_signals.rs` distills from the hotkey event tap): the user just
+//!     sent / ran / saved / copied something; a short settle delay lets the
+//!     result render so the frame holds the action *and* its outcome.
+//!   * a **window switch** (frontmost app or window/tab title changed): the
+//!     start of whatever the user is looking at next.
+//!   * the end of a **typing burst** (sustained typing, then quiet): composed
+//!     content that never got an Enter — documents, code, notes.
+//!   * a fallback **interval** timer for passive reading, gated on the user
+//!     actually being at the keyboard (input-idle skip); the perceptual-hash
+//!     dedupe then drops the frames where nothing changed.
+//!
+//! Every stored frame records which trigger kept it, so downstream readers can
+//! tell "user acted here" from "screen was on".
+//!
+//! Retention is tiered: pixels are only worth keeping while a human might
+//! scroll back to them (`frame_retention_days`, full JPEG + thumbnail), while
+//! the OCR text row — the part agents search — stays for the much longer
+//! `retention_days`. Text is ~1000× smaller than pixels, so this is what keeps
+//! all-day capture from eating the disk.
 //!
 //! Capture and the heavy work (encode + OCR) run inside `spawn_blocking` so the
 //! async runtime is never blocked. Everything is gated behind a user toggle and
@@ -19,6 +43,22 @@ use std::time::{Duration, Instant};
 
 /// app_settings key holding the JSON-serialized [`CaptureSettings`].
 const SETTINGS_KEY: &str = "screen_capture";
+/// Trigger-decision cadence. Every tick costs one frontmost probe (NSWorkspace
+/// identity, no IPC, plus one AX title read); captures only happen on triggers.
+const TICK_MS: u64 = 1000;
+/// Delay between a commit gesture and its capture, so the submitted message /
+/// command output / saved state has rendered by the time the frame is taken.
+const COMMIT_SETTLE_MS: i64 = 1200;
+/// A window/tab change must hold this long before its capture (skips flashed
+/// intermediate states while ⌘-tabbing through apps).
+const SWITCH_SETTLE_MS: i64 = 900;
+/// Typing-burst end: at least this many keystrokes in a burst…
+const TYPING_MIN_BURST: u32 = 8;
+/// …followed by this much quiet.
+const TYPING_PAUSE_MS: i64 = 3000;
+/// Skip switch/interval captures when the user hasn't touched keyboard/mouse
+/// for this long — nobody is looking, and background churn is not activity.
+const IDLE_SKIP_SECS: f64 = 120.0;
 /// Frames whose perceptual hash is within this Hamming distance of the last
 /// stored frame are treated as duplicates and dropped.
 const DEDUPE_HAMMING: u32 = 6;
@@ -45,15 +85,22 @@ pub struct CaptureSettings {
     /// Master switch. Off by default — never capture without explicit opt-in.
     #[serde(default)]
     pub enabled: bool,
-    /// Seconds between capture attempts (clamped to >= 2 at runtime).
+    /// Seconds between *fallback* capture attempts (clamped to >= 2 at
+    /// runtime). Event triggers (commit / switch / typing) fire on their own.
     #[serde(default = "default_interval")]
     pub interval_seconds: u64,
     /// App names / bundle ids to skip (case-insensitive substring match).
     #[serde(default)]
     pub excluded_apps: Vec<String>,
-    /// Delete frames older than this many days (0 = keep forever).
+    /// Delete entries (text row + FTS index) older than this many days
+    /// (0 = keep forever). Text is tiny; this can be long.
     #[serde(default = "default_retention")]
     pub retention_days: u32,
+    /// Delete the *pixels* (full JPEG + thumbnail) after this many days while
+    /// the searchable text row lives on for `retention_days` (0 = keep pixels
+    /// as long as the row). Pixels are ~99% of the disk cost.
+    #[serde(default = "default_frame_retention")]
+    pub frame_retention_days: u32,
     /// Run on-device OCR (Apple Vision) on each kept frame.
     #[serde(default = "default_true")]
     pub ocr_enabled: bool,
@@ -64,6 +111,9 @@ fn default_interval() -> u64 {
 }
 fn default_retention() -> u32 {
     7
+}
+fn default_frame_retention() -> u32 {
+    3
 }
 fn default_true() -> bool {
     true
@@ -76,6 +126,7 @@ impl Default for CaptureSettings {
             interval_seconds: 30,
             excluded_apps: Vec::new(),
             retention_days: default_retention(),
+            frame_retention_days: default_frame_retention(),
             ocr_enabled: true,
         }
     }
@@ -101,6 +152,31 @@ pub fn recall_log_path(app_data: &Path) -> PathBuf {
     app_data.join("screen-context").join("recall.jsonl")
 }
 
+/// What the cheap per-tick frontmost probe saw (identity + window title; no
+/// pixel work). All best-effort empty off-macOS or without Accessibility.
+#[derive(Default, Clone, PartialEq)]
+struct Probe {
+    app: String,
+    bundle: String,
+    pid: i32,
+    title: String,
+}
+
+fn probe_frontmost() -> Probe {
+    let (app, bundle, pid) = crate::ax::frontmost_identity().unwrap_or_default();
+    let title = if pid > 0 {
+        crate::ax::focused_window_title(pid).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    Probe {
+        app,
+        bundle,
+        pid,
+        title,
+    }
+}
+
 /// Start the background capture loop. Cheap when disabled (just polls the
 /// toggle every few seconds).
 pub fn spawn(store: Arc<Store>, app_data: PathBuf) {
@@ -109,37 +185,100 @@ pub fn spawn(store: Arc<Store>, app_data: PathBuf) {
         let recall = recall_log_path(&app_data);
         let mut last_hash: Option<u64> = None;
         let mut last_prune = Instant::now();
+        // Trigger bookkeeping. `consumed_*` are the signal timestamps already
+        // acted on, so each gesture fires exactly one capture.
+        let mut consumed_commit_ms: i64 = 0;
+        let mut consumed_typing_ms: i64 = 0;
+        let mut last_probe = Probe::default();
+        // When the frontmost window last changed (None = stable & captured).
+        let mut switch_pending_since: Option<i64> = None;
+        let mut last_attempt_ms: i64 = 0; // fallback-interval clock
 
         loop {
             let settings = load_settings(&store);
             if !settings.enabled {
+                // Drop stale trigger state so re-enabling starts fresh.
+                consumed_commit_ms = crate::input_signals::last_commit_ms();
+                consumed_typing_ms = crate::input_signals::last_keydown_ms();
+                last_probe = Probe::default();
+                switch_pending_since = None;
                 tokio::time::sleep(Duration::from_secs(DISABLED_POLL_SECS)).await;
                 continue;
             }
 
             if last_prune.elapsed().as_secs() >= PRUNE_INTERVAL_SECS {
                 let store2 = store.clone();
-                let retention = settings.retention_days;
-                let _ = tokio::task::spawn_blocking(move || prune(&store2, retention)).await;
+                let settings2 = settings.clone();
+                let _ = tokio::task::spawn_blocking(move || prune(&store2, &settings2)).await;
                 last_prune = Instant::now();
             }
 
-            let store2 = store.clone();
-            let app_data2 = app_data.clone();
-            let dir2 = screenshots_dir.clone();
-            let recall2 = recall.clone();
-            let settings2 = settings.clone();
-            let prev = last_hash;
-            let outcome = tokio::task::spawn_blocking(move || {
-                capture_once(&store2, &app_data2, &dir2, &recall2, &settings2, prev)
-            })
-            .await;
-            if let Ok(Some(h)) = outcome {
-                last_hash = Some(h);
+            let probe = tokio::task::spawn_blocking(probe_frontmost)
+                .await
+                .unwrap_or_default();
+            let now = now_ms();
+            let idle = crate::ax::seconds_since_last_input() >= IDLE_SKIP_SECS;
+
+            // Track window/tab changes (identity only — title flaps re-arm the
+            // settle timer so we shoot the destination, not the transit).
+            if probe.bundle != last_probe.bundle || probe.title != last_probe.title {
+                switch_pending_since = Some(now);
+                last_probe = probe.clone();
             }
 
-            let interval = settings.interval_seconds.max(2);
-            tokio::time::sleep(Duration::from_secs(interval)).await;
+            let commit = crate::input_signals::last_commit_ms();
+            let keydown = crate::input_signals::last_keydown_ms();
+            let commit_pending = commit > consumed_commit_ms;
+            let interval_ms = (settings.interval_seconds.max(2) as i64) * 1000;
+
+            // One trigger per tick, most specific first. An unsettled commit
+            // parks the tick entirely: its frame is the most valuable one and
+            // must not be half-taken by a lesser trigger (the dedupe hash would
+            // then swallow the settled commit frame as a duplicate).
+            let trigger: Option<&'static str> = if commit_pending {
+                if now - commit >= COMMIT_SETTLE_MS {
+                    consumed_commit_ms = commit;
+                    consumed_typing_ms = keydown; // same burst — don't refire
+                    Some("commit")
+                } else {
+                    None // settling; next tick takes it
+                }
+            } else if keydown > consumed_typing_ms
+                && crate::input_signals::burst_keys() >= TYPING_MIN_BURST
+                && now - keydown >= TYPING_PAUSE_MS
+            {
+                consumed_typing_ms = keydown;
+                Some("typing")
+            } else if !idle && switch_pending_since.is_some_and(|t| now - t >= SWITCH_SETTLE_MS) {
+                switch_pending_since = None;
+                Some("switch")
+            } else if !idle && now - last_attempt_ms >= interval_ms {
+                Some("interval")
+            } else {
+                None
+            };
+
+            if let Some(trigger) = trigger {
+                last_attempt_ms = now;
+                let store2 = store.clone();
+                let app_data2 = app_data.clone();
+                let dir2 = screenshots_dir.clone();
+                let recall2 = recall.clone();
+                let settings2 = settings.clone();
+                let probe2 = probe.clone();
+                let prev = last_hash;
+                let outcome = tokio::task::spawn_blocking(move || {
+                    capture_once(
+                        &store2, &app_data2, &dir2, &recall2, &settings2, prev, &probe2, trigger,
+                    )
+                })
+                .await;
+                if let Ok(Some(h)) = outcome {
+                    last_hash = Some(h);
+                }
+            }
+
+            tokio::time::sleep(Duration::from_millis(TICK_MS)).await;
         }
     });
 }
@@ -147,6 +286,9 @@ pub fn spawn(store: Arc<Store>, app_data: PathBuf) {
 /// Capture, dedup, store, and OCR a single frame. Returns the new baseline hash
 /// when a frame was stored (so the caller updates its dedup reference), or
 /// `None` when the tick was skipped (disabled-app, duplicate, or error).
+/// `probe` is the loop's frontmost sample from this tick; `trigger` is why the
+/// frame is being taken (recorded on the row).
+#[allow(clippy::too_many_arguments)]
 fn capture_once(
     store: &Store,
     app_data: &Path,
@@ -154,14 +296,17 @@ fn capture_once(
     recall: &Path,
     settings: &CaptureSettings,
     prev_hash: Option<u64>,
+    probe: &Probe,
+    trigger: &'static str,
 ) -> Option<u64> {
     // Exclusion is enforced *before* capture so excluded windows never touch
     // disk (cheaper and safer than capture-then-delete).
-    let app = ocr::frontmost_app(app_data);
-    if let Some(a) = &app {
-        if is_excluded(&settings.excluded_apps, a) {
-            return None;
-        }
+    let app = AppInfo {
+        app: probe.app.clone(),
+        bundle_id: probe.bundle.clone(),
+    };
+    if is_excluded(&settings.excluded_apps, &app) {
+        return None;
     }
 
     let img = capture_primary()?;
@@ -184,12 +329,21 @@ fn capture_once(
     // window between that check and the framebuffer grab, drop the in-memory
     // frame before it ever touches disk — the subsystem's core privacy promise.
     // The fresh sample also gives more accurate attribution than the stale one.
-    let app = ocr::frontmost_app(app_data);
-    if let Some(a) = &app {
-        if is_excluded(&settings.excluded_apps, a) {
+    let fresh = probe_frontmost();
+    let (app, title) = if fresh.bundle.is_empty() && fresh.app.is_empty() {
+        // Identity briefly unreadable — fall back to the tick's probe (already
+        // exclusion-checked above).
+        (app, probe.title.clone())
+    } else {
+        let app = AppInfo {
+            app: fresh.app.clone(),
+            bundle_id: fresh.bundle.clone(),
+        };
+        if is_excluded(&settings.excluded_apps, &app) {
             return None; // nothing persisted; leave prev_hash unchanged
         }
-    }
+        (app, fresh.title)
+    };
 
     let ts = now_ms();
     let (path, thumb_path, bytes) = match save_jpeg(resized, dir, ts) {
@@ -200,20 +354,18 @@ fn capture_once(
         }
     };
 
-    let app_name = app
-        .as_ref()
-        .map(|a| a.app.clone())
-        .filter(|s| !s.is_empty());
+    let app_name = Some(app.app.clone()).filter(|s| !s.is_empty());
     let shot = Screenshot {
         id: uuid::Uuid::new_v4().to_string(),
         ts,
         app_name: app_name.clone(),
-        window_title: None,
+        window_title: Some(title).filter(|s| !s.is_empty()),
         file_path: path.to_string_lossy().into_owned(),
         thumb_path: thumb_path.map(|p| p.to_string_lossy().into_owned()),
         phash: Some(hash as i64),
         bytes: bytes as i64,
         ocr_text: None,
+        trigger: Some(trigger.to_string()),
     };
     if let Err(e) = store.insert_screenshot(&shot) {
         tracing::warn!("screen capture: db insert failed: {e}");
@@ -486,11 +638,35 @@ fn append_recall(path: &Path, ts: i64, app: Option<&str>, text: &str) {
 
 // ---- retention -------------------------------------------------------------
 
-fn prune(store: &Store, retention_days: u32) {
-    if retention_days == 0 {
-        return; // keep forever
+/// Tiered retention. Phase 1 strips the pixels (full JPEG + thumbnail) of
+/// frames older than `frame_retention_days`; the searchable text row survives.
+/// Phase 2 deletes whole entries older than `retention_days`.
+fn prune(store: &Store, settings: &CaptureSettings) {
+    let day_ms: i64 = 86_400 * 1000;
+    let frames = settings.frame_retention_days;
+    if frames > 0 {
+        let before = now_ms() - (frames as i64) * day_ms;
+        match store.prune_screenshot_frames(before) {
+            Ok(paths) => {
+                let n = paths.len();
+                for p in &paths {
+                    let _ = std::fs::remove_file(p);
+                }
+                if n > 0 {
+                    tracing::info!(
+                        "screen capture: dropped pixels of {n} files older than {frames}d (text kept)"
+                    );
+                }
+            }
+            Err(e) => tracing::warn!("screen capture: frame prune failed: {e}"),
+        }
     }
-    let before = now_ms() - (retention_days as i64) * 86_400 * 1000;
+
+    let retention = settings.retention_days;
+    if retention == 0 {
+        return; // keep text forever
+    }
+    let before = now_ms() - (retention as i64) * day_ms;
     match store.prune_screenshots(before) {
         Ok(paths) => {
             let n = paths.len();
@@ -498,7 +674,7 @@ fn prune(store: &Store, retention_days: u32) {
                 let _ = std::fs::remove_file(&p);
             }
             if n > 0 {
-                tracing::info!("screen capture: pruned {n} frames older than {retention_days}d");
+                tracing::info!("screen capture: pruned {n} entries older than {retention}d");
             }
         }
         Err(e) => tracing::warn!("screen capture: prune failed: {e}"),

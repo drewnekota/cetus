@@ -5,7 +5,7 @@ import {
   Square,
   Paperclip,
   X,
-  File,
+  File as FileIcon,
   Terminal,
   Radar,
   CornerDownRight,
@@ -314,6 +314,13 @@ const CODEX_CLI_COMMANDS: SlashItem[] = [
 const RUNTIME_CATALOG_REFRESH_MS = 30_000;
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB — docx/xlsx/pdf etc., read on disk by the agent
+
+/** Text pastes longer than this become a `pasted.txt` attachment instead of
+ *  entering the textarea. A controlled textarea holding megabytes (a crash log,
+ *  a terminal dump) wedges the webview: WebKit re-lays-out and spellchecks the
+ *  whole run on every render, and the draft write-through rewrites it all to
+ *  localStorage on each keystroke. */
+const LONG_PASTE_CHARS = 20_000;
 const FOCUS_TRIGGER_CHARS = new Set(["/", "、", "／"]);
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -1285,7 +1292,7 @@ export function Composer({
                   title={a.name}
                   className="flex h-14 max-w-44 items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5"
                 >
-                  <File className="size-4 shrink-0 text-muted-foreground" />
+                  <FileIcon className="size-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
                     <div className="truncate text-xs font-medium">{a.name}</div>
                     <div className="text-[10px] text-muted-foreground">{formatBytes(a.sizeBytes)}</div>
@@ -1341,12 +1348,18 @@ export function Composer({
               if (f) files.push(f);
             }
           }
-          // No files → let the browser paste text normally.
-          if (!files.length) return;
+          const pastedText = e.clipboardData?.getData("text/plain") ?? "";
+          const textAsFile =
+            pastedText.length > LONG_PASTE_CHARS
+              ? new File([pastedText], "pasted.txt", { type: "text/plain" })
+              : null;
+          // No files and reasonably-sized text → let the browser paste normally.
+          if (!files.length && !textAsFile) return;
           // Mixed paste (image + text): hijack the event so the images become
           // attachments, but don't drop the accompanying text — insert it at
           // the caret ourselves since preventDefault cancels the native paste.
           e.preventDefault();
+          if (textAsFile) files.push(textAsFile);
           // A Finder file copy carries the real path on the pasteboard; resolve
           // it first so addFiles can reference a too-large file by path instead
           // of skipping it. Best-effort — falls back to the byte path on any
@@ -1362,8 +1375,7 @@ export function Composer({
               return addFiles(files, hints);
             })
             .catch(() => addFiles(files));
-          const pastedText = e.clipboardData?.getData("text/plain") ?? "";
-          if (pastedText) insertTextAtCaret(pastedText);
+          if (pastedText && !textAsFile) insertTextAtCaret(pastedText);
         }}
         onKeyDown={(e) => {
           const composing = e.nativeEvent.isComposing || e.keyCode === 229;

@@ -292,6 +292,16 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
                 tracing::warn!("cetus: event tap was disabled by the OS; re-armed and resynced");
                 return None;
             }
+            if matches!(event_type, CGEventType::KeyDown) {
+                // Feed the screen-context capture's trigger clock (commit /
+                // typing-burst timestamps only — see input_signals.rs for the
+                // privacy contract). Before the launcher-enabled gate: capture
+                // wants these signals even when the launcher gesture is off.
+                crate::input_signals::note_key_down(
+                    event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE),
+                    event.get_flags().bits(),
+                );
+            }
             if !enabled.load(Ordering::Relaxed) {
                 was_both.set(false);
                 return None;

@@ -21,6 +21,12 @@
 
 <p align="center"><strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a></p>
 
+<h2 align="center">Join the Cetus community</h2>
+
+<p align="center">Scan with WeChat to join the group chat and share feedback.</p>
+
+<p align="center"><img src="docs/cetus-community-wechat.jpg" width="360" alt="WeChat QR code for the Cetus community group" /></p>
+
 ![Cetus runtime picker — Claude Code, Codex, OpenCode, Grok Build, and Kimi CLI in one macOS app](docs/screenshot-runtime-picker.png)
 
 ![Cetus demo — launch an agent, schedule an automation, and switch runtimes](docs/cetus-demo.gif)

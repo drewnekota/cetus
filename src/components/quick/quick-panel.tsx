@@ -35,6 +35,7 @@ import {
   type QuickAttachment,
   type QuickOpenPayload,
   type QuickOpenUrlPayload,
+  type QuickReplyContextPayload,
   type QuickReplyDeltaPayload,
   type QuickReplyOpenPayload,
   type QuickReplyResultPayload,
@@ -118,6 +119,11 @@ export function QuickPanel() {
   const [replyResult, setReplyResult] = useState<QuickReplyResultPayload | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [insertingReply, setInsertingReply] = useState(false);
+  // Runtime the reply surface is drafting on. Seeded from the open payload (the
+  // resolved `replyBackend` setting) and re-runnable: picking another one
+  // re-sends the same capture, so the user can compare drafts without having to
+  // re-trigger the gesture — the screen it was reading is gone by then.
+  const [replyBackend, setReplyBackend] = useState<BackendId>("pi");
 
   const taRef = useRef<HTMLTextAreaElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -216,9 +222,31 @@ export function QuickPanel() {
     [backend, cliModel],
   );
 
-  // ⌃1/⌃2/⌃3 (user-editable) switch the launcher's runtime, mirroring the
-  // main composer. This window only receives keys while the panel is up.
-  useRuntimeShortcuts(onBackendChange);
+  /** Re-draft on another runtime against the capture already in flight. The
+   *  turn streams into the same draft, so clear it back to the loading shell
+   *  first; a superseded turn's late deltas are dropped natively. */
+  const onReplyBackendChange = useCallback(
+    (id: string) => {
+      const next = BACKENDS.find((b) => b.id === id);
+      if (!next || next.id === replyBackend) return;
+      setReplyBackend(next.id);
+      setReplyResult(null);
+      setReplyDraft("");
+      api.quickReplyRegenerate(next.id).catch((error) => {
+        setReplyResult((current) =>
+          current ?? { openId: replyOpen?.openId ?? 0, output: null, error: String(error) },
+        );
+      });
+    },
+    [replyBackend, replyOpen],
+  );
+
+  // ⌃1/⌃2/⌃3 (user-editable) switch the runtime, mirroring the main composer.
+  // This window only receives keys while the panel is up, and the two surfaces
+  // own separate runtime choices — the reply surface re-drafts on switch.
+  useRuntimeShortcuts(
+    surface === "reply" ? onReplyBackendChange : onBackendChange,
+  );
 
   const onWorkspaceChange = useCallback((dir: string) => {
     setWorkspaceDir(dir);
@@ -293,11 +321,21 @@ export function QuickPanel() {
       listen<QuickReplyOpenPayload>("quick-reply-open", (e) => {
         setSurface("reply");
         setReplyOpen(e.payload);
+        setReplyBackend(e.payload.backend ?? "pi");
         setReplyResult(null);
         setReplyDraft("");
         setInsertingReply(false);
         openingRef.current = true;
         window.setTimeout(() => { openingRef.current = false; }, 400);
+      }),
+      // The AX walk and browser probe land after the panel is already up; fold
+      // their result into the captured-input band the user is looking at.
+      listen<QuickReplyContextPayload>("quick-reply-context", (e) => {
+        setReplyOpen((current) =>
+          current && current.openId === e.payload.openId
+            ? { ...current, context: e.payload.context, axChars: e.payload.axChars }
+            : current,
+        );
       }),
       listen<QuickReplyDeltaPayload>("quick-reply-delta", (e) => {
         setReplyOpen((current) => {
@@ -552,6 +590,8 @@ export function QuickPanel() {
         result={replyResult}
         draft={replyDraft}
         inserting={insertingReply}
+        backend={replyBackend}
+        onBackendChange={onReplyBackendChange}
         onDraftChange={setReplyDraft}
         onInsert={() => { void insertReply(); }}
         onDismiss={() => { api.quickDismiss().catch(() => {}); }}
@@ -745,6 +785,8 @@ function QuickReplySurface({
   result,
   draft,
   inserting,
+  backend,
+  onBackendChange,
   onDraftChange,
   onInsert,
   onDismiss,
@@ -753,11 +795,14 @@ function QuickReplySurface({
   result: QuickReplyResultPayload | null;
   draft: string;
   inserting: boolean;
+  backend: BackendId;
+  onBackendChange: (id: string) => void;
   onDraftChange: (value: string) => void;
   onInsert: () => void;
   onDismiss: () => void;
 }) {
   const { t } = useTranslation("quick");
+  const enabledBackendIds = useEnabledBackendIds();
   // The turn streams the draft in before the result settles; show the text as
   // soon as the first delta lands and keep the footer in "reading" state.
   const streaming = !result && draft.length > 0;
@@ -770,6 +815,13 @@ function QuickReplySurface({
     if (e.key === "Escape") {
       e.preventDefault();
       onDismiss();
+      return;
+    }
+    // Tab re-drafts on the next runtime, same key that cycles runtimes in the
+    // launcher and the main composer.
+    if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      onBackendChange(nextBackend(backend, enabledBackendIds));
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
@@ -797,7 +849,7 @@ function QuickReplySurface({
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-10 text-center">
           <ImageOff className="size-5 text-warning" />
           <div className="max-w-xl text-sm text-foreground">{result.error}</div>
-          <div className="text-xs text-muted-foreground">{t("reply.retryHint")}</div>
+          <div className="text-xs text-muted-foreground">{t("reply.retryRuntime")}</div>
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col px-6 pt-5">
@@ -858,14 +910,13 @@ function QuickReplySurface({
         </div>
       )}
 
-      <div className="flex shrink-0 items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-[13px] text-muted-foreground dark:border-white/[0.06]">
-        {result?.output ? (
-          <span className="shrink-0 text-muted-foreground/70">
-            {t("reply.provider", { provider: result.output.provider })}
-          </span>
-        ) : (
-          <span className="min-w-0 truncate">{status}</span>
-        )}
+      {/* Same action strip as the launcher, minus everything a one-shot turn
+          doesn't have: just the runtime, which doubles as the re-draft control. */}
+      <div className="flex shrink-0 items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-[13px] text-muted-foreground dark:border-white/[0.06] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5">
+        <BackendSelect value={backend} onChange={onBackendChange} />
+        <span className="min-w-0 truncate text-muted-foreground/70">
+          {result?.output ? t("reply.drafted") : status}
+        </span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-4 pr-1">
           {result?.output && (
             <>
@@ -876,6 +927,9 @@ function QuickReplySurface({
               <span className="text-muted-foreground/40">·</span>
             </>
           )}
+          <Kbd>⇥</Kbd>
+          {t("reply.redraft")}
+          <span className="text-muted-foreground/40">·</span>
           <Kbd>esc</Kbd>
           {t("footer.dismiss")}
         </span>

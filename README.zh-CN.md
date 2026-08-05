@@ -21,6 +21,12 @@
 
 <p align="center"><a href="./README.md">English</a> · <strong>简体中文</strong></p>
 
+<h2 align="center">加入 Cetus 社区群聊</h2>
+
+<p align="center">微信扫码加入群聊，交流使用体验和建议。</p>
+
+<p align="center"><img src="docs/cetus-community-wechat.jpg" width="360" alt="Cetus 社区微信群二维码" /></p>
+
 ![Cetus runtime 选择器 —— Claude Code、Codex、OpenCode、Grok Build、Kimi CLI 都在同一个 macOS app 里](docs/screenshot-runtime-picker.png)
 
 ![Cetus 操作演示 —— 唤起 agent、创建自动化任务并切换 runtime](docs/cetus-demo.gif)

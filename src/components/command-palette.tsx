@@ -401,13 +401,18 @@ export function CommandPalette({
                           onSelect={() => onOpenScreenHistory(q, s)}
                           className="items-start"
                         >
-                          <img
-                            src={convertFileSrc(s.thumbPath ?? s.filePath)}
-                            alt=""
-                            loading="lazy"
-                            decoding="async"
-                            className="mt-0.5 h-9 w-14 shrink-0 rounded border border-border object-cover"
-                          />
+                          {s.thumbPath || s.filePath ? (
+                            <img
+                              src={convertFileSrc(s.thumbPath || s.filePath)}
+                              alt=""
+                              loading="lazy"
+                              decoding="async"
+                              className="mt-0.5 h-9 w-14 shrink-0 rounded border border-border object-cover"
+                            />
+                          ) : (
+                            // Pixels pruned by tiered retention; text-only hit.
+                            <div className="mt-0.5 h-9 w-14 shrink-0 rounded border border-border bg-muted" />
+                          )}
                           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                             <div className="flex items-center gap-2">
                               <span className="min-w-0 flex-1 truncate font-medium">

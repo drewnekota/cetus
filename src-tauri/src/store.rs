@@ -80,6 +80,22 @@ pub struct Screenshot {
     pub phash: Option<i64>,
     pub bytes: i64,
     pub ocr_text: Option<String>,
+    /// What caused this frame to be kept: "commit" (Enter/⌘S/⌘C), "switch"
+    /// (app/window change), "typing" (burst ended), "interval" (fallback timer).
+    /// None for frames captured before event-driven triggers existed.
+    pub trigger: Option<String>,
+}
+
+/// [`Screenshot`] minus pixels and text body — what timeline aggregation reads
+/// (mirrors [`AxContextMeta`] for the OCR stream).
+#[derive(Debug, Clone)]
+pub struct ScreenshotMeta {
+    pub id: String,
+    pub ts: i64,
+    pub app_name: Option<String>,
+    pub window_title: Option<String>,
+    pub trigger: Option<String>,
+    pub text_chars: i64,
 }
 
 /// One observed ambient-context change: structured text read off the frontmost
@@ -415,6 +431,9 @@ impl Store {
         // Additive — frames captured before this column keep thumb_path = NULL
         // and the client falls back to the full image.
         ensure_column(&conn, "screenshots", "thumb_path", "TEXT")?;
+        // Why a frame was kept ("commit" / "switch" / "typing" / "interval").
+        // Additive — pre-event-driven frames stay NULL.
+        ensure_column(&conn, "screenshots", "trigger", "TEXT")?;
         conn.execute(&format!("PRAGMA user_version = {SCHEMA_VERSION}"), [])?;
         // Open the dedicated read connection after the schema exists. Same file,
         // same WAL pragmas; it never writes, so it can read concurrently with the
@@ -997,8 +1016,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO screenshots
-                (id, ts, app_name, window_title, file_path, phash, bytes, ocr_text, thumb_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                (id, ts, app_name, window_title, file_path, phash, bytes, ocr_text, thumb_path, trigger)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 s.id,
                 s.ts,
@@ -1009,6 +1028,7 @@ impl Store {
                 s.bytes,
                 s.ocr_text,
                 s.thumb_path,
+                s.trigger,
             ],
         )?;
         Ok(())
@@ -1045,7 +1065,7 @@ impl Store {
     ) -> Result<Vec<Screenshot>> {
         let conn = self.read_conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, ts, app_name, window_title, file_path, phash, bytes, ocr_text, thumb_path
+            "SELECT id, ts, app_name, window_title, file_path, phash, bytes, ocr_text, thumb_path, trigger
              FROM screenshots WHERE ts < ?2 ORDER BY ts DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(
@@ -1076,7 +1096,7 @@ impl Store {
         }
         let conn = self.read_conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.ts, s.app_name, s.window_title, s.file_path, s.phash, s.bytes, s.ocr_text, s.thumb_path
+            "SELECT s.id, s.ts, s.app_name, s.window_title, s.file_path, s.phash, s.bytes, s.ocr_text, s.thumb_path, s.trigger
              FROM screenshots s JOIN screenshots_fts ON screenshots_fts.id = s.id
              WHERE screenshots_fts MATCH ?1 AND s.ts >= ?2 AND s.ts < ?4
              ORDER BY s.ts DESC LIMIT ?3",
@@ -1139,6 +1159,139 @@ impl Store {
             );
         }
         Ok(paths)
+    }
+
+    /// Tiered retention, phase 1: drop only the *pixels* of frames older than
+    /// `before_ts` — full JPEG and thumbnail — while the row, OCR text, and FTS
+    /// index stay. Returns the file paths so the caller can unlink them.
+    /// `file_path` is cleared to '' (the schema forbids NULL) as the marker the
+    /// client and `context get` use for "text-only entry".
+    pub fn prune_screenshot_frames(&self, before_ts: i64) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let paths: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT file_path, thumb_path FROM screenshots
+                 WHERE ts < ?1 AND (file_path != '' OR thumb_path IS NOT NULL)",
+            )?;
+            let rows = stmt.query_map(params![before_ts], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            })?;
+            let mut out = Vec::new();
+            for r in rows.flatten() {
+                if !r.0.is_empty() {
+                    out.push(r.0);
+                }
+                if let Some(thumb) = r.1 {
+                    out.push(thumb);
+                }
+            }
+            out
+        };
+        if !paths.is_empty() {
+            conn.execute(
+                "UPDATE screenshots SET file_path = '', thumb_path = NULL, bytes = 0
+                 WHERE ts < ?1 AND (file_path != '' OR thumb_path IS NOT NULL)",
+                params![before_ts],
+            )?;
+        }
+        Ok(paths)
+    }
+
+    /// Metadata of every frame in `[from_ts, to_ts)`, oldest first — the OCR
+    /// stream's input to timeline aggregation (mirrors `ax_context_range_meta`).
+    pub fn screenshots_range_meta(
+        &self,
+        from_ts: i64,
+        to_ts: i64,
+        limit: u32,
+    ) -> Result<Vec<ScreenshotMeta>> {
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, app_name, window_title, trigger, length(coalesce(ocr_text,''))
+             FROM screenshots WHERE ts >= ?1 AND ts < ?2 ORDER BY ts ASC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![from_ts, to_ts, limit], |r| {
+            Ok(ScreenshotMeta {
+                id: r.get(0)?,
+                ts: r.get(1)?,
+                app_name: r.get(2)?,
+                window_title: r.get(3)?,
+                trigger: r.get(4)?,
+                text_chars: r.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// FTS search over OCR text returning match-centered snippets, newest first
+    /// (mirrors `search_ax_context_snippets`; url/page_title are always None for
+    /// this stream).
+    pub fn search_screenshots_snippets(
+        &self,
+        query: &str,
+        from_ts: i64,
+        to_ts: i64,
+        app_filter: &str,
+        limit: u32,
+    ) -> Result<Vec<AxSearchHit>> {
+        let match_expr = fts_match_expr(query);
+        if match_expr.is_empty() {
+            return Ok(Vec::new());
+        }
+        let app = app_filter.trim().to_lowercase();
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.ts, s.app_name, s.window_title,
+                    snippet(screenshots_fts, 1, '[', ']', ' … ', 24)
+             FROM screenshots s JOIN screenshots_fts ON screenshots_fts.id = s.id
+             WHERE screenshots_fts MATCH ?1 AND s.ts >= ?2 AND s.ts < ?3
+               AND (?4 = '' OR instr(lower(coalesce(s.app_name,'')), ?4) > 0)
+             ORDER BY s.ts DESC LIMIT ?5",
+        )?;
+        let rows = stmt.query_map(params![match_expr, from_ts, to_ts, app, limit], |r| {
+            Ok(AxSearchHit {
+                id: r.get(0)?,
+                ts: r.get(1)?,
+                app_name: r.get(2)?,
+                window_title: r.get(3)?,
+                url: None,
+                page_title: None,
+                snippet: r.get(4)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// One frame by id — `context get` drill-down for the OCR stream.
+    pub fn get_screenshot(&self, id: &str) -> Result<Option<Screenshot>> {
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, app_name, window_title, file_path, phash, bytes, ocr_text, thumb_path, trigger
+             FROM screenshots WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![id], row_to_screenshot)?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// Oldest/newest frame timestamps, None when the table is empty.
+    pub fn screenshots_span(&self) -> Result<Option<(i64, i64)>> {
+        let conn = self.read_conn.lock().unwrap();
+        let span: (Option<i64>, Option<i64>) =
+            conn.query_row("SELECT MIN(ts), MAX(ts) FROM screenshots", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
+        Ok(match span {
+            (Some(a), Some(b)) => Some((a, b)),
+            _ => None,
+        })
     }
 
     // ---- ax_context (rolling ambient text context) -------------------------
@@ -1550,6 +1703,7 @@ fn row_to_screenshot(r: &rusqlite::Row<'_>) -> rusqlite::Result<Screenshot> {
         bytes: r.get(6)?,
         ocr_text: r.get(7)?,
         thumb_path: r.get(8)?,
+        trigger: r.get(9)?,
     })
 }
 

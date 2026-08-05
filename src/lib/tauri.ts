@@ -7,6 +7,7 @@ import type {
   AutoArchiveSettings,
   Automation,
   AutomationInput,
+  BackendId,
   BashResult,
   Conversation,
   DiscoverySettings,
@@ -53,9 +54,13 @@ import type {
 
 export interface CaptureSettings {
   enabled: boolean;
+  /** Fallback-timer cadence; event triggers (commit/switch/typing) fire on their own. */
   intervalSeconds: number;
   excludedApps: string[];
+  /** How long text entries (OCR + FTS row) live. */
   retentionDays: number;
+  /** How long the pixels (full frame + thumbnail) live; 0 = as long as the row. */
+  frameRetentionDays: number;
   ocrEnabled: boolean;
 }
 
@@ -69,6 +74,7 @@ export interface Screenshot {
   ts: number;
   appName: string | null;
   windowTitle: string | null;
+  /** Empty string when the frame's pixels were pruned (text-only entry). */
   filePath: string;
   /** Small JPEG variant for grid/palette previews; null for pre-thumbnail
    *  frames (render filePath as the fallback). */
@@ -76,6 +82,9 @@ export interface Screenshot {
   phash: number | null;
   bytes: number;
   ocrText: string | null;
+  /** Why the frame was kept: "commit" | "switch" | "typing" | "interval";
+   *  null for frames captured before event-driven triggers existed. */
+  trigger: string | null;
 }
 
 // --- Ambient text context (Littlebird-like AX collector) types --------------
@@ -537,6 +546,12 @@ export const api = {
   /** Accept a direct visual reply and type it back into the previously focused app. */
   quickReplyInsert: (text: string) =>
     invoke<void>("quick_reply_insert", { text }),
+  /** Re-draft the reply on another runtime, reusing the capture the panel
+   *  opened with (the screen is long gone by now). Also makes that runtime the
+   *  default for the next quick reply. Resolves when the new turn settles; the
+   *  draft itself streams in over the usual delta/result events. */
+  quickReplyRegenerate: (backend: BackendId) =>
+    invoke<void>("quick_reply_regenerate", { backend }),
   // Native notification: clicking it routes back as a `notification-activate`
   // event carrying `conversationId` (see notify.rs).
   postNotification: (p: {

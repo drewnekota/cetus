@@ -31,6 +31,7 @@ mod focused_text;
 mod host_tunnel;
 #[cfg(target_os = "macos")]
 mod hotkey;
+mod input_signals;
 mod locale;
 mod mcp;
 mod mcp_oauth;
@@ -1563,6 +1564,7 @@ pub fn run() {
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,
         quick::quick_reply_insert,
+        quick::quick_reply_regenerate,
         quick::quick_submit,
         quick::accessibility_trusted,
         quick::request_accessibility,
@@ -1739,6 +1741,7 @@ pub fn run() {
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,
         quick::quick_reply_insert,
+        quick::quick_reply_regenerate,
         quick::quick_submit,
         quick::accessibility_trusted,
         quick::request_accessibility,

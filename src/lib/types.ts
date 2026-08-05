@@ -174,7 +174,19 @@ export interface QuickReplyOpenPayload {
   screenshotPermission: boolean;
   screenshot: QuickScreenshot | null;
   context: QuickContext | null;
-  /** Characters of focused-window AX text sent alongside the screenshot. */
+  /** Characters of focused-window AX text sent alongside the screenshot.
+   *  Zero at open time — the AX walk runs after the panel presents and reports
+   *  its volume in `quick-reply-context`. */
+  axChars: number;
+  /** Runtime answering this turn, already resolved against the enabled set. */
+  backend: BackendId;
+}
+
+/** The pid-keyed half of the capture, read once the panel is already up: window
+ *  title / browser URL merged into the context chips, plus the AX text volume. */
+export interface QuickReplyContextPayload {
+  openId: number;
+  context: QuickContext | null;
   axChars: number;
 }
 

@@ -21,13 +21,24 @@
 //! finish (cleanup context) and at +1.2s/+10s (correction mining), all well
 //! after the wake-up sent at session start.
 
-/// Rich, one-shot context for quick reply. `ambient` carries app/window/browser
-/// metadata and the focused selection; `visible_text` is the bounded AX walk of
-/// the focused window. Both are captured before the quick panel takes focus.
-pub struct ReplyContext {
-    pub ambient: Option<crate::ocr::AmbientContext>,
+/// The pid-keyed half of quick reply's capture: everything that stays valid
+/// after the panel takes focus, so it runs *after* the panel presents rather
+/// than on its first-paint path.
+#[derive(Default)]
+pub struct ReplyDetails {
+    pub title: String,
+    pub url: String,
     pub visible_text: String,
 }
+
+/// Budget for the AX walk of the app being replied to. Same order as the
+/// prompt's own clamp in `quick_reply::build_prompt`.
+pub const REPLY_TEXT_CHARS: usize = 8_000;
+
+/// Below this, a walk counts as "the tree wasn't built yet" rather than "this
+/// window really has no text" — a window title alone lands around 10-30 chars,
+/// which is exactly what a cold Electron tree returns.
+const COLD_TREE_CHARS: usize = 40;
 
 /// Best-effort, blocking (one AX round-trip + a stat): poke the frontmost
 /// app's accessibility tree awake if it's an Electron app. Debounced per pid —
@@ -262,30 +273,66 @@ pub fn gather_pre_focus_context() -> Option<crate::ocr::AmbientContext> {
     }
 }
 
-/// Capture the full current reply context in one blocking job. Unlike the
-/// launcher's lightweight context path, quick reply benefits from the focused
-/// window's visible AX text and can afford the bounded browser/title probes
-/// because screenshot capture runs alongside this function.
+/// The pre-focus half of quick reply's capture: frontmost identity + selection,
+/// both of which become wrong the instant the panel takes key focus. Returns the
+/// frontmost pid alongside, so the caller can run [`gather_reply_details`] for
+/// the rest *after* presenting.
 #[cfg(target_os = "macos")]
-pub fn gather_reply_context() -> ReplyContext {
+pub fn gather_reply_identity() -> (Option<crate::ocr::AmbientContext>, i32) {
     let mut ambient = gather_pre_focus_context().unwrap_or_default();
     let (_, bundle, pid) = frontmost_identity().unwrap_or_default();
     if ambient.bundle_id.is_empty() {
-        ambient.bundle_id = bundle.clone();
+        ambient.bundle_id = bundle;
     }
-    let visible_text = visible_text(pid, 8_000).unwrap_or_default();
-    ambient.title = focused_window_title(pid).unwrap_or_default();
+    ((!ambient.is_empty()).then_some(ambient), pid)
+}
+
+/// Window title, browser URL, and the bounded AX walk of the window being
+/// replied to. Every probe here is keyed to `pid`/`bundle` rather than to
+/// frontmost-ness, so this is safe to run once the quick panel already holds
+/// focus — which is where it belongs: the AX walk can wait on a cold Electron
+/// tree without that wait showing up as launcher latency.
+#[cfg(target_os = "macos")]
+pub fn gather_reply_details(pid: i32, bundle: &str) -> ReplyDetails {
+    let visible_text = settled_visible_text(pid);
+    let mut details = ReplyDetails {
+        title: focused_window_title(pid).unwrap_or_default(),
+        url: String::new(),
+        visible_text,
+    };
     if !bundle.is_empty() {
-        if let Some((url, page_title)) = fetch_browser_url(&bundle) {
-            ambient.url = url;
+        if let Some((url, page_title)) = fetch_browser_url(bundle) {
+            details.url = url;
             if !page_title.is_empty() {
-                ambient.title = page_title;
+                details.title = page_title;
             }
         }
     }
-    ReplyContext {
-        ambient: (!ambient.is_empty()).then_some(ambient),
-        visible_text,
+    details
+}
+
+/// [`visible_text`], with one bounded second chance for a tree that hasn't
+/// finished building. Chromium apps (Lark, Slack, Discord…) start constructing
+/// their AX tree only once `wake_frontmost_app` announces an assistive client,
+/// and they do it asynchronously — so the walk issued right after that poke
+/// comes back with a window title and little else. Without the retry the model
+/// gets pixels and nothing to read, which is precisely when it can't find a
+/// conversation to reply to.
+#[cfg(target_os = "macos")]
+fn settled_visible_text(pid: i32) -> String {
+    let first = visible_text(pid, REPLY_TEXT_CHARS).unwrap_or_default();
+    if first.chars().count() >= COLD_TREE_CHARS {
+        return first;
+    }
+    // The wake-up poke is debounced per pid, so re-poking a warm app is free
+    // and this covers the case where the app was launched between opens.
+    wake_app(pid);
+    std::thread::sleep(std::time::Duration::from_millis(280));
+    let second = visible_text(pid, REPLY_TEXT_CHARS).unwrap_or_default();
+    if second.chars().count() > first.chars().count() {
+        second
+    } else {
+        first
     }
 }
 
@@ -709,11 +756,13 @@ pub fn gather_pre_focus_context() -> Option<crate::ocr::AmbientContext> {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn gather_reply_context() -> ReplyContext {
-    ReplyContext {
-        ambient: None,
-        visible_text: String::new(),
-    }
+pub fn gather_reply_identity() -> (Option<crate::ocr::AmbientContext>, i32) {
+    (None, 0)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn gather_reply_details(_pid: i32, _bundle: &str) -> ReplyDetails {
+    ReplyDetails::default()
 }
 
 #[cfg(not(target_os = "macos"))]

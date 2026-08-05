@@ -409,6 +409,15 @@ pub struct QuickRuntime {
     /// overlay's `snip_finish` command. Written on the main thread before the
     /// overlay presents, so the finish command always sees it populated.
     pub snip_stash: Arc<std::sync::Mutex<Option<crate::snip::SnipStash>>>,
+    /// The capture behind the quick-reply surface currently on screen, kept so
+    /// switching the runtime in the panel can re-run the turn against the same
+    /// screen. Re-capturing would be wrong — by then the frontmost app is the
+    /// panel itself.
+    pub reply_stash: Arc<std::sync::Mutex<Option<ReplyStash>>>,
+    /// Bumped for every quick-reply turn (first run and each regenerate). Deltas
+    /// and results carrying a stale run are dropped, so a superseded turn can't
+    /// stream into the draft the user is now watching.
+    pub reply_run: Arc<AtomicU32>,
 
     // ---- Global voice dictation (read live by the hotkey thread) ----
     pub voice_enabled: Arc<AtomicBool>,
@@ -452,6 +461,8 @@ impl QuickRuntime {
             last_open_ms: Arc::new(AtomicI64::new(0)),
             snip_active: Arc::new(AtomicBool::new(false)),
             snip_stash: Arc::new(std::sync::Mutex::new(None)),
+            reply_stash: Arc::new(std::sync::Mutex::new(None)),
+            reply_run: Arc::new(AtomicU32::new(0)),
             voice_enabled: Arc::new(AtomicBool::new(s.voice_enabled)),
             voice_gesture: Arc::new(AtomicU8::new(voice_gesture_code(&s.voice_gesture))),
             voice_handsfree_shortcut: Arc::new(AtomicBool::new(s.voice_handsfree_shortcut)),
@@ -521,6 +532,16 @@ pub fn screen_recording_granted() -> bool {
 
 // ---- Screen capture -------------------------------------------------------
 
+/// Everything a quick-reply turn reads, kept alive for the life of the panel so
+/// the same screen can be re-sent to a different runtime.
+#[derive(Clone)]
+pub struct ReplyStash {
+    pub open_id: i64,
+    pub screenshot: Screenshot,
+    pub context: Option<crate::ocr::AmbientContext>,
+    pub visible_text: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Screenshot {
@@ -529,10 +550,78 @@ pub struct Screenshot {
     pub mime_type: String,
 }
 
-/// Grab the main display. macOS-only (uses the built-in `screencapture`); other
-/// platforms return None and the panel degrades to a text-only launcher.
+/// Grab the display the user is working on. macOS-only (uses the built-in
+/// `screencapture`); other platforms return None and the panel degrades to a
+/// text-only launcher.
+///
+/// Bare `screencapture` only ever shoots the *main* display, so on a multi-
+/// display setup it silently captured the wrong screen — the panel presents on
+/// the cursor's screen while the model was handed the primary one. Bound the
+/// grab to the cursor's display instead (same `-R` path the snip overlay uses),
+/// falling back to the plain grab when there's only one display or the bounded
+/// one doesn't come back — a wrong-display shot beats no shot at all.
 pub fn capture_screenshot() -> Option<Screenshot> {
-    capture_screenshot_region(None)
+    match cursor_display_region() {
+        Some(region) => {
+            capture_screenshot_region(Some(region)).or_else(|| capture_screenshot_region(None))
+        }
+        None => capture_screenshot_region(None),
+    }
+}
+
+/// Bounds of the display holding the cursor, in CG global coordinates (points,
+/// top-left origin) — what `screencapture -R` expects. None with a single
+/// display (the default grab already covers it) or if the lookup fails.
+///
+/// Pure CoreGraphics on purpose: this runs on a blocking worker thread, where
+/// the AppKit `NSScreen` lookup `panel.rs` uses would be off-main-thread.
+#[cfg(target_os = "macos")]
+fn cursor_display_region() -> Option<(f64, f64, f64, f64)> {
+    use core_graphics::display::{CGDirectDisplayID, CGDisplay};
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    // The *online* list rather than the active one: the active list is empty in
+    // process contexts without a full window-server session, and an empty list
+    // would silently degrade every multi-display capture back to the main
+    // screen. Online is the superset and reports the same bounds.
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGGetOnlineDisplayList(
+            max: u32,
+            displays: *mut CGDirectDisplayID,
+            count: *mut u32,
+        ) -> i32;
+    }
+    let mut ids = [0 as CGDirectDisplayID; 16];
+    let mut count: u32 = 0;
+    if unsafe { CGGetOnlineDisplayList(ids.len() as u32, ids.as_mut_ptr(), &mut count) } != 0
+        || count < 2
+    {
+        return None;
+    }
+    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
+    let cursor = CGEvent::new(source).ok()?.location();
+    let bounds = ids[..count as usize]
+        .iter()
+        .map(|id| CGDisplay::new(*id).bounds())
+        .find(|b| {
+            cursor.x >= b.origin.x
+                && cursor.x < b.origin.x + b.size.width
+                && cursor.y >= b.origin.y
+                && cursor.y < b.origin.y + b.size.height
+        })?;
+    Some((
+        bounds.origin.x,
+        bounds.origin.y,
+        bounds.size.width,
+        bounds.size.height,
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn cursor_display_region() -> Option<(f64, f64, f64, f64)> {
+    None
 }
 
 /// Like [`capture_screenshot`], but bounded to `region` (CG global display
@@ -865,13 +954,13 @@ pub async fn open_reply(app: &AppHandle) {
     last_open_ms.store(open_id, Ordering::Relaxed);
     shown.store(true, Ordering::Relaxed);
 
-    let context_task = tauri::async_runtime::spawn_blocking(crate::ax::gather_reply_context);
+    // Only the identity half runs before the panel presents — it's the half that
+    // stops being true the moment the panel takes focus. The AX walk and the
+    // browser probe are pid-keyed and follow after presenting, so their latency
+    // (including waiting on a cold Electron tree) never delays first paint.
+    let identity_task = tauri::async_runtime::spawn_blocking(crate::ax::gather_reply_identity);
     let screenshot_task = tauri::async_runtime::spawn_blocking(capture_screenshot);
-    let reply_context = context_task.await.ok().unwrap_or(crate::ax::ReplyContext {
-        ambient: None,
-        visible_text: String::new(),
-    });
-    let context = reply_context.ambient;
+    let (mut context, pid) = identity_task.await.ok().unwrap_or((None, 0));
     let screenshot = screenshot_task.await.ok().flatten();
 
     // The reply surface is a single editable draft that streams in live, with
@@ -908,9 +997,14 @@ pub async fn open_reply(app: &AppHandle) {
         let _ = win.set_focus();
     }
 
-    // The full capture rides along so the panel can show the user exactly what
-    // the model receives: the screenshot (already JPEG, ≤1600px — same payload
-    // the launcher ships), the ambient context, and how much AX text was read.
+    // The capture rides along so the panel can show the user exactly what the
+    // model receives: the screenshot (already JPEG, ≤1600px — same payload the
+    // launcher ships), the ambient context, and the runtime that will answer.
+    // The AX volume isn't known yet; `quick-reply-context` fills it in below.
+    let backend = crate::quick_reply::resolve_backend(
+        &app.state::<AppState>().store,
+        &settings.reply_backend,
+    );
     let _ = win.emit(
         "quick-reply-open",
         serde_json::json!({
@@ -919,18 +1013,59 @@ pub async fn open_reply(app: &AppHandle) {
             "screenshotPermission": screen_recording_granted(),
             "screenshot": &screenshot,
             "context": &context,
-            "axChars": reply_context.visible_text.chars().count(),
+            "axChars": 0,
+            "backend": &backend,
         }),
     );
 
+    // Now that the panel is up, read the app being replied to: window title,
+    // browser URL, and the bounded AX walk (which may wait on a cold Electron
+    // tree). All pid-keyed, so the panel holding focus doesn't affect them.
+    let bundle = context
+        .as_ref()
+        .map(|c| c.bundle_id.clone())
+        .unwrap_or_default();
+    let details =
+        tauri::async_runtime::spawn_blocking(move || crate::ax::gather_reply_details(pid, &bundle))
+            .await
+            .ok()
+            .unwrap_or_default();
+    if last_open_ms.load(Ordering::Relaxed) != open_id {
+        return;
+    }
+    if let Some(ctx) = context.as_mut() {
+        ctx.title = details.title;
+        ctx.url = details.url;
+    }
+    let _ = win.emit(
+        "quick-reply-context",
+        serde_json::json!({
+            "openId": open_id,
+            "context": &context,
+            "axChars": details.visible_text.chars().count(),
+        }),
+    );
+
+    let run = {
+        let state = app.state::<AppState>();
+        // Keep the capture for the panel's runtime picker to re-send.
+        *state.quick.reply_stash.lock().unwrap() = screenshot.clone().map(|shot| ReplyStash {
+            open_id,
+            screenshot: shot,
+            context: context.clone(),
+            visible_text: details.visible_text.clone(),
+        });
+        state.quick.reply_run.fetch_add(1, Ordering::Relaxed) + 1
+    };
     let result = match screenshot {
         Some(ref shot) => {
             crate::quick_reply::generate(
                 app,
                 open_id,
+                run,
                 shot,
                 context.as_ref(),
-                &reply_context.visible_text,
+                &details.visible_text,
                 &settings.reply_backend,
             )
             .await
@@ -944,6 +1079,29 @@ pub async fn open_reply(app: &AppHandle) {
     if last_open_ms.load(Ordering::Relaxed) != open_id {
         return;
     }
+    emit_reply_result(app, open_id, run, result);
+}
+
+/// Publish a settled quick-reply turn, unless a newer run (a runtime switch)
+/// has already taken over the panel.
+fn emit_reply_result(
+    app: &AppHandle,
+    open_id: i64,
+    run: u32,
+    result: anyhow::Result<crate::quick_reply::QuickReplyOutput>,
+) {
+    if app
+        .state::<AppState>()
+        .quick
+        .reply_run
+        .load(Ordering::Relaxed)
+        != run
+    {
+        return;
+    }
+    let Some(win) = app.get_webview_window("quick") else {
+        return;
+    };
     let payload = match result {
         Ok(output) => serde_json::json!({ "openId": open_id, "output": output, "error": null }),
         Err(error) => serde_json::json!({
@@ -1017,10 +1175,11 @@ pub async fn quick_recapture_screenshot(
 /// panel fully out on the main thread so it cannot interfere with Mission
 /// Control's ordering of the main window; elsewhere, use Tauri's hide path.
 pub(crate) fn park_quick(app: &AppHandle) {
-    app.state::<AppState>()
-        .quick
-        .shown
-        .store(false, Ordering::Relaxed);
+    let state = app.state::<AppState>();
+    state.quick.shown.store(false, Ordering::Relaxed);
+    // The reply capture belongs to the panel that just went away; dropping it
+    // keeps a stale screen from being re-sent by a late runtime switch.
+    *state.quick.reply_stash.lock().unwrap() = None;
     #[cfg(target_os = "macos")]
     {
         let app2 = app.clone();
@@ -1072,6 +1231,45 @@ pub async fn quick_reply_insert(app: AppHandle, text: String) -> Result<(), Stri
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Re-run the quick-reply turn against the *same* capture with a different
+/// runtime. Re-capturing here would be wrong — the panel is frontmost by now —
+/// so the turn replays the screenshot and AX text stashed when the panel opened.
+/// The choice is persisted, matching how the launcher's runtime picker sticks.
+#[tauri::command]
+pub async fn quick_reply_regenerate(app: AppHandle, backend: String) -> Result<(), String> {
+    let (stash, run) = {
+        let state = app.state::<AppState>();
+        let stash = state
+            .quick
+            .reply_stash
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| "The captured screen is no longer available.".to_string())?;
+        let mut settings = load_settings(&state.store);
+        if settings.reply_backend != backend {
+            settings.reply_backend = backend.clone();
+            save_settings(&state.store, &settings).map_err(|e| e.to_string())?;
+        }
+        (
+            stash,
+            state.quick.reply_run.fetch_add(1, Ordering::Relaxed) + 1,
+        )
+    };
+    let result = crate::quick_reply::generate(
+        &app,
+        stash.open_id,
+        run,
+        &stash.screenshot,
+        stash.context.as_ref(),
+        &stash.visible_text,
+        &backend,
+    )
+    .await;
+    emit_reply_result(&app, stash.open_id, run, result);
+    Ok(())
 }
 
 #[derive(Deserialize)]
