@@ -41,6 +41,17 @@ export function normalizeMath(text: string): string {
       i % 2 === 1
         ? part
         : part
+            // GFM's literal-autolink tokenizer treats emphasis delimiters
+            // touching a bare URL as part of the URL. For example,
+            // `**https://example.com**` otherwise renders both pairs of `**`
+            // literally and opens `https://example.com**`. Make the link
+            // explicit before parsing so the surrounding emphasis remains
+            // structural Markdown. Keep this inside the code-span split so
+            // examples in code stay byte-for-byte unchanged.
+            .replace(
+              /(\*{1,3})(https?:\/\/[^\s<*]+?)\1(?=\s|$|[.,;:!?)}\]'"])/gi,
+              "$1[$2]($2)$1",
+            )
             .replace(/\\\[([\s\S]+?)\\\]/g, (_, body) => `$$${body}$$`)
             .replace(/\\\(([\s\S]+?)\\\)/g, (_, body) => `$$${body}$$`),
     )
