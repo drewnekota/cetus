@@ -25,6 +25,8 @@ src-tauri/gen
 src-tauri/pi-install/
 # Legacy locations from the previous sidecar approach.
 src-tauri/binaries/
+# Downloaded by tauri-runtime-verso-build for the current target (~100 MB).
+src-tauri/versoview/
 
 # In-repo clones used only for code reading (e.g. deepseek-tui).
 research/

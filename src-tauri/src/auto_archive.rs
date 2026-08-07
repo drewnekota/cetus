@@ -22,11 +22,12 @@
 //!   active sidebar list.
 
 use crate::store::now_ms;
+use crate::AppHandle;
 use crate::AppState;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::store::Store;
 

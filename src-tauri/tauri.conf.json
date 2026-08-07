@@ -119,6 +119,9 @@
     ],
     "resources": [
       "pi-install"
+    ],
+    "externalBin": [
+      "versoview/versoview"
     ]
   }
 }

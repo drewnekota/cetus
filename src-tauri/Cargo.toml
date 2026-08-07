@@ -12,10 +12,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+tauri-runtime-verso-build = { git = "https://github.com/versotile-org/tauri-runtime-verso.git" }
 
 [dependencies]
 cetus-bridge = { path = "cetus-bridge" }
-tauri = { version = "2", features = ["macos-private-api", "protocol-asset", "tray-icon", "image-png", "unstable"] }
+tauri = { version = "=2.7.0", default-features = false, features = ["macos-private-api", "protocol-asset", "tray-icon", "image-png", "unstable"] }
+tauri-runtime-verso = { git = "https://github.com/versotile-org/tauri-runtime-verso.git", features = ["macos-private-api"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-notification = "2"
@@ -67,6 +69,7 @@ sysinfo = "0.33"
 # interactive programs (codex, claude, vim, dev servers) attached to a TTY and
 # lets the frontend resize/write the same shell process across commands.
 portable-pty = "0.9"
+percent-encoding = "2"
 
 # macOS-only: the global "double / both ⌘" launcher gesture is detected with a
 # CGEventTap (the OS hotkey API can't register modifier-only chords), and the

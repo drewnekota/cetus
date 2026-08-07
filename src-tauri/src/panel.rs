@@ -1045,6 +1045,104 @@ pub fn app_is_active() -> bool {
     }
 }
 
+/// Ordering-relevant state of one window, read for the activation watch log.
+pub struct OrderSnapshot {
+    pub visible: bool,
+    pub key: bool,
+    pub level: isize,
+    pub on_active_space: bool,
+    pub miniaturized: bool,
+}
+
+/// Read [`OrderSnapshot`] for `ns_window`. MUST run on the main thread.
+pub fn order_snapshot(ns_window: *mut c_void) -> Option<OrderSnapshot> {
+    if ns_window.is_null() {
+        return None;
+    }
+    let obj = ns_window as *mut AnyObject;
+    unsafe {
+        let window: &AnyObject = &*obj;
+        let visible: Bool = msg_send![window, isVisible];
+        let key: Bool = msg_send![window, isKeyWindow];
+        let level: isize = msg_send![window, level];
+        let on_active_space: Bool = msg_send![window, isOnActiveSpace];
+        let miniaturized: Bool = msg_send![window, isMiniaturized];
+        Some(OrderSnapshot {
+            visible: visible.as_bool(),
+            key: key.as_bool(),
+            level,
+            on_active_space: on_active_space.as_bool(),
+            miniaturized: miniaturized.as_bool(),
+        })
+    }
+}
+
+/// Observe app activation / deactivation and active-Space changes, invoking
+/// `on_event` on the main thread with a tag naming which one fired.
+///
+/// This deliberately carries NO summon/raise logic and must never grow any:
+/// the old `NSApplicationDidBecomeActive` observer that ordered windows front
+/// fought Mission Control's own raise and was the root of the "select cetus in
+/// Mission Control → window lands underneath" bug family. Callers may only
+/// LOG window state or order windows OUT (e.g. dismiss a stale launcher).
+pub fn install_activation_watch(on_event: impl Fn(&'static str) + 'static) {
+    let cb = std::rc::Rc::new(on_event);
+    unsafe {
+        let Some(nc_cls) = AnyClass::get(c"NSNotificationCenter") else {
+            return;
+        };
+        let default_center: *mut AnyObject = msg_send![nc_cls, defaultCenter];
+        let Some(ws_cls) = AnyClass::get(c"NSWorkspace") else {
+            return;
+        };
+        let workspace: *mut AnyObject = msg_send![ws_cls, sharedWorkspace];
+        let ws_center: *mut AnyObject = msg_send![workspace, notificationCenter];
+        let Some(queue_cls) = AnyClass::get(c"NSOperationQueue") else {
+            return;
+        };
+        let main_queue: *mut AnyObject = msg_send![queue_cls, mainQueue];
+        let Some(str_cls) = AnyClass::get(c"NSString") else {
+            return;
+        };
+        if default_center.is_null() || ws_center.is_null() || main_queue.is_null() {
+            return;
+        }
+        let add = |center: *mut AnyObject, name: &std::ffi::CStr, tag: &'static str| {
+            let ns_name: *mut AnyObject = msg_send![str_cls, stringWithUTF8String: name.as_ptr()];
+            if ns_name.is_null() {
+                return;
+            }
+            let cb = cb.clone();
+            let block = RcBlock::new(move |_note: *mut AnyObject| cb(tag));
+            let token: *mut AnyObject = msg_send![
+                center,
+                addObserverForName: ns_name,
+                object: std::ptr::null_mut::<AnyObject>(),
+                queue: main_queue,
+                usingBlock: &*block,
+            ];
+            // Observers live for the app's lifetime: keep the token and block.
+            let _: *mut AnyObject = msg_send![token, retain];
+            std::mem::forget(block);
+        };
+        add(
+            default_center,
+            c"NSApplicationDidBecomeActiveNotification",
+            "did-become-active",
+        );
+        add(
+            default_center,
+            c"NSApplicationDidResignActiveNotification",
+            "did-resign-active",
+        );
+        add(
+            ws_center,
+            c"NSWorkspaceActiveSpaceDidChangeNotification",
+            "active-space-changed",
+        );
+    }
+}
+
 /// Hide cetus exactly like ⌘H: orders out every window AND deactivates the app,
 /// handing key focus back to the previously active app. (`NSWindow.orderOut`
 /// alone would leave cetus active with no visible window.)

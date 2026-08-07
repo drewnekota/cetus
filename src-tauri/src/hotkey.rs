@@ -12,6 +12,7 @@
 //! Accessibility, so we wait for trust before installing it.
 
 use crate::quick::{self, QuickRuntime};
+use crate::AppHandle;
 use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
@@ -25,7 +26,7 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::Manager;
 
 const LCMD: u64 = 0x0000_0008; // NX_DEVICELCMDKEYMASK
 const RCMD: u64 = 0x0000_0010; // NX_DEVICERCMDKEYMASK
@@ -473,13 +474,13 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
             }
 
             // --- double-tap ⌥ ---
-            // Same clean-double-tap logic as ⌘, but specifically keyed to right
-            // Option. Right Option is the shared quick-input key: double-tap is
-            // visual reply, while a hold is voice. The voice recognizer does not
+            // Same clean-double-tap logic as ⌘. Either Option key can trigger a
+            // double-tap; only the voice hold gesture is deliberately right-only.
+            // The voice recognizer does not
             // claim the double-tap unless its legacy hands-free shortcut is
             // explicitly enabled.
             if act_dopt != quick::ACT_NONE {
-                let alt_any = (bits & DEV_RALT) != 0;
+                let alt_any = (bits & (DEV_RALT | DEV_LALT)) != 0;
                 let mut a = alt.borrow_mut();
                 // Holding *both* ⌥ keys is the both-⌥ gesture, not a single-⌥
                 // tap — dirty this hold so the two ⌥ gestures can coexist.

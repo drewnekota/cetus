@@ -20,11 +20,14 @@
 //! user can connect — the same trust boundary as the sqlite file itself.
 
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
+use std::time::Duration;
 
+use crate::AppHandle;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager};
+use tauri::Manager;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt, BufReader};
-use tokio::net::UnixListener;
+use tokio::net::{UnixListener, UnixStream};
 
 use crate::AppState;
 
@@ -81,41 +84,145 @@ pub fn install_cli_shim(app_data_dir: &Path) {
     }
 }
 
-/// Bind the control socket and serve forever. Called once from app setup.
-pub fn start(app: AppHandle) {
-    let path = socket_path(&app.state::<AppState>().app_data_dir);
-    tauri::async_runtime::spawn(async move {
-        if let Some(parent) = path.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
-        }
-        // Remove a stale socket file (previous run) before binding.
-        let _ = tokio::fs::remove_file(&path).await;
+/// The path this process actually bound — normally the canonical one, but a
+/// per-instance fallback while another live instance owns it. Children must get
+/// THIS in `$CETUS_SOCK`, not the canonical path (see `active_socket_path`).
+static ACTIVE_SOCK: RwLock<Option<PathBuf>> = RwLock::new(None);
 
-        let listener = match UnixListener::bind(&path) {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::warn!("control: failed to bind {}: {e}", path.display());
-                return;
-            }
-        };
-        #[cfg(unix)]
-        {
+/// How often the supervisor checks that our socket file is still ours.
+const WATCH_INTERVAL: Duration = Duration::from_secs(10);
+/// Backoff when even the fallback path can't be bound (disk/permission trouble).
+const RETRY_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Socket path to hand to child CLIs: whatever `start` actually bound, falling
+/// back to the canonical path before the bind lands.
+pub fn active_socket_path(app_data_dir: &Path) -> PathBuf {
+    ACTIVE_SOCK
+        .read()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_else(|| socket_path(app_data_dir))
+}
+
+/// Identity of the socket file at `path` (device + inode), or `None` if it's
+/// gone. Used to notice another instance unlinking ours out from under us — the
+/// path can look fine while pointing at somebody else's (or nobody's) node.
+fn sock_id(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt as _;
+    let md = std::fs::symlink_metadata(path).ok()?;
+    Some((md.dev(), md.ino()))
+}
+
+/// Is someone actually listening at `path`? An abandoned socket file — the
+/// residue of an instance that bound and exited — still `stat`s fine but
+/// refuses connections, so only a real connect answers this.
+async fn is_live(path: &Path) -> bool {
+    matches!(
+        tokio::time::timeout(Duration::from_secs(2), UnixStream::connect(path)).await,
+        Ok(Ok(_))
+    )
+}
+
+/// `…/cetus.sock` → `…/cetus-<pid>.sock`.
+fn instance_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("cetus.sock");
+    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, "sock"));
+    path.with_file_name(format!("{stem}-{}.{ext}", std::process::id()))
+}
+
+/// Clear whatever is at `path` and bind there, `0600`.
+async fn bind_at(path: &Path) -> Option<UnixListener> {
+    let _ = tokio::fs::remove_file(path).await;
+    match UnixListener::bind(path) {
+        Ok(l) => {
             use std::os::unix::fs::PermissionsExt as _;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+            Some(l)
         }
-        tracing::info!("control socket listening on {}", path.display());
+        Err(e) => {
+            tracing::warn!("control: failed to bind {}: {e}", path.display());
+            None
+        }
+    }
+}
 
-        loop {
-            match listener.accept().await {
+/// Take the canonical path if it's free, otherwise a per-instance one.
+///
+/// The one thing we must not do is evict a *live* owner: a second instance
+/// (typically a dev build sharing this app data dir) that unlinks the running
+/// app's socket and rebinds leaves, on exit, an orphan node nobody can reach —
+/// while the original app keeps listening on an inode with no name.
+async fn acquire(canonical: &Path) -> Option<(UnixListener, PathBuf)> {
+    if !is_live(canonical).await {
+        if let Some(l) = bind_at(canonical).await {
+            return Some((l, canonical.to_path_buf()));
+        }
+    } else {
+        tracing::warn!(
+            "control: {} is held by another live Cetus instance; binding a per-instance socket instead",
+            canonical.display()
+        );
+    }
+    let alt = instance_path(canonical);
+    bind_at(&alt).await.map(|l| (l, alt))
+}
+
+/// Accept connections until our socket file stops being ours (or the canonical
+/// path frees up while we're on the fallback), then return so `start` re-acquires.
+async fn serve(app: &AppHandle, listener: UnixListener, canonical: &Path, path: &Path) {
+    let ours = sock_id(path);
+    let mut tick = tokio::time::interval(WATCH_INTERVAL);
+    tick.tick().await; // the first tick is immediate
+
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => match accepted {
                 Ok((stream, _addr)) => {
-                    let app = app.clone();
-                    tauri::async_runtime::spawn(handle_conn(app, stream));
+                    tauri::async_runtime::spawn(handle_conn(app.clone(), stream));
                 }
                 Err(e) => {
                     tracing::warn!("control: accept error: {e}");
-                    break;
+                    return;
+                }
+            },
+            _ = tick.tick() => {
+                if sock_id(path) != ours {
+                    tracing::warn!(
+                        "control: {} was replaced by another instance — re-acquiring",
+                        path.display()
+                    );
+                    return;
+                }
+                // On the fallback path: reclaim the canonical one once free.
+                if path != canonical && !is_live(canonical).await {
+                    return;
                 }
             }
+        }
+    }
+}
+
+/// Bind the control socket and serve forever. Called once from app setup.
+pub fn start(app: AppHandle) {
+    let canonical = socket_path(&app.state::<AppState>().app_data_dir);
+    tauri::async_runtime::spawn(async move {
+        if let Some(parent) = canonical.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        loop {
+            let Some((listener, path)) = acquire(&canonical).await else {
+                tokio::time::sleep(RETRY_INTERVAL).await;
+                continue;
+            };
+            if let Ok(mut g) = ACTIVE_SOCK.write() {
+                *g = Some(path.clone());
+            }
+            tracing::info!("control socket listening on {}", path.display());
+
+            serve(&app, listener, &canonical, &path).await;
         }
     });
 }
@@ -291,4 +398,56 @@ async fn blocking_text(
         .await
         .map_err(|e| e.to_string())?
         .map(|text| json!({ "text": text }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cetus-control-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.sock"));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    #[tokio::test]
+    async fn acquires_the_canonical_path_when_free() {
+        let canonical = scratch("free");
+        let (_l, path) = acquire(&canonical).await.unwrap();
+        assert_eq!(path, canonical);
+        assert!(is_live(&canonical).await);
+    }
+
+    #[tokio::test]
+    async fn never_evicts_a_live_owner() {
+        let canonical = scratch("owned");
+        let (owner, owner_path) = acquire(&canonical).await.unwrap();
+        let owner_id = sock_id(&owner_path);
+
+        let (_second, second_path) = acquire(&canonical).await.unwrap();
+        assert_ne!(second_path, canonical, "second instance must step aside");
+        assert_eq!(
+            sock_id(&canonical),
+            owner_id,
+            "the owner's socket file must survive untouched"
+        );
+        drop(owner);
+    }
+
+    #[tokio::test]
+    async fn takes_over_an_abandoned_socket() {
+        let canonical = scratch("orphan");
+        // Dropping the listener leaves the file behind with nobody listening —
+        // the exact residue a second instance used to leave the app stuck on.
+        let (listener, _) = acquire(&canonical).await.unwrap();
+        drop(listener);
+        assert!(canonical.exists());
+        assert!(!is_live(&canonical).await);
+
+        let (_l, path) = acquire(&canonical).await.unwrap();
+        assert_eq!(path, canonical);
+        assert!(is_live(&canonical).await);
+    }
 }

@@ -4,11 +4,12 @@
 //! The launcher gesture itself (double / both ⌘) is detected natively on macOS
 //! in `hotkey.rs`; this module owns everything that isn't the raw key tap.
 
+use crate::AppHandle;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{Emitter, Manager, State};
 
 /// Persisted launcher preferences. Stored as one JSON blob in `app_settings`
 /// under [`SETTINGS_KEY`] so the panel (a separate webview) and the Rust gesture
@@ -20,7 +21,7 @@ pub struct QuickSettings {
     pub enabled: bool,
     /// Gesture that opens the launcher *without* a screenshot. One of
     /// "off" | "both_cmd" (hold both ⌘) | "both_opt" (hold both ⌥) |
-    /// "double_cmd" (double-tap ⌘) | "double_opt" (double-tap right ⌥). Defaults to
+    /// "double_cmd" (double-tap ⌘) | "double_opt" (double-tap either ⌥). Defaults to
     /// hold both ⌘.
     #[serde(default = "default_gesture_plain")]
     pub gesture_plain: String,
@@ -131,7 +132,7 @@ fn default_gesture_plain() -> String {
 }
 
 fn default_gesture_shot() -> String {
-    "off".into()
+    "both_opt".into()
 }
 
 fn default_gesture_reply() -> String {
@@ -194,7 +195,7 @@ pub fn load_settings(store: &crate::store::Store) -> QuickSettings {
     settings
 }
 
-/// Older settings can already use the new default (double right Option) for one of
+/// Older settings can already use the new default (double Option) for one of
 /// the two launcher actions. Preserve those assignments and move quick reply to
 /// the first free gesture instead of silently stealing the user's shortcut.
 fn normalize_reply_gesture(settings: &mut QuickSettings) {
@@ -251,21 +252,44 @@ pub fn migrate_voice_defaults(store: &crate::store::Store) {
 /// never overwrite a deliberate binding. Hands-free itself is independently
 /// default-off via serde for every existing settings blob.
 pub fn migrate_shortcut_defaults(store: &crate::store::Store) {
-    const MARKER: &str = "shortcut_defaults_v3_migrated";
-    if matches!(store.get_setting(MARKER), Ok(Some(_))) {
-        return;
-    }
+    const MARKER_V3: &str = "shortcut_defaults_v3_migrated";
+    const MARKER_V4: &str = "shortcut_defaults_v4_migrated";
     let mut settings = load_settings(store);
-    if apply_shortcut_defaults_v3(&mut settings) {
-        if let Err(error) = save_settings(store, &settings) {
-            tracing::warn!("shortcut defaults migration failed: {error}");
-            return;
+    if !matches!(store.get_setting(MARKER_V3), Ok(Some(_))) {
+        if apply_shortcut_defaults_v3(&mut settings) {
+            if let Err(error) = save_settings(store, &settings) {
+                tracing::warn!("shortcut defaults migration failed: {error}");
+                return;
+            }
+            tracing::info!(
+                "shortcut defaults migration: launcher=both Cmd, reply=double Option, voice=hold right Option"
+            );
         }
-        tracing::info!(
-            "shortcut defaults migration: launcher=both Cmd, reply=double right Option, voice=hold right Option"
-        );
+        let _ = store.set_setting(MARKER_V3, "1");
     }
-    let _ = store.set_setting(MARKER, "1");
+    if !matches!(store.get_setting(MARKER_V4), Ok(Some(_))) {
+        if apply_shortcut_defaults_v4(&mut settings) {
+            if let Err(error) = save_settings(store, &settings) {
+                tracing::warn!("shortcut defaults v4 migration failed: {error}");
+                return;
+            }
+            tracing::info!("shortcut defaults v4 migration: screenshot ask=both Option");
+        }
+        let _ = store.set_setting(MARKER_V4, "1");
+    }
+}
+
+/// Enable screenshot ask only for installations still using the untouched v3
+/// shortcut layout. Any customized binding opts out of the migration.
+fn apply_shortcut_defaults_v4(settings: &mut QuickSettings) -> bool {
+    let untouched_v3_defaults = settings.gesture_plain == "both_cmd"
+        && settings.gesture_shot == "off"
+        && settings.gesture_reply == "double_opt";
+    if !untouched_v3_defaults {
+        return false;
+    }
+    settings.gesture_shot = "both_opt".into();
+    true
 }
 
 fn apply_shortcut_defaults_v3(settings: &mut QuickSettings) -> bool {
@@ -285,7 +309,7 @@ fn apply_shortcut_defaults_v3(settings: &mut QuickSettings) -> bool {
 // ---- Gesture runtime ------------------------------------------------------
 
 /// What a detected gesture should do. Each supported gesture (both-⌘,
-/// both-⌥, double-⌘, double-right-⌥) is independently mapped from the three
+/// both-⌥, double-⌘, double-⌥) is independently mapped from the three
 /// per-function assignments (`gesture_plain` / `gesture_shot` /
 /// `gesture_reply`).
 pub const ACT_NONE: u8 = 0;
@@ -390,11 +414,12 @@ pub struct QuickRuntime {
     /// gesture listener doesn't read that hidden state as "closed" and pop a
     /// second panel on top of the in-flight re-capture.
     pub recapturing: Arc<AtomicBool>,
-    /// Whether the launcher is currently presented (vs. parked off-screen). The
-    /// panel is kept warm by parking, not hiding (see [`crate::panel::park`]), so
-    /// the OS window stays ordered-in even when dismissed — `is_visible()` can no
-    /// longer tell "open" from "closed". This flag is the source of truth the
-    /// gesture toggle reads instead.
+    /// Whether the launcher is currently presented (vs. parked). Dismissal ends
+    /// at `orderOut:` these days (see [`crate::panel::park`] — an ordered-in
+    /// hidden panel steals Mission Control's raise from the main window), but
+    /// this flag stays the source of truth the gesture toggle reads: it is
+    /// written on the command path, ahead of the main-thread hop that actually
+    /// re-orders the window, so it never races the OS window state.
     pub shown: Arc<AtomicBool>,
     /// Epoch-ms of the last launcher open. The macOS reopen handler reads it to
     /// tell a gesture-driven activation apart from a real dock click, so the
@@ -423,7 +448,7 @@ pub struct QuickRuntime {
     pub voice_enabled: Arc<AtomicBool>,
     pub voice_gesture: Arc<AtomicU8>,
     /// Whether clean double-taps of `voice_gesture` may toggle hands-free.
-    /// Disabled by default; quick reply owns double right-Option instead.
+    /// Disabled by default; quick reply owns double-Option instead.
     pub voice_handsfree_shortcut: Arc<AtomicBool>,
     pub voice_insert_mode: Arc<AtomicU8>,
     pub voice_cleanup: Arc<AtomicBool>,
@@ -670,7 +695,7 @@ pub fn capture_screenshot_region(region: Option<(f64, f64, f64, f64)>) -> Option
 /// macOS does this natively in `panel::center_on_mouse_screen` (AppKit cursor
 /// tracking, no coordinate-space surprises); this is the cross-platform path.
 #[cfg(not(target_os = "macos"))]
-fn center_on_cursor_monitor(win: &tauri::WebviewWindow) {
+fn center_on_cursor_monitor(win: &crate::WebviewWindow) {
     let pos = match win.app_handle().cursor_position() {
         Ok(p) => p,
         Err(_) => {
@@ -1401,16 +1426,16 @@ pub async fn open_screen_recording_settings() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_shortcut_defaults_v3, gesture_actions, normalize_reply_gesture, QuickSettings,
-        ACT_NONE, ACT_PLAIN, ACT_REPLY,
+        apply_shortcut_defaults_v3, apply_shortcut_defaults_v4, gesture_actions,
+        normalize_reply_gesture, QuickSettings, ACT_NONE, ACT_PLAIN, ACT_REPLY, ACT_SHOT,
     };
 
     #[test]
     fn default_gestures_are_collision_free() {
         let settings = QuickSettings::default();
         let actions = gesture_actions(&settings);
-        // both Cmd, both Option, double Cmd, double right Option
-        assert_eq!(actions, (ACT_PLAIN, ACT_NONE, ACT_NONE, ACT_REPLY));
+        // both Cmd, both Option, double Cmd, double Option
+        assert_eq!(actions, (ACT_PLAIN, ACT_SHOT, ACT_NONE, ACT_REPLY));
         assert_eq!(settings.voice_gesture, "right_option");
         assert!(!settings.voice_handsfree_shortcut);
     }
@@ -1443,5 +1468,23 @@ mod tests {
         customized.gesture_plain = "double_cmd".into();
         assert!(!apply_shortcut_defaults_v3(&mut customized));
         assert_eq!(customized.gesture_plain, "double_cmd");
+    }
+
+    #[test]
+    fn enables_screenshot_ask_only_for_untouched_v3_defaults() {
+        let mut old_defaults = QuickSettings {
+            gesture_shot: "off".into(),
+            ..Default::default()
+        };
+        assert!(apply_shortcut_defaults_v4(&mut old_defaults));
+        assert_eq!(old_defaults.gesture_shot, "both_opt");
+
+        let mut customized = QuickSettings {
+            gesture_plain: "both_opt".into(),
+            gesture_shot: "off".into(),
+            ..Default::default()
+        };
+        assert!(!apply_shortcut_defaults_v4(&mut customized));
+        assert_eq!(customized.gesture_shot, "off");
     }
 }

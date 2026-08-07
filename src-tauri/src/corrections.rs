@@ -26,11 +26,11 @@
 //! writes behind a process-wide lock, best-effort everywhere (a failure here
 //! must never affect dictation).
 
+use crate::AppHandle;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use tauri::AppHandle;
 
 const FILE: &str = "corrections.json";
 /// A pair must be observed this many times before it's auto-applied. ASR hotword

@@ -22,6 +22,7 @@
 //! log (read by the `meeting-recall` pi extension) for the agent.
 
 use crate::store::{now_ms, Meeting, MeetingSegment, Store};
+use crate::AppHandle;
 use crate::{secrets, AppState};
 use chrono::{Local, TimeZone};
 use serde::{Deserialize, Serialize};
@@ -30,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{Emitter, Manager, State};
 
 const SETTINGS_KEY: &str = "meeting";
 

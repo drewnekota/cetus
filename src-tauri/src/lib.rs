@@ -69,6 +69,7 @@ mod text_input;
 mod titling;
 mod transcripts;
 mod updater;
+mod verso_frontend;
 mod voice;
 mod webview_health;
 mod window_geom;
@@ -76,8 +77,15 @@ mod window_geom;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Listener, Manager};
+use tauri::{Emitter, Listener, Manager};
 use tokio::sync::Mutex;
+
+/// The complete Cetus application runs on the experimental Servo/Verso backend
+/// on this branch. Keeping these aliases central avoids accidentally creating a
+/// Wry-backed handle or window in a command or background service.
+pub type CetusRuntime = tauri_runtime_verso::VersoRuntime;
+pub type AppHandle = tauri::AppHandle<CetusRuntime>;
+pub type WebviewWindow = tauri::WebviewWindow<CetusRuntime>;
 
 #[cfg(target_os = "windows")]
 const PI_BINARY_NAME: &str = "pi.exe";
@@ -814,7 +822,7 @@ pub fn run() {
         .with(file_layer)
         .init();
 
-    let builder = tauri::Builder::default()
+    let builder = tauri_runtime_verso::builder()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
@@ -860,7 +868,7 @@ pub fn run() {
         .plugin(
             // `()` config: the plugin takes no `tauri.conf.json` settings, and
             // nothing else pins the type parameter for inference.
-            tauri::plugin::Builder::<tauri::Wry, ()>::new("navigation-guard")
+            tauri::plugin::Builder::<CetusRuntime, ()>::new("navigation-guard")
                 .on_navigation(|webview, url| {
                     let label = webview.label();
                     if url.scheme() != "file"
@@ -875,19 +883,18 @@ pub fn run() {
                 .build(),
         );
 
-    // WKWebView runs out-of-process. If macOS reclaims or crashes that content
-    // process, reload just the frontend; chats and drafts hydrate from durable
-    // stores on page load.
-    #[cfg(target_os = "macos")]
-    let builder = builder.on_web_content_process_terminate(|webview| {
-        if webview.label() == "main" {
-            tracing::warn!("main WKWebView content process terminated; reloading UI");
-            let _ = webview.reload();
-        }
-    });
-
     let builder = builder
         .setup(|app| {
+            #[cfg(not(dev))]
+            {
+                let frontend_url = verso_frontend::start(app.handle())?;
+                for label in ["main", "quick", "snip", "voice", "meeting"] {
+                    if let Some(window) = app.get_webview_window(label) {
+                        window.navigate(frontend_url.clone())?;
+                    }
+                }
+            }
+
             // Started as a login item (the autostart plugin appends `--autostart`):
             // keep cetus resident in the tray instead of popping the main window in
             // the user's face right after they log in.
@@ -1171,6 +1178,53 @@ pub fn run() {
             // removed in favor of stock macOS behavior: activation alone brings
             // nothing back; recall paths are the Dock click (`Reopen` handler),
             // the summon hotkey, and the tray.
+            //
+            // What remains is a logging-only activation watch. The intermittent
+            // "select cetus in Mission Control → main window lands at the
+            // bottom" reports have never had window-state evidence at the
+            // moment of activation; this dumps every window's ordering state on
+            // each activation / deactivation / Space switch so the next
+            // occurrence is attributable. Its only side effect is ordering the
+            // quick launcher OUT if it is still ordered-in at such a moment: a
+            // front-ordered non-activating panel is exactly the window that
+            // historically stole the activation raise from the main window
+            // (see `panel::park`), and the launcher should not survive an app
+            // switch or Space change anyway. It must never order anything
+            // front.
+            #[cfg(target_os = "macos")]
+            {
+                let app_h = app.handle().clone();
+                crate::panel::install_activation_watch(move |reason| {
+                    use std::fmt::Write as _;
+                    let mut dump = String::new();
+                    let mut quick_ordered_in = false;
+                    for (label, w) in app_h.webview_windows() {
+                        let Ok(ptr) = w.ns_window() else { continue };
+                        let Some(s) = crate::panel::order_snapshot(ptr) else {
+                            continue;
+                        };
+                        let _ = write!(
+                            dump,
+                            "[{label} vis={} key={} lvl={} space={} mini={}] ",
+                            s.visible as u8,
+                            s.key as u8,
+                            s.level,
+                            s.on_active_space as u8,
+                            s.miniaturized as u8,
+                        );
+                        if label == "quick" && s.visible {
+                            quick_ordered_in = true;
+                        }
+                    }
+                    tracing::info!("activation-watch {reason}: {dump}");
+                    if quick_ordered_in {
+                        tracing::info!(
+                            "activation-watch {reason}: parking ordered-in quick launcher"
+                        );
+                        crate::quick::park_quick(&app_h);
+                    }
+                });
+            }
             for label in ["quick", "voice"] {
                 if let Some(win) = app.get_webview_window(label) {
                     let win_for_hide = win.clone();
@@ -1478,6 +1532,7 @@ pub fn run() {
         commands::open_external,
         commands::open_browser_window,
         commands::open_browser_panel,
+        commands::browser_annotation_from_webview,
         commands::set_browser_panel_bounds,
         commands::set_browser_panel_annotation_mode,
         commands::close_browser_panel,
@@ -1655,6 +1710,7 @@ pub fn run() {
         commands::open_external,
         commands::open_browser_window,
         commands::open_browser_panel,
+        commands::browser_annotation_from_webview,
         commands::set_browser_panel_bounds,
         commands::set_browser_panel_annotation_mode,
         commands::close_browser_panel,

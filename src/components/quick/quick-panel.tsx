@@ -551,7 +551,13 @@ export function QuickPanel() {
       .filter((file): file is File => file !== null);
     if (!files.length) return;
     e.preventDefault();
-    void addFiles(files);
+    // Finder exposes folders as file-like clipboard items, but FileReader
+    // cannot read a directory. Prefer the native paths when available so the
+    // existing drop pipeline inserts folders as path references.
+    void api
+      .readClipboardFilePaths()
+      .then((paths) => (paths.length ? addPaths(paths) : addFiles(files)))
+      .catch(() => addFiles(files));
     const pastedText = e.clipboardData.getData("text/plain");
     if (pastedText) {
       const el = taRef.current;

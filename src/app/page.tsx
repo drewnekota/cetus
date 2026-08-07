@@ -1198,13 +1198,14 @@ export default function Home() {
           }
           case "conversation_updated": {
             // Async auto-title (or other out-of-band change) landed — merge the
-            // fresh row into the sidebar list in place. If it just got archived
-            // (e.g. by the auto-archive sweep), drop it from the active list.
+            // fresh row into the sidebar list. Inserting an unknown active row
+            // also repairs a missed creation/automation event. If it just got
+            // archived (e.g. by the auto-archive sweep), drop it from the list.
             const updated = evt.conversation;
             setConversations((cs) =>
               updated.archivedAt != null
                 ? cs.filter((c) => c.id !== updated.id)
-                : cs.map((c) => (c.id === updated.id ? updated : c)),
+                : mergeConversation(cs, updated),
             );
             break;
           }
@@ -1394,6 +1395,39 @@ export default function Home() {
 
   useEffect(() => {
     refreshList().catch(console.error);
+  }, [refreshList]);
+
+  // Native events are the fast path, but WKWebView/Tauri delivery is not a
+  // durable queue: an event emitted while the renderer is being suspended or
+  // repaired can be lost. Reconcile the cheap conversation index while the
+  // main page is visible so a background automation row appears within a few
+  // seconds even if its one-shot `automation_fired` event was missed. Focus and
+  // visibility hooks repair immediately after a wake; hidden windows do no
+  // periodic IPC work.
+  useEffect(() => {
+    let refreshing = false;
+    const reconcile = () => {
+      if (document.visibilityState !== "visible" || refreshing) return;
+      refreshing = true;
+      refreshList()
+        .catch(console.error)
+        .finally(() => {
+          refreshing = false;
+        });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") reconcile();
+    };
+    const timer = window.setInterval(reconcile, 5_000);
+    window.addEventListener("focus", reconcile);
+    window.addEventListener("pageshow", reconcile);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", reconcile);
+      window.removeEventListener("pageshow", reconcile);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [refreshList]);
 
   useEffect(() => {
@@ -2646,13 +2680,13 @@ export default function Home() {
     openTerminalWithCommand(command);
   }
 
-  /** True when `id` runs on a CLI backend (claude-code / codex). Their runner
+  /** True when `id` runs on a CLI backend. Their runner
    *  persists a stopped turn's partial messages, so an abort keeps what
    *  streamed on screen instead of dropping the in-flight turn (pi's
    *  semantics — see end_stream's keepPartial). */
   function isCliConv(id: string | null): boolean {
     const b = conversationsRef.current.find((c) => c.id === id)?.backend;
-    return b === "claude-code" || b === "codex";
+    return b != null && b !== "pi";
   }
 
   async function onAbort() {

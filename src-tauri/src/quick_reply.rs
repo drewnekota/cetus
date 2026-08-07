@@ -44,7 +44,7 @@ pub struct QuickReplyOutput {
 /// Generate a reply with the user's selected agent runtime. Unknown or disabled
 /// choices fall back to the built-in Cetus runtime, matching runtime pickers.
 pub async fn generate(
-    app: &tauri::AppHandle,
+    app: &crate::AppHandle,
     open_id: i64,
     run: u32,
     screenshot: &crate::quick::Screenshot,
@@ -142,7 +142,7 @@ fn runtime_label(id: &str) -> &str {
 }
 
 async fn call_cli_runtime(
-    app: &tauri::AppHandle,
+    app: &crate::AppHandle,
     sink: Arc<QuickReplySink>,
     backend: cetus_bridge::cli_agent::CliBackend,
     screenshot: &crate::quick::Screenshot,
@@ -228,7 +228,7 @@ async fn call_cli_runtime(
 }
 
 async fn call_cetus(
-    app: &tauri::AppHandle,
+    app: &crate::AppHandle,
     sink: Arc<QuickReplySink>,
     screenshot: &crate::quick::Screenshot,
     prompt: &str,
@@ -312,7 +312,7 @@ impl DeltaGate {
 /// deltas to the quick panel (same normalized protocol the conversation UI
 /// consumes) and, for the pi path, resolves a completion channel on agent_end.
 struct QuickReplySink {
-    app: tauri::AppHandle,
+    app: crate::AppHandle,
     open_id: i64,
     /// This turn's run token, checked against the live counter before each
     /// delta: after a runtime switch the superseded turn keeps streaming until
@@ -325,7 +325,7 @@ struct QuickReplySink {
 
 impl QuickReplySink {
     fn new(
-        app: tauri::AppHandle,
+        app: crate::AppHandle,
         open_id: i64,
         run: u32,
         current_run: Arc<std::sync::atomic::AtomicU32>,

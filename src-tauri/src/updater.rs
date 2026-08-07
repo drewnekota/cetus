@@ -8,6 +8,7 @@
 
 #[cfg(not(debug_assertions))]
 use crate::quick;
+use crate::AppHandle;
 use crate::AppState;
 use serde::Serialize;
 #[cfg(not(debug_assertions))]
@@ -17,7 +18,6 @@ use std::sync::{
 };
 #[cfg(not(debug_assertions))]
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::AppHandle;
 #[cfg(not(debug_assertions))]
 use tauri::Manager;
 

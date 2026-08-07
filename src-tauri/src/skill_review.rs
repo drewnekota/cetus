@@ -25,12 +25,13 @@
 //!   skills; it never edits or enables the user's own skills.
 
 use crate::store::{now_ms, Store};
+use crate::AppHandle;
 use crate::{dream, secrets, skills, AppState};
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{Emitter, Manager, State};
 
 /// `app_settings` keys (distinct from dreaming's, so the features are independent).
 const SETTINGS_KEY: &str = "skill_review";

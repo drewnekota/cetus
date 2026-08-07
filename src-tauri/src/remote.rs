@@ -2,6 +2,7 @@
 //! Tailscale Serve. The remote surface intentionally exposes only conversation
 //! operations; native files, terminal, secrets and settings never enter this API.
 
+use crate::AppHandle;
 use axum::{
     body::Body,
     extract::{
@@ -22,7 +23,7 @@ use std::{
     process::Command,
     sync::{Arc, Mutex},
 };
-use tauri::{AppHandle, Listener, Manager, State};
+use tauri::{Listener, Manager, State};
 
 use crate::{commands, AppState};
 

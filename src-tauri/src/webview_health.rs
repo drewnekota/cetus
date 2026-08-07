@@ -5,9 +5,11 @@
 //! after focus gets one bounded UI reload; the WebContent termination callback
 //! in `lib.rs` covers the harder process-crash case.
 
+use crate::AppHandle;
+use crate::WebviewWindow;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::Manager;
 
 static LAST_HEARTBEAT_MS: AtomicI64 = AtomicI64::new(0);
 static FOCUS_WATCHDOG_EPOCH: AtomicU64 = AtomicU64::new(0);

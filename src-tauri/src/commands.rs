@@ -7,17 +7,15 @@
 use crate::model::ModelChoice;
 use crate::secrets;
 use crate::store::{now_ms, Conversation};
-use crate::AppState;
+use crate::{AppHandle, AppState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
-use tauri::webview::WebviewBuilder;
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Size, State, Url,
-    WebviewUrl, WebviewWindowBuilder,
+    Emitter, LogicalPosition, LogicalSize, Manager, State, Url, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
@@ -33,7 +31,7 @@ pub(crate) const BROWSER_WINDOW_LABEL: &str = "browser";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct BrowserAnnotationPayload {
+pub(crate) struct BrowserAnnotationPayload {
     url: String,
     title: String,
     x_pct: Option<f64>,
@@ -300,11 +298,12 @@ const BROWSER_ANNOTATION_SCRIPT: &str = r###"
       e.stopPropagation();
       if (!pending || !note.value.trim()) return;
       pending.note = note.value.trim().slice(0, 2000);
-      document.title = PREFIX + JSON.stringify(pending);
-      setTimeout(function () {
-        document.title = pending.title || "Cetus Browser";
-        setAnnotating(false);
-      }, 0);
+      var invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+      if (invoke) {
+        invoke("browser_annotation_from_webview", { payload: pending })
+          .catch(function (error) { console.error("Cetus annotation IPC failed", error); });
+      }
+      setAnnotating(false);
     });
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && annotating) {
@@ -1136,7 +1135,7 @@ pub async fn retry_last_turn(state: State<'_, AppState>, id: String) -> CmdResul
 /// frontend. Silent on any failure — the mechanical fallback already stuck.
 fn spawn_auto_title(
     store: Arc<crate::store::Store>,
-    handle: tauri::AppHandle,
+    handle: crate::AppHandle,
     id: String,
     message: String,
     fallback: String,
@@ -1209,7 +1208,7 @@ pub async fn default_workspace(state: State<'_, AppState>) -> CmdResult<String> 
 
 /// Open a native folder picker. Returns the chosen path or None if cancelled.
 #[tauri::command]
-pub async fn pick_workspace_dir(app: tauri::AppHandle) -> CmdResult<Option<String>> {
+pub async fn pick_workspace_dir(app: crate::AppHandle) -> CmdResult<Option<String>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog().file().pick_folder(move |path| {
         let _ = tx.send(path.and_then(|p| p.into_path().ok()));
@@ -1227,7 +1226,7 @@ pub async fn pick_workspace_dir(app: tauri::AppHandle) -> CmdResult<Option<Strin
 /// whole cetus UI with the raw file, which no in-page code can undo.
 /// Returns the destination, or `None` if the user cancelled.
 #[tauri::command]
-pub async fn save_artifact_copy(app: tauri::AppHandle, path: String) -> CmdResult<Option<String>> {
+pub async fn save_artifact_copy(app: crate::AppHandle, path: String) -> CmdResult<Option<String>> {
     let source = PathBuf::from(&path);
     if !source.is_file() {
         return Err(format!("artifact is missing: {path}"));
@@ -2099,7 +2098,7 @@ pub async fn delete_api_key(state: State<'_, AppState>, provider: String) -> Cmd
 /// path, which the frontend embeds in the prompt for the model to read.
 #[tauri::command]
 pub async fn save_attachment(
-    app: tauri::AppHandle,
+    app: crate::AppHandle,
     id: String,
     name: String,
     data: String,
@@ -2368,6 +2367,18 @@ pub async fn open_browser_window(
     open_browser_window_with_app_data_dir(&app, &state.app_data_dir, &url).await
 }
 
+/// Verso does not expose Wry's document-title-change callback. Its injected
+/// Tauri invoke bridge is therefore the transport for annotations originating
+/// in the isolated browser webviews.
+#[tauri::command]
+pub async fn browser_annotation_from_webview(
+    app: AppHandle,
+    payload: BrowserAnnotationPayload,
+) -> CmdResult<()> {
+    app.emit_to("main", "browser-annotation", payload)
+        .map_err(err)
+}
+
 pub(crate) async fn open_browser_window_with_app_data_dir(
     app: &AppHandle,
     app_data_dir: &Path,
@@ -2387,7 +2398,6 @@ pub(crate) async fn open_browser_window_with_app_data_dir(
     }
     let data_dir = app_data_dir.join("browser-webview");
     std::fs::create_dir_all(&data_dir).map_err(err)?;
-    let app_for_annotation = app.clone();
     let annotation_token = format!(
         "{}{}__",
         BROWSER_ANNOTATION_TITLE_PREFIX,
@@ -2402,20 +2412,6 @@ pub(crate) async fn open_browser_window_with_app_data_dir(
         .resizable(true)
         .data_directory(data_dir)
         .initialization_script(annotation_script)
-        .on_document_title_changed(move |win, title| {
-            let Some(raw) = title.strip_prefix(&annotation_token) else {
-                return;
-            };
-            match serde_json::from_str::<BrowserAnnotationPayload>(raw) {
-                Ok(payload) => {
-                    let _ = app_for_annotation.emit_to("main", "browser-annotation", payload);
-                    let _ = win.set_title("Cetus Browser");
-                }
-                Err(e) => {
-                    tracing::warn!("browser annotation payload parse failed: {e}");
-                }
-            }
-        })
         .build()
     {
         Ok(_) => {}
@@ -2431,14 +2427,28 @@ pub(crate) async fn open_browser_window_with_app_data_dir(
     Ok(())
 }
 
-fn browser_panel_rect(bounds: &BrowserPanelBounds) -> Rect {
-    Rect {
-        position: Position::Logical(LogicalPosition::new(bounds.x.max(0.0), bounds.y.max(0.0))),
-        size: Size::Logical(LogicalSize::new(
+fn set_browser_panel_window_bounds(
+    app: &AppHandle,
+    panel: &crate::WebviewWindow,
+    bounds: &BrowserPanelBounds,
+) -> CmdResult<()> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    let scale = main.scale_factor().map_err(err)?;
+    let origin = main.outer_position().map_err(err)?.to_logical::<f64>(scale);
+    panel
+        .set_position(LogicalPosition::new(
+            origin.x + bounds.x.max(0.0),
+            origin.y + bounds.y.max(0.0),
+        ))
+        .map_err(err)?;
+    panel
+        .set_size(LogicalSize::new(
             bounds.width.max(1.0),
             bounds.height.max(1.0),
-        )),
-    }
+        ))
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -2458,16 +2468,12 @@ pub async fn open_browser_panel(
     if bounds.width < 2.0 || bounds.height < 2.0 {
         return Ok(());
     }
-    let rect = browser_panel_rect(&bounds);
-    if let Some(webview) = app.get_webview(BROWSER_PANEL_LABEL) {
-        webview.set_bounds(rect).map_err(err)?;
-        webview.navigate(parsed).map_err(err)?;
+    if let Some(panel) = app.get_webview_window(BROWSER_PANEL_LABEL) {
+        set_browser_panel_window_bounds(&app, &panel, &bounds)?;
+        panel.navigate(parsed).map_err(err)?;
+        panel.show().map_err(err)?;
         return Ok(());
     }
-    let window = app
-        .get_window("main")
-        .ok_or_else(|| "main window not found".to_string())?;
-    let app_for_annotation = app.clone();
     let annotation_token = format!(
         "{}{}__",
         BROWSER_ANNOTATION_TITLE_PREFIX,
@@ -2475,31 +2481,27 @@ pub async fn open_browser_panel(
     );
     let annotation_script =
         browser_annotation_script(&annotation_token, &labels.unwrap_or_default(), false);
-    let builder = WebviewBuilder::new(BROWSER_PANEL_LABEL, WebviewUrl::External(parsed.clone()))
-        .initialization_script(annotation_script)
-        .on_document_title_changed(move |_webview, title| {
-            let Some(raw) = title.strip_prefix(&annotation_token) else {
-                return;
-            };
-            match serde_json::from_str::<BrowserAnnotationPayload>(raw) {
-                Ok(payload) => {
-                    let _ = app_for_annotation.emit_to("main", "browser-annotation", payload);
-                }
-                Err(e) => {
-                    tracing::warn!("browser panel annotation payload parse failed: {e}");
-                }
-            }
-        });
-    match window.add_child(
-        builder,
-        LogicalPosition::new(bounds.x.max(0.0), bounds.y.max(0.0)),
-        LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
-    ) {
-        Ok(_) => {}
+    match WebviewWindowBuilder::new(
+        &app,
+        BROWSER_PANEL_LABEL,
+        WebviewUrl::External(parsed.clone()),
+    )
+    .title("Cetus Browser Panel")
+    .decorations(false)
+    .resizable(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .inner_size(bounds.width.max(1.0), bounds.height.max(1.0))
+    .initialization_script(annotation_script)
+    .build()
+    {
+        Ok(panel) => {
+            set_browser_panel_window_bounds(&app, &panel, &bounds)?;
+        }
         Err(e) => {
-            if let Some(webview) = app.get_webview(BROWSER_PANEL_LABEL) {
-                webview.set_bounds(rect).map_err(err)?;
-                webview.navigate(parsed).map_err(err)?;
+            if let Some(panel) = app.get_webview_window(BROWSER_PANEL_LABEL) {
+                set_browser_panel_window_bounds(&app, &panel, &bounds)?;
+                panel.navigate(parsed).map_err(err)?;
             } else {
                 return Err(err(e));
             }
@@ -2510,10 +2512,8 @@ pub async fn open_browser_panel(
 
 #[tauri::command]
 pub async fn set_browser_panel_bounds(app: AppHandle, bounds: BrowserPanelBounds) -> CmdResult<()> {
-    if let Some(webview) = app.get_webview(BROWSER_PANEL_LABEL) {
-        webview
-            .set_bounds(browser_panel_rect(&bounds))
-            .map_err(err)?;
+    if let Some(panel) = app.get_webview_window(BROWSER_PANEL_LABEL) {
+        set_browser_panel_window_bounds(&app, &panel, &bounds)?;
     }
     Ok(())
 }
@@ -2782,7 +2782,7 @@ pub async fn ambient_recent_summary(state: State<'_, AppState>) -> CmdResult<Opt
 /// tracking the system for live updates. Best-effort — a missing window or an
 /// unsupported platform is a no-op.
 #[tauri::command]
-pub async fn set_theme_appearance(app: tauri::AppHandle, preference: String) -> CmdResult<()> {
+pub async fn set_theme_appearance(app: crate::AppHandle, preference: String) -> CmdResult<()> {
     use tauri::Manager;
     let theme = match preference.as_str() {
         "light" => Some(tauri::Theme::Light),
@@ -3012,7 +3012,7 @@ mod tests {
         assert!(script.contains("drawHighlight(target)"));
         assert!(script.contains("element: describeElement(target)"));
         assert!(script.contains("text: clippedText(target)"));
-        assert!(script.contains("document.title = PREFIX + JSON.stringify(pending)"));
+        assert!(script.contains("invoke(\"browser_annotation_from_webview\""));
     }
 
     #[test]

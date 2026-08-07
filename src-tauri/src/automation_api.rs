@@ -11,8 +11,9 @@
 use crate::app_event::AppEvent;
 use crate::automation::{Automation, AutomationInput};
 use crate::store::now_ms;
+use crate::AppHandle;
 use crate::AppState;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
 fn emit(handle: &AppHandle, event: AppEvent) {

@@ -22,8 +22,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use crate::AppHandle;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter as _, Listener as _, Manager, State};
+use tauri::{Emitter as _, Listener as _, Manager, State};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 

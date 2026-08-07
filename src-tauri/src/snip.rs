@@ -9,12 +9,13 @@
 //! (native grab → sips → base64 → `quick-open`) is unchanged.
 
 use crate::quick;
+use crate::AppHandle;
 use crate::AppState;
 use serde::Deserialize;
 use std::sync::atomic::Ordering;
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
-use tauri::{AppHandle, Manager, State};
+use tauri::{Manager, State};
 
 /// Selection reported by the overlay webview: CSS pixels (== AppKit points),
 /// top-left origin, relative to the overlay window (which covers one screen).
@@ -32,8 +33,10 @@ pub struct SnipStash {
     /// points) — the space `screencapture -R` expects. Selection offsets from
     /// the webview add directly onto this origin.
     pub frame_cg: (f64, f64, f64, f64),
-    /// Pre-focus ambient context gathered before the overlay took key focus.
-    pub context: Option<crate::ocr::AmbientContext>,
+    /// Context gathered against the frontmost identity captured before the
+    /// overlay took key focus. It runs in parallel with region selection so AX
+    /// latency never delays the overlay's first interaction.
+    pub context_task: tauri::async_runtime::JoinHandle<Option<crate::ocr::AmbientContext>>,
 }
 
 /// Enter region-select mode: gather pre-focus context, cover the mouse screen
@@ -74,12 +77,15 @@ pub async fn begin(app: &AppHandle) {
         let Some(_win) = app.get_webview_window("snip") else {
             return;
         };
-        // Pre-focus ambient context, same contract as `open_panel`: gathered
-        // before our overlay takes key so it reflects the app the user was in.
-        let context = tauri::async_runtime::spawn_blocking(crate::ax::gather_pre_focus_context)
-            .await
-            .ok()
-            .flatten();
+        // Snapshot the cheap identity before the overlay becomes key, then pin
+        // the slower AX work to that pid. The task runs while the user selects
+        // a region instead of delaying presentation (and letting the first
+        // click fall through to the app underneath).
+        let (context_app, context_bundle, context_pid) =
+            crate::ax::frontmost_identity().unwrap_or_default();
+        let context_task = tauri::async_runtime::spawn_blocking(move || {
+            crate::ax::gather_context_for_identity(context_app, context_bundle, context_pid)
+        });
         app.state::<AppState>()
             .quick
             .snip_active
@@ -107,7 +113,10 @@ pub async fn begin(app: &AppHandle) {
                 return;
             };
             if let Ok(mut stash) = state.quick.snip_stash.lock() {
-                *stash = Some(SnipStash { frame_cg, context });
+                *stash = Some(SnipStash {
+                    frame_cg,
+                    context_task,
+                });
             }
             crate::panel::present(ptr);
             // Reset the persistent overlay webview only after it is ordered
@@ -194,8 +203,13 @@ pub async fn snip_finish(
         let recapturing = state.quick.recapturing.clone();
         recapturing.store(true, Ordering::Relaxed);
         // Window order-out is async; give the compositor room to drop the dim
-        // overlay before shooting so it isn't baked into the capture.
-        tokio::time::sleep(std::time::Duration::from_millis(220)).await;
+        // overlay before shooting so it isn't baked into the capture. Finish
+        // any remaining context work during that same gap rather than adding
+        // its latency after the user's selection.
+        let (context, ()) = tokio::join!(
+            async { stash.context_task.await.ok().flatten() },
+            tokio::time::sleep(std::time::Duration::from_millis(220)),
+        );
         let (fx, fy, fw, fh) = stash.frame_cg;
         let region = match rect {
             Some(r) => {
@@ -216,7 +230,7 @@ pub async fn snip_finish(
         .ok()
         .flatten();
         recapturing.store(false, Ordering::Relaxed);
-        quick::present_launcher(&app, shot, stash.context, true).await;
+        quick::present_launcher(&app, shot, context, true).await;
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]

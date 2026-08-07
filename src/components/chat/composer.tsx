@@ -1360,19 +1360,16 @@ export function Composer({
           // the caret ourselves since preventDefault cancels the native paste.
           e.preventDefault();
           if (textAsFile) files.push(textAsFile);
-          // A Finder file copy carries the real path on the pasteboard; resolve
-          // it first so addFiles can reference a too-large file by path instead
-          // of skipping it. Best-effort — falls back to the byte path on any
-          // failure or off macOS.
+          // A Finder copy carries the real path on the pasteboard. Route those
+          // paths through the same pipeline as a drop so directories become
+          // path references instead of being handed to FileReader (which
+          // rejects them with NotFoundError). Best-effort — raw clipboard files
+          // and non-macOS platforms keep using the browser-provided bytes.
           api
             .readClipboardFilePaths()
             .then((paths) => {
-              const hints = new Map<string, string>();
-              for (const p of paths) {
-                const base = p.split("/").pop();
-                if (base) hints.set(base, p);
-              }
-              return addFiles(files, hints);
+              if (paths.length) return addPaths(paths);
+              return addFiles(files);
             })
             .catch(() => addFiles(files));
           if (pastedText && !textAsFile) insertTextAtCaret(pastedText);

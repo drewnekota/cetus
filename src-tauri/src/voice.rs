@@ -11,10 +11,11 @@
 //!
 //! macOS only. On other platforms every command is a graceful no-op/error.
 
+use crate::AppHandle;
 use crate::AppState;
 use serde::Serialize;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{Emitter, Manager, State};
 use tokio::sync::{oneshot, Mutex};
 
 /// Microphone + Speech Recognition authorization, as reported by the helper.

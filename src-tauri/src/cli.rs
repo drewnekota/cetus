@@ -340,15 +340,49 @@ fn socket_path() -> Result<std::path::PathBuf, String> {
     Ok(format!("{home}/Library/Application Support/dev.cetus.app/cetus.sock").into())
 }
 
+/// Connect to the app, preferring the configured path but falling back to any
+/// `cetus-<pid>.sock` sibling — that's where an instance binds when the
+/// canonical path is taken (see `control::acquire`), and it's also the escape
+/// hatch when our `$CETUS_SOCK` points at a socket file that's been abandoned.
+#[cfg(unix)]
+fn connect_socket(path: &std::path::Path) -> Result<std::os::unix::net::UnixStream, String> {
+    let first = match std::os::unix::net::UnixStream::connect(path) {
+        Ok(s) => return Ok(s),
+        Err(e) => e,
+    };
+    let stem = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .and_then(|n| n.rsplit_once('.'))
+        .map(|(stem, _)| stem.to_string())
+        .unwrap_or_else(|| "cetus".to_string());
+    let siblings = path
+        .parent()
+        .and_then(|dir| std::fs::read_dir(dir).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|n| n.starts_with(&format!("{stem}-")) && n.ends_with(".sock"))
+        });
+    for alt in siblings {
+        if let Ok(s) = std::os::unix::net::UnixStream::connect(&alt) {
+            return Ok(s);
+        }
+    }
+    Err(format!(
+        "cannot reach the Cetus app at {} ({first}) — is Cetus running?",
+        path.display()
+    ))
+}
+
 #[cfg(unix)]
 fn request(req: &Value) -> Result<Value, String> {
     let path = socket_path()?;
-    let mut stream = std::os::unix::net::UnixStream::connect(&path).map_err(|e| {
-        format!(
-            "cannot reach the Cetus app at {} ({e}) — is Cetus running?",
-            path.display()
-        )
-    })?;
+    let mut stream = connect_socket(&path)?;
     let mut line = serde_json::to_string(req).map_err(|e| e.to_string())?;
     line.push('\n');
     stream

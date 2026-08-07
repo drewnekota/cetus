@@ -273,6 +273,39 @@ pub fn gather_pre_focus_context() -> Option<crate::ocr::AmbientContext> {
     }
 }
 
+/// Build the snip overlay's context from an identity captured before the
+/// overlay became key. Unlike [`gather_pre_focus_context`], every AX lookup is
+/// pinned to `pid`, so this can run after the overlay is visible without
+/// accidentally describing Cetus. The clipboard fallback is intentionally
+/// omitted because synthetic ⌘C would target the now-key overlay.
+#[cfg(target_os = "macos")]
+pub(crate) fn gather_context_for_identity(
+    app: String,
+    bundle: String,
+    pid: i32,
+) -> Option<crate::ocr::AmbientContext> {
+    wake_app(pid);
+    let selection = focused_selected_text(pid)
+        .map(|s| {
+            s.chars()
+                .take(crate::ocr::MAX_SELECTION_CHARS)
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+    tracing::info!(
+        "gather_context_for_identity: app={app:?} bundle={bundle:?} pid={pid} sel_len={}",
+        selection.len()
+    );
+    let ctx = crate::ocr::AmbientContext {
+        app,
+        bundle_id: bundle,
+        url: String::new(),
+        title: String::new(),
+        selection,
+    };
+    (!ctx.is_empty()).then_some(ctx)
+}
+
 /// The pre-focus half of quick reply's capture: frontmost identity + selection,
 /// both of which become wrong the instant the panel takes key focus. Returns the
 /// frontmost pid alongside, so the caller can run [`gather_reply_details`] for

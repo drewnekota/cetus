@@ -25,11 +25,12 @@ use crate::host_tunnel::{self, str_field};
 use crate::pi_rpc::PiRpc;
 use crate::skills::{self, SkillEntry};
 use crate::store::Store;
+use crate::AppHandle;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::Emitter;
 use tokio::sync::Mutex;
 
 /// Clone-friendly bundle the app-event listener captures so it can service

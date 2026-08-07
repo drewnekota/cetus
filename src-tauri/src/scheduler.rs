@@ -16,11 +16,12 @@ use crate::automation::Automation;
 use crate::pi_rpc::PiRpc;
 use crate::secrets;
 use crate::store::{now_ms, Conversation, Store};
+use crate::AppHandle;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::Emitter;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -446,5 +447,7 @@ fn run_title(name: &str) -> String {
 }
 
 fn emit(ctx: &SchedulerCtx, event: AppEvent) {
-    let _ = ctx.handle.emit("app-event", event);
+    if let Err(e) = ctx.handle.emit("app-event", event) {
+        tracing::warn!("scheduler: failed to emit app-event: {e}");
+    }
 }

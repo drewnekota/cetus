@@ -9,11 +9,12 @@ use crate::host_tunnel::{self, str_field};
 use crate::mcp::{self, McpConnector, McpConnectorInput};
 use crate::pi_rpc::PiRpc;
 use crate::store::Store;
+use crate::AppHandle;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::Emitter;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]

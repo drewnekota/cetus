@@ -9,11 +9,11 @@
 
 use crate::agent;
 use crate::store::Store;
+use crate::AppHandle;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use tauri::AppHandle;
 
 pub const CETUS_PLUGINS_DIR: &str = "cetus-plugins";
 pub const CETUS_BUILTIN_PLUGINS_ENV: &str = "CETUS_BUILTIN_PLUGINS_DIR";

@@ -22,11 +22,12 @@ use crate::host_tunnel::{self, str_field};
 use crate::model::{DsModel, ModelChoice, ReasoningLevel};
 use crate::pi_rpc::PiRpc;
 use crate::store::{now_ms, Store};
+use crate::AppHandle;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::Emitter;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 

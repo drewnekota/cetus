@@ -1,17 +1,18 @@
 use crate::app_event::AppEvent;
 use crate::bridge::RuntimeEvent;
 use crate::pi_rpc::{EventSink, TaskSpawner};
+use crate::CetusRuntime;
 use std::future::Future;
 use std::pin::Pin;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{Emitter, Manager};
 
 #[derive(Clone)]
-pub struct TauriEventSink<R: tauri::Runtime = tauri::Wry> {
-    handle: AppHandle<R>,
+pub struct TauriEventSink<R: tauri::Runtime = CetusRuntime> {
+    handle: tauri::AppHandle<R>,
 }
 
 impl<R: tauri::Runtime> TauriEventSink<R> {
-    pub fn new(handle: AppHandle<R>) -> Self {
+    pub fn new(handle: tauri::AppHandle<R>) -> Self {
         Self { handle }
     }
 }

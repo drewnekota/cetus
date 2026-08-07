@@ -47,7 +47,7 @@ export interface QuickSettings {
   /** Push-to-talk modifier held while speaking. */
   voiceGesture: VoiceGesture;
   /** Opt-in double-tap of the voice trigger for hands-free mode. Off by
-   *  default so double right-Option belongs to quick reply only. */
+   *  default so double-Option belongs to quick reply only. */
   voiceHandsfreeShortcut: boolean;
   /** How a global transcript is inserted into the focused app. */
   voiceInsertMode: VoiceInsertMode;

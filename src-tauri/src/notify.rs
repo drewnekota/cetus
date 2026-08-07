@@ -13,7 +13,7 @@
 //! bundle owns the notification. We still borrow `mac-notification-sys`'s bundle
 //! hook (`set_application`) so delivery works from the unbundled dev binary.
 
-use tauri::AppHandle;
+use crate::AppHandle;
 
 #[cfg(target_os = "macos")]
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};

@@ -22,13 +22,14 @@ use crate::app_event::AppEvent;
 use crate::cua::CuaRuntime;
 use crate::pi_rpc::PiRpc;
 use crate::store::Store;
+use crate::AppHandle;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{Emitter, State};
 use tokio::sync::Mutex;
 
 // =============================================================================

@@ -4,6 +4,7 @@ import { ConsoleBridge } from "@/components/devtools/console-bridge";
 import { ChunkReloadGuard } from "@/components/chunk-reload-guard";
 import { FileDropHost } from "@/components/file-drop-host";
 import { ThemeWatcher } from "@/components/theme-watcher";
+import { VersoPlatformPolyfills } from "@/components/verso-platform-polyfills";
 import { fontVariables } from "./fonts";
 
 // Toggle the `.dark` class before first paint so the saved theme (or the
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning className={fontVariables}>
       <body className="h-full font-sans">
+        <VersoPlatformPolyfills />
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         {/* Keeps every window's `.dark` class synced with the saved theme after
             the pre-paint apply (OS-appearance + cross-window changes). */}

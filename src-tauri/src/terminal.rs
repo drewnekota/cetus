@@ -4,6 +4,7 @@
 //! composer's one-shot `!cmd` escape hatch, while this module owns interactive
 //! shells with a real controlling TTY, streaming output, resize, and stdin.
 
+use crate::AppHandle;
 use crate::AppState;
 use base64::Engine;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
@@ -11,7 +12,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{Emitter, State};
 
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;

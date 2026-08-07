@@ -4,6 +4,7 @@
 //! [`cetus_bridge::cli_agent`]; the command wiring in [`crate::commands`].
 
 use crate::store::{now_ms, Conversation, Store};
+use crate::AppHandle;
 use crate::AppState;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
@@ -796,7 +797,7 @@ pub fn dispatch_turn(
     // first-turn preamble below.
     env.push((
         "CETUS_SOCK".to_string(),
-        crate::control::socket_path(&state.app_data_dir)
+        crate::control::active_socket_path(&state.app_data_dir)
             .to_string_lossy()
             .into_owned(),
     ));
@@ -1133,7 +1134,7 @@ pub async fn compact_codex_conversation(
             let mut env = crate::secrets::load_env();
             env.push((
                 "CETUS_SOCK".to_string(),
-                crate::control::socket_path(&state.app_data_dir)
+                crate::control::active_socket_path(&state.app_data_dir)
                     .to_string_lossy()
                     .into_owned(),
             ));

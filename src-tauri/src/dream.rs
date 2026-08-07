@@ -31,12 +31,13 @@
 //!   rewritten. Output is hard-capped to a handful of notes per dream.
 
 use crate::store::{now_ms, Conversation, Store};
+use crate::AppHandle;
 use crate::{memory, secrets, AppState};
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{Emitter, Manager, State};
 
 /// `app_settings` keys.
 const SETTINGS_KEY: &str = "dreaming";
