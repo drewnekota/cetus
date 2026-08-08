@@ -768,6 +768,10 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
   archivedAt: number | null;
+  /** When a run finished that the user hasn't looked at since — the sidebar's
+   *  unread dot, persisted so it survives a restart and so auto-archive can skip
+   *  chats with unseen output. null once the chat is opened. */
+  unreadAt?: number | null;
   /** Set when an automation firing minted this conversation (the automation's
    *  id); null for user-started chats. Lets the UI badge automation runs. */
   sourceAutomationId: string | null;

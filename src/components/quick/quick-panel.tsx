@@ -43,6 +43,7 @@ import {
   type QuickSessionMode,
 } from "@/lib/types";
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
+import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import {
   loadBackendChoice,
   loadCliTuningChoice,
@@ -966,7 +967,8 @@ function BackendSelect({
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger
         size="sm"
-        className="gap-1.5 border-0 bg-transparent px-2 text-[13px] text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0"
+        style={{ ...runtimeThemeStyle(value), color: "var(--runtime-color)" }}
+        className="gap-1.5 border-0 bg-transparent px-2 text-[13px] shadow-none focus-visible:ring-0"
       >
         <TriggerIcon className="size-3.5" />
         <span className="truncate">{current.label}</span>

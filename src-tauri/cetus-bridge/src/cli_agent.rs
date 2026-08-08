@@ -3582,7 +3582,22 @@ pub fn spawn_acp_session(
             .pointer("/agentCapabilities/loadSession")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let session_params = json!({ "cwd": cwd_string, "mcpServers": [] });
+        let grok_default_model = (backend == CliBackend::Grok)
+            .then(|| {
+                init.pointer("/_meta/modelState/currentModelId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .flatten();
+        let mut session_params = json!({ "cwd": cwd_string, "mcpServers": [] });
+        // Grok accepts the initial model on session/new. Reasoning effort is
+        // applied below through session/set_model, which is also the only path
+        // that updates an existing loaded session.
+        if backend == CliBackend::Grok {
+            if let Some(model) = opts.model.as_ref() {
+                session_params["modelId"] = json!(model);
+            }
+        }
         let resume_requested = opts.resume.is_some();
         let loaded = if can_load {
             if let Some(resume) = opts.resume.as_ref() {
@@ -3651,6 +3666,36 @@ pub fn spawn_acp_session(
             let _ = child.start_kill();
             return;
         };
+
+        if backend == CliBackend::Grok && (opts.model.is_some() || opts.effort.is_some()) {
+            let model_id = opts
+                .model
+                .clone()
+                .or_else(|| {
+                    session_result
+                        .pointer("/models/currentModelId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .or(grok_default_model);
+            if let Some(model_id) = model_id {
+                let mut params = json!({ "sessionId": session_id, "modelId": model_id });
+                if let Some(effort) = opts.effort.as_ref() {
+                    params["reasoningEffort"] = json!(effort);
+                }
+                if let Err(error) = acp_handshake_request(
+                    &mut stdin,
+                    &mut reader,
+                    4,
+                    "session/set_model",
+                    params,
+                )
+                .await
+                {
+                    tracing::warn!("Grok ACP session/set_model failed: {error}");
+                }
+            }
+        }
 
         let mut next_id = 10u64;
         let mut active: Option<ActiveAcpTurn> = None;

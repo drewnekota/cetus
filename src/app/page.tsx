@@ -450,6 +450,24 @@ export default function Home() {
   const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(
     () => new Set(),
   );
+  // Mirror of the set, so markUnread can dedupe (and skip the write) without
+  // doing I/O inside a setState updater — which React may run twice.
+  const unreadIdsRef = useRef<Set<string>>(unreadCompletedIds);
+  /** Guards the one-shot hydration in refreshList (which runs on every send). */
+  const unreadHydratedRef = useRef(false);
+  /** Flip a chat's unread dot and persist it (conversations.unreadAt). The
+   *  renderer decides *when* — it sees agent_end, retries, and whether the chat
+   *  was on screen — while the row is what survives a restart and what the
+   *  auto-archive sweep checks before filing a chat away. */
+  const markUnread = useCallback((cid: string, unread: boolean) => {
+    if (unreadIdsRef.current.has(cid) === unread) return;
+    const next = new Set(unreadIdsRef.current);
+    if (unread) next.add(cid);
+    else next.delete(cid);
+    unreadIdsRef.current = next;
+    setUnreadCompletedIds(next);
+    api.setConversationUnread(cid, unread).catch(console.error);
+  }, []);
   const [modelChoice, setModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
   // Backend + CLI model/effort chosen on the hero composer before a
   // conversation exists; applied to the conversation minted on first send.
@@ -979,12 +997,7 @@ export default function Home() {
         switch (pe.type) {
           case "agent_start":
             runStatusRef.current[cid] = { running: true, outcome: "ok" };
-            setUnreadCompletedIds((ids) => {
-              if (!ids.has(cid)) return ids;
-              const next = new Set(ids);
-              next.delete(cid);
-              return next;
-            });
+            markUnread(cid, false);
             break;
           case "message_update": {
             const r = runStatusRef.current[cid];
@@ -1024,14 +1037,7 @@ export default function Home() {
               suppressWhenFocused: watchingNow(cid),
               conversationId: cid,
             });
-            setUnreadCompletedIds((ids) => {
-              const next = new Set(ids);
-              if (watchingNow(cid)) next.delete(cid);
-              else next.add(cid);
-              return next.size === ids.size && next.has(cid) === ids.has(cid)
-                ? ids
-                : next;
-            });
+            markUnread(cid, !watchingNow(cid));
             break;
           }
         }
@@ -1253,7 +1259,7 @@ export default function Home() {
       cancelled = true;
       unlisten?.();
     };
-  }, [chatStore]);
+  }, [chatStore, markUnread]);
 
   const refreshList = useCallback(async () => {
     const list = await api.listConversations(false);
@@ -1280,9 +1286,28 @@ export default function Home() {
     setTemporaryWorkspaces((dirs) =>
       reconcileTemporaryWorkspaces(dirs, list),
     );
+    // Seed the unread dots from the persisted rows, once. Later refreshes are
+    // not a source of truth: they race in-flight markUnread writes and would
+    // resurrect a dot the user just cleared by opening the chat.
+    if (!unreadHydratedRef.current) {
+      unreadHydratedRef.current = true;
+      const unread = new Set(
+        list.filter((c) => c.unreadAt != null).map((c) => c.id),
+      );
+      if (unread.size) {
+        unreadIdsRef.current = unread;
+        setUnreadCompletedIds(unread);
+        // Whatever is on screen right now has been read by definition. The
+        // clear for it may have already run against a row this fetch had
+        // in flight, so re-assert it instead of painting a stale dot.
+        if (viewRef.current === "chat" && activeIdRef.current) {
+          markUnread(activeIdRef.current, false);
+        }
+      }
+    }
     setConversationsLoaded(true);
     return list;
-  }, []);
+  }, [markUnread]);
 
   // Read through a ref so reordering runtimes in Settings doesn't re-register
   // the (large) global keydown handler.
@@ -1503,13 +1528,8 @@ export default function Home() {
 
   useEffect(() => {
     if (view !== "chat" || !activeId) return;
-    setUnreadCompletedIds((ids) => {
-      if (!ids.has(activeId)) return ids;
-      const next = new Set(ids);
-      next.delete(activeId);
-      return next;
-    });
-  }, [activeId, view]);
+    markUnread(activeId, false);
+  }, [activeId, view, markUnread]);
 
   // Global keyboard shortcuts (parallels macOS app conventions).
   //   ⌘K    — command palette
@@ -2247,16 +2267,11 @@ export default function Home() {
   // need a `view` dependency that would break memoization on every view switch.
   const onSelectChat = useCallback(
     (id: string) => {
-      setUnreadCompletedIds((ids) => {
-        if (!ids.has(id)) return ids;
-        const next = new Set(ids);
-        next.delete(id);
-        return next;
-      });
+      markUnread(id, false);
       setView("chat");
       onSelect(id);
     },
-    [onSelect],
+    [onSelect, markUnread],
   );
   selectChatRef.current = onSelectChat;
   const switchChat = useCallback(

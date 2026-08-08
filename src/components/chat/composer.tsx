@@ -41,6 +41,7 @@ import {
   writeDraftAttachments,
 } from "@/lib/draft-store";
 import type { BackendId, CliSlashCommand, ModelChoice } from "@/lib/types";
+import { runtimeThemeStyle } from "@/lib/runtime-theme";
 
 function GitBranchIndicator({
   conversationId,
@@ -1158,6 +1159,12 @@ export function Composer({
       data-file-drop-target
       data-streaming={streaming && !bashMode ? "true" : undefined}
       data-backend={backend}
+      style={{
+        ...runtimeThemeStyle(backend),
+        ...(!bashMode
+          ? { borderColor: "color-mix(in oklab, var(--runtime-color) 60%, transparent)" }
+          : {}),
+      }}
       className={cn(
         "relative rounded-2xl border border-border",
         // Soft, wide, low-opacity shadow (large blur, ~6% alpha) for a premium
@@ -1168,15 +1175,8 @@ export function Composer({
         // Bash mode: tint the frame so it's unmistakably "running a command",
         // not "messaging the agent".
         bashMode && "border-primary/60 ring-1 ring-primary/40",
-        // CLI backends tint the frame so it's obvious at a glance which
-        // runtime the next message runs on: Claude Code gets Anthropic's
-        // clay orange, Codex a teal. Bash mode's tint wins while active.
-        !bashMode &&
-          backend === "claude-code" &&
-          "border-[#d97757]/60 dark:border-[#d97757]/50",
-        !bashMode &&
-          backend === "codex" &&
-          "border-[#10a37f]/60 dark:border-[#10a37f]/50",
+        // Runtime identity is supplied by the shared theme registry. Bash
+        // mode intentionally replaces it with the primary command tint.
         variant === "hero" ? "bg-card p-2" : "bg-card p-1.5",
       )}
     >

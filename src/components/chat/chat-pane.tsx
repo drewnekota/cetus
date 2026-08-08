@@ -56,6 +56,7 @@ import { useTranslation } from "@/lib/i18n";
 import { flavorHeadline } from "@/lib/chat-flavor";
 import type { BackendId, ModelChoice } from "@/lib/types";
 import { api } from "@/lib/tauri";
+import { runtimeThemeStyle } from "@/lib/runtime-theme";
 
 interface Props {
   /** Conversation id to subscribe to. Null means "new chat" — shows hero. */
@@ -355,36 +356,6 @@ function CompactionBar({ reason }: { reason: string | null }) {
  *  CLI backends, cleared when the session process exits) and the rendered
  *  cards' running-subagent details (covers pi-backend runs). Renders nothing
  *  when both are empty. */
-const RUNTIME_TONES: Record<
-  BackendId,
-  { frame: string; accent: string }
-> = {
-  "claude-code": {
-    frame: "border-[#d97757]/30 bg-[#d97757]/5",
-    accent: "text-[#d97757]",
-  },
-  codex: {
-    frame: "border-emerald-600/30 bg-emerald-500/[0.06]",
-    accent: "text-emerald-600 dark:text-emerald-400",
-  },
-  opencode: {
-    frame: "border-violet-600/25 bg-violet-500/[0.05]",
-    accent: "text-violet-600 dark:text-violet-400",
-  },
-  grok: {
-    frame: "border-zinc-500/30 bg-zinc-500/[0.06]",
-    accent: "text-zinc-700 dark:text-zinc-300",
-  },
-  kimi: {
-    frame: "border-indigo-600/25 bg-indigo-500/[0.05]",
-    accent: "text-indigo-600 dark:text-indigo-400",
-  },
-  pi: {
-    frame: "border-sky-600/25 bg-sky-500/[0.05]",
-    accent: "text-sky-600 dark:text-sky-400",
-  },
-};
-
 function BackgroundAgentsBar({
   convId,
   backend,
@@ -396,7 +367,6 @@ function BackgroundAgentsBar({
   const agents = useRunningSubagents(convId);
   const tasks = useBackgroundTasks(convId);
   if (agents.length === 0 && tasks.length === 0) return null;
-  const tone = RUNTIME_TONES[backend];
   // Prefer the human task description; fall back to the agent/task type.
   const seen = new Set(tasks.map((task) => `${task.kind}|${task.description}`));
   const labels = [
@@ -409,10 +379,15 @@ function BackgroundAgentsBar({
   const extra = labels.length - Math.min(labels.length, 3);
   return (
     <div
-      className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] text-muted-foreground ${tone.frame}`}
+      style={{
+        ...runtimeThemeStyle(backend),
+        borderColor: "color-mix(in oklab, var(--runtime-color) 30%, transparent)",
+        backgroundColor: "color-mix(in oklab, var(--runtime-color) 6%, transparent)",
+      }}
+      className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] text-muted-foreground"
     >
-      <Bot className={`size-3.5 shrink-0 ${tone.accent}`} />
-      <Spinner className={`size-3 ${tone.accent}`} />
+      <Bot className="size-3.5 shrink-0 text-[var(--runtime-color)]" />
+      <Spinner className="size-3 text-[var(--runtime-color)]" />
       <span className="shrink-0 font-medium text-foreground">
         {t("pane.backgroundAgents.title", { count: labels.length })}
       </span>

@@ -107,8 +107,6 @@
   --info: var(--skill);
   --info-foreground: var(--surface);
   --skill-foreground: var(--surface);
-  --runtime-claude: #d97757;
-  --runtime-codex: #10a37f;
 
   --chart-1: var(--brand);
   --chart-2: var(--skill);
@@ -163,8 +161,6 @@
   --info: var(--skill);
   --info-foreground: var(--surface);
   --skill-foreground: var(--surface);
-  --runtime-claude: #d97757;
-  --runtime-codex: #10a37f;
 
   --chart-1: var(--brand);
   --chart-2: var(--skill);
@@ -405,7 +401,7 @@
 }
 
 [data-chat-composer][data-streaming="true"] {
-  --composer-runner: var(--primary);
+  --composer-runner: var(--runtime-color, var(--primary));
 }
 
 [data-chat-composer][data-streaming="true"]::after {
@@ -435,14 +431,6 @@
      plus a window-sized backdrop read on each tick). The moving gradient
      highlight reads as the glow on its own. */
   animation: composer-border-spin 2.8s linear infinite;
-}
-
-[data-chat-composer][data-streaming="true"][data-backend="claude-code"] {
-  --composer-runner: var(--runtime-claude);
-}
-
-[data-chat-composer][data-streaming="true"][data-backend="codex"] {
-  --composer-runner: var(--runtime-codex);
 }
 
 @media (prefers-reduced-motion: reduce) {

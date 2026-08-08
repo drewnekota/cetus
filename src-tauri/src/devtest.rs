@@ -293,6 +293,7 @@ async fn op_agent_prompt(
         created_at: now,
         updated_at: now,
         archived_at: None,
+        unread_at: None,
         source_automation_id: None,
         parallel_group_id: None,
         solution_index: None,

@@ -92,6 +92,7 @@ import type {
   CliRateLimitInfo,
   Conversation,
 } from "@/lib/types";
+import { RUNTIME_THEME } from "@/lib/runtime-theme";
 
 type CliBackendId = Exclude<BackendId, "pi">;
 
@@ -977,16 +978,6 @@ function runtimeLabel(backend: BackendId): string {
   return BACKENDS.find((runtime) => runtime.id === backend)?.label ?? "Cetus";
 }
 
-/** Runtime identity dot in the row tooltip. Vendor brand colors where they have
- *  one; Cetus itself stays neutral. */
-const RUNTIME_DOTS: Partial<Record<BackendId, string>> = {
-  "claude-code": "bg-[#d97757]",
-  codex: "bg-[#10a37f]",
-  opencode: "bg-violet-500",
-  grok: "bg-zinc-400",
-  kimi: "bg-indigo-500",
-};
-
 function displayModelName(raw: string): string {
   const claude = raw.match(/^claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d+))?/i);
   if (!claude) return raw;
@@ -1190,10 +1181,8 @@ const ConversationRow = memo(function ConversationRow({
         >
           <div className="flex min-w-0 items-center gap-2">
             <span
-              className={cn(
-                "size-1.5 shrink-0 rounded-full",
-                RUNTIME_DOTS[backend] ?? "bg-background/65",
-              )}
+              style={{ backgroundColor: RUNTIME_THEME[backend].color }}
+              className="size-1.5 shrink-0 rounded-full"
             />
             <span className="truncate font-medium">{runtimeLabel(backend)}</span>
             {streaming && (

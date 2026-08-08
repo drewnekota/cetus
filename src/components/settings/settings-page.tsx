@@ -67,6 +67,7 @@ import {
   setThemePreference,
   type ThemePreference,
 } from "@/lib/theme-prefs";
+import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import {
   LOCALE_NATIVE_NAMES,
   LOCALES,
@@ -698,7 +699,15 @@ function RuntimesSection() {
               data-testid={`runtime-settings-row-${id}`}
               className="flex items-center gap-3 px-4 py-3"
             >
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <div
+                style={{
+                  ...runtimeThemeStyle(id),
+                  color: "var(--runtime-color)",
+                  backgroundColor:
+                    "color-mix(in oklab, var(--runtime-color) 10%, transparent)",
+                }}
+                className="flex size-9 shrink-0 items-center justify-center rounded-lg"
+              >
                 <Icon className="size-4" />
               </div>
               <div className="min-w-0 flex-1">

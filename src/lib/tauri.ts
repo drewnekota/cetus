@@ -188,6 +188,10 @@ export const api = {
     invoke<void>("set_active_conversation", { id }),
   archiveConversation: (id: string, archive: boolean) =>
     invoke<Conversation>("archive_conversation", { id, archive }),
+  /** Persist the sidebar's unread dot so it survives a restart and auto-archive
+   *  can skip chats whose finished run hasn't been read. */
+  setConversationUnread: (id: string, unread: boolean) =>
+    invoke<void>("set_conversation_unread", { id, unread }),
   /** Set the human-in-the-loop review state; returns the updated row. */
   setReviewState: (id: string, state: ReviewState) =>
     invoke<Conversation>("set_review_state", { id, stateValue: state }),

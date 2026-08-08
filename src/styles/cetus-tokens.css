@@ -6,8 +6,12 @@
   --brand: #827be6;
   --diff-added: #52a450;
   --diff-removed: #c94446;
-  --runtime-codex: #10a37f;
+  --runtime-pi: var(--brand);
   --runtime-claude: #d97757;
+  --runtime-codex: #10a37f;
+  --runtime-opencode: light-dark(#201d1d, #d6d3d1);
+  --runtime-grok: #71717a;
+  --runtime-kimi: #1783ff;
   --background: var(--surface);
   --foreground: var(--ink);
   --card: var(--surface);

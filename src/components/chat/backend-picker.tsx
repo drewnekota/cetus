@@ -45,6 +45,7 @@ import {
   useKeyboardShortcuts,
   type ShortcutMap,
 } from "@/lib/keyboard-shortcuts";
+import { runtimeThemeStyle } from "@/lib/runtime-theme";
 
 export const BACKENDS: { id: BackendId; label: string; icon: AppIcon }[] = [
   { id: "pi", label: "Cetus", icon: CetusIcon },
@@ -67,12 +68,12 @@ export function useRuntimeCatalog() {
   return { orderedBackends, enabledBackendIds };
 }
 
-export type TunableBackendId = "claude-code" | "codex";
+export type TunableBackendId = "claude-code" | "codex" | "grok";
 
 export function backendSupportsTuning(
   backend: BackendId,
 ): backend is TunableBackendId {
-  return backend === "claude-code" || backend === "codex";
+  return backend === "claude-code" || backend === "codex" || backend === "grok";
 }
 
 /** The next runtime in the user's picker order, wrapping around. Bound to Tab
@@ -178,6 +179,10 @@ export const CLI_MODELS: Record<
     { id: "gpt-5.4-mini", label: "GPT-5.4-Mini" },
     { id: "gpt-5.3-codex-spark", label: "GPT-5.3-Codex-Spark" },
   ],
+  grok: [
+    { id: "", label: "Default" },
+    { id: "grok-4.5", label: "Grok 4.5" },
+  ],
 };
 
 /** Reasoning-effort levels per CLI backend, matching what each CLI accepts
@@ -201,6 +206,12 @@ export const CLI_EFFORTS: Record<
     { id: "medium", label: "Medium" },
     { id: "high", label: "High" },
     { id: "xhigh", label: "XHigh" },
+  ],
+  grok: [
+    { id: "", label: "Default" },
+    { id: "low", label: "Low" },
+    { id: "medium", label: "Medium" },
+    { id: "high", label: "High" },
   ],
 };
 
@@ -550,15 +561,8 @@ export function BackendPicker({
         <SelectTrigger
           data-testid="runtime-picker-trigger"
           size="sm"
-          className={
-            "h-7 gap-1.5 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted focus-visible:ring-0 data-[size=sm]:h-7 " +
-            // Echo the composer frame's runtime tint on the trigger label.
-            (shown === "claude-code"
-              ? "text-[#d97757] hover:text-[#d97757]"
-              : shown === "codex"
-                ? "text-[#10a37f] hover:text-[#10a37f]"
-                : "text-muted-foreground hover:text-foreground")
-          }
+          style={{ ...runtimeThemeStyle(shown), color: "var(--runtime-color)" }}
+          className="h-7 gap-1.5 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted focus-visible:ring-0 data-[size=sm]:h-7"
         >
           <TriggerIcon className="size-3" />
           <span className="truncate">{current.label}</span>

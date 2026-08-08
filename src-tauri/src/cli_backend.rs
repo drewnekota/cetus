@@ -161,7 +161,87 @@ pub async fn get_cli_defaults(backend: String) -> Result<CliDefaults, String> {
             defaults
         }
         "codex" => codex_defaults(&home),
+        "grok" => probe_grok_defaults().await.unwrap_or_default(),
         _ => CliDefaults::default(),
+    })
+}
+
+/// Grok exposes its account-specific model catalog and each model's supported
+/// reasoning efforts in the ACP initialize response. Probe that response so
+/// the picker follows server-side rollouts instead of relying on a stale list.
+async fn probe_grok_defaults() -> Option<CliDefaults> {
+    let mut command = TokioCommand::new("grok");
+    command
+        .args(["agent", "stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let mut child = command.spawn().ok()?;
+    let mut stdin = child.stdin.take()?;
+    let stdout = child.stdout.take()?;
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": 1,
+            "clientCapabilities": {
+                "fs": { "readTextFile": false, "writeTextFile": false },
+                "terminal": false
+            },
+            "clientInfo": { "name": "cetus", "version": env!("CARGO_PKG_VERSION") }
+        }
+    })
+    .to_string();
+    stdin.write_all(request.as_bytes()).await.ok()?;
+    stdin.write_all(b"\n").await.ok()?;
+    stdin.flush().await.ok()?;
+
+    let mut lines = BufReader::new(stdout).lines();
+    let response = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Ok(Some(line)) = lines.next_line().await {
+            let value: Value = match serde_json::from_str(&line) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if value.get("id").and_then(Value::as_u64) == Some(1) {
+                return Some(value);
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()?;
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+
+    let state = response.pointer("/result/_meta/modelState")?;
+    let model = state
+        .get("currentModelId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let available = state.get("availableModels")?.as_array()?;
+    let models: Vec<CliModelEntry> = available
+        .iter()
+        .filter_map(|entry| {
+            let id = entry.get("modelId")?.as_str()?.to_string();
+            let label = entry.get("name").and_then(Value::as_str).unwrap_or(&id).to_string();
+            Some(CliModelEntry { id, label })
+        })
+        .collect();
+    let selected = available.iter().find(|entry| {
+        entry.get("modelId").and_then(Value::as_str) == model.as_deref()
+    });
+    let effort = selected
+        .and_then(|entry| entry.pointer("/_meta/reasoningEffort"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Some(CliDefaults {
+        model,
+        effort,
+        models: (!models.is_empty()).then_some(models),
     })
 }
 

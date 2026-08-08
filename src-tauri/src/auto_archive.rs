@@ -183,6 +183,12 @@ async fn sweep(state: &AppState, handle: &AppHandle, settings: &AutoArchiveSetti
         if c.source_automation_id.is_some() {
             continue;
         }
+        // Same reason, for hand-started chats: a run finished and the user never
+        // came back to read it. Archiving would file away output they've never
+        // seen. The marker clears the moment they open the chat.
+        if c.unread_at.is_some() {
+            continue;
+        }
         // Don't yank a chat mid-turn. We gate on an *in-flight turn*, not on
         // merely having a pi in the pool: in a long-running app session every
         // chat you've opened keeps a warm pi around indefinitely, and treating

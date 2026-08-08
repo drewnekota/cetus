@@ -405,6 +405,7 @@ pub async fn new_conversation(
         created_at: now,
         updated_at: now,
         archived_at: None,
+        unread_at: None,
         source_automation_id: None,
         parallel_group_id: None,
         solution_index: None,
@@ -478,6 +479,7 @@ pub async fn fork_conversation(
         created_at: now,
         updated_at: now,
         archived_at: None,
+        unread_at: None,
         source_automation_id: None,
         parallel_group_id: None,
         solution_index: None,
@@ -561,6 +563,7 @@ async fn fork_cli_conversation(
         created_at: now,
         updated_at: now,
         archived_at: None,
+        unread_at: None,
         source_automation_id: None,
         parallel_group_id: None,
         solution_index: None,
@@ -692,6 +695,22 @@ pub async fn set_active_conversation(
 ) -> CmdResult<()> {
     state.set_active_conversation(id).await;
     Ok(())
+}
+
+/// Persist the sidebar's unread dot. The renderer owns *when* a chat becomes
+/// unread (it sees agent_end, retries, and whether the chat was on screen); this
+/// only stores the answer, so the dot survives a restart and the auto-archive
+/// sweep can see it. Unknown ids are a no-op — the row may have been deleted.
+#[tauri::command]
+pub async fn set_conversation_unread(
+    state: State<'_, AppState>,
+    id: String,
+    unread: bool,
+) -> CmdResult<()> {
+    state
+        .store
+        .set_unread(&id, if unread { Some(now_ms()) } else { None })
+        .map_err(err)
 }
 
 #[tauri::command]

@@ -27,6 +27,13 @@ pub struct Conversation {
     pub created_at: i64,
     pub updated_at: i64,
     pub archived_at: Option<i64>,
+    /// When a run finished without the user having looked at the result since —
+    /// the timestamp behind the sidebar's unread dot. Persisted (rather than kept
+    /// as renderer state) so the dot survives a restart and so auto-archive can
+    /// skip chats whose output hasn't been read. Cleared when the conversation is
+    /// opened, and when it is archived by hand.
+    #[serde(default)]
+    pub unread_at: Option<i64>,
     /// Set when this conversation was minted by an automation firing — carries
     /// that automation's id so the UI can badge the run. None for user chats.
     pub source_automation_id: Option<String>,
@@ -218,6 +225,7 @@ impl Store {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 archived_at INTEGER,
+                unread_at INTEGER,
                 source_automation_id TEXT,
                 parallel_group_id TEXT,
                 solution_index INTEGER,
@@ -348,6 +356,9 @@ impl Store {
         // already exists), so add it via a guarded ALTER — preserving the user's
         // chats instead of forcing a schema-reset drop.
         ensure_column(&conn, "conversations", "source_automation_id", "TEXT")?;
+        // Unread marker for finished runs. Additive; pre-existing rows start
+        // NULL (= read), which is the right default for chats that predate it.
+        ensure_column(&conn, "conversations", "unread_at", "INTEGER")?;
         // Parallel-solutions grouping. Additive like source_automation_id so an
         // existing DB keeps its chats instead of being dropped by a schema bump.
         ensure_column(&conn, "conversations", "parallel_group_id", "TEXT")?;
@@ -448,8 +459,8 @@ impl Store {
     pub fn insert(&self, c: &Conversation) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO conversations (id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            "INSERT INTO conversations (id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 c.id,
                 c.title,
@@ -460,6 +471,7 @@ impl Store {
                 c.created_at,
                 c.updated_at,
                 c.archived_at,
+                c.unread_at,
                 c.source_automation_id,
                 c.parallel_group_id,
                 c.solution_index,
@@ -475,10 +487,10 @@ impl Store {
     pub fn list(&self, include_archived: bool) -> Result<Vec<Conversation>> {
         let conn = self.read_conn.lock().unwrap();
         let sql = if include_archived {
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
              FROM conversations WHERE archived_at IS NOT NULL ORDER BY archived_at DESC"
         } else {
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
              FROM conversations WHERE archived_at IS NULL ORDER BY updated_at DESC"
         };
         let mut stmt = conn.prepare(sql)?;
@@ -493,7 +505,7 @@ impl Store {
     pub fn get(&self, id: &str) -> Result<Option<Conversation>> {
         let conn = self.read_conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
              FROM conversations WHERE id = ?1",
         )?;
         let row = stmt
@@ -505,9 +517,24 @@ impl Store {
     pub fn set_archived(&self, id: &str, archived: bool, ts: i64) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let value: Option<i64> = if archived { Some(ts) } else { None };
+        // Archiving is an explicit dismissal, so it also clears the unread dot —
+        // otherwise a restored chat would come back wearing a stale badge. (The
+        // auto-archive sweep never reaches an unread row; see auto_archive.rs.)
         conn.execute(
-            "UPDATE conversations SET archived_at = ?1, updated_at = ?2 WHERE id = ?3",
+            "UPDATE conversations SET archived_at = ?1, updated_at = ?2, unread_at = NULL WHERE id = ?3",
             params![value, ts, id],
+        )?;
+        Ok(())
+    }
+
+    /// Set/clear the unread marker. Deliberately does NOT touch `updated_at`:
+    /// reading a chat isn't activity, and bumping it would reorder the sidebar
+    /// and reset the auto-archive idle clock.
+    pub fn set_unread(&self, id: &str, unread_at: Option<i64>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET unread_at = ?1 WHERE id = ?2",
+            params![unread_at, id],
         )?;
         Ok(())
     }
@@ -1773,13 +1800,14 @@ fn row_to_conversation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> 
         created_at: r.get(6)?,
         updated_at: r.get(7)?,
         archived_at: r.get(8)?,
-        source_automation_id: r.get(9)?,
-        parallel_group_id: r.get(10)?,
-        solution_index: r.get(11)?,
-        review_state: r.get(12)?,
-        backend: r.get(13)?,
-        cli_model: r.get(14)?,
-        cli_effort: r.get(15)?,
+        unread_at: r.get(9)?,
+        source_automation_id: r.get(10)?,
+        parallel_group_id: r.get(11)?,
+        solution_index: r.get(12)?,
+        review_state: r.get(13)?,
+        backend: r.get(14)?,
+        cli_model: r.get(15)?,
+        cli_effort: r.get(16)?,
     })
 }
 
@@ -1942,6 +1970,7 @@ mod tests {
             created_at: 1,
             updated_at: 1,
             archived_at: None,
+            unread_at: None,
             source_automation_id: None,
             parallel_group_id: None,
             solution_index: None,
@@ -1993,6 +2022,48 @@ mod tests {
         // Same backend / missing conversation: no-op.
         assert_eq!(store.switch_backend("c1", "opencode", 8).unwrap(), None);
         assert_eq!(store.switch_backend("nope", "codex", 5).unwrap(), None);
+
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn unread_marker_persists_and_clears_on_archive() {
+        let (store, path) = temp_store();
+        let conv = Conversation {
+            id: "c1".into(),
+            title: String::new(),
+            session_file: String::new(),
+            workspace_dir: "/tmp".into(),
+            model: Default::default(),
+            created_at: 1,
+            updated_at: 1,
+            archived_at: None,
+            unread_at: None,
+            source_automation_id: None,
+            parallel_group_id: None,
+            solution_index: None,
+            review_state: "none".into(),
+            backend: "pi".into(),
+            cli_model: String::new(),
+            cli_effort: String::new(),
+        };
+        store.insert(&conv).unwrap();
+
+        store.set_unread("c1", Some(42)).unwrap();
+        let c = store.get("c1").unwrap().unwrap();
+        assert_eq!(c.unread_at, Some(42));
+        // Reading a chat is not activity: the sidebar order and the auto-archive
+        // idle clock must not move.
+        assert_eq!(c.updated_at, 1);
+
+        store.set_unread("c1", None).unwrap();
+        assert_eq!(store.get("c1").unwrap().unwrap().unread_at, None);
+
+        // Archiving by hand dismisses the dot, so a restore comes back clean.
+        store.set_unread("c1", Some(42)).unwrap();
+        store.set_archived("c1", true, 99).unwrap();
+        assert_eq!(store.get("c1").unwrap().unwrap().unread_at, None);
 
         drop(store);
         let _ = std::fs::remove_file(&path);

@@ -439,7 +439,7 @@ export const settings = {
       "Automatically move conversations you haven't touched in a while into the archive. They stay restorable here.",
     "autoArchive.threshold.label": "Archive after",
     "autoArchive.threshold.description":
-      "How long a conversation can sit untouched before it's archived. Open chats and automation results are left alone.",
+      "How long a conversation can sit untouched before it's archived. Open chats, unread results, and automation results are left alone.",
     "autoArchive.unit.hours": "hours",
     "autoArchive.unit.days": "days",
 
@@ -1023,7 +1023,7 @@ export const settings = {
       "把你长时间未处理的对话自动移入归档。归档后仍可在此恢复。",
     "autoArchive.threshold.label": "归档阈值",
     "autoArchive.threshold.description":
-      "对话闲置多久后自动归档。正在打开的对话和自动化（Automation）产生的对话不会被归档。",
+      "对话闲置多久后自动归档。正在打开的对话、还没读的运行结果，以及自动化（Automation）产生的对话不会被归档。",
     "autoArchive.unit.hours": "小时",
     "autoArchive.unit.days": "天",
 
