@@ -64,8 +64,88 @@ permissions:
   contents: write
 
 jobs:
+  version-check:
+    name: Validate release version
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_PLATFORM: ${{ inputs.platform || 'both' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify source versions match
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          TAURI_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          if [[ "$PACKAGE_VERSION" != "$TAURI_VERSION" ]]; then
+            echo "package.json ($PACKAGE_VERSION) and tauri.conf.json ($TAURI_VERSION) versions differ" >&2
+            exit 1
+          fi
+          if [[ ! "$TAURI_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must use numeric major.minor.patch format: $TAURI_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Require an appropriate published-version change
+        if: github.event_name == 'push' || inputs.publish
+        run: |
+          set -euo pipefail
+          CURRENT_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          PUBLISHED_MANIFEST="$RUNNER_TEMP/published-latest.json"
+          HTTP_STATUS="$(curl --location --silent --show-error \
+            --output "$PUBLISHED_MANIFEST" \
+            --write-out '%{http_code}' \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/latest.json?version-check=${GITHUB_RUN_ID}")"
+
+          if [[ "$HTTP_STATUS" == "404" ]]; then
+            echo "No published updater manifest exists for $RELEASE_TAG; allowing the first release."
+            exit 0
+          fi
+          if [[ "$HTTP_STATUS" != "200" ]]; then
+            echo "Could not read the published updater manifest (HTTP $HTTP_STATUS)" >&2
+            exit 1
+          fi
+
+          PUBLISHED_VERSION="$(node -p "require(process.argv[1]).version" "$PUBLISHED_MANIFEST")"
+          node - "$CURRENT_VERSION" "$PUBLISHED_VERSION" "$RELEASE_PLATFORM" <<'NODE'
+          const [current, published, platform] = process.argv.slice(2);
+          const parse = (version) => {
+            if (!/^\d+\.\d+\.\d+$/.test(version)) {
+              throw new Error(`invalid release version: ${version}`);
+            }
+            return version.split(".").map(Number);
+          };
+          const compare = (left, right) => {
+            const a = parse(left);
+            const b = parse(right);
+            for (let index = 0; index < 3; index += 1) {
+              if (a[index] !== b[index]) return a[index] - b[index];
+            }
+            return 0;
+          };
+
+          const difference = compare(current, published);
+          if (platform === "windows") {
+            if (difference !== 0) {
+              throw new Error(
+                `Windows-only publishing must use the existing release version ${published}; got ${current}`,
+              );
+            }
+            console.log(`Windows-only release version matches ${published}.`);
+          } else {
+            if (difference <= 0) {
+              throw new Error(
+                `Version must be bumped above published version ${published}; got ${current}`,
+              );
+            }
+            console.log(`Release version increased from ${published} to ${current}.`);
+          }
+          NODE
+
   macos:
     name: Build macOS arm64
+    needs: version-check
     if: github.event_name == 'push' || inputs.platform == 'both' || inputs.platform == 'macos'
     runs-on: macos-14
     steps:
@@ -172,6 +252,7 @@ jobs:
 
   windows:
     name: Build Windows x64
+    needs: version-check
     if: inputs.platform == 'both' || inputs.platform == 'windows'
     runs-on: windows-2022
     steps:
