@@ -227,13 +227,17 @@ async fn probe_grok_defaults() -> Option<CliDefaults> {
         .iter()
         .filter_map(|entry| {
             let id = entry.get("modelId")?.as_str()?.to_string();
-            let label = entry.get("name").and_then(Value::as_str).unwrap_or(&id).to_string();
+            let label = entry
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(&id)
+                .to_string();
             Some(CliModelEntry { id, label })
         })
         .collect();
-    let selected = available.iter().find(|entry| {
-        entry.get("modelId").and_then(Value::as_str) == model.as_deref()
-    });
+    let selected = available
+        .iter()
+        .find(|entry| entry.get("modelId").and_then(Value::as_str) == model.as_deref());
     let effort = selected
         .and_then(|entry| entry.pointer("/_meta/reasoningEffort"))
         .and_then(Value::as_str)
