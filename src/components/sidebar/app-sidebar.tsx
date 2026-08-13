@@ -21,7 +21,6 @@ import {
   ChevronRight,
   Clock,
   Cpu,
-  Download,
   Folder,
   FolderOpen,
   Gauge,
@@ -140,11 +139,6 @@ interface Props {
   /** Version of a downloaded-but-not-yet-applied update, or null. When set, a
    *  "Restart to update" button appears above Settings. */
   updateReadyVersion?: string | null;
-  /** An update is downloading in the backend. Shown here rather than only in
-   *  Settings, which unmounts as soon as another section is opened. */
-  updateDownloading?: boolean;
-  /** Percentage of that download, or null while the size is still unknown. */
-  updateDownloadPercent?: number | null;
   onRestartToUpdate?: () => void;
 }
 
@@ -172,8 +166,6 @@ export const AppSidebar = memo(function AppSidebar({
   onArchive,
   onOpenSettings,
   updateReadyVersion,
-  updateDownloading,
-  updateDownloadPercent,
   onRestartToUpdate,
 }: Props) {
   const { t } = useTranslation("sidebar");
@@ -496,24 +488,6 @@ export const AppSidebar = memo(function AppSidebar({
           with a long conversation list. */}
       <SidebarFooter>
         <SidebarMenu>
-          {/* A download in flight. Not a button — the backend owns the transfer,
-              this only keeps it visible while the user works elsewhere. */}
-          {updateDownloading && !updateReadyVersion && (
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                disabled
-                tooltip={t("update.downloading.tooltip")}
-                className="opacity-100"
-              >
-                <Download className="animate-pulse" />
-                <span className="truncate text-muted-foreground">
-                  {updateDownloadPercent == null
-                    ? t("update.downloading.label")
-                    : `${t("update.downloading.label")} ${updateDownloadPercent}%`}
-                </span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          )}
           {/* Appears only once an update is downloaded and waiting — a one-click
               relaunch to apply it, pinned right above Settings. */}
           {updateReadyVersion && (

@@ -2474,54 +2474,6 @@ export default function Home() {
     api.relaunchApp().catch(console.error);
   }, []);
 
-  // An update download runs in the backend and outlives whatever surface
-  // started it — Settings unmounts as soon as another section is opened, and a
-  // background check can start one with no surface at all. Track it here so the
-  // sidebar can show it from anywhere in the app; on a slow link a 60 MB
-  // package takes a long while, and a percentage that disappears when you
-  // navigate away reads as a download that died.
-  const [updateDownloadPercent, setUpdateDownloadPercent] = useState<
-    number | null
-  >(null);
-  const [updateDownloading, setUpdateDownloading] = useState(false);
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-    const apply = (progress: UpdateDownloadProgress | null) => {
-      if (!progress || progress.finished || progress.failed) {
-        setUpdateDownloading(false);
-        setUpdateDownloadPercent(null);
-        return;
-      }
-      setUpdateDownloading(true);
-      setUpdateDownloadPercent(
-        progress.total && progress.total > 0
-          ? Math.max(
-              0,
-              Math.min(
-                100,
-                Math.round((progress.downloaded / progress.total) * 100),
-              ),
-            )
-          : null,
-      );
-    };
-    api
-      .updateDownloadProgress()
-      .then((progress) => {
-        if (!cancelled) apply(progress);
-      })
-      .catch(() => {});
-    onUpdateDownloadProgress(apply).then((u) => {
-      if (cancelled) u();
-      else unlisten = u;
-    });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const onOpenDetail = useCallback((id: string) => setDetailId(id), []);
 
@@ -3518,7 +3470,13 @@ export default function Home() {
         workspaceFilter={boardWorkspaceFilter}
         onWorkspaceFilterChange={setBoardWorkspaceFilter}
         onSelect={onSelectChat}
-        onNewTask={() => setNewTaskOpen(true)}
+        onNewTask={() => {
+          if (view === "chat") {
+            onNew();
+          } else {
+            setNewTaskOpen(true);
+          }
+        }}
         onNew={onNewSidebar}
         onRevealWorkspace={onRevealWorkspace}
         onArchiveWorkspaceChats={onArchiveWorkspaceChats}
@@ -3528,8 +3486,6 @@ export default function Home() {
         onArchive={onArchive}
         onOpenSettings={openSettings}
         updateReadyVersion={updateReadyVersion}
-        updateDownloading={updateDownloading}
-        updateDownloadPercent={updateDownloadPercent}
         onRestartToUpdate={onRestartToUpdate}
       />
       {/* Opaque card, no backdrop-filter: the shell root paints solid bg-sidebar,
