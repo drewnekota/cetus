@@ -968,12 +968,13 @@ export type AppEvent =
       highlightedIndex?: number;
       screenshotJpeg?: string;
     }
-  // Meeting memory lifecycle: a capture session started ("started") or its
+  // Meeting memory lifecycle: a capture session started ("started"), ended
+  // ("stopped" — capture is over, summary may still be running), or its
   // transcript landed ("saved", with the generated title when a summary ran).
-  // The frontend turns these into localized notifications.
+  // The frontend notifies on started/saved; "stopped" only resyncs UI state.
   | {
       type: "meeting_event";
-      kind: "started" | "saved";
+      kind: "started" | "stopped" | "saved";
       meetingId: string;
       app: string | null;
       title: string | null;

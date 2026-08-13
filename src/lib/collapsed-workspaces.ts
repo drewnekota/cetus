@@ -36,3 +36,26 @@ export function visibleConversationIds(
     collapsedDirs.has(group.dir) ? [] : group.items.map((chat) => chat.id),
   );
 }
+
+/** The next visible chat in the current workspace, wrapping at the end. */
+export function nextConversationIdInWorkspace(
+  visibleIds: ReadonlyArray<string>,
+  conversations: ReadonlyArray<{ id: string; workspaceDir: string }>,
+  currentId: string,
+): string | undefined {
+  const workspaceDir = conversations.find((chat) => chat.id === currentId)?.workspaceDir;
+  if (workspaceDir === undefined) return undefined;
+
+  const workspaceIds = visibleIds.filter(
+    (id) =>
+      id !== currentId &&
+      conversations.find((chat) => chat.id === id)?.workspaceDir === workspaceDir,
+  );
+  if (workspaceIds.length === 0) return undefined;
+
+  const currentIndex = visibleIds.indexOf(currentId);
+  return (
+    workspaceIds.find((id) => visibleIds.indexOf(id) > currentIndex) ??
+    workspaceIds[0]
+  );
+}

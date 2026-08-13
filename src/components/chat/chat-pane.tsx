@@ -45,6 +45,7 @@ import {
   useAwaitingAssistant,
   useBackgroundTasks,
   useChatError,
+  useChatStore,
   useCompaction,
   useHasMessages,
   useIsStreaming,
@@ -52,6 +53,20 @@ import {
   useMessageRoles,
   useRunningSubagents,
 } from "@/lib/chat-store";
+import { FindBar } from "@/components/chat/find-bar";
+import {
+  clearFindHighlights,
+  FIND_IN_CHAT_EVENT,
+  paintFindHighlights,
+  revealRange,
+} from "@/components/chat/find-highlight";
+import {
+  buildFindMatches,
+  firstMatchFrom,
+  messageFindText,
+  preserveActive,
+  stepMatch,
+} from "@/lib/message-search";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeadline } from "@/lib/chat-flavor";
 import type { BackendId, ModelChoice } from "@/lib/types";
@@ -576,6 +591,16 @@ function MessageList({
     setAtBottom(next);
   }, []);
 
+  // ⌘F find state. `focusTick` doubles as the open signal's identity so a second
+  // ⌘F re-selects the field instead of doing nothing.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findActive, setFindActive] = useState(0);
+  const [findFocusTick, setFindFocusTick] = useState(0);
+  // Read by the streaming follow, which must not drag the reader off a match.
+  const findOpenRef = useRef(false);
+  findOpenRef.current = findOpen;
+
   // Re-arm the open settle DURING render on conversation switch (not in an
   // effect): the keyed Virtuoso remounts — and starts its initial end seek —
   // before any parent effect would run.
@@ -605,6 +630,126 @@ function MessageList({
     });
     return out;
   }, [groups, keys, roles]);
+
+  // The prose behind each list row, for ⌘F. Read straight off the store rather
+  // than through a hook: subscribing to message BODIES here would re-render the
+  // whole list on every streamed token, which is exactly what this file's
+  // per-bubble subscriptions exist to avoid. The trade-off is that a reply
+  // streaming in while the bar is open only joins the match list once the turn
+  // count changes — searching live output is not what ⌘F is for.
+  const findRowTexts = useMemo(() => {
+    if (!findOpen || !convId) return [];
+    const byKey = useChatStore.getState().chats[convId]?.byKey;
+    if (!byKey) return [];
+    return items.map((item) => {
+      if (item.kind === "assistant")
+        return item.keys
+          .map((k) => (byKey[k] ? messageFindText(byKey[k]) : ""))
+          .join("\n");
+      if (item.kind === "single") return byKey[item.key] ? messageFindText(byKey[item.key]) : "";
+      return "";
+    });
+    // `keys` covers hydration filling in a conversation whose groups already exist.
+  }, [findOpen, convId, items, keys]);
+
+  const findMatches = useMemo(
+    () => buildFindMatches(findRowTexts, findQuery),
+    [findRowTexts, findQuery],
+  );
+
+  // A new query resumes from the reader's position rather than the first turn.
+  // topIndex is read through a ref so this doesn't re-run (and re-jump) on every
+  // scroll event while the bar sits open.
+  const topIndexRef = useRef(0);
+  topIndexRef.current = topIndex;
+  useEffect(() => {
+    setFindActive(firstMatchFrom(findMatches, topIndexRef.current));
+    // findMatches is deliberately not a dependency: it also changes when a
+    // message arrives, and re-homing the cursor then would move the reader.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findQuery]);
+
+  // Keep the cursor inside the (possibly shrunken) match list when the
+  // conversation changes under it.
+  useEffect(() => {
+    setFindActive((prev) => preserveActive(findMatches.length, prev));
+  }, [findMatches]);
+
+  // Scroll the active occurrence into view, then paint. The row may not be
+  // mounted in this frame — Virtuoso needs a tick to realise a row that was far
+  // off-screen — so wait for it rather than painting a miss.
+  const current = findMatches[findActive] ?? null;
+  useEffect(() => {
+    if (!scroller || !findOpen) return;
+    if (!current) {
+      clearFindHighlights();
+      return;
+    }
+    virtuosoRef.current?.scrollToIndex({ index: current.itemIndex, align: "center" });
+    let frames = 12;
+    let frame = requestAnimationFrame(function step() {
+      const range = paintFindHighlights(scroller, findQuery, current);
+      if (range) {
+        revealRange(scroller, range);
+        // One more pass: revealing may have mounted rows that were off-screen.
+        frame = requestAnimationFrame(() => paintFindHighlights(scroller, findQuery, current));
+        return;
+      }
+      if (--frames > 0) frame = requestAnimationFrame(step);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [scroller, findOpen, findQuery, current]);
+
+  // Repaint when Virtuoso mounts or retires rows under an unchanged active
+  // match (ordinary scrolling while the bar is open).
+  const repaintFind = useCallback(() => {
+    if (!scroller || !findOpen || !current) return;
+    paintFindHighlights(scroller, findQuery, current);
+  }, [scroller, findOpen, findQuery, current]);
+
+  // ⌘F arrives as an event from the app's global handler, which has already
+  // cleared the modal and view guards. A repeat press re-focuses and selects
+  // the field rather than toggling the bar shut — the browser convention.
+  useEffect(() => {
+    const onFind = () => {
+      setFindOpen(true);
+      setFindFocusTick((n) => n + 1);
+    };
+    window.addEventListener(FIND_IN_CHAT_EVENT, onFind);
+    return () => window.removeEventListener(FIND_IN_CHAT_EVENT, onFind);
+  }, []);
+
+  // Esc closes the bar from anywhere in the chat, not just from inside the
+  // field (the reader may have clicked back into the transcript).
+  useEffect(() => {
+    if (!findOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setFindOpen(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [findOpen]);
+
+  // Leave no paint behind when the bar closes or the conversation switches.
+  useEffect(() => {
+    if (!findOpen) clearFindHighlights();
+  }, [findOpen]);
+  useEffect(() => {
+    setFindOpen(false);
+    setFindQuery("");
+    setFindActive(0);
+    clearFindHighlights();
+  }, [convId]);
+  useEffect(() => clearFindHighlights, []);
+
+  const closeFind = useCallback(() => setFindOpen(false), []);
+  const stepFind = useCallback(
+    (delta: number) => setFindActive((prev) => stepMatch(findMatches.length, prev, delta)),
+    [findMatches.length],
+  );
 
   // Snap to the newest message when the user sends (even if scrolled up reading);
   // followOutput then keeps the streaming reply pinned as long as we stay at the
@@ -748,6 +893,9 @@ function MessageList({
 
     let frame: number | null = null;
     const scrollIfPinned = () => {
+      // While ⌘F is open the reader is looking at a match, not at the tail —
+      // chasing streaming growth would drag them off it mid-read.
+      if (findOpenRef.current) return;
       if (!atBottomRef.current) return;
       if (frame != null) return;
       frame = requestAnimationFrame(() => {
@@ -866,7 +1014,9 @@ function MessageList({
       // wrapper. Once the viewport can center max-w-3xl clear of the navigator,
       // this returns to the composer's px-4 geometry so both columns line up.
       return (
-        <div className={MESSAGE_ROW_GUTTER_CLASS}>
+        // data-find-row is how the ⌘F painter locates a mounted row's text
+        // nodes without knowing anything about the bubbles inside it.
+        <div className={MESSAGE_ROW_GUTTER_CLASS} data-find-row={index}>
           <div
             className={`mx-auto max-w-3xl ${
               opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
@@ -938,9 +1088,24 @@ function MessageList({
         followOutput={(isAtBottom) => (isAtBottom ? "auto" : false)}
         atBottomThreshold={STICKY_BOTTOM_PX}
         atBottomStateChange={setAtBottomState}
-        rangeChanged={(range) => setTopIndex(range.startIndex)}
+        rangeChanged={(range) => {
+          setTopIndex(range.startIndex);
+          repaintFind();
+        }}
         increaseViewportBy={OVERSCAN_PX}
       />
+      {findOpen && (
+        <FindBar
+          query={findQuery}
+          onQueryChange={setFindQuery}
+          total={findMatches.length}
+          active={findActive}
+          onStep={stepFind}
+          onClose={closeFind}
+          opticalCenter={opticalCenter}
+          focusTick={findFocusTick}
+        />
+      )}
       <TurnNavigator
         convId={convId}
         userTurns={userTurns}

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { visibleConversationIds } from "./collapsed-workspaces.ts";
+import {
+  nextConversationIdInWorkspace,
+  visibleConversationIds,
+} from "./collapsed-workspaces.ts";
 
 describe("visible conversation navigation", () => {
   const groups = [
@@ -22,5 +25,30 @@ describe("visible conversation navigation", () => {
     expect(
       visibleConversationIds(groups, new Set(["/repo/hidden"])),
     ).toEqual(["a", "b", "e"]);
+  });
+});
+
+describe("archive fallback navigation", () => {
+  const conversations = [
+    { id: "a", workspaceDir: "/chat" },
+    { id: "b", workspaceDir: "/chat" },
+    { id: "c", workspaceDir: "/repo" },
+    { id: "d", workspaceDir: "/repo" },
+  ];
+  const visibleIds = conversations.map((chat) => chat.id);
+
+  test("selects the next chat in the same workspace", () => {
+    expect(nextConversationIdInWorkspace(visibleIds, conversations, "c")).toBe("d");
+  });
+
+  test("wraps from the last chat to the first chat in the same workspace", () => {
+    expect(nextConversationIdInWorkspace(visibleIds, conversations, "d")).toBe("c");
+  });
+
+  test("does not cross into another workspace when no sibling remains", () => {
+    expect(nextConversationIdInWorkspace(visibleIds, conversations, "b")).toBe("a");
+    expect(
+      nextConversationIdInWorkspace(["b", "c", "d"], conversations, "b"),
+    ).toBeUndefined();
   });
 });

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 export type ShortcutId =
   | "commandPalette"
+  | "findInChat"
   | "newChat"
   | "newDefaultChat"
   | "archiveChat"
@@ -73,6 +74,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: "Command palette",
     description: "Open or close the command palette",
     defaultAccelerator: "Cmd+K",
+  },
+  {
+    id: "findInChat",
+    label: "Find in conversation",
+    description: "Search the open conversation and step through the matches",
+    defaultAccelerator: "Cmd+F",
   },
   {
     id: "newChat",

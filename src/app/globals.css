@@ -226,6 +226,19 @@
   [data-chat-markdown] p > [data-chat-selection-text]::selection {
     background-color: color-mix(in oklab, var(--brand) 32%, transparent);
   }
+  /* ⌘F matches (find-highlight.ts). Painted through the CSS Custom Highlight
+     API, so these ranges sit over the existing DOM without any find-aware
+     markup in the message tree. The inactive hits stay quiet enough to read
+     around; the current one takes the brand tint that ::selection uses, so
+     stepping through matches reads like the app's own selection. */
+  ::highlight(cetus-find) {
+    background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+    color: var(--foreground);
+  }
+  ::highlight(cetus-find-active) {
+    background-color: color-mix(in oklab, var(--brand) 55%, transparent);
+    color: var(--foreground);
+  }
   html.theme-repaint [data-chat-composer],
   html.theme-repaint [data-slot="textarea"],
   html.theme-repaint [data-slot="input"] {

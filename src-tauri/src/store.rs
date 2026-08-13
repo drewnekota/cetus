@@ -1681,6 +1681,19 @@ impl Store {
         Ok(())
     }
 
+    /// Ids of meetings that started before `before_ts` — the prune pre-pass,
+    /// so the caller can also remove per-meeting files (saved audio) on disk.
+    pub fn meeting_ids_started_before(&self, before_ts: i64) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id FROM meetings WHERE started_ts < ?1")?;
+        let rows = stmt.query_map(params![before_ts], |r| r.get(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// Delete meetings (and their segments) that STARTED before `before_ts`.
     /// Returns how many meetings were removed.
     pub fn prune_meetings(&self, before_ts: i64) -> Result<usize> {

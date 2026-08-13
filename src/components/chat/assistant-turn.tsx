@@ -125,12 +125,12 @@ export function AssistantGroup({ convId, keys, onFork, active = false }: Props) 
       <div
         data-message-hover-target
         {...messageHoverProps}
-        className="flex w-full flex-col gap-2 items-start"
+        className="flex min-w-0 w-full flex-col gap-2 items-start"
       >
         <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           {t("pane.assistant")}
         </div>
-        <div className="flex w-full max-w-full flex-col gap-2">
+        <div className="flex min-w-0 w-full max-w-full flex-col gap-2">
           {segments.map((seg, i) =>
             seg.type === "activity" ? (
               <ActivityGroup
@@ -143,7 +143,7 @@ export function AssistantGroup({ convId, keys, onFork, active = false }: Props) 
             ) : (
               // Answer content and activity bars share the same 88% reading
               // width so the assistant turn keeps a consistent right edge.
-              <div key={i} className="w-full max-w-[88%]">
+              <div key={i} className="min-w-0 w-full max-w-[88%]">
                 <AnswerBlock block={seg.block} isUser={false} />
               </div>
             ),

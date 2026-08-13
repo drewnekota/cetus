@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { ConsoleBridge } from "@/components/devtools/console-bridge";
 import { ChunkReloadGuard } from "@/components/chunk-reload-guard";
 import { FileDropHost } from "@/components/file-drop-host";
+import { LinkGuard } from "@/components/link-guard";
 import { ThemeWatcher } from "@/components/theme-watcher";
 import { fontVariables } from "./fonts";
 
@@ -34,6 +35,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Routes OS file drops anywhere in the window to the composer that is
             on screen. Mounted at the root so every window is covered. */}
         <FileDropHost />
+        {/* Backstop for link inputs that component-level interception cannot
+            see (middle click, link drag-drop, context-menu Open Link) — any
+            of which would navigate the webview away from the app. */}
+        <LinkGuard />
         {/* Sidebar uses `tooltip` prop on SidebarMenuButton, which calls
             useContext on TooltipProvider. Hoist the provider to the root so
             every sidebar item (and any future tooltips) finds it.

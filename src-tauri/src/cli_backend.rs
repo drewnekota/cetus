@@ -747,6 +747,26 @@ pub fn save_turn_images(
     out
 }
 
+/// Tell the model where this turn's image attachments landed on disk. The
+/// inline base64 blocks are vision-only — without a path the agent can't hand
+/// an attached image to file-based tools (Read, media-insert, …). Rides only
+/// the outgoing prompt; the persisted transcript row stays clean, so nothing
+/// needs stripping on reload.
+fn image_path_refs(paths: &[String]) -> String {
+    if paths.is_empty() {
+        return String::new();
+    }
+    let lines = paths
+        .iter()
+        .map(|p| format!("- {p}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "\n\n<cetus-attachments>\nThe attached images are also saved on disk. \
+         Use these paths whenever a tool needs the image as a file:\n{lines}\n</cetus-attachments>"
+    )
+}
+
 /// The PiMessage-shaped transcript row for a user prompt (+ image blocks).
 fn cli_user_message_json(
     message: &str,
@@ -799,6 +819,12 @@ pub fn dispatch_turn(
         .ok_or_else(|| format!("not a CLI backend: {}", conv.backend))?;
     let state = handle.state::<AppState>();
 
+    // Materialize this turn's images once, up front: codex ingests the paths
+    // via `-i`, and every backend gets them appended to the outgoing prompt
+    // (image_path_refs) so the agent can reuse the files with path-based tools.
+    let image_paths = save_turn_images(&state.app_data_dir, &conv.id, &images);
+    let image_refs = image_path_refs(&image_paths);
+
     // Claude's bidirectional stream accepts user messages while a turn is
     // running. Inject the steer instead of sending the SDK interrupt control:
     // interrupt also cancels async Agent/Workflow tasks owned by the active
@@ -809,7 +835,10 @@ pub fn dispatch_turn(
             .iter()
             .map(|img| (img.mime_type.clone(), img.data.clone()))
             .collect();
-        let line = cetus_bridge::cli_agent::claude_user_message_line(message, &image_blocks);
+        let line = cetus_bridge::cli_agent::claude_user_message_line(
+            &format!("{message}{image_refs}"),
+            &image_blocks,
+        );
         // The transcript row rides along and is spliced in at the steer's
         // merge point by the session's translator (persisted with the turn's
         // outcome) — appending it here would order it before the whole turn.
@@ -839,10 +868,9 @@ pub fn dispatch_turn(
             let Some(session) = state.codex_session(&conv.id) else {
                 return Err("Codex session disappeared while its turn was running".into());
             };
-            let image_paths = save_turn_images(&state.app_data_dir, &conv.id, &images);
             session
                 .steer(
-                    message.to_string(),
+                    format!("{message}{image_refs}"),
                     image_paths,
                     cli_user_message_json(message, &images),
                 )
@@ -908,13 +936,9 @@ pub fn dispatch_turn(
         });
 
     // Image attachments: claude takes them inline on the stdin user message
-    // (native content blocks); codex ingests file paths via `-i`.
+    // (native content blocks); codex ingests file paths via `-i`. Both get the
+    // on-disk paths appended to the prompt (image_refs) for file-based reuse.
     let is_codex = backend == cetus_bridge::cli_agent::CliBackend::Codex;
-    let image_paths = if is_codex {
-        save_turn_images(&state.app_data_dir, &conv.id, &images)
-    } else {
-        Vec::new()
-    };
     let image_blocks: Vec<(String, String)> = if is_codex {
         Vec::new()
     } else {
@@ -949,6 +973,7 @@ pub fn dispatch_turn(
             crate::control::AGENT_HINT
         );
     }
+    prompt.push_str(&image_refs);
     // An ACP session id lives in the vendor process, not on disk, so a resume
     // token can outlive the process that owned it. Agents advertising
     // `loadSession` restore it; the rest silently start an empty session. Build

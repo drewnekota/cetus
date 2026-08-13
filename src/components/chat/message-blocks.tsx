@@ -35,10 +35,12 @@ import { useTranslation } from "@/lib/i18n";
 
 const PROSE_CLASS = cn(
   "prose prose-sm dark:prose-invert max-w-none",
-  // Contain unbreakable content (KaTeX nowrap spans, long tokens, wide tables)
-  // to this message: without this it widens the Virtuoso scroller and puts a
-  // horizontal scrollbar under the whole conversation.
-  "scrollbar-slim min-w-0 overflow-x-auto",
+  // The prose box itself must never become the horizontal scroller: doing so
+  // puts a bar under an otherwise ordinary reply whenever any one descendant
+  // is slightly too wide. Wide content gets its own scroller below instead.
+  "min-w-0 max-w-full overflow-x-hidden break-words",
+  "[&_pre]:scrollbar-slim [&_pre]:max-w-full [&_pre]:overflow-x-auto",
+  "[&_.katex-display]:scrollbar-slim [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden",
   // Tighten default prose spacing so chat bubbles don't blow up.
   "prose-p:my-2 prose-pre:my-2 prose-ul:my-2 prose-ol:my-2 prose-headings:my-3",
   "prose-code:rounded prose-code:bg-secondary prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:before:content-none prose-code:after:content-none",
@@ -86,7 +88,7 @@ function CopyablePre({
 
   const label = copied ? t("action.copied") : t("action.copy");
   return (
-    <div className="group/code relative my-2">
+    <div className="group/code relative my-2 min-w-0 max-w-full">
       <pre ref={preRef} {...props} className={cn("!my-0 pr-16", props.className)}>
         {children}
       </pre>
@@ -112,6 +114,23 @@ function CopyablePre({
   );
 }
 
+/** Tables need horizontal scrolling, but only around the table itself. A
+ * message-level scroller makes the bar appear at the bottom of the entire
+ * answer, far away from the content that caused it. */
+function ScrollableTable({
+  children,
+  node: _node,
+  ...props
+}: React.ComponentProps<"table"> & { node?: unknown }) {
+  return (
+    <div className="scrollbar-slim my-2 max-w-full overflow-x-auto">
+      <table {...props} className={cn("!my-0", props.className)}>
+        {children}
+      </table>
+    </div>
+  );
+}
+
 /**
  * Keep WebKit's selected block separator from painting the empty remainder of
  * a paragraph row. The paragraph owns a transparent structural selection
@@ -133,6 +152,7 @@ const assistantMarkdownComponents: Components = {
   ...markdownComponents,
   p: SelectableParagraph,
   pre: CopyablePre,
+  table: ScrollableTable,
 };
 
 /** One parse of a markdown fragment. Memoized on the source string so an
@@ -273,7 +293,7 @@ export function TextBlock({
 }) {
   const throttled = useThrottledText(text, streaming ?? false);
   return (
-    <div className="break-words text-sm leading-relaxed">
+    <div className="min-w-0 max-w-full break-words text-sm leading-relaxed">
       {isUser ? (
         // User messages are plain text; markdown rendering is for assistant
         // output where the model emits **bold** / code / lists. We still linkify

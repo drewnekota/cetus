@@ -101,7 +101,7 @@ function MessageBubbleView({
         data-message-hover-target
         {...messageHoverProps}
         className={cn(
-          "flex max-w-[88%] flex-col gap-2",
+          "flex min-w-0 max-w-[88%] flex-col gap-2",
           isUser ? "items-end" : "items-start",
         )}
       >
@@ -121,7 +121,7 @@ function MessageBubbleView({
         {blocks.length > 0 && (
           <div
             className={cn(
-              "flex w-fit max-w-full flex-col gap-2",
+              "flex min-w-0 w-fit max-w-full flex-col gap-2",
               isUser && "rounded-2xl bg-primary/15 px-4 py-2 dark:bg-primary/20",
             )}
           >

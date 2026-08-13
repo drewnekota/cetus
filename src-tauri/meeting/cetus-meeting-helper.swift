@@ -14,7 +14,7 @@
 //          cetus's own helpers are filtered out by bundle-id prefix so a running
 //          meeting recorder never counts as "someone is on a call".
 //          Exits on stdin EOF.
-//   cetus-meeting-helper record [--no-system] [--cloud] [localeIdentifier]
+//   cetus-meeting-helper record [--no-system] [--cloud] [--no-aec] [--save-dir DIR] [localeIdentifier]
 //       -> captures the microphone (AVAudioEngine) and — on macOS 14.2+ — the
 //          system audio output (CoreAudio process tap mixed down into a private
 //          aggregate device), runs one streaming SFSpeechRecognizer per stream,
@@ -28,7 +28,11 @@
 //          stdin — same convention as the speech helper.
 //
 // `--cloud` emits ephemeral 16 kHz mono PCM chunks to the parent process for
-// real-time cloud ASR. Audio is never written to disk.
+// real-time cloud ASR.
+//
+// `--save-dir DIR` additionally encodes each stream to an AAC file under DIR
+// (mic.m4a mono, system.m4a stereo, both 48 kHz) so the raw audio can be
+// replayed later. Without the flag no audio ever touches disk.
 //
 // Recognition is forced on-device when the locale supports it. Each stream's
 // recognition request is rotated on speech pauses (and on a hard interval) so
@@ -418,6 +422,110 @@ final class PCMStreamer {
     }
 }
 
+/// Encodes one capture stream into an AAC (.m4a) file under the session's
+/// audio directory. Raw tap formats are hostile to direct encoding — the
+/// voice-processing input reports exotic layouts (observed: 9-channel Float32)
+/// that AAC refuses — so every buffer is first converted (same pattern as
+/// PCMStreamer) into one fixed file format. Conversion happens on the audio
+/// thread (cheap, and it yields freshly-owned buffers), file I/O on the
+/// main-queue ticker so it never runs on CoreAudio's real-time callback. The
+/// fixed format also means an input-route change mid-session just rebuilds the
+/// converter instead of splitting the file.
+final class AudioFileWriter {
+    private let url: URL
+    private let base: String
+    /// 48 kHz Float32 deinterleaved at the requested channel count.
+    private let output: AVAudioFormat
+    private let lock = NSLock()
+    private var pending: [AVAudioPCMBuffer] = []
+    private var converter: AVAudioConverter?
+    private var inputFormat: AVAudioFormat?
+    private var file: AVAudioFile?
+    private var failed = false
+
+    init?(dir: URL, base: String, channels: AVAudioChannelCount) {
+        guard let output = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: channels)
+        else { return nil }
+        self.url = dir.appendingPathComponent("\(base).m4a")
+        self.base = base
+        self.output = output
+    }
+
+    /// Audio-thread entry: convert into the file format and queue for drain.
+    func append(_ buffer: AVAudioPCMBuffer) {
+        guard !failed, buffer.frameLength > 0 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        let format = buffer.format
+        if converter == nil || inputFormat != format {
+            converter = AVAudioConverter(from: format, to: output)
+            inputFormat = format
+        }
+        guard let converter else { return }
+        let ratio = output.sampleRate / format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
+        guard let converted = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: capacity)
+        else { return }
+        var fed = false
+        converter.convert(to: converted, error: nil) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        // Backstop: cap the queue (~30s of audio) if the drain ever stalls.
+        if converted.frameLength > 0, pending.count < 1500 {
+            pending.append(converted)
+        }
+    }
+
+    /// Main-queue ticker entry: encode everything queued since the last tick.
+    func drain() {
+        guard !failed else { return }
+        lock.lock()
+        let buffers = pending
+        pending = []
+        lock.unlock()
+        guard !buffers.isEmpty else { return }
+        if file == nil {
+            let settings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: output.sampleRate,
+                AVNumberOfChannelsKey: Int(output.channelCount),
+                AVEncoderBitRateKey: 48_000 * Int(output.channelCount),
+            ]
+            do {
+                file = try AVAudioFile(
+                    forWriting: url,
+                    settings: settings,
+                    commonFormat: .pcmFormatFloat32,
+                    interleaved: false)
+            } catch {
+                failed = true
+                emit(["warn": "audio_file_open_failed_\(base)"])
+                return
+            }
+        }
+        do {
+            for buffer in buffers {
+                try file?.write(from: buffer)
+            }
+        } catch {
+            // A write AVAudioFile rejects is not going to fix itself — fail
+            // once, loudly, instead of grinding out an empty file.
+            failed = true
+            file = nil
+            emit(["warn": "audio_file_write_failed_\(base)"])
+        }
+    }
+
+    /// Session-end flush; releasing the AVAudioFile finalizes the container.
+    func finish() {
+        drain()
+        file = nil
+    }
+}
+
 /// Deep-copy a HAL-owned buffer list into a standalone AVAudioPCMBuffer. The
 /// IOProc's memory is only valid during the callback, while the recognizer may
 /// hold onto appended buffers — so copying is mandatory, not paranoia.
@@ -560,7 +668,7 @@ func startSystemTap(sink: @escaping (AVAudioPCMBuffer) -> Void) -> (() -> Void)?
 
 // ---- record ------------------------------------------------------------------
 
-func runRecord(noSystem: Bool, cloud: Bool, localeId: String?) {
+func runRecord(noSystem: Bool, cloud: Bool, noAec: Bool, saveDir: String?, localeId: String?) {
     if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
         let group = DispatchGroup()
         group.enter()
@@ -594,6 +702,18 @@ func runRecord(noSystem: Bool, cloud: Bool, localeId: String?) {
     let sysT = cloud ? nil : StreamTranscriber(source: "system", locale: locale)
     let sysPCM = cloud ? PCMStreamer(source: "system") : nil
 
+    // Optional raw-audio persistence, one writer per stream.
+    var micWriter: AudioFileWriter? = nil
+    var sysWriter: AudioFileWriter? = nil
+    if let saveDir {
+        let dirURL = URL(fileURLWithPath: saveDir, isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: dirURL, withIntermediateDirectories: true)
+        // Mic mono (the VP unit's output is one voice); system stereo.
+        micWriter = AudioFileWriter(dir: dirURL, base: "mic", channels: 1)
+        if !noSystem { sysWriter = AudioFileWriter(dir: dirURL, base: "system", channels: 2) }
+    }
+
     // Microphone: same AVAudioEngine tap as dictation, but feeding a rotating
     // long-form recognizer instead of a one-shot request.
     let engine = AVAudioEngine()
@@ -605,12 +725,21 @@ func runRecord(noSystem: Bool, cloud: Bool, localeId: String?) {
     // the transcript twice — once from the system tap, once attributed to the
     // user. Apple's voice-processing unit subtracts device playback from the
     // capture; with headphones on it is simply a no-op.
-    var aecOn = true
-    do {
-        try input.setVoiceProcessingEnabled(true)
-    } catch {
-        aecOn = false
-        emit(["warn": "aec_unavailable"])
+    //
+    // `--no-aec` skips it: the VP unit is a system-wide side effect (its AGC
+    // audibly lowers the user's mic level for everyone on the call), so the
+    // host disables it for auto-detected sessions where the conferencing app
+    // already owns echo handling. The transcript-duplication risk that AEC
+    // guards against only exists for speaker users; degrading the live call
+    // is the worse trade.
+    var aecOn = false
+    if !noAec {
+        do {
+            try input.setVoiceProcessingEnabled(true)
+            aecOn = true
+        } catch {
+            emit(["warn": "aec_unavailable"])
+        }
     }
 
     micT?.start()
@@ -623,6 +752,7 @@ func runRecord(noSystem: Bool, cloud: Bool, localeId: String?) {
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             micT?.append(buffer)
             micPCM?.append(buffer)
+            micWriter?.append(buffer)
         }
         engine.prepare()
         do {
@@ -678,6 +808,7 @@ func runRecord(noSystem: Bool, cloud: Bool, localeId: String?) {
         tapTeardown = startSystemTap { buffer in
             sysT?.append(buffer)
             sysPCM?.append(buffer)
+            sysWriter?.append(buffer)
         }
 #endif
     }
@@ -691,6 +822,8 @@ func runRecord(noSystem: Bool, cloud: Bool, localeId: String?) {
         sysT?.tick()
         micPCM?.flush()
         sysPCM?.flush()
+        micWriter?.drain()
+        sysWriter?.drain()
     }
     ticker.resume()
 
@@ -705,6 +838,8 @@ func runRecord(noSystem: Bool, cloud: Bool, localeId: String?) {
             sysT?.finish()
             micPCM?.finish()
             sysPCM?.finish()
+            micWriter?.finish()
+            sysWriter?.finish()
             emit(["done": true])
             exit(0)
         }
@@ -737,17 +872,27 @@ case "monitor":
 case "record":
     var noSystem = false
     var cloud = false
+    var noAec = false
+    var saveDir: String? = nil
     var localeId: String? = nil
-    for a in args.dropFirst(2) {
+    var i = 2
+    while i < args.count {
+        let a = args[i]
         if a == "--no-system" {
             noSystem = true
         } else if a == "--cloud" {
             cloud = true
+        } else if a == "--no-aec" {
+            noAec = true
+        } else if a == "--save-dir", i + 1 < args.count {
+            i += 1
+            saveDir = args[i]
         } else {
             localeId = a
         }
+        i += 1
     }
-    runRecord(noSystem: noSystem, cloud: cloud, localeId: localeId)
+    runRecord(noSystem: noSystem, cloud: cloud, noAec: noAec, saveDir: saveDir, localeId: localeId)
 
 default:
     eprint("unknown subcommand: \(args[1])")

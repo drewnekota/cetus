@@ -875,6 +875,60 @@ pub fn run() {
                 .build(),
         );
 
+    // Recovery net behind the navigation guard above. `on_navigation` cannot
+    // tell a main-frame navigation from a subframe one, so it cannot refuse
+    // http(s) without also breaking artifact iframes. This callback, however,
+    // only fires for main-frame loads (WKNavigationDelegate didCommit), so a
+    // foreign http(s) URL here means the app UI has been replaced — a link
+    // click that escaped interception (middle click, the context menu's
+    // "Open Link", or a link drag dropped back onto the window; wry forwards
+    // OS drags to WebKit, whose default is to navigate to a dropped link).
+    // Navigate straight back to the app shell instead of staying stranded.
+    let builder = builder.on_page_load(|webview, payload| {
+        if !matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+            return;
+        }
+        let label = webview.label();
+        if label == commands::BROWSER_WINDOW_LABEL || label == commands::BROWSER_PANEL_LABEL {
+            return;
+        }
+        let url = payload.url();
+        if !matches!(url.scheme(), "http" | "https") {
+            return;
+        }
+        let host = url.host_str().unwrap_or("");
+        // Windows serves the bundled frontend from tauri.localhost; dev builds
+        // serve it from the localhost dev server.
+        if host == "tauri.localhost" || (tauri::is_dev() && host == "localhost") {
+            return;
+        }
+        tracing::warn!("app webview {label} navigated away to {url}; restoring the app shell");
+        let home = tauri::is_dev()
+            .then(|| {
+                webview
+                    .app_handle()
+                    .config()
+                    .build
+                    .dev_url
+                    .as_ref()
+                    .map(|u| u.as_str().to_owned())
+            })
+            .flatten()
+            .unwrap_or_else(|| {
+                if cfg!(windows) {
+                    "http://tauri.localhost".to_owned()
+                } else {
+                    "tauri://localhost".to_owned()
+                }
+            });
+        if let Ok(home) = tauri::Url::parse(&home) {
+            let webview = webview.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = webview.navigate(home);
+            });
+        }
+    });
+
     // WKWebView runs out-of-process. If macOS reclaims or crashes that content
     // process, reload just the frontend; chats and drafts hydrate from durable
     // stores on page load.
@@ -1512,6 +1566,7 @@ pub fn run() {
         meeting::list_meetings,
         meeting::delete_meeting,
         meeting::meeting_transcript,
+        meeting::meeting_audio_dir,
         memory::list_memories,
         memory::create_memory,
         memory::update_memory,
@@ -1690,6 +1745,7 @@ pub fn run() {
         meeting::list_meetings,
         meeting::delete_meeting,
         meeting::meeting_transcript,
+        meeting::meeting_audio_dir,
         memory::list_memories,
         memory::create_memory,
         memory::update_memory,

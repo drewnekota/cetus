@@ -14,11 +14,17 @@ export interface MatchRange {
  * Flatten a conversation's human-visible prose (user + assistant text, plus
  * extension breadcrumbs) into one searchable blob. Skips thinking/tool/system
  * noise and caps length so a long conversation can't dominate memory or scan
- * time — the head of a thread is the most identifying part anyway.
+ * time.
+ *
+ * The cap used to be 8k, which quietly made this a search of each thread's
+ * OPENING only: anything said past the first few turns of a long conversation
+ * was unfindable, and the palette read as if it searched titles alone. 120k is
+ * roughly a full working conversation, and the cost is bounded — the index is
+ * built once per palette open and cached per conversation by updatedAt.
  */
 export function extractConversationText(
   messages: RenderedMessage[],
-  cap = 8000,
+  cap = 120_000,
 ): string {
   const parts: string[] = [];
   let len = 0;

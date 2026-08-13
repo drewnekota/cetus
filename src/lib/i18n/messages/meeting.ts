@@ -6,7 +6,7 @@ export const meeting = {
   en: {
     title: "Meetings",
     description:
-      "Transcribe meetings on-device into searchable notes. Your microphone is you; system audio is everyone else. Only text is kept — no audio is ever stored.",
+      "Transcribe meetings on-device into searchable notes. Your microphone is you; system audio is everyone else. Everything stays on this Mac.",
     macOnly: "Meeting capture is currently macOS-only.",
     "status.recording": "Transcribing…",
     "status.auto": "Auto-detected",
@@ -30,9 +30,12 @@ export const meeting = {
     "summarize.label": "Generate meeting notes",
     "summarize.description":
       "After each meeting, distill a title and minutes (key points, decisions, action items) with DeepSeek.",
+    "saveAudio.label": "Keep raw audio",
+    "saveAudio.description":
+      "Save each stream as an m4a file next to the transcript, on this Mac only.",
     "asr.label": "Transcription quality",
     "asr.description":
-      "Auto uses real-time SeedASR when your Doubao key is configured, and privately falls back to Apple on-device. Audio is streamed only for recognition and is never saved.",
+      "Auto uses real-time SeedASR when your Doubao key is configured, and privately falls back to Apple on-device. Audio is streamed only for recognition.",
     "asr.auto": "Auto · best available",
     "asr.local": "On-device only",
     "retention.label": "Keep meetings for",
@@ -55,15 +58,16 @@ export const meeting = {
     "transcript.you": "You",
     "transcript.them": "Them",
     "delete.label": "Delete",
+    "audio.reveal": "Show audio files",
     "notify.started.title": "Transcribing meeting",
-    "notify.started.body": "Cetus is transcribing on-device. No audio is stored.",
+    "notify.started.body": "Cetus is transcribing this meeting on-device.",
     "notify.saved.title": "Meeting notes ready",
     "notify.saved.body": "Transcript saved and searchable.",
   },
   zh: {
     title: "会议",
     description:
-      "在本地将会议转写为可搜索的笔记。麦克风是你，系统音频是其他人。只保留文本——绝不存储任何音频。",
+      "在本地将会议转写为可搜索的笔记。麦克风是你，系统音频是其他人。所有数据都只留在本机。",
     macOnly: "会议记录目前仅支持 macOS。",
     "status.recording": "转写中…",
     "status.auto": "自动检测",
@@ -86,9 +90,12 @@ export const meeting = {
     "summarize.label": "生成会议纪要",
     "summarize.description":
       "每次会议结束后，用 DeepSeek 提炼标题和纪要（要点、决定、待办事项）。",
+    "saveAudio.label": "保留原始音频",
+    "saveAudio.description":
+      "将每路音频以 m4a 保存在逐字稿旁边，仅存本机。",
     "asr.label": "转写质量",
     "asr.description":
-      "自动模式在已配置豆包密钥时使用实时 SeedASR，否则私密降级到 Apple 本地识别。音频只用于实时识别，绝不保存。",
+      "自动模式在已配置豆包密钥时使用实时 SeedASR，否则私密降级到 Apple 本地识别。音频流仅用于实时识别。",
     "asr.auto": "自动 · 最佳可用",
     "asr.local": "仅本地",
     "retention.label": "会议保留时长",
@@ -111,15 +118,16 @@ export const meeting = {
     "transcript.you": "我",
     "transcript.them": "对方",
     "delete.label": "删除",
+    "audio.reveal": "查看音频文件",
     "notify.started.title": "正在转写会议",
-    "notify.started.body": "Cetus 正在本地转写。不会存储任何音频。",
+    "notify.started.body": "Cetus 正在本地转写这场会议。",
     "notify.saved.title": "会议纪要已就绪",
     "notify.saved.body": "转写已保存，可随时搜索。",
   },
   ja: {
     title: "ミーティング",
     description:
-      "会議をオンデバイスで文字起こしし、検索可能なノートにします。マイクはあなた、システム音声はそれ以外の参加者です。保存されるのはテキストのみ——音声は一切保存されません。",
+      "会議をオンデバイスで文字起こしし、検索可能なノートにします。マイクはあなた、システム音声はそれ以外の参加者です。データはすべてこの Mac 内に留まります。",
     macOnly: "ミーティング記録は現在 macOS のみ対応です。",
     "status.recording": "文字起こし中…",
     "status.auto": "自動検出",
@@ -139,6 +147,9 @@ export const meeting = {
     "summarize.label": "議事録を生成",
     "summarize.description":
       "会議終了後、DeepSeek でタイトルと議事録（要点・決定事項・アクションアイテム）を抽出します。",
+    "saveAudio.label": "元の音声を保存",
+    "saveAudio.description":
+      "各ストリームを m4a ファイルとしてこの Mac にのみ保存します。",
     "retention.label": "ミーティングの保持期間",
     "retention.description": "古いミーティングは削除されます。0 で永久保持。",
     "retention.unit": "日",
@@ -151,15 +162,16 @@ export const meeting = {
     untitled: "無題のミーティング",
     noSummary: "このミーティングの議事録は生成されませんでした。",
     "delete.label": "削除",
+    "audio.reveal": "音声ファイルを表示",
     "notify.started.title": "ミーティングを文字起こし中",
-    "notify.started.body": "Cetus がオンデバイスで文字起こししています。音声は保存されません。",
+    "notify.started.body": "Cetus がオンデバイスで文字起こししています。",
     "notify.saved.title": "議事録ができました",
     "notify.saved.body": "文字起こしを保存しました。検索できます。",
   },
   ko: {
     title: "회의",
     description:
-      "회의를 온디바이스로 전사해 검색 가능한 노트로 만듭니다. 마이크는 나, 시스템 오디오는 다른 참가자입니다. 텍스트만 보관하며 오디오는 절대 저장하지 않습니다.",
+      "회의를 온디바이스로 전사해 검색 가능한 노트로 만듭니다. 마이크는 나, 시스템 오디오는 다른 참가자입니다. 모든 데이터는 이 Mac에만 남습니다.",
     macOnly: "회의 기록은 현재 macOS에서만 지원됩니다.",
     "status.recording": "전사 중…",
     "status.auto": "자동 감지됨",
@@ -179,6 +191,9 @@ export const meeting = {
     "summarize.label": "회의록 생성",
     "summarize.description":
       "회의가 끝나면 DeepSeek으로 제목과 회의록(요점, 결정 사항, 액션 아이템)을 정리합니다.",
+    "saveAudio.label": "원본 오디오 보관",
+    "saveAudio.description":
+      "각 스트림을 m4a 파일로 이 Mac에만 저장합니다.",
     "retention.label": "회의 보관 기간",
     "retention.description": "오래된 회의는 삭제됩니다. 0은 영구 보관입니다.",
     "retention.unit": "일",
@@ -191,15 +206,16 @@ export const meeting = {
     untitled: "제목 없는 회의",
     noSummary: "이 회의에는 요약이 생성되지 않았습니다.",
     "delete.label": "삭제",
+    "audio.reveal": "오디오 파일 보기",
     "notify.started.title": "회의 전사 중",
-    "notify.started.body": "Cetus가 온디바이스로 전사하고 있습니다. 오디오는 저장되지 않습니다.",
+    "notify.started.body": "Cetus가 온디바이스로 전사하고 있습니다.",
     "notify.saved.title": "회의록 준비 완료",
     "notify.saved.body": "전사가 저장되어 검색할 수 있습니다.",
   },
   es: {
     title: "Reuniones",
     description:
-      "Transcribe reuniones en el dispositivo a notas buscables. El micrófono eres tú; el audio del sistema es el resto. Solo se conserva texto: nunca se almacena audio.",
+      "Transcribe reuniones en el dispositivo a notas buscables. El micrófono eres tú; el audio del sistema es el resto. Todo permanece en este Mac.",
     macOnly: "La captura de reuniones solo está disponible en macOS por ahora.",
     "status.recording": "Transcribiendo…",
     "status.auto": "Detección automática",
@@ -219,6 +235,9 @@ export const meeting = {
     "summarize.label": "Generar actas de reunión",
     "summarize.description":
       "Al terminar cada reunión, destila un título y actas (puntos clave, decisiones, tareas) con DeepSeek.",
+    "saveAudio.label": "Conservar audio original",
+    "saveAudio.description":
+      "Guarda cada pista como archivo m4a solo en este Mac.",
     "retention.label": "Conservar reuniones durante",
     "retention.description": "Las reuniones antiguas se eliminan. 0 las conserva para siempre.",
     "retention.unit": "días",
@@ -231,15 +250,16 @@ export const meeting = {
     untitled: "Reunión sin título",
     noSummary: "No se generó resumen para esta reunión.",
     "delete.label": "Eliminar",
+    "audio.reveal": "Mostrar archivos de audio",
     "notify.started.title": "Transcribiendo reunión",
-    "notify.started.body": "Cetus está transcribiendo en el dispositivo. No se almacena audio.",
+    "notify.started.body": "Cetus está transcribiendo en el dispositivo.",
     "notify.saved.title": "Actas de reunión listas",
     "notify.saved.body": "Transcripción guardada y buscable.",
   },
   pt: {
     title: "Reuniões",
     description:
-      "Transcreva reuniões no dispositivo em notas pesquisáveis. O microfone é você; o áudio do sistema são os outros. Apenas texto é mantido — áudio nunca é armazenado.",
+      "Transcreva reuniões no dispositivo em notas pesquisáveis. O microfone é você; o áudio do sistema são os outros. Tudo permanece neste Mac.",
     macOnly: "A captura de reuniões está disponível apenas no macOS por enquanto.",
     "status.recording": "Transcrevendo…",
     "status.auto": "Detecção automática",
@@ -259,6 +279,9 @@ export const meeting = {
     "summarize.label": "Gerar ata da reunião",
     "summarize.description":
       "Ao fim de cada reunião, destila um título e uma ata (pontos-chave, decisões, ações) com o DeepSeek.",
+    "saveAudio.label": "Manter áudio original",
+    "saveAudio.description":
+      "Salva cada trilha como arquivo m4a apenas neste Mac.",
     "retention.label": "Manter reuniões por",
     "retention.description": "Reuniões antigas são excluídas. 0 mantém para sempre.",
     "retention.unit": "dias",
@@ -271,15 +294,16 @@ export const meeting = {
     untitled: "Reunião sem título",
     noSummary: "Nenhum resumo foi gerado para esta reunião.",
     "delete.label": "Excluir",
+    "audio.reveal": "Mostrar arquivos de áudio",
     "notify.started.title": "Transcrevendo reunião",
-    "notify.started.body": "O Cetus está transcrevendo no dispositivo. Nenhum áudio é armazenado.",
+    "notify.started.body": "O Cetus está transcrevendo no dispositivo.",
     "notify.saved.title": "Ata da reunião pronta",
     "notify.saved.body": "Transcrição salva e pesquisável.",
   },
   fr: {
     title: "Réunions",
     description:
-      "Transcrivez vos réunions sur l'appareil en notes consultables. Le micro, c'est vous ; l'audio système, ce sont les autres. Seul le texte est conservé — aucun audio n'est jamais stocké.",
+      "Transcrivez vos réunions sur l'appareil en notes consultables. Le micro, c'est vous ; l'audio système, ce sont les autres. Tout reste sur ce Mac.",
     macOnly: "La capture de réunions n'est disponible que sur macOS pour l'instant.",
     "status.recording": "Transcription…",
     "status.auto": "Détection automatique",
@@ -299,6 +323,9 @@ export const meeting = {
     "summarize.label": "Générer le compte rendu",
     "summarize.description":
       "Après chaque réunion, distille un titre et un compte rendu (points clés, décisions, actions) avec DeepSeek.",
+    "saveAudio.label": "Conserver l'audio brut",
+    "saveAudio.description":
+      "Enregistre chaque flux en fichier m4a uniquement sur ce Mac.",
     "retention.label": "Conserver les réunions pendant",
     "retention.description": "Les réunions anciennes sont supprimées. 0 = conservation illimitée.",
     "retention.unit": "jours",
@@ -311,15 +338,16 @@ export const meeting = {
     untitled: "Réunion sans titre",
     noSummary: "Aucun résumé n'a été généré pour cette réunion.",
     "delete.label": "Supprimer",
+    "audio.reveal": "Afficher les fichiers audio",
     "notify.started.title": "Transcription de la réunion",
-    "notify.started.body": "Cetus transcrit sur l'appareil. Aucun audio n'est stocké.",
+    "notify.started.body": "Cetus transcrit sur l'appareil.",
     "notify.saved.title": "Compte rendu prêt",
     "notify.saved.body": "Transcription enregistrée et consultable.",
   },
   de: {
     title: "Meetings",
     description:
-      "Transkribiert Meetings auf dem Gerät in durchsuchbare Notizen. Das Mikrofon bist du; der Systemton sind alle anderen. Nur Text wird behalten — Audio wird niemals gespeichert.",
+      "Transkribiert Meetings auf dem Gerät in durchsuchbare Notizen. Das Mikrofon bist du; der Systemton sind alle anderen. Alles bleibt auf diesem Mac.",
     macOnly: "Meeting-Aufzeichnung ist derzeit nur unter macOS verfügbar.",
     "status.recording": "Transkribiere…",
     "status.auto": "Automatisch erkannt",
@@ -339,6 +367,9 @@ export const meeting = {
     "summarize.label": "Meeting-Protokoll erstellen",
     "summarize.description":
       "Destilliert nach jedem Meeting Titel und Protokoll (Kernpunkte, Entscheidungen, Aufgaben) mit DeepSeek.",
+    "saveAudio.label": "Rohaudio behalten",
+    "saveAudio.description":
+      "Speichert jeden Stream als m4a-Datei nur auf diesem Mac.",
     "retention.label": "Meetings aufbewahren für",
     "retention.description": "Ältere Meetings werden gelöscht. 0 bewahrt sie für immer auf.",
     "retention.unit": "Tage",
@@ -351,15 +382,16 @@ export const meeting = {
     untitled: "Unbenanntes Meeting",
     noSummary: "Für dieses Meeting wurde keine Zusammenfassung erstellt.",
     "delete.label": "Löschen",
+    "audio.reveal": "Audiodateien anzeigen",
     "notify.started.title": "Meeting wird transkribiert",
-    "notify.started.body": "Cetus transkribiert auf dem Gerät. Es wird kein Audio gespeichert.",
+    "notify.started.body": "Cetus transkribiert auf dem Gerät.",
     "notify.saved.title": "Meeting-Protokoll bereit",
     "notify.saved.body": "Transkript gespeichert und durchsuchbar.",
   },
   it: {
     title: "Riunioni",
     description:
-      "Trascrivi le riunioni sul dispositivo in note ricercabili. Il microfono sei tu; l'audio di sistema sono gli altri. Viene conservato solo testo: l'audio non viene mai salvato.",
+      "Trascrivi le riunioni sul dispositivo in note ricercabili. Il microfono sei tu; l'audio di sistema sono gli altri. Tutto resta su questo Mac.",
     macOnly: "La registrazione delle riunioni è al momento disponibile solo su macOS.",
     "status.recording": "Trascrizione…",
     "status.auto": "Rilevamento automatico",
@@ -379,6 +411,9 @@ export const meeting = {
     "summarize.label": "Genera verbale della riunione",
     "summarize.description":
       "Al termine di ogni riunione, distilla titolo e verbale (punti chiave, decisioni, azioni) con DeepSeek.",
+    "saveAudio.label": "Conserva l'audio originale",
+    "saveAudio.description":
+      "Salva ogni flusso come file m4a solo su questo Mac.",
     "retention.label": "Conserva le riunioni per",
     "retention.description": "Le riunioni più vecchie vengono eliminate. 0 le conserva per sempre.",
     "retention.unit": "giorni",
@@ -391,15 +426,16 @@ export const meeting = {
     untitled: "Riunione senza titolo",
     noSummary: "Per questa riunione non è stato generato alcun riepilogo.",
     "delete.label": "Elimina",
+    "audio.reveal": "Mostra file audio",
     "notify.started.title": "Trascrizione riunione in corso",
-    "notify.started.body": "Cetus sta trascrivendo sul dispositivo. Nessun audio viene salvato.",
+    "notify.started.body": "Cetus sta trascrivendo sul dispositivo.",
     "notify.saved.title": "Verbale pronto",
     "notify.saved.body": "Trascrizione salvata e ricercabile.",
   },
   ru: {
     title: "Встречи",
     description:
-      "Расшифровывайте встречи на устройстве в заметки с поиском. Микрофон — это вы; системный звук — все остальные. Хранится только текст — аудио никогда не сохраняется.",
+      "Расшифровывайте встречи на устройстве в заметки с поиском. Микрофон — это вы; системный звук — все остальные. Всё остаётся на этом Mac.",
     macOnly: "Запись встреч пока доступна только на macOS.",
     "status.recording": "Расшифровка…",
     "status.auto": "Автообнаружение",
@@ -419,6 +455,9 @@ export const meeting = {
     "summarize.label": "Создавать протокол встречи",
     "summarize.description":
       "После каждой встречи DeepSeek выделяет заголовок и протокол (ключевые моменты, решения, задачи).",
+    "saveAudio.label": "Сохранять исходное аудио",
+    "saveAudio.description":
+      "Сохраняет каждый поток в файл m4a только на этом Mac.",
     "retention.label": "Хранить встречи",
     "retention.description": "Старые встречи удаляются. 0 — хранить вечно.",
     "retention.unit": "дней",
@@ -431,8 +470,9 @@ export const meeting = {
     untitled: "Встреча без названия",
     noSummary: "Для этой встречи не было создано резюме.",
     "delete.label": "Удалить",
+    "audio.reveal": "Показать аудиофайлы",
     "notify.started.title": "Идёт расшифровка встречи",
-    "notify.started.body": "Cetus расшифровывает на устройстве. Аудио не сохраняется.",
+    "notify.started.body": "Cetus расшифровывает на устройстве.",
     "notify.saved.title": "Протокол встречи готов",
     "notify.saved.body": "Расшифровка сохранена и доступна для поиска.",
   },

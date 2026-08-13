@@ -16,10 +16,11 @@
 //! Capture itself lives in a lazily-`swiftc`-compiled helper
 //! (`meeting/cetus-meeting-helper.swift`): mic via AVAudioEngine plus — on
 //! macOS 14.2+ — the system audio output via a CoreAudio process tap, each
-//! stream transcribed on-device with SFSpeechRecognizer. **No audio is ever
-//! written to disk**; only text reaches this module. Segments land in SQLite
-//! (`meetings` / `meeting_segments`) for the UI and in a rolling JSONL recall
-//! log (read by the `meeting-recall` pi extension) for the agent.
+//! stream transcribed on-device with SFSpeechRecognizer. Segments land in
+//! SQLite (`meetings` / `meeting_segments`) for the UI and in a rolling JSONL
+//! recall log (read by the `meeting-recall` pi extension) for the agent. When
+//! `save_audio` is on (the default) the helper also encodes each stream to
+//! AAC under `app_data/meetings/<id>/`; with it off no audio touches disk.
 
 use crate::store::{now_ms, Meeting, MeetingSegment, Store};
 use crate::{secrets, AppState};
@@ -98,6 +99,9 @@ pub struct MeetingSettings {
     /// Generate a title + minutes when a session ends.
     #[serde(default = "default_true")]
     pub summarize: bool,
+    /// Keep the raw audio (AAC per stream) next to the transcript.
+    #[serde(default = "default_true")]
+    pub save_audio: bool,
     /// "auto" uses SeedASR when a Doubao key is configured and otherwise
     /// falls back to Apple on-device recognition. "local" never sends audio.
     #[serde(default = "default_asr_engine")]
@@ -122,11 +126,11 @@ fn default_asr_engine() -> String {
     "auto".into()
 }
 fn default_toggle_hotkey() -> String {
-    if cfg!(target_os = "macos") {
-        "Cmd+Shift+M".into()
-    } else {
-        "Ctrl+Shift+M".into()
-    }
+    // Ctrl+Alt+M (⌃⌥M): "M for meeting" without stealing anyone's mute key.
+    // The old defaults — ⌘⇧M on macOS, Ctrl+Shift+M on Windows — are Teams'
+    // mute toggle (and ⌘⇧M is Chrome's profile switcher); a global
+    // registration swallows those exactly while the user is in a call.
+    "Ctrl+Alt+M".into()
 }
 
 impl Default for MeetingSettings {
@@ -136,6 +140,7 @@ impl Default for MeetingSettings {
             auto_detect: true,
             system_audio: true,
             summarize: true,
+            save_audio: true,
             asr_engine: default_asr_engine(),
             retention_days: default_retention(),
             toggle_hotkey: default_toggle_hotkey(),
@@ -144,20 +149,20 @@ impl Default for MeetingSettings {
 }
 
 pub fn load_settings(store: &Store) -> MeetingSettings {
-    let settings = match store.get_setting(SETTINGS_KEY) {
+    let mut settings: MeetingSettings = match store.get_setting(SETTINGS_KEY) {
         Ok(Some(json)) => serde_json::from_str(&json).unwrap_or_default(),
         _ => MeetingSettings::default(),
     };
-    // Older Windows builds persisted the macOS default verbatim. Migrate that
-    // one known default while preserving every user-recorded custom binding.
-    #[cfg(not(target_os = "macos"))]
-    let settings = {
-        let mut migrated = settings;
-        if migrated.toggle_hotkey == "Cmd+Shift+M" {
-            migrated.toggle_hotkey = default_toggle_hotkey();
-        }
-        migrated
-    };
+    // Migrate the two known legacy defaults (they collide with Teams' mute
+    // shortcut, see default_toggle_hotkey) while preserving every
+    // user-recorded custom binding. This also covers the older Windows builds
+    // that persisted the then-macOS default verbatim.
+    if matches!(
+        settings.toggle_hotkey.as_str(),
+        "Cmd+Shift+M" | "Ctrl+Shift+M"
+    ) {
+        settings.toggle_hotkey = default_toggle_hotkey();
+    }
     settings
 }
 
@@ -171,6 +176,22 @@ fn save_settings(store: &Store, settings: &MeetingSettings) -> anyhow::Result<()
 /// writer never diverge.
 pub fn recall_log_path(app_data: &Path) -> PathBuf {
     app_data.join("meeting-context").join("recall.jsonl")
+}
+
+/// Where a meeting's raw audio lives when `save_audio` is on. Derived from the
+/// id (not stored in the DB) so delete/prune can clean up unconditionally.
+fn audio_dir(app_data: &Path, id: &str) -> PathBuf {
+    app_data.join("meetings").join(id)
+}
+
+/// Best-effort removal of a meeting's saved audio.
+fn remove_audio_dir(app_data: &Path, id: &str) {
+    let dir = audio_dir(app_data, id);
+    if dir.is_dir() {
+        if let Err(e) = std::fs::remove_dir_all(&dir) {
+            tracing::warn!("meeting: failed to remove audio dir {}: {e}", dir.display());
+        }
+    }
 }
 
 // =============================================================================
@@ -197,11 +218,11 @@ mod helper {
   <key>CFBundleName</key>
   <string>cetus-meeting-helper</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>cetus listens during meetings to transcribe them into searchable notes. No audio is stored.</string>
+  <string>cetus listens during meetings to transcribe them into searchable notes.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>cetus transcribes meetings on-device so you can recall what was said.</string>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>cetus transcribes the other meeting participants from your system audio. No audio is stored.</string>
+  <string>cetus transcribes the other meeting participants from your system audio.</string>
 </dict>
 </plist>
 "#;
@@ -224,7 +245,7 @@ mod helper {
         let bin_dir = app_data.join("bin");
         // Bump the version suffix whenever the embedded Swift changes so cached
         // installs recompile.
-        let bin = bin_dir.join("cetus-meeting-helper-v6");
+        let bin = bin_dir.join("cetus-meeting-helper-v8");
         if bin.exists() {
             return Some(bin);
         }
@@ -312,6 +333,11 @@ fn helper_command(app_data: &Path) -> Result<(PathBuf, Vec<std::ffi::OsString>),
 #[derive(Default)]
 pub struct MeetingRuntime {
     active: tokio::sync::Mutex<Option<ActiveSession>>,
+    /// Granola-style cancel semantics: set when the user stops a session while
+    /// the call app still holds the mic, cleared by the monitor once the mic is
+    /// released. While set, auto-detect never restarts a session — a user stop
+    /// is final for the current call, not a 6-second pause.
+    auto_suppressed: std::sync::atomic::AtomicBool,
 }
 
 struct ActiveSession {
@@ -377,6 +403,21 @@ async fn start_internal(
         if cloud {
             args.push("--cloud".into());
         }
+        if auto {
+            // The conferencing app that triggered auto-detect owns the mic
+            // experience (and its own echo cancellation). Enabling our
+            // voice-processing unit on top is a system-wide side effect — its
+            // AGC audibly lowers the user's voice for everyone on the call —
+            // so auto sessions record the raw mic. Manual sessions keep AEC:
+            // there Cetus is the primary recorder and speaker playback would
+            // otherwise be transcribed twice.
+            args.push("--no-aec".into());
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        if settings.save_audio {
+            args.push("--save-dir".into());
+            args.push(audio_dir(app_data, &id).into_os_string());
+        }
 
         let grouped = program
             .file_name()
@@ -408,11 +449,11 @@ async fn start_internal(
             });
         }
 
-        let id = uuid::Uuid::new_v4().to_string();
         let started_ts = now_ms();
         if let Err(e) = store.insert_meeting(&id, started_ts, app_hint.as_deref()) {
             kill_active_capture(); // never leave the mic hot on a failed start
             let _ = child.wait().await;
+            remove_audio_dir(app_data, &id);
             return Err(e.to_string());
         }
 
@@ -455,7 +496,7 @@ async fn start_internal(
                     tracing::info!(
                         "meeting: max session duration reached; auto-finalizing {watchdog_id}"
                     );
-                    let _ = stop_internal(&app).await;
+                    let _ = stop_internal(&app, false).await;
                 }
             });
         }
@@ -476,7 +517,13 @@ async fn start_internal(
 /// Ask the live session to finalize. Returns false when nothing was recording.
 /// The reader task (not this fn) does the actual cleanup, so crash and stop
 /// funnel through one place; we just nudge stdin and wait for it.
-async fn stop_internal(app: &AppHandle) -> Result<bool, String> {
+///
+/// `user_initiated` marks a stop the user asked for (pill button, Settings,
+/// hotkey) as opposed to the auto-stop / max-duration watchdogs. A user stop
+/// suppresses auto-detect until the current call releases the mic — otherwise
+/// "cancel" during a live call is un-cancelable: the monitor still sees the
+/// call app on the mic and restarts a session seconds later.
+async fn stop_internal(app: &AppHandle, user_initiated: bool) -> Result<bool, String> {
     let runtime = app.state::<MeetingRuntime>();
     let (stdin, pid) = {
         let mut slot = runtime.active.lock().await;
@@ -485,6 +532,9 @@ async fn stop_internal(app: &AppHandle) -> Result<bool, String> {
             Some(s) => (s.stdin.take(), s.child_pid),
         }
     };
+    if user_initiated {
+        runtime.auto_suppressed.store(true, Ordering::Relaxed);
+    }
     if let Some(mut stdin) = stdin {
         use tokio::io::AsyncWriteExt;
         let _ = stdin.write_all(b"\n").await;
@@ -668,8 +718,16 @@ async fn run_reader(
     }
     drop(mic_pcm);
     drop(system_pcm);
-    for task in cloud_tasks {
-        let _ = task.await;
+    for mut task in cloud_tasks {
+        // Bounded join: a wedged ASR socket must not keep the session slot
+        // occupied forever (the stop spinner would never resolve).
+        if tokio::time::timeout(Duration::from_secs(15), &mut task)
+            .await
+            .is_err()
+        {
+            tracing::warn!("meeting: cloud ASR finalize timed out; aborting");
+            task.abort();
+        }
     }
     let _ = child.wait().await;
     ACTIVE_CAPTURE_TARGET.store(0, Ordering::Relaxed);
@@ -682,6 +740,9 @@ async fn run_reader(
             *slot = None;
         }
     }
+    // Announce the end immediately (the HUD and Settings resync off this);
+    // "saved" follows once the summary lands.
+    emit_meeting_event(&app, "stopped", &id, app_hint.as_deref(), None);
 
     let count = segments.load(Ordering::Relaxed);
     let ended_ts = now_ms();
@@ -689,8 +750,9 @@ async fn run_reader(
         tracing::warn!("meeting: finalize failed: {e}");
     }
     if count == 0 {
-        // Nothing was said — drop the empty shell row entirely.
+        // Nothing was said — drop the empty shell row (and its audio) entirely.
         let _ = store.delete_meeting(&id);
+        remove_audio_dir(&app_data, &id);
         return;
     }
 
@@ -1019,7 +1081,7 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
         let settings = load_settings(&store);
 
         if last_prune.elapsed().as_secs() >= PRUNE_INTERVAL_SECS {
-            prune(&store, settings.retention_days);
+            prune(&store, &app_data, settings.retention_days);
             last_prune = Instant::now();
         }
 
@@ -1143,13 +1205,22 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
         }
 
         // Debounced state machine.
-        let session_state = {
+        let (session_state, suppressed) = {
             let runtime = app.state::<MeetingRuntime>();
+            // A mic release ends the "call" a user-stop suppressed; the next
+            // occupancy is a fresh call and may auto-start again.
+            if !mic_active {
+                runtime.auto_suppressed.store(false, Ordering::Relaxed);
+            }
             let slot = runtime.active.lock().await;
-            slot.as_ref().map(|s| s.auto)
+            (
+                slot.as_ref().map(|s| s.auto),
+                runtime.auto_suppressed.load(Ordering::Relaxed),
+            )
         };
         match session_state {
             None if mic_active
+                && !suppressed
                 && active_since
                     .map(|t| t.elapsed().as_secs() >= AUTO_START_SECS)
                     .unwrap_or(false) =>
@@ -1168,7 +1239,7 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
                         .map(|t| t.elapsed().as_secs() >= AUTO_STOP_SECS)
                         .unwrap_or(false) =>
             {
-                if let Err(e) = stop_internal(&app).await {
+                if let Err(e) = stop_internal(&app, false).await {
                     tracing::warn!("meeting auto-stop failed: {e}");
                 }
                 inactive_since = None;
@@ -1178,11 +1249,17 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
     }
 }
 
-fn prune(store: &Store, retention_days: u32) {
+fn prune(store: &Store, app_data: &Path, retention_days: u32) {
     if retention_days == 0 {
         return;
     }
     let before = now_ms() - (retention_days as i64) * 86_400 * 1000;
+    // Saved audio first: fetching ids after the SQL delete would orphan dirs.
+    if let Ok(ids) = store.meeting_ids_started_before(before) {
+        for id in ids {
+            remove_audio_dir(app_data, &id);
+        }
+    }
     match store.prune_meetings(before) {
         Ok(n) if n > 0 => {
             tracing::info!("meeting: pruned {n} meetings older than {retention_days}d")
@@ -1231,7 +1308,7 @@ pub(crate) fn is_toggle_shortcut(sc: &tauri_plugin_global_shortcut::Shortcut) ->
 pub(crate) fn toggle_from_hotkey(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        match stop_internal(&app).await {
+        match stop_internal(&app, true).await {
             Ok(true) => {}
             Ok(false) => {
                 let (store, app_data) = {
@@ -1303,7 +1380,7 @@ pub async fn meeting_start(app: AppHandle, state: State<'_, AppState>) -> Result
 
 #[tauri::command]
 pub async fn meeting_stop(app: AppHandle) -> Result<bool, String> {
-    stop_internal(&app).await
+    stop_internal(&app, true).await
 }
 
 #[tauri::command]
@@ -1319,7 +1396,24 @@ pub async fn list_meetings(
 
 #[tauri::command]
 pub async fn delete_meeting(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.store.delete_meeting(&id).map_err(|e| e.to_string())
+    state.store.delete_meeting(&id).map_err(|e| e.to_string())?;
+    remove_audio_dir(&state.app_data_dir, &id);
+    Ok(())
+}
+
+/// The meeting's saved-audio directory, or None when nothing was kept (audio
+/// saving off, or the session predates the feature).
+#[tauri::command]
+pub async fn meeting_audio_dir(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<String>, String> {
+    // Ids are our own UUIDs; refuse anything path-like from a hostile webview.
+    if id.contains(['/', '\\', '.']) {
+        return Err("invalid meeting id".into());
+    }
+    let dir = audio_dir(&state.app_data_dir, &id);
+    Ok(dir.is_dir().then(|| dir.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]

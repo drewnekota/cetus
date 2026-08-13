@@ -120,6 +120,8 @@ export interface MeetingSettings {
   autoDetect: boolean;
   systemAudio: boolean;
   summarize: boolean;
+  /** Keep the raw audio (m4a per stream) next to the transcript. */
+  saveAudio: boolean;
   /** auto = SeedASR when configured, otherwise Apple on-device. */
   asrEngine: "auto" | "local";
   retentionDays: number;
@@ -643,6 +645,8 @@ export const api = {
   listMeetings: (limit?: number) =>
     invoke<Meeting[]>("list_meetings", { limit: limit ?? null }),
   deleteMeeting: (id: string) => invoke<void>("delete_meeting", { id }),
+  meetingAudioDir: (id: string) =>
+    invoke<string | null>("meeting_audio_dir", { id }),
   meetingTranscript: (id: string) =>
     invoke<MeetingSegment[]>("meeting_transcript", { id }),
 

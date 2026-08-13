@@ -13,6 +13,7 @@ import {
 import { ChatPane } from "@/components/chat/chat-pane";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
 import { CommandPalette } from "@/components/command-palette";
+import { FIND_IN_CHAT_EVENT } from "@/components/chat/find-highlight";
 import { AppSidebar, groupByWorkspace } from "@/components/sidebar/app-sidebar";
 import type { SidebarView } from "@/components/sidebar/view-toggle";
 import { BoardView } from "@/components/board/board-view";
@@ -103,6 +104,7 @@ import { composeWithContext } from "@/lib/quick-context";
 import { useConversationAutoSort } from "@/lib/conversation-order";
 import {
   loadCollapsedWorkspaceDirs,
+  nextConversationIdInWorkspace,
   persistCollapsedWorkspaceDirs,
   visibleConversationIds,
 } from "@/lib/collapsed-workspaces";
@@ -1235,6 +1237,8 @@ export default function Home() {
             // Meeting capture lifecycle → localized OS notification. "started"
             // doubles as the consent surface (you should always know cetus is
             // transcribing), "saved" carries the generated title when one ran.
+            // "stopped" is a UI-resync signal only — no notification.
+            if (evt.kind === "stopped") break;
             const started = evt.kind === "started";
             dispatchNotification("meeting", {
               title: tt(
@@ -1363,9 +1367,12 @@ export default function Home() {
       const archiving = !c.archivedAt;
       const isActive = c.id === activeIdRef.current;
       const ids = orderedChatIdsRef.current;
-      const currentIndex = ids.indexOf(c.id);
       const stateIndex = conversationsRef.current.findIndex((x) => x.id === c.id);
-      const nextId = currentIndex >= 0 ? ids[currentIndex + 1] : undefined;
+      const nextId = nextConversationIdInWorkspace(
+        ids,
+        conversationsRef.current,
+        c.id,
+      );
 
       // Archiving is local, reversible, and overwhelmingly likely to succeed:
       // remove the row and navigate immediately instead of waiting for process
@@ -1376,8 +1383,8 @@ export default function Home() {
         if (isActive && nextId) {
           selectChatRef.current(nextId);
         } else if (isActive) {
-          // The archived chat was the last visible row. Start a fresh chat in
-          // the same repo instead of falling back to the repo-less default.
+          // The archived chat was the only visible row in this workspace.
+          // Start a fresh chat there instead of crossing into another folder.
           pendingSelectRef.current = null;
           activeIdRef.current = null;
           setView("chat");
@@ -1589,6 +1596,15 @@ export default function Home() {
         detailId !== null
       )
         return;
+      // ⌘F — find inside the open conversation. Only meaningful on the chat
+      // view, and only past the modal guard above; the message list owns the
+      // bar's state, so this just hands it the key.
+      if (shortcut("findInChat")) {
+        if (view !== "chat" || historyOpen) return;
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent(FIND_IN_CHAT_EVENT));
+        return;
+      }
       if (sideWorkspace.open && shortcut("previousWorkspaceTab")) {
         e.preventDefault();
         switchWorkspaceTab("side", -1);
@@ -1713,6 +1729,7 @@ export default function Home() {
     settingsOpen,
     automationDialogOpen,
     newTaskOpen,
+    historyOpen,
     detailId,
     sideWorkspace.open,
     sideWorkspace.activeId,

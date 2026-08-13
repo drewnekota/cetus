@@ -69,7 +69,10 @@ export function MeetingHud() {
     setStopping(true);
     try {
       await api.meetingStop();
-    } catch {
+    } finally {
+      // Always drop the spinner once the stop call settles: if the backend
+      // reports a session again afterwards it is a NEW session (the old one is
+      // gone), and the pill must show its stop button, not a stuck spinner.
       setStopping(false);
     }
   }

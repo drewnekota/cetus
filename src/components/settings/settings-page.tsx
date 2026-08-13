@@ -2833,6 +2833,30 @@ function MeetingTranscriptPanel({
   );
 }
 
+/** "Show audio files" reveal button — rendered only when the meeting actually
+ *  has a saved-audio directory (audio saving can be off, or predate it). */
+function MeetingAudioButton({ meetingId }: { meetingId: string }) {
+  const { t } = useTranslation("meeting");
+  const [dir, setDir] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.meetingAudioDir(meetingId).then(setDir).catch(() => {});
+  }, [meetingId]);
+
+  if (!dir) return null;
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="gap-1.5 text-muted-foreground"
+      onClick={() => api.revealInFinder(dir).catch(() => {})}
+    >
+      <FolderOpen className="size-3.5" />
+      {t("audio.reveal")}
+    </Button>
+  );
+}
+
 function MeetingsSection({ open }: { open: boolean }) {
   const { t } = useTranslation("meeting");
   // The hotkey recorder reuses the summon shortcut's generic strings.
@@ -3084,6 +3108,15 @@ function MeetingsSection({ open }: { open: boolean }) {
             onCheckedChange={(v) => update({ summarize: v })}
             boxed
           />
+          <div className="border-t border-border" />
+          <ToggleRow
+            id="meeting-save-audio"
+            label={t("saveAudio.label")}
+            description={t("saveAudio.description")}
+            checked={settings.saveAudio}
+            onCheckedChange={(v) => update({ saveAudio: v })}
+            boxed
+          />
         </div>
 
         <div className="flex items-center justify-between gap-4">
@@ -3198,7 +3231,8 @@ function MeetingsSection({ open }: { open: boolean }) {
                       <div className="mt-4">
                         <MeetingTranscriptPanel meetingId={m.id} />
                       </div>
-                      <div className="mt-2 flex justify-end">
+                      <div className="mt-2 flex justify-end gap-1">
+                        <MeetingAudioButton meetingId={m.id} />
                         <Button
                           variant="ghost"
                           size="sm"
