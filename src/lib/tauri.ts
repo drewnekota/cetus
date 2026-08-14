@@ -155,6 +155,17 @@ export interface MeetingSegment {
   text: string;
 }
 
+/** One live-caption line from the active meeting session. `partial` is a
+ * whole-text replace of the in-flight hypothesis for `source`; `final` appends
+ * a settled sentence and clears that source's partial. */
+export interface MeetingCaption {
+  meetingId: string;
+  source: "mic" | "system";
+  kind: "partial" | "final";
+  ts: number;
+  text: string;
+}
+
 export interface RemoteSettings {
   enabled: boolean;
   port: number;
@@ -650,6 +661,8 @@ export const api = {
     invoke<string | null>("meeting_audio_dir", { id }),
   meetingTranscript: (id: string) =>
     invoke<MeetingSegment[]>("meeting_transcript", { id }),
+  meetingHudSetExpanded: (expanded: boolean) =>
+    invoke<void>("meeting_hud_set_expanded", { expanded }),
 
   // DEV-ONLY eval bridge (only registered when the `devtest` Cargo feature is on).
   testEval: (js: string, label?: string) =>
@@ -669,6 +682,14 @@ export const api = {
 
 export async function onAppEvent(handler: (e: AppEvent) => void): Promise<UnlistenFn> {
   return listen<AppEvent>("app-event", (e) => handler(e.payload));
+}
+
+/** Live meeting captions (partial hypotheses + settled sentences), broadcast
+ * by the meeting session for the pill HUD and the Settings transcript view. */
+export async function onMeetingCaption(
+  handler: (e: MeetingCaption) => void,
+): Promise<UnlistenFn> {
+  return listen<MeetingCaption>("meeting-caption", (e) => handler(e.payload));
 }
 
 /** Settings saves are broadcast by Rust to every webview so all runtime

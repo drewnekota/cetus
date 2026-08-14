@@ -21,9 +21,13 @@
 //          and emits transcript segments as JSONL:
 //            {"ready":true}
 //            {"warn":"system_audio_unavailable"}            (pre-14.2 etc.)
+//            {"partial":{"source":"mic","ts":...,"text":"..."}}    (live caption)
 //            {"segment":{"source":"mic","ts":1718000000000,"text":"..."}}
 //            {"segment":{"source":"system","ts":...,"text":"..."}}
 //            {"done":true}                                  then exit
+//          `partial` lines are the in-flight hypothesis for the CURRENT
+//          utterance (throttled, whole-text replace); the following `segment`
+//          for the same source supersedes them.
 //          Stops + finalizes as soon as ANYTHING (a newline, or EOF) arrives on
 //          stdin — same convention as the speech helper.
 //
@@ -233,6 +237,8 @@ final class StreamTranscriber {
     private var task: SFSpeechRecognitionTask?
     private var gen = 0
     private var lastPartial = ""
+    private var lastEmittedPartial = ""
+    private var lastPartialEmitAt = Date(timeIntervalSince1970: 0)
     private var partialChangedAt = Date()
     private var requestStartedAt = Date()
     private var firstSpeechTs: Int64?
@@ -244,6 +250,9 @@ final class StreamTranscriber {
     private let pauseSecs: TimeInterval = 1.6
     /// Hard rotation interval so one request never grows unbounded.
     private let maxRequestSecs: TimeInterval = 60
+    /// Live-caption partials are whole-text replaces, so pace them: recognition
+    /// callbacks can fire per audio buffer, far faster than a reader needs.
+    private let partialMinInterval: TimeInterval = 0.2
 
     init?(source: String, locale: Locale) {
         self.source = source
@@ -273,7 +282,21 @@ final class StreamTranscriber {
             rotate()
         } else if now.timeIntervalSince(requestStartedAt) > maxRequestSecs {
             rotate()
+        } else {
+            // Trailing flush: a hypothesis update the throttle swallowed still
+            // reaches the reader within one tick.
+            maybeEmitPartial(force: true)
         }
+    }
+
+    /// Emit the current hypothesis as a live-caption `partial` if it changed.
+    private func maybeEmitPartial(force: Bool = false) {
+        guard lastPartial != lastEmittedPartial else { return }
+        let now = Date()
+        if !force && now.timeIntervalSince(lastPartialEmitAt) < partialMinInterval { return }
+        lastEmittedPartial = lastPartial
+        lastPartialEmitAt = now
+        emit(["partial": ["source": source, "ts": firstSpeechTs ?? nowMs(), "text": lastPartial]])
     }
 
     /// Emit whatever has been recognized so far as a segment (if non-empty) and
@@ -283,6 +306,9 @@ final class StreamTranscriber {
         let ts = firstSpeechTs ?? nowMs()
         let oldTask = task
         lastPartial = ""
+        // The segment below supersedes any emitted partial; reset the caption
+        // baseline so the next utterance's first hypothesis emits immediately.
+        lastEmittedPartial = ""
         firstSpeechTs = nil
         gen += 1 // orphan any in-flight callbacks from the old task
         oldTask?.cancel()
@@ -318,6 +344,7 @@ final class StreamTranscriber {
                         self.lastPartial = t
                         self.partialChangedAt = Date()
                         if self.firstSpeechTs == nil { self.firstSpeechTs = nowMs() }
+                        self.maybeEmitPartial()
                     }
                     if result.isFinal {
                         self.rotate()

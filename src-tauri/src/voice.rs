@@ -954,7 +954,8 @@ pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Resu
             }
         };
         if let Err(e) =
-            crate::doubao::stream_hands_free(&key, &resource, corpus, pcm_rx, on_sentence).await
+            crate::doubao::stream_hands_free(&key, &resource, corpus, pcm_rx, |_| {}, on_sentence)
+                .await
         {
             tracing::warn!("doubao hands-free stream failed: {e}");
             let _ = app_s.emit(

@@ -48,8 +48,6 @@ import { toast } from "sonner";
 import {
   api,
   onAppEvent,
-  onUpdateAvailable,
-  onUpdateDownloadProgress,
   onUpdateReady,
   type Screenshot,
 } from "@/lib/tauri";
@@ -2375,71 +2373,6 @@ export default function Home() {
     };
   }, []);
 
-  // Passive "update available" toast: fired only when auto-update is off and a
-  // background check finds a (not-yet-dismissed) newer version. Install applies
-  // on next launch; Ignore remembers this version so it won't re-prompt.
-  const updateToastId = (version: string) => `update-available-${version}`;
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-    onUpdateAvailable((u) => {
-      toast(tt("settings", "update.toast.title", { version: u.version }), {
-        id: updateToastId(u.version),
-        description: tt("settings", "update.toast.body"),
-        duration: Infinity,
-        action: {
-          label: tt("settings", "update.toast.install"),
-          onClick: async () => {
-            const id = toast.loading(tt("settings", "update.installing"));
-            let unlistenProgress: (() => void) | undefined;
-            try {
-              unlistenProgress = await onUpdateDownloadProgress((progress) => {
-                const percent =
-                  progress.total && progress.total > 0
-                    ? Math.max(
-                        0,
-                        Math.min(
-                          100,
-                          Math.round((progress.downloaded / progress.total) * 100),
-                        ),
-                      )
-                    : null;
-                toast.loading(tt("settings", "update.installing"), {
-                  id,
-                  description: percent == null ? undefined : `${percent}%`,
-                });
-              });
-              const staged = await api.installUpdate();
-              if (staged) {
-                toast.success(tt("settings", "update.installed"), { id });
-              } else {
-                // A download was already running; it keeps going and the
-                // sidebar row carries its progress from here.
-                toast.dismiss(id);
-              }
-            } catch {
-              toast.error(tt("settings", "update.failed"), { id });
-            } finally {
-              unlistenProgress?.();
-            }
-          },
-        },
-        cancel: {
-          label: tt("settings", "update.toast.ignore"),
-          onClick: () => {
-            void api.ignoreUpdateVersion(u.version);
-          },
-        },
-      });
-    }).then((u) => {
-      if (cancelled) u();
-      else unlisten = u;
-    });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
   // A downloaded-but-not-yet-applied update. Set when the backend reports the
   // swap is on disk (silent auto-install, or a manual install); drives the
   // sidebar's persistent "Restart to update" button.
@@ -2453,13 +2386,11 @@ export default function Home() {
       .pendingUpdateVersion()
       .then((version) => {
         if (!cancelled && version) {
-          toast.dismiss(updateToastId(version));
           setUpdateReadyVersion(version);
         }
       })
       .catch(() => {});
     onUpdateReady((u) => {
-      toast.dismiss(updateToastId(u.version));
       setUpdateReadyVersion(u.version);
     }).then((u) => {
       if (cancelled) u();

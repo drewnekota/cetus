@@ -977,7 +977,11 @@ function BackendSelect({
         {availableBackends.map((b) => {
           const Icon = b.icon;
           return (
-            <SelectItem key={b.id} value={b.id} className="text-[13px]">
+            <SelectItem
+              key={b.id}
+              value={b.id}
+              className="text-[13px] *:[span]:last:w-full"
+            >
               <Icon className="size-4" />
               <span className="truncate">{b.label}</span>
               <RuntimeShortcutHint backend={b.id} />

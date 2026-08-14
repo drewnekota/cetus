@@ -260,6 +260,9 @@ struct Parsed {
     /// Texts of `definite` utterances in this frame — a completed sentence each
     /// (only present with `show_utterances`, i.e. hands-free).
     sentences: Vec<String>,
+    /// The still-open (non-`definite`) utterance in this frame, if any — the
+    /// live-caption hypothesis for the sentence currently being spoken.
+    interim: Option<String>,
     /// True on the final (last-packet) response.
     last: bool,
 }
@@ -292,6 +295,7 @@ fn parse(data: &[u8]) -> Result<Parsed> {
             error: Some(format!("{code}: {msg}")),
             text: None,
             sentences: Vec::new(),
+            interim: None,
             last: true,
         });
     }
@@ -308,14 +312,21 @@ fn parse(data: &[u8]) -> Result<Parsed> {
         .and_then(|x| x.as_str())
         .map(|s| s.to_string());
     let mut sentences = Vec::new();
+    let mut interim = None;
     if let Some(utts) = v.pointer("/result/utterances").and_then(|x| x.as_array()) {
         for u in utts {
-            if u.get("definite").and_then(|d| d.as_bool()).unwrap_or(false) {
-                if let Some(t) = u.get("text").and_then(|x| x.as_str()) {
-                    let t = t.trim();
-                    if !t.is_empty() {
-                        sentences.push(t.to_string());
-                    }
+            let definite = u.get("definite").and_then(|d| d.as_bool()).unwrap_or(false);
+            if let Some(t) = u.get("text").and_then(|x| x.as_str()) {
+                let t = t.trim();
+                if t.is_empty() {
+                    continue;
+                }
+                if definite {
+                    sentences.push(t.to_string());
+                } else {
+                    // At most one utterance is still open per frame; keep the
+                    // last one seen as the live hypothesis.
+                    interim = Some(t.to_string());
                 }
             }
         }
@@ -325,6 +336,7 @@ fn parse(data: &[u8]) -> Result<Parsed> {
         error: None,
         text,
         sentences,
+        interim,
         last,
     })
 }
@@ -456,14 +468,18 @@ pub async fn stream(
 }
 
 /// Hands-free: stream continuously and call `on_sentence` with each completed
-/// (VAD-`definite`) sentence as it lands, so the caller can insert it live. Runs
-/// until `pcm_rx` closes (the session is toggled off). No replay here — the
-/// sentences already inserted can't be un-typed, so a re-run would duplicate.
+/// (VAD-`definite`) sentence as it lands, so the caller can insert it live.
+/// `on_partial` fires with the still-open sentence's running hypothesis (and
+/// with `""` when a sentence completes without a successor yet) — live-caption
+/// fuel, safe to ignore. Runs until `pcm_rx` closes (the session is toggled
+/// off). No replay here — the sentences already inserted can't be un-typed, so
+/// a re-run would duplicate.
 pub async fn stream_hands_free(
     key: &str,
     resource_id: &str,
     corpus: Corpus,
     pcm_rx: mpsc::Receiver<Vec<u8>>,
+    on_partial: impl Fn(&str) + Send + Sync + 'static,
     on_sentence: impl Fn(&str) + Send + Sync + 'static,
 ) -> Result<()> {
     let (_, err) = run(
@@ -474,7 +490,7 @@ pub async fn stream_hands_free(
         pcm_rx,
         true,
         false,
-        &|_| {},
+        &on_partial,
         &on_sentence,
     )
     .await;
@@ -601,9 +617,21 @@ async fn run_session(
                 for s in &p.sentences {
                     on_sentence(s);
                 }
+                if hands_free {
+                    // Live captions want the CURRENT sentence's hypothesis, not
+                    // the whole-audio text. An empty interim after a definite
+                    // clears the caller's caption line.
+                    match &p.interim {
+                        Some(t) => on_partial(t),
+                        None if !p.sentences.is_empty() => on_partial(""),
+                        None => {}
+                    }
+                }
                 if let Some(t) = p.text {
                     if !t.is_empty() {
-                        on_partial(&t);
+                        if !hands_free {
+                            on_partial(&t);
+                        }
                         if let Ok(mut a) = acc.lock() {
                             *a = t;
                         }

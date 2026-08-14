@@ -18,7 +18,10 @@
 //! macOS 14.2+ — the system audio output via a CoreAudio process tap, each
 //! stream transcribed on-device with SFSpeechRecognizer. Segments land in
 //! SQLite (`meetings` / `meeting_segments`) for the UI and in a rolling JSONL
-//! recall log (read by the `meeting-recall` pi extension) for the agent. When
+//! recall log (read by the `meeting-recall` pi extension) for the agent. Both
+//! engines additionally stream per-utterance partial hypotheses, broadcast as
+//! `meeting-caption` events (Granola-style live captions: hover the recording
+//! pill to watch them settle; see `emit_caption`). When
 //! `save_audio` is on (the default) the helper also encodes each stream to
 //! AAC under `app_data/meetings/<id>/`; with it off no audio touches disk.
 
@@ -126,11 +129,11 @@ fn default_asr_engine() -> String {
     "auto".into()
 }
 fn default_toggle_hotkey() -> String {
-    // Ctrl+Alt+M (⌃⌥M): "M for meeting" without stealing anyone's mute key.
-    // The old defaults — ⌘⇧M on macOS, Ctrl+Shift+M on Windows — are Teams'
-    // mute toggle (and ⌘⇧M is Chrome's profile switcher); a global
-    // registration swallows those exactly while the user is in a call.
-    "Ctrl+Alt+M".into()
+    if cfg!(target_os = "macos") {
+        "Cmd+Shift+M".into()
+    } else {
+        "Ctrl+Shift+M".into()
+    }
 }
 
 impl Default for MeetingSettings {
@@ -153,14 +156,13 @@ pub fn load_settings(store: &Store) -> MeetingSettings {
         Ok(Some(json)) => serde_json::from_str(&json).unwrap_or_default(),
         _ => MeetingSettings::default(),
     };
-    // Migrate the two known legacy defaults (they collide with Teams' mute
-    // shortcut, see default_toggle_hotkey) while preserving every
-    // user-recorded custom binding. This also covers the older Windows builds
-    // that persisted the then-macOS default verbatim.
-    if matches!(
-        settings.toggle_hotkey.as_str(),
-        "Cmd+Shift+M" | "Ctrl+Shift+M"
-    ) {
+    // Migrate the short-lived Ctrl+Alt+M default (and the macOS default that
+    // older Windows builds persisted verbatim) back onto the platform default,
+    // while preserving every user-recorded custom binding.
+    let legacy_default = cfg!(target_os = "macos") && settings.toggle_hotkey == "Ctrl+Alt+M"
+        || !cfg!(target_os = "macos")
+            && matches!(settings.toggle_hotkey.as_str(), "Ctrl+Alt+M" | "Cmd+Shift+M");
+    if legacy_default {
         settings.toggle_hotkey = default_toggle_hotkey();
     }
     settings
@@ -245,7 +247,7 @@ mod helper {
         let bin_dir = app_data.join("bin");
         // Bump the version suffix whenever the embedded Swift changes so cached
         // installs recompile.
-        let bin = bin_dir.join("cetus-meeting-helper-v8");
+        let bin = bin_dir.join("cetus-meeting-helper-v9");
         if bin.exists() {
             return Some(bin);
         }
@@ -594,6 +596,9 @@ fn show_pill(app: &AppHandle) {
     let _ = app.clone().run_on_main_thread(move || {
         if let Some(win) = app.get_webview_window("meeting") {
             if let Ok(ptr) = win.ns_window() {
+                // A previous session may have left the panel expanded (hidden
+                // while hovered) — always present collapsed.
+                crate::panel::resize_keep_top_center(ptr, HUD_COLLAPSED.0, HUD_COLLAPSED.1);
                 // Mirror the voice HUD: position + `present_inactive` only.
                 // Deliberately NOT `win.show()` (= `makeKeyAndOrderFront:`), which
                 // activates cetus even for this non-activating panel.
@@ -657,6 +662,7 @@ async fn run_reader(
                 if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
                     if cloud && mic_pcm.is_none() && system_pcm.is_none() {
                         let (mic, system, tasks) = spawn_cloud_asr(
+                            app.clone(),
                             store.clone(),
                             id.clone(),
                             recall.clone(),
@@ -683,6 +689,13 @@ async fn run_reader(
             } else {
                 mic_pcm.take();
             }
+        } else if let Some(p) = v.get("partial") {
+            // Live-caption hypothesis for the current utterance — HUD-only,
+            // never persisted (the following `segment` is the durable record).
+            let source = p.get("source").and_then(|s| s.as_str()).unwrap_or("mic");
+            let ts = p.get("ts").and_then(|t| t.as_i64()).unwrap_or_else(now_ms);
+            let text = p.get("text").and_then(|t| t.as_str()).unwrap_or("");
+            emit_caption(&app, &id, source, "partial", ts, text);
         } else if let Some(seg) = v.get("segment") {
             let source = seg.get("source").and_then(|s| s.as_str()).unwrap_or("mic");
             let ts = seg
@@ -697,6 +710,7 @@ async fn run_reader(
             if text.is_empty() {
                 continue;
             }
+            emit_caption(&app, &id, source, "final", ts, text);
             if let Err(e) = store.insert_meeting_segment(&id, ts, source, text) {
                 tracing::warn!("meeting: segment insert failed: {e}");
             }
@@ -799,6 +813,7 @@ type CloudAsrChannels = (
 
 #[cfg(target_os = "macos")]
 fn spawn_cloud_asr(
+    app: AppHandle,
     store: Arc<Store>,
     id: String,
     recall: PathBuf,
@@ -821,17 +836,20 @@ fn spawn_cloud_asr(
         let recall = recall.clone();
         let app_hint = app_hint.clone();
         let segments = segments.clone();
+        let app = app.clone();
         tasks.push(tokio::spawn(async move {
             let store_for_sentence = store.clone();
             let id_for_sentence = id.clone();
             let recall_for_sentence = recall.clone();
             let hint_for_sentence = app_hint.clone();
+            let app_for_sentence = app.clone();
             let on_sentence = move |text: &str| {
                 let text = text.trim();
                 if text.is_empty() {
                     return;
                 }
                 let ts = now_ms();
+                emit_caption(&app_for_sentence, &id_for_sentence, source, "final", ts, text);
                 if let Err(e) =
                     store_for_sentence.insert_meeting_segment(&id_for_sentence, ts, source, text)
                 {
@@ -849,11 +867,26 @@ fn spawn_cloud_asr(
                 );
                 segments.fetch_add(1, Ordering::Relaxed);
             };
+            let app_for_partial = app.clone();
+            let id_for_partial = id.clone();
+            // Doubao interims already arrive per server frame (a few per
+            // second) — no extra throttle needed on top.
+            let on_partial = move |text: &str| {
+                emit_caption(
+                    &app_for_partial,
+                    &id_for_partial,
+                    source,
+                    "partial",
+                    now_ms(),
+                    text,
+                );
+            };
             if let Err(e) = crate::doubao::stream_hands_free(
                 &key,
                 &resource,
                 crate::doubao::Corpus::default(),
                 rx,
+                on_partial,
                 on_sentence,
             )
             .await
@@ -962,6 +995,24 @@ async fn summarize(
         if title.is_empty() { None } else { Some(&title) },
     );
     Ok(())
+}
+
+/// Broadcast one live-caption line to the HUD. `kind` is `partial` (whole-text
+/// replace of the in-flight hypothesis for `source`) or `final` (append; also
+/// clears that source's partial). Broadcast, not `emit_to`: the meeting pill is
+/// the consumer today, but the transcript view in Settings listens too, and
+/// broadcast is the pattern that survived the emit_to("main") regression.
+fn emit_caption(app: &AppHandle, id: &str, source: &str, kind: &str, ts: i64, text: &str) {
+    let _ = app.emit(
+        "meeting-caption",
+        json!({
+            "meetingId": id,
+            "source": source,
+            "kind": kind,
+            "ts": ts,
+            "text": text,
+        }),
+    );
 }
 
 /// Broadcast a meeting lifecycle event; the frontend turns these into localized
@@ -1414,6 +1465,41 @@ pub async fn meeting_audio_dir(
     }
     let dir = audio_dir(&state.app_data_dir, &id);
     Ok(dir.is_dir().then(|| dir.to_string_lossy().into_owned()))
+}
+
+/// Pill geometry: collapsed is the bare capsule; expanded adds the live-caption
+/// card below it (Granola-style hover reveal). Sized here, not in the webview —
+/// the panel is non-resizable for the user, and resize + reanchor must be one
+/// main-thread mutation to avoid a visible two-step jump.
+const HUD_COLLAPSED: (f64, f64) = (220.0, 52.0);
+const HUD_EXPANDED: (f64, f64) = (420.0, 320.0);
+
+/// Grow/shrink the meeting pill window in place, keeping its top-center anchor
+/// (the capsule must not move under the cursor mid-hover).
+#[tauri::command]
+pub async fn meeting_hud_set_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, expanded);
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let (w, h) = if expanded {
+            HUD_EXPANDED
+        } else {
+            HUD_COLLAPSED
+        };
+        app.clone()
+            .run_on_main_thread(move || {
+                if let Some(win) = app.get_webview_window("meeting") {
+                    if let Ok(ptr) = win.ns_window() {
+                        crate::panel::resize_keep_top_center(ptr, w, h);
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]

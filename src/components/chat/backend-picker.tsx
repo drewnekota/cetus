@@ -594,7 +594,9 @@ export function BackendPicker({
               <SelectItem
                 key={b.id}
                 value={b.id}
-                className="text-xs"
+                // The shortcut hint is `ml-auto`; Radix wraps the children in a
+                // shrink-to-fit span, so it needs to span the row to right-align.
+                className="text-xs *:[span]:last:w-full"
                 data-testid={`runtime-option-${b.id}`}
               >
                 <Icon className="size-4" />

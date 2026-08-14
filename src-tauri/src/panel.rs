@@ -324,6 +324,32 @@ pub fn top_center_on_mouse_screen(ns_window: *mut c_void) {
     }
 }
 
+/// Resize `ns_window` to `width`×`height` points, keeping its top edge and
+/// horizontal center where they are — the meeting pill's hover-expand: the
+/// caption card grows downward while the capsule stays put under the cursor.
+/// Anchored to the window's own frame (not the mouse screen) so a pill the
+/// user dragged elsewhere expands in place.
+pub fn resize_keep_top_center(ns_window: *mut c_void, width: f64, height: f64) {
+    if ns_window.is_null() {
+        return;
+    }
+    let obj = ns_window as *mut AnyObject;
+    unsafe {
+        let window: &AnyObject = &*obj;
+        let frame: NSRect = msg_send![window, frame];
+        let center_x = frame.origin.x + frame.size.width / 2.0;
+        let top = frame.origin.y + frame.size.height;
+        let rect = NSRect {
+            origin: NSPoint {
+                x: center_x - width / 2.0,
+                y: top - height,
+            },
+            size: NSSize { width, height },
+        };
+        let _: () = msg_send![window, setFrame: rect, display: true];
+    }
+}
+
 /// `visibleFrame` (excludes the menu bar and Dock) of the screen that currently
 /// holds the mouse cursor. Containment is tested against the full frame — the
 /// cursor can legitimately sit in the menu bar.

@@ -83,6 +83,7 @@ import {
 import {
   api,
   onAppEvent,
+  onMeetingCaption,
   onUpdateDownloadProgress,
   onUpdateReady,
   onPiEvent,
@@ -2716,6 +2717,7 @@ function MeetingTranscriptPanel({
 }) {
   const { t } = useTranslation("meeting");
   const [segments, setSegments] = useState<MeetingSegment[]>([]);
+  const [partials, setPartials] = useState<Record<string, MeetingSegment>>({});
   const [query, setQuery] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -2729,6 +2731,34 @@ function MeetingTranscriptPanel({
     const timer = setInterval(refresh, 1200);
     return () => clearInterval(timer);
   }, [live, refresh]);
+
+  // Live sessions also stream the in-flight hypothesis per source — rendered
+  // as a ghost bubble below the settled ones, replaced in place. A `final`
+  // clears its source's ghost (the settled row arrives via the next poll).
+  useEffect(() => {
+    if (!live) {
+      setPartials({});
+      return;
+    }
+    let unlisten: (() => void) | undefined;
+    onMeetingCaption((c) => {
+      if (c.meetingId !== meetingId) return;
+      setPartials((p) => {
+        if (c.kind === "final" || !c.text.trim()) {
+          if (!(c.source in p)) return p;
+          const next = { ...p };
+          delete next[c.source];
+          return next;
+        }
+        return {
+          ...p,
+          [c.source]: { ts: c.ts, source: c.source, text: c.text },
+        };
+      });
+      if (c.kind === "final") refresh();
+    }).then((u) => (unlisten = u));
+    return () => unlisten?.();
+  }, [live, meetingId, refresh]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -2831,6 +2861,30 @@ function MeetingTranscriptPanel({
             );
           })
         )}
+        {live &&
+          !query.trim() &&
+          Object.values(partials)
+            .sort((a, b) => a.ts - b.ts)
+            .map((partial) => {
+              const mine = partial.source === "mic";
+              return (
+                <div
+                  key={`partial-${partial.source}`}
+                  className={cn("flex", mine ? "justify-end" : "justify-start")}
+                >
+                  <p
+                    className={cn(
+                      "max-w-[86%] rounded-2xl px-3 py-2 text-left text-[13px] leading-relaxed italic opacity-60",
+                      mine
+                        ? "rounded-br-md bg-[#ddefd7] text-[#173819] dark:bg-emerald-900/50 dark:text-emerald-50"
+                        : "rounded-bl-md bg-white text-foreground dark:bg-white/[0.08]",
+                    )}
+                  >
+                    {partial.text}
+                  </p>
+                </div>
+              );
+            })}
       </div>
     </div>
   );
