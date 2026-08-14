@@ -4,7 +4,7 @@
 
 <p align="center"><strong>把你惯用的 agent runtime，变成一个常驻桌面的智能助手。</strong></p>
 
-<p align="center">Codex、Claude Code 或内置 runtime 仍是核心；Cetus 在它们之外补上桌面助手这一层：从任何 app 随时唤起、定时安排工作，并理解你在屏幕上看过的内容。</p>
+<p align="center">Codex、Claude Code、DeepSeek Harness 或内置 runtime 仍是核心；Cetus 在它们之外补上桌面助手这一层：从任何 app 随时唤起、定时安排工作，并理解你在屏幕上看过的内容。</p>
 
 <p align="center"><strong>Quick Launcher</strong> · <strong>Automations</strong> · <strong>Global Quick Reply</strong> · <strong>Screen Context</strong></p>
 
@@ -63,10 +63,10 @@
 
 1. [下载最新版本](https://github.com/drewnekota/cetus/releases/latest)。
 2. 打开 DMG，将 Cetus 移入 Applications。
-3. 使用 Cetus 内置 runtime，或选择本机已经安装并登录的 `claude` / `codex` CLI。
+3. 使用 Cetus 内置 runtime，或选择本机已经安装并登录的 `claude` / `codex` / `dsh`（DeepSeek Harness）CLI。
 4. 选择一个 workspace，交给 agent 第一个任务。
 
-Claude Code 和 Codex 会复用现有 CLI 登录，不需要再配置一个账号。从源码构建请参阅[参与开发](#参与开发)。
+Claude Code、Codex 和 DeepSeek Harness 会复用现有 CLI 登录，不需要再配置一个账号。从源码构建请参阅[参与开发](#参与开发)。
 
 > **早期版本：** Cetus 仍在快速开发。如果遇到问题或缺少需要的工作流，欢迎[提交 Issue](https://github.com/drewnekota/cetus/issues)。
 
@@ -74,7 +74,7 @@ Claude Code 和 Codex 会复用现有 CLI 登录，不需要再配置一个账�
 
 ### 继续用你已经信任的 runtime
 
-内置 pi runtime、**Claude Code** 或 **Codex** 都可以直接使用，并沿用你现有的模型、工具和登录状态。Cetus 把不同 runtime 的事件转换成一致的桌面工作流，同时让对话 context 和后台终端跨回复继续存在。
+内置 pi runtime、**Claude Code**、**Codex** 或 **DeepSeek Harness** 都可以直接使用，并沿用你现有的模型、工具和登录状态。Cetus 把不同 runtime 的事件转换成一致的桌面工作流，同时让对话 context 和后台终端跨回复继续存在。
 
 选择 **workspace** 和 runtime，可选附上文件或截图，然后发送。并行处理代码任务时，还可以为每个对话启用独立 git worktree。
 
@@ -127,7 +127,7 @@ Claude Code 和 Codex 会复用现有 CLI 登录，不需要再配置一个账�
 
 ## 为什么做 Cetus
 
-Codex、Claude Code 这样的通用 agent 已经足够强大，Cetus 并不打算取代它们。它补上那些不适合待在终端里的桌面助手能力：随时可用的入口、来自 Mac 的环境 context、跨 session 的连续性、后台调度，以及统一审阅完成结果的地方。
+Codex、Claude Code、DeepSeek Harness 这样的通用 agent 已经足够强大，Cetus 并不打算取代它们。它补上那些不适合待在终端里的桌面助手能力：随时可用的入口、来自 Mac 的环境 context、跨 session 的连续性、后台调度，以及统一审阅完成结果的地方。
 
 Runtime 继续负责智能与执行，Cetus 则成为包在它周围的 assistant layer。你可以为每项任务选择合适的 runtime，只加入自己愿意提供的 context，并让那些跨越数小时甚至数天的工作始终可见、可检查。
 
@@ -155,7 +155,7 @@ Runtime 继续负责智能与执行，Cetus 则成为包在它周围的 assistan
 - **Rust** stable（`rustc`、`cargo`）
 - **Tauri** 前置依赖：<https://v2.tauri.app/start/prerequisites/>
 - 一个 **`DEEPSEEK_API_KEY`**（或你选用的供应商；pi 会自动读取 `ANTHROPIC_API_KEY`、`OPENAI_API_KEY` 等）
-- **可选**：本机安装并登录过 **Claude Code**（`claude`）和/或 **Codex**（`codex`）CLI，即可把它们用作对话 runtime —— Cetus 复用其现有登录，无需额外配置
+- **可选**：本机安装并登录过 **Claude Code**（`claude`）、**Codex**（`codex`）和/或 **DeepSeek Harness**（`dsh`）CLI，即可把它们用作对话 runtime —— Cetus 复用其现有登录，无需额外配置
 
 ### 首次配置
 
@@ -225,7 +225,7 @@ pnpm tauri build
 - **流式**：pi 发出 `agent_start`、带 `assistantMessageEvent` 增量的 `message_update`，以及 `tool_execution_*` 事件。前端的 `chatReducer` 把这些折叠成按 `contentIndex` 索引的稳定 `RenderedMessage[]`，并用一张 `toolCallId → block` 旁表来路由执行更新。
 - **分帧**：严格 LF 的 JSONL。`tauri-plugin-shell` 以任意字节块投递 stdout，所以读取端维护自己的累加缓冲，按每个 `\n` 吐出一行，并剥掉可选的 `\r`。按 Unicode 分隔符切分的通用行读取器（Node `readline`）不符合规范。
 - **Sidecar 打包**：`src-tauri/binaries/pi-<target>` 打进 `.app/Contents/Resources/`。`PI_BIN` 环境变量是迭代 pi 的开发后门。
-- **CLI runtime**：跑在 **Claude Code** / **Codex** 上的对话完全绕过 pi RPC —— `cetus-bridge::cli_agent` 为每个对话保持 Claude streaming session 或 Codex app-server thread，由带单测的 `EventTranslator` 把事件翻译成 `chatReducer` 已经在消费的 PiEvent 流。上下文与后台终端通过 vendor session/thread 跨轮延续；可选的 per-conversation git worktree 用于隔离改动。
+- **CLI runtime**：跑在 **Claude Code** / **Codex** / **DeepSeek Harness** 上的对话完全绕过 pi RPC —— `cetus-bridge::cli_agent` 为每个对话保持 Claude（或 DeepSeek Harness）streaming session 或 Codex app-server thread，由带单测的 `EventTranslator` 把事件翻译成 `chatReducer` 已经在消费的 PiEvent 流。上下文与后台终端通过 vendor session/thread 跨轮延续；可选的 per-conversation git worktree 用于隔离改动。
 - **Extension UI**：当某个 pi extension 调用 `ctx.ui.select()` 等，pi 会通过事件流发出 `extension_ui_request`。前端 `DialogHost` 渲染一个对话框，并通过 `extension_ui_respond` Tauri 命令回复。
 
 ## 可复用的 bridge 包

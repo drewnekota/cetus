@@ -4,7 +4,7 @@
 
 <p align="center"><strong>Turn your favorite agent runtime into an always-on desktop assistant.</strong></p>
 
-<p align="center">Keep Codex, Claude Code, or the built-in runtime at the core. Cetus adds the desktop layer around it: summon it over any app, schedule work for later, and give it context from what has been on your screen.</p>
+<p align="center">Keep Codex, Claude Code, DeepSeek Harness, or the built-in runtime at the core. Cetus adds the desktop layer around it: summon it over any app, schedule work for later, and give it context from what has been on your screen.</p>
 
 <p align="center"><strong>Quick Launcher</strong> · <strong>Automations</strong> · <strong>Global Quick Reply</strong> · <strong>Screen Context</strong></p>
 
@@ -63,10 +63,10 @@ The prebuilt app supports **Apple Silicon** and **macOS 13 or later**.
 
 1. [Download the latest release](https://github.com/drewnekota/cetus/releases/latest).
 2. Open the DMG and move Cetus to Applications.
-3. Use the built-in Cetus runtime, or select an already installed and signed-in `claude` or `codex` CLI.
+3. Use the built-in Cetus runtime, or select an already installed and signed-in `claude`, `codex`, or `dsh` (DeepSeek Harness) CLI.
 4. Choose a workspace and give the agent its first task.
 
-Claude Code and Codex reuse their existing CLI login — there is no second account to configure. Building from source is documented under [Development](#development).
+Claude Code, Codex, and DeepSeek Harness reuse their existing CLI login — there is no second account to configure. Building from source is documented under [Development](#development).
 
 > **Early release:** Cetus is under active development. Please [open an issue](https://github.com/drewnekota/cetus/issues) if something breaks or if a workflow is missing.
 
@@ -74,7 +74,7 @@ Claude Code and Codex reuse their existing CLI login — there is no second acco
 
 ### Keep the runtime you already trust
 
-Use the built-in pi runtime, **Claude Code**, or **Codex** with the models, tools, and login you already have. Cetus translates each runtime into the same desktop workflow while preserving conversation context and background terminals across replies.
+Use the built-in pi runtime, **Claude Code**, **Codex**, or **DeepSeek Harness** with the models, tools, and login you already have. Cetus translates each runtime into the same desktop workflow while preserving conversation context and background terminals across replies.
 
 Pick a **workspace**, choose a runtime, optionally attach files or a screenshot, and send. For parallel coding tasks, enable per-conversation git worktrees so each agent edits an isolated checkout.
 
@@ -127,7 +127,7 @@ Each capability is opt-in. **Computer & Browser control** lets the agent drive y
 
 ## Why Cetus
 
-General-purpose agents such as Codex and Claude Code are already powerful. Cetus does not try to replace them. It gives them the parts of a desktop assistant that do not belong inside a terminal: an always-available entry point, ambient context from your Mac, continuity across sessions, background scheduling, and a place to review completed work.
+General-purpose agents such as Codex, Claude Code, and DeepSeek Harness are already powerful. Cetus does not try to replace them. It gives them the parts of a desktop assistant that do not belong inside a terminal: an always-available entry point, ambient context from your Mac, continuity across sessions, background scheduling, and a place to review completed work.
 
 The runtime remains the intelligence and execution engine. Cetus is the assistant layer around it. Choose the runtime for each task, add only the context you want, and make work that spans hours or days visible and inspectable.
 
@@ -155,7 +155,7 @@ The three factors describe a single moment. What makes an agent useful over time
 - **Rust** stable (`rustc`, `cargo`)
 - **Tauri** prerequisites: <https://v2.tauri.app/start/prerequisites/>
 - A **`DEEPSEEK_API_KEY`** (or your provider of choice; pi auto-picks up `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)
-- **Optional**: the **Claude Code** (`claude`) and/or **Codex** (`codex`) CLIs installed and logged in, if you want them as conversation runtimes — Cetus reuses their existing login, no extra setup
+- **Optional**: the **Claude Code** (`claude`), **Codex** (`codex`), and/or **DeepSeek Harness** (`dsh`) CLIs installed and logged in, if you want them as conversation runtimes — Cetus reuses their existing login, no extra setup
 
 ### First-time setup
 
@@ -225,7 +225,7 @@ Outputs `.app` / `.dmg` on macOS. A real multi-size icon set is required for `ta
 - **Streaming**: pi emits `agent_start`, `message_update` with `assistantMessageEvent` deltas, and `tool_execution_*` events. The frontend `chatReducer` folds these into stable `RenderedMessage[]` indexed by `contentIndex`, with a `toolCallId → block` side-table to route execution updates.
 - **Framing**: strict-LF JSONL. `tauri-plugin-shell` delivers stdout in arbitrary byte chunks, so the reader maintains its own accumulator and emits one line per `\n`, stripping optional `\r`. Generic line readers that split on Unicode separators (Node `readline`) are non-compliant.
 - **Sidecar packaging**: `src-tauri/binaries/pi-<target>` ships inside `.app/Contents/Resources/`. `PI_BIN` env var is the dev backdoor for iterating on pi.
-- **CLI runtimes**: conversations on **Claude Code** / **Codex** bypass the pi RPC entirely — `cetus-bridge::cli_agent` keeps a conversation-scoped Claude streaming session or Codex app-server thread alive, and a unit-tested `EventTranslator` maps their events into the same PiEvent stream `chatReducer` already consumes. Context and background terminals persist across turns via the vendor session/thread; optional per-conversation git worktrees isolate edits.
+- **CLI runtimes**: conversations on **Claude Code** / **Codex** / **DeepSeek Harness** bypass the pi RPC entirely — `cetus-bridge::cli_agent` keeps a conversation-scoped Claude (or DeepSeek Harness) streaming session or Codex app-server thread alive, and a unit-tested `EventTranslator` maps their events into the same PiEvent stream `chatReducer` already consumes. Context and background terminals persist across turns via the vendor session/thread; optional per-conversation git worktrees isolate edits.
 - **Extension UI**: when a pi extension calls `ctx.ui.select()` etc., pi sends `extension_ui_request` over the event stream. The frontend `DialogHost` renders a dialog and replies via the `extension_ui_respond` Tauri command.
 - **Bridge**: Cetus also intercepts known extension host tunnels and routes them to native handlers. See [docs/bridge.md](docs/bridge.md) for the protocol, security boundary, and open-source extraction plan.
 
