@@ -606,6 +606,7 @@ const RUNTIME_COMMANDS: Record<BackendId, string> = {
   opencode: "opencode acp",
   grok: "grok agent stdio",
   kimi: "kimi acp",
+  dsh: "dsh web + Cetus bridge",
 };
 
 function runtimeEnabledPatch(
@@ -623,6 +624,8 @@ function runtimeEnabledPatch(
       return { grokEnabled: enabled };
     case "kimi":
       return { kimiEnabled: enabled };
+    case "dsh":
+      return { dshEnabled: enabled };
     case "pi":
       return {};
   }

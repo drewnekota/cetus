@@ -98,6 +98,16 @@ export function CliControlCard({ convId }: { convId: string }) {
     );
   }
 
+  if (current.source === "dsh" && current.requestKind === "request_user_input") {
+    return (
+      <CodexQuestionCard
+        key={current.requestId}
+        request={current}
+        onSubmit={(answers) => respond({ answers })}
+      />
+    );
+  }
+
   if (current.source === "acp") {
     return (
       <ApprovalCard
@@ -141,6 +151,7 @@ interface CodexQuestion {
   question: string;
   isOther?: boolean;
   isSecret?: boolean;
+  multiSelect?: boolean;
   options?: { label: string; description?: string }[] | null;
 }
 
@@ -281,6 +292,13 @@ function CodexQuestionCard({
   }
 
   function choose(label: string) {
+    if (q.multiSelect) {
+      const current = new Set(answers[q.id] ?? []);
+      if (current.has(label)) current.delete(label);
+      else current.add(label);
+      setAnswers({ ...answers, [q.id]: [...current] });
+      return;
+    }
     const next = { ...answers, [q.id]: [label] };
     setAnswers(next);
     if (isLast) finish(next);
@@ -292,8 +310,9 @@ function CodexQuestionCard({
 
   function advanceWithText() {
     const value = other.trim();
-    if (!value) return;
-    const next = { ...answers, [q.id]: [value] };
+    const combined = [...(answers[q.id] ?? []), ...(value ? [value] : [])];
+    if (!combined.length) return;
+    const next = { ...answers, [q.id]: combined };
     setAnswers(next);
     if (isLast) finish(next);
     else {
@@ -328,7 +347,10 @@ function CodexQuestionCard({
               key={option.label}
               type="button"
               onClick={() => choose(option.label)}
-              className="rounded-lg border border-border px-2.5 py-2 text-left text-xs transition-colors hover:border-primary/50 hover:bg-primary/5"
+              className={cn(
+                "rounded-lg border border-border px-2.5 py-2 text-left text-xs transition-colors hover:border-primary/50 hover:bg-primary/5",
+                selected.includes(option.label) && "border-primary/60 bg-primary/10",
+              )}
             >
               <span className="font-medium">{option.label}</span>
               {option.description && <span className="mt-0.5 block text-[11px] text-muted-foreground">{option.description}</span>}

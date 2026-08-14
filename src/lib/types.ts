@@ -217,7 +217,8 @@ export type BackendId =
   | "codex"
   | "opencode"
   | "grok"
-  | "kimi";
+  | "kimi"
+  | "dsh";
 
 /** Whether a backend supports sending a message while a turn is running.
  *  `pi` steers over its RPC, claude-code over the turn's stdin, and codex
@@ -251,7 +252,7 @@ export interface CliAskQuestion {
 export interface CliControlRequest {
   type: "cli_control_request";
   requestId: string | number;
-  source?: "claude-code" | "codex" | "acp";
+  source?: "claude-code" | "codex" | "acp" | "dsh";
   requestKind?: "request_user_input" | "mcp_elicitation";
   toolName: string;
   input: Record<string, unknown> & { questions?: CliAskQuestion[] };
@@ -329,6 +330,7 @@ export interface CliAgentSettings {
   opencodeEnabled: boolean;
   grokEnabled: boolean;
   kimiEnabled: boolean;
+  dshEnabled: boolean;
   /** Picker order. Unknown ids are discarded and newly-added runtimes append. */
   runtimeOrder: BackendId[];
 }

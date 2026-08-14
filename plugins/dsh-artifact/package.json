@@ -1,0 +1,27 @@
+{
+  "name": "@dsh-external/dsh-artifact",
+  "version": "0.1.0",
+  "description": "dsh 的文件交付协议：send_artifact 工具让模型把产出文件正式交付给客户端——任何消费 events.mux 的前端（桌面壳、IM 机器人、Web）都能从 tool/result 的 meta 里拿到结构化的 artifact 描述并各自呈现",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["lib"],
+  "license": "BSD-3-Clause",
+  "engines": { "dsh": ">=0.0.1" },
+  "dshx": {
+    "contributes": { "tools": ["send_artifact"], "skills": [] }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-system-prompt": "^0.0.1",
+    "@deepseek-ai/dsh-tools": "^0.0.1",
+    "cordis": "^4.0.0-rc.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

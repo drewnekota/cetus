@@ -127,8 +127,8 @@ async fn bundled_pi_sidecar_speaks_the_protocol_cetus_assumes() {
         )],
         Some("e2e".to_string()),
         RuntimeConfig {
-            append_system_prompt: "You are cetus. Follow instructions exactly and keep replies short."
-                .to_string(),
+            append_system_prompt:
+                "You are cetus. Follow instructions exactly and keep replies short.".to_string(),
             ..Default::default()
         },
     )
@@ -137,7 +137,10 @@ async fn bundled_pi_sidecar_speaks_the_protocol_cetus_assumes() {
     // --- handshake + session -------------------------------------------------
     let session_file = pi.new_session().await.expect("new_session");
     assert!(
-        Path::new(&session_file).parent().map(Path::exists).unwrap_or(false),
+        Path::new(&session_file)
+            .parent()
+            .map(Path::exists)
+            .unwrap_or(false),
         "session file lives in the session dir we passed: {session_file}"
     );
 
@@ -157,7 +160,11 @@ async fn bundled_pi_sidecar_speaks_the_protocol_cetus_assumes() {
     // `set_model` included: pi ≥0.82 drops unauthenticated providers from its
     // registry, so without a key it answers "Model not found" for a model that
     // is very much bundled (see `set_model_without_a_credential_...` below).
-    if std::env::var("DEEPSEEK_API_KEY").ok().filter(|k| !k.is_empty()).is_none() {
+    if std::env::var("DEEPSEEK_API_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
+        .is_none()
+    {
         eprintln!("skipping the model half: DEEPSEEK_API_KEY is not set");
         let _ = std::fs::remove_dir_all(&root);
         return;
@@ -184,32 +191,57 @@ async fn bundled_pi_sidecar_speaks_the_protocol_cetus_assumes() {
 
     let events = sink.0.lock().unwrap().clone();
     let types = sink.types();
-    let ty = |e: &Value| e.get("type").and_then(Value::as_str).unwrap_or("").to_string();
+    let ty = |e: &Value| {
+        e.get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
 
     let ext_errors: Vec<String> = events
         .iter()
         .filter(|e| ty(e) == "extension_error")
         .map(|e| e.to_string())
         .collect();
-    assert!(ext_errors.is_empty(), "extensions failed to load: {ext_errors:?}");
+    assert!(
+        ext_errors.is_empty(),
+        "extensions failed to load: {ext_errors:?}"
+    );
 
     let tools: Vec<String> = events
         .iter()
         .filter(|e| ty(e) == "tool_execution_end")
-        .filter_map(|e| e.get("toolName").and_then(Value::as_str).map(str::to_string))
+        .filter_map(|e| {
+            e.get("toolName")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
         .collect();
-    assert!(tools.contains(&"skill_search".to_string()), "skill_search ran; saw {tools:?}");
+    assert!(
+        tools.contains(&"skill_search".to_string()),
+        "skill_search ran; saw {tools:?}"
+    );
     // The lazy skill is loaded with pi's BUILT-IN read tool — cetus's old
     // `skill_read` reimplementation is gone, so a regression here means the
     // migration silently stopped working.
-    assert!(tools.contains(&"read".to_string()), "native read loaded the SKILL.md; saw {tools:?}");
-    assert!(!tools.contains(&"skill_read".to_string()), "skill_read must not come back");
+    assert!(
+        tools.contains(&"read".to_string()),
+        "native read loaded the SKILL.md; saw {tools:?}"
+    );
+    assert!(
+        !tools.contains(&"skill_read".to_string()),
+        "skill_read must not come back"
+    );
 
     let answer: String = events
         .iter()
         .filter(|e| ty(e) == "message_end")
         .filter(|e| e.pointer("/message/role").and_then(Value::as_str) == Some("assistant"))
-        .filter_map(|e| e.pointer("/message/content").and_then(Value::as_array).cloned())
+        .filter_map(|e| {
+            e.pointer("/message/content")
+                .and_then(Value::as_array)
+                .cloned()
+        })
         .flatten()
         .filter_map(|b| b.get("text").and_then(Value::as_str).map(str::to_string))
         .collect::<Vec<_>>()
@@ -222,7 +254,10 @@ async fn bundled_pi_sidecar_speaks_the_protocol_cetus_assumes() {
     let end = types.iter().rposition(|t| t == "agent_end");
     let settled = types.iter().rposition(|t| t == "agent_settled");
     assert!(end.is_some(), "agent_end emitted; saw {types:?}");
-    assert!(settled > end, "agent_settled follows agent_end; saw {types:?}");
+    assert!(
+        settled > end,
+        "agent_settled follows agent_end; saw {types:?}"
+    );
 
     let _ = std::fs::remove_dir_all(&root);
 }

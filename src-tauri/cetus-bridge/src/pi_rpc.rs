@@ -336,7 +336,9 @@ impl PiRpc {
         let mut data = resp.get("data").cloned().unwrap_or(Value::Null);
         if let (Some(remote), Some(path)) = (
             &self.remote,
-            data.get("sessionFile").and_then(|v| v.as_str()).map(String::from),
+            data.get("sessionFile")
+                .and_then(|v| v.as_str())
+                .map(String::from),
         ) {
             let local = crate::remote::local_session_path(remote, &path);
             if let Some(obj) = data.as_object_mut() {
@@ -599,7 +601,10 @@ fn spawn_process(
             crate::remote::shell_word(&remote.workspace.path),
             remote_script_parts.join(" ")
         );
-        command.args(crate::remote::remote_command_args(&remote.workspace, &script));
+        command.args(crate::remote::remote_command_args(
+            &remote.workspace,
+            &script,
+        ));
     } else {
         command.current_dir(cwd);
         for (k, v) in extra_env {
@@ -616,12 +621,13 @@ fn spawn_process(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .with_context(|| match &remote {
-            Some(remote) => format!("failed to spawn remote pi via ssh {}", remote.workspace.target),
-            None => format!("failed to spawn pi at {}", bin.display()),
-        })?;
+    let mut child = command.spawn().with_context(|| match &remote {
+        Some(remote) => format!(
+            "failed to spawn remote pi via ssh {}",
+            remote.workspace.target
+        ),
+        None => format!("failed to spawn pi at {}", bin.display()),
+    })?;
 
     let stdin = child.stdin.take().context("pi stdin missing")?;
     let stdout = child.stdout.take().context("pi stdout missing")?;

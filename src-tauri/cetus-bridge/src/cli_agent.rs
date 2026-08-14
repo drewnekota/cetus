@@ -37,6 +37,1262 @@ pub enum CliBackend {
     OpenCode,
     Grok,
     Kimi,
+    Dsh,
+}
+// ===========================================================================
+// DSH backend: one shared `dsh web` host process with the
+// companion bridge plugin mounted, one dsh session per conversation, driven
+// over the bridge's HTTP + SSE. Reuses `AcpSessionHandle` as the command
+// surface so the app-side session map, kill paths, and dispatch shape are
+// identical to the ACP runtimes.
+// Bridge protocol and adapter design adapted from william-jin-cmu/dsh-companion
+// (MIT): https://github.com/william-jin-cmu/dsh-companion
+// ===========================================================================
+
+struct DshHost {
+    base: String,
+    token: String,
+    client: reqwest::Client,
+    routes: std::sync::Mutex<
+        std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<Value>>,
+    >,
+}
+
+static DSH_HOST: tokio::sync::Mutex<Option<std::sync::Arc<DshHost>>> =
+    tokio::sync::Mutex::const_new(None);
+
+/// Future type for companion reverse-RPC handlers (bridge tools → app).
+pub type CompanionRpcFuture = futures_util::future::BoxFuture<'static, Result<Value, String>>;
+type CompanionRpcHandler =
+    std::sync::Arc<dyn Fn(String, Value) -> CompanionRpcFuture + Send + Sync>;
+static DSH_COMPANION_RPC: std::sync::OnceLock<CompanionRpcHandler> = std::sync::OnceLock::new();
+
+/// Register the app-side handler for bridge tool requests (automation.create
+/// etc.). Call once at startup, before the first dsh conversation.
+pub fn set_dsh_companion_rpc_handler(
+    handler: std::sync::Arc<dyn Fn(String, Value) -> CompanionRpcFuture + Send + Sync>,
+) {
+    let _ = DSH_COMPANION_RPC.set(handler);
+}
+
+/// PID of the spawned `dsh web` host, for process-group teardown at app exit.
+static DSH_HOST_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Stop the dsh host's whole process tree. Call from the app's exit path.
+pub fn dsh_shutdown_host() {
+    let pid = DSH_HOST_PID.swap(0, std::sync::atomic::Ordering::SeqCst);
+    if pid != 0 {
+        #[cfg(unix)]
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &format!("-{pid}")])
+            .status();
+        #[cfg(windows)]
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status();
+    }
+}
+
+fn dsh_free_port() -> Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    Ok(listener.local_addr()?.port())
+}
+
+fn dsh_random_token() -> String {
+    use std::io::Read;
+    let mut bytes = [0u8; 16];
+    if std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut bytes))
+        .is_err()
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        bytes[..8].copy_from_slice(&now.as_nanos().to_le_bytes()[..8]);
+    }
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+const DSH_BRIDGE_JS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../dsh-bridge/lib/index.js"
+));
+const DSH_BRIDGE_PACKAGE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../dsh-bridge/package.json"
+));
+const DSH_VISION_PACKAGE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../plugins/dsh-vision/package.json"
+));
+const DSH_VISION_INDEX: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../plugins/dsh-vision/lib/index.js"
+));
+const DSH_VISION_VLM: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../plugins/dsh-vision/lib/vlm.js"
+));
+const DSH_ARTIFACT_PACKAGE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../plugins/dsh-artifact/package.json"
+));
+const DSH_ARTIFACT_INDEX: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../plugins/dsh-artifact/lib/index.js"
+));
+
+fn dsh_home() -> std::path::PathBuf {
+    std::env::var("DSH_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".dsh")
+        })
+}
+
+/// Materialize the embedded runtime plugins under DSH_HOME. Embedding keeps
+/// packaged Cetus builds independent of source-tree paths and makes upgrades
+/// atomic at the individual-file level.
+fn dsh_materialize_runtime() -> Result<std::path::PathBuf> {
+    let root = dsh_home().join("cetus-runtime");
+    let files = [
+        ("bridge/package.json", DSH_BRIDGE_PACKAGE),
+        ("bridge/lib/index.js", DSH_BRIDGE_JS),
+        ("plugins/dsh-vision/package.json", DSH_VISION_PACKAGE),
+        ("plugins/dsh-vision/lib/index.js", DSH_VISION_INDEX),
+        ("plugins/dsh-vision/lib/vlm.js", DSH_VISION_VLM),
+        ("plugins/dsh-artifact/package.json", DSH_ARTIFACT_PACKAGE),
+        ("plugins/dsh-artifact/lib/index.js", DSH_ARTIFACT_INDEX),
+    ];
+    for (relative, contents) in files {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(contents) {
+            std::fs::write(path, contents)?;
+        }
+    }
+    Ok(root)
+}
+
+/// Companion-vendored plugins shipped alongside the bridge. Each mounts by id
+/// unless the user's config already mentions that id (their copy wins).
+const VENDORED_PLUGINS: &[&str] = &["dsh-vision", "dsh-artifact"];
+
+/// Host packages a vendored plugin may declare as peerDependencies, mapped to
+/// checkout paths for the marisa#2 symlink workaround.
+const DSH_HOST_PACKAGES: &[(&str, &str)] = &[
+    ("@deepseek-ai/cordis", "vendor/cordis"),
+    ("cordis", "vendor/cordis"),
+    ("cosmokit", "vendor/cosmokit"),
+    ("schemastery", "vendor/schemastery"),
+    ("@deepseek-ai/dsh-tools", "packages/core/tools"),
+    (
+        "@deepseek-ai/dsh-system-prompt",
+        "packages/core/system-prompt",
+    ),
+    ("@deepseek-ai/dsh-host-apiproxy", "packages/host/apiproxy"),
+];
+
+fn dsh_install_from_path() -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let launcher = std::env::split_paths(&path)
+        .flat_map(|dir| ["dsh", "dsh.cmd", "dsh.exe"].map(move |name| dir.join(name)))
+        .find(|candidate| candidate.is_file())?;
+    let real = std::fs::canonicalize(launcher).ok()?;
+    let mut cursor = real.as_path();
+    let mut package_root = None;
+    while let Some(parent) = cursor.parent() {
+        let is_checkout = parent.join("packages").is_dir() && parent.join("apps").is_dir();
+        let is_package = std::fs::read_to_string(parent.join("package.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|json| json.get("name").and_then(Value::as_str).map(str::to_string))
+            .is_some_and(|name| name == "@deepseek-ai/dsh");
+        if is_checkout {
+            return Some(parent.to_path_buf());
+        }
+        if is_package {
+            package_root.get_or_insert_with(|| parent.to_path_buf());
+        }
+        cursor = parent;
+    }
+    package_root
+}
+
+/// marisa#2 workaround for a vendored plugin dir: link declared host packages.
+fn dsh_link_host_packages(plugin_dir: &std::path::Path) {
+    let Some(install) = dsh_install_from_path() else {
+        return;
+    };
+    let Ok(text) = std::fs::read_to_string(plugin_dir.join("package.json")) else {
+        return;
+    };
+    let Ok(package) = serde_json::from_str::<Value>(&text) else {
+        return;
+    };
+    let names = package
+        .get("peerDependencies")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|object| object.keys())
+        .chain(
+            package
+                .get("dependencies")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flat_map(|object| object.keys()),
+        );
+    for name in names {
+        if let Some((_, rel)) = DSH_HOST_PACKAGES.iter().find(|(known, _)| known == name) {
+            let checkout_source = install.join(rel);
+            let package_source = install.join("node_modules").join(name);
+            let source = if checkout_source.exists() {
+                checkout_source
+            } else {
+                package_source
+            };
+            let link = plugin_dir.join("node_modules").join(name);
+            if source.exists() && !link.exists() {
+                if let Some(parent) = link.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                #[cfg(unix)]
+                let _ = std::os::unix::fs::symlink(&source, &link);
+            }
+        }
+    }
+}
+
+/// Where the vendored plugins live: env override, else the repo dir in dev.
+fn dsh_vendored_plugins_dir() -> std::path::PathBuf {
+    std::env::var("DSH_COMPANION_PLUGINS_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| dsh_home().join("cetus-runtime/plugins"))
+}
+
+/// Ensure the formal Dsh home overlay mounts the companion bridge and bundled
+/// plugins. Existing rows win, so this can safely fill additions after an
+/// upgrade without replacing a user's own plugin mount.
+fn dsh_ensure_bridge_mounted() -> Result<()> {
+    let runtime = dsh_materialize_runtime()?;
+    let home = dsh_home();
+    let config = home.join("cordis.patch.yml");
+    let existing = std::fs::read_to_string(&config).unwrap_or_default();
+    let lib = std::env::var("DSH_COMPANION_BRIDGE_LIB").unwrap_or_else(|_| {
+        runtime
+            .join("bridge/lib/index.js")
+            .to_string_lossy()
+            .into_owned()
+    });
+    let bridge_dir = std::path::Path::new(&lib)
+        .parent()
+        .and_then(std::path::Path::parent)
+        .context("invalid Dsh bridge path")?;
+    dsh_link_host_packages(bridge_dir);
+    std::fs::create_dir_all(&home)?;
+    let mut rows = String::new();
+    if !existing.contains("- id: dsh-companion-bridge") {
+        rows.push_str(&format!(
+            "    - id: dsh-companion-bridge\n      name: '{lib}'\n"
+        ));
+    }
+    let plugins_dir = dsh_vendored_plugins_dir();
+    for id in VENDORED_PLUGINS {
+        if existing.contains(&format!("- id: {id}")) {
+            continue; // the user's own mount of this plugin wins
+        }
+        let dir = plugins_dir.join(id);
+        let entry = dir.join("lib/index.js");
+        if entry.exists() {
+            dsh_link_host_packages(&dir);
+            rows.push_str(&format!(
+                "    - id: {id}\n      name: '{}'\n",
+                entry.display()
+            ));
+        }
+    }
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let block = format!(
+        "\n# >>> dsh-companion managed block (do not edit)\n- insert:\n{rows}# <<< dsh-companion managed block\n"
+    );
+    std::fs::write(&config, format!("{existing}{block}"))?;
+    Ok(())
+}
+
+async fn dsh_ensure_host(
+    bin: &str,
+    extra_env: Vec<(String, String)>,
+) -> Result<std::sync::Arc<DshHost>> {
+    let bin = bin.to_string();
+    let mut cached = DSH_HOST.lock().await;
+    if let Some(host) = cached.as_ref() {
+        let healthy = host
+            .client
+            .get(format!("{}/health", host.base))
+            .header("x-companion-token", &host.token)
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .is_ok_and(|response| response.status().is_success());
+        if healthy {
+            return Ok(host.clone());
+        }
+        dsh_shutdown_host();
+        *cached = None;
+    }
+    let started: Result<std::sync::Arc<DshHost>> = async move {
+            dsh_ensure_bridge_mounted()?;
+            let web_port = dsh_free_port()?;
+            let bridge_port = dsh_free_port()?;
+            let token = dsh_random_token();
+            let mut command = TokioCommand::new(&bin);
+            command
+                .args(["web", "--port", &web_port.to_string()])
+                .env("DSH_COMPANION_BRIDGE_PORT", bridge_port.to_string())
+                .env("DSH_COMPANION_BRIDGE_TOKEN", &token);
+            // $DSH_HOME/.env is dsh's own credential file; inject it into the
+            // host env so plugins (dsh-vision etc.) see their keys regardless
+            // of which shell rc files a non-interactive login shell reads.
+            let dsh_env = std::env::var("DSH_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| {
+                    std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+                        .join(".dsh")
+                })
+                .join(".env");
+            if let Ok(text) = std::fs::read_to_string(&dsh_env) {
+                for line in text.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
+                    if let Some((key, value)) = line.split_once('=') {
+                        let value = value.trim().trim_matches('"').trim_matches('\'');
+                        command.env(key.trim(), value);
+                    }
+                }
+            }
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped());
+            for (key, value) in extra_env {
+                command.env(key, value);
+            }
+            #[cfg(unix)]
+            command.process_group(0);
+            let client = reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(3))
+                .build()?;
+            let mut child = command
+                .spawn()
+                .with_context(|| format!("failed to launch `{bin} web`"))?;
+            // The host outlives conversation handles; the app's exit path
+            // calls dsh_shutdown_host() to tear down the process group.
+            if let Some(pid) = child.id() {
+                DSH_HOST_PID.store(pid, std::sync::atomic::Ordering::SeqCst);
+            }
+            // Always drain stderr so a chatty long-lived host cannot block on
+            // pipe backpressure. Keep only a bounded tail for startup errors.
+            let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+            if let Some(mut stream) = child.stderr.take() {
+                let tail = stderr_tail.clone();
+                tokio::spawn(async move {
+                    use tokio::io::AsyncReadExt;
+                    let mut chunk = [0u8; 4096];
+                    while let Ok(count) = stream.read(&mut chunk).await {
+                        if count == 0 {
+                            break;
+                        }
+                        let mut text = tail.lock().unwrap();
+                        text.push_str(&String::from_utf8_lossy(&chunk[..count]));
+                        if text.len() > 32 * 1024 {
+                            let mut boundary = text.len() - 32 * 1024;
+                            while !text.is_char_boundary(boundary) {
+                                boundary += 1;
+                            }
+                            text.drain(..boundary);
+                        }
+                    }
+                });
+            }
+            let base = format!("http://127.0.0.1:{bridge_port}");
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
+            loop {
+                if let Some(status) = child.try_wait()? {
+                    DSH_HOST_PID.store(0, std::sync::atomic::Ordering::SeqCst);
+                    let stderr = stderr_tail.lock().unwrap().clone();
+                    anyhow::bail!(
+                        "`{bin} web` exited during startup ({status}): {}",
+                        stderr.trim()
+                    );
+                }
+                let health = client
+                    .get(format!("{base}/health"))
+                    .header("x-companion-token", &token)
+                    .timeout(std::time::Duration::from_secs(2))
+                    .send()
+                    .await;
+                if matches!(&health, Ok(resp) if resp.status().is_success()) {
+                    break;
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    dsh_shutdown_host();
+                    anyhow::bail!(
+                        "dsh web + bridge not ready within 90s (is `{bin}` on PATH and the bridge plugin mounted?)"
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            }
+            let host_pid = child.id().unwrap_or(0);
+            tokio::spawn(async move {
+                let _ = child.wait().await;
+                if host_pid != 0
+                    && DSH_HOST_PID
+                        .compare_exchange(
+                            host_pid,
+                            0,
+                            std::sync::atomic::Ordering::SeqCst,
+                            std::sync::atomic::Ordering::SeqCst,
+                        )
+                        .is_ok()
+                {
+                    *DSH_HOST.lock().await = None;
+                }
+            });
+
+            let host = std::sync::Arc::new(DshHost {
+                base,
+                token,
+                client,
+                routes: std::sync::Mutex::new(std::collections::HashMap::new()),
+            });
+            // SSE pump: route every frame to its session's channel.
+            let pump = host.clone();
+            let (events_ready_tx, events_ready_rx) = tokio::sync::oneshot::channel();
+            tokio::spawn(async move {
+                let mut events_ready_tx = Some(events_ready_tx);
+                loop {
+                    let request = pump
+                        .client
+                        .get(format!("{}/events", pump.base))
+                        .header("x-companion-token", &pump.token)
+                        .send()
+                        .await;
+                    if let Ok(resp) = request {
+                        if !resp.status().is_success() {
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            continue;
+                        }
+                        if let Some(ready) = events_ready_tx.take() {
+                            let _ = ready.send(());
+                        }
+                        let mut buf = String::new();
+                        let mut stream = resp.bytes_stream();
+                        use futures_util::StreamExt;
+                        while let Some(Ok(bytes)) = stream.next().await {
+                            buf.push_str(&String::from_utf8_lossy(&bytes));
+                            while let Some(pos) = buf.find("\n\n") {
+                                let chunk: String = buf.drain(..pos + 2).collect();
+                                for line in chunk.lines() {
+                                    let Some(data) = line.strip_prefix("data: ") else {
+                                        continue;
+                                    };
+                                    let Ok(value) = serde_json::from_str::<Value>(data) else {
+                                        continue;
+                                    };
+                                    if value.get("stream").and_then(Value::as_str) == Some("companion") {
+                                        let rpc_id = value.get("rpcId").and_then(Value::as_str).unwrap_or("").to_string();
+                                        let frame = value.get("frame").cloned().unwrap_or(Value::Null);
+                                        let host = pump.clone();
+                                        tokio::spawn(async move {
+                                            let method = frame.get("method").and_then(Value::as_str).unwrap_or("").to_string();
+                                            let params = frame.get("params").cloned().unwrap_or(Value::Null);
+                                            let result = match DSH_COMPANION_RPC.get() {
+                                                Some(handler) => handler(method, params).await,
+                                                None => Err("companion rpc handler not registered".to_string()),
+                                            };
+                                            let body = match result {
+                                                Ok(value) => json!({ "id": rpc_id, "ok": true, "value": value }),
+                                                Err(error) => json!({ "id": rpc_id, "ok": false, "error": error }),
+                                            };
+                                            let _ = host.client
+                                                .post(format!("{}/rpc-result", host.base))
+                                                .header("x-companion-token", &host.token)
+                                                .timeout(std::time::Duration::from_secs(30))
+                                                .json(&body)
+                                                .send()
+                                                .await;
+                                        });
+                                        continue;
+                                    }
+                                    let session_id = value
+                                        .get("frame")
+                                        .and_then(|f| f.get("sessionId"))
+                                        .and_then(Value::as_str)
+                                        .map(str::to_string);
+                                    if let Some(session_id) = session_id {
+                                        let routes = pump.routes.lock().unwrap();
+                                        if let Some(tx) = routes.get(&session_id) {
+                                            let _ = tx.send(value);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            });
+            if !matches!(
+                tokio::time::timeout(std::time::Duration::from_secs(10), events_ready_rx).await,
+                Ok(Ok(()))
+            ) {
+                dsh_shutdown_host();
+                anyhow::bail!("dsh bridge event stream did not become ready");
+            }
+            Ok(host)
+    }
+    .await;
+    if let Ok(host) = &started {
+        *cached = Some(host.clone());
+    }
+    started
+}
+
+impl DshHost {
+    /// POST /call and unwrap both envelopes (bridge + RpcResponse) to the value.
+    async fn call(&self, path: &str, payload: Value) -> Result<Value> {
+        let resp = self
+            .client
+            .post(format!("{}/call", self.base))
+            .header("x-companion-token", &self.token)
+            .timeout(std::time::Duration::from_secs(600))
+            .json(&json!({ "path": path, "payload": payload }))
+            .send()
+            .await
+            .with_context(|| format!("bridge call {path} failed"))?;
+        let body: Value = resp.json().await?;
+        anyhow::ensure!(
+            body.get("ok").and_then(Value::as_bool) == Some(true),
+            "bridge {path}: {}",
+            body.get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error")
+        );
+        let result = body.get("result").cloned().unwrap_or(Value::Null);
+        // respond() returns a bare receipt; domain calls return RpcResponse.
+        if let Some(inner) = result.get("result") {
+            anyhow::ensure!(
+                inner.get("ok").and_then(Value::as_bool) == Some(true),
+                "dsh {path}: {}",
+                inner
+                    .get("error")
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "unknown error".to_string())
+            );
+            return Ok(inner.get("value").cloned().unwrap_or(Value::Null));
+        }
+        Ok(result)
+    }
+}
+
+impl EventTranslator {
+    /// Translate one dsh SessionEvent (`{type, data}` from the bridge mux
+    /// stream) into PiEvents, in the same vocabulary as the ACP path.
+    pub fn on_dsh_event(&mut self, event: &Value) -> Vec<Value> {
+        let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
+        let data = event.get("data").cloned().unwrap_or(Value::Null);
+        let out = match kind {
+            "assistant/chunk" => {
+                let chunk = data.get("chunk").cloned().unwrap_or(Value::Null);
+                let index = chunk.get("index").and_then(Value::as_u64).unwrap_or(0);
+                match chunk.get("type").and_then(Value::as_str).unwrap_or("") {
+                    "text-delta" => {
+                        let text = chunk.get("text").and_then(Value::as_str).unwrap_or("");
+                        self.emit_codex_delta(
+                            format!("dsh-text-{index}"),
+                            "dsh-message",
+                            LiveKind::Text,
+                            text,
+                        )
+                    }
+                    "reasoning-delta" => {
+                        let text = chunk.get("text").and_then(Value::as_str).unwrap_or("");
+                        self.emit_codex_delta(
+                            format!("dsh-think-{index}"),
+                            "dsh-message",
+                            LiveKind::Thinking,
+                            text,
+                        )
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            "assistant/message" => {
+                // Authoritative assembled message. If nothing streamed (e.g. a
+                // provider without deltas), emit the text once, then settle.
+                let mut events = Vec::new();
+                if self.codex_live_blocks.is_empty() {
+                    let content = data
+                        .get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    for block in &content {
+                        match block.get("type").and_then(Value::as_str).unwrap_or("") {
+                            "text" => {
+                                let text = block.get("text").and_then(Value::as_str).unwrap_or("");
+                                events.extend(self.emit_codex_delta(
+                                    "dsh-text-final".to_string(),
+                                    "dsh-message",
+                                    LiveKind::Text,
+                                    text,
+                                ));
+                            }
+                            "reasoning" => {
+                                let text = block.get("text").and_then(Value::as_str).unwrap_or("");
+                                events.extend(self.emit_codex_delta(
+                                    "dsh-think-final".to_string(),
+                                    "dsh-message",
+                                    LiveKind::Thinking,
+                                    text,
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                events.extend(self.close_all_codex_blocks());
+                events
+            }
+            "tool/call" => {
+                let mut events = self.close_all_codex_blocks();
+                let id = data
+                    .get("callId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("dsh-tool")
+                    .to_string();
+                let name = data
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool")
+                    .to_string();
+                let raw_args = data
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .unwrap_or("{}");
+                let input: Value =
+                    serde_json::from_str(raw_args).unwrap_or_else(|_| json!({ "raw": raw_args }));
+                if self.started_items.insert(id.clone()) {
+                    events.extend(self.emit_tool_call(&id, &name, &input));
+                    events.push(json!({ "type": "tool_execution_start", "toolCallId": id }));
+                }
+                events
+            }
+            "tool/result" => {
+                let mut events = self.close_all_codex_blocks();
+                let message = data.get("message").cloned().unwrap_or(Value::Null);
+                let id = message
+                    .get("callId")
+                    .and_then(Value::as_str)
+                    .or_else(|| message.get("toolCallId").and_then(Value::as_str))
+                    .unwrap_or("dsh-tool")
+                    .to_string();
+                let failed = data.get("error").is_some();
+                let text = message
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .map(|blocks| {
+                        blocks
+                            .iter()
+                            .filter_map(|b| b.get("text").and_then(Value::as_str))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                let details = data.get("meta").cloned().unwrap_or(Value::Null);
+                events.extend(self.emit_tool_result_end_with_details(
+                    &id,
+                    &json!(text),
+                    details,
+                    failed,
+                ));
+                self.started_items.remove(&id);
+                events
+            }
+            _ => Vec::new(),
+        };
+        self.with_open(out)
+    }
+}
+
+struct ActiveDshTurn {
+    sink: Arc<dyn EventSink>,
+    outcome: tokio::sync::oneshot::Sender<CliTurnOutcome>,
+    translator: EventTranslator,
+}
+
+/// Spawn (or adopt) the dsh session behind one conversation and return the
+/// standard session handle. `opts.resume` carries the dsh session id from a
+/// previous run; absent → a fresh session is created lazily on first turn.
+pub fn spawn_dsh_session(
+    bin: &str,
+    cwd: &Path,
+    conversation_id: Option<String>,
+    extra_env: Vec<(String, String)>,
+    opts: CliRunOpts,
+) -> Result<AcpSessionHandle> {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let handle = AcpSessionHandle { tx };
+    let bin = bin.to_string();
+    let cwd = cwd.to_string_lossy().into_owned();
+
+    tokio::spawn(async move {
+        let host = match dsh_ensure_host(&bin, extra_env).await {
+            Ok(host) => host,
+            Err(error) => {
+                dsh_fail_all(
+                    &mut rx,
+                    &conversation_id,
+                    &format!("dsh host failed: {error:#}"),
+                )
+                .await;
+                return;
+            }
+        };
+        // Resolve the session: reuse the stored id or create a fresh one.
+        let session_id = match &opts.resume {
+            Some(resume) => resume.clone(),
+            None => {
+                match host
+                    .call("sessions.create", json!({ "cwd": cwd }))
+                    .await
+                    .and_then(|v| {
+                        v.get("sessionId")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .ok_or_else(|| anyhow::anyhow!("sessions.create returned no id"))
+                    }) {
+                    Ok(id) => id,
+                    Err(error) => {
+                        dsh_fail_all(
+                            &mut rx,
+                            &conversation_id,
+                            &format!("dsh session create failed: {error:#}"),
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            }
+        };
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        host.routes
+            .lock()
+            .unwrap()
+            .insert(session_id.clone(), event_tx);
+
+        // Apply the conversation's model/effort choice for this session. The
+        // app recreates the session task on every tuning change, so once per
+        // spawn is enough.
+        if opts.model.is_some() || opts.effort.is_some() {
+            let model = opts
+                .model
+                .clone()
+                .unwrap_or_else(|| "deepseek-v4-flash".to_string());
+            let mut select = json!({
+                "sessionId": session_id,
+                "provider": "deepseek-official",
+                "model": model,
+            });
+            if let Some(effort) = opts.effort.clone().filter(|e| !e.is_empty()) {
+                select["reasoningEffort"] = json!(effort);
+            }
+            if let Err(error) = host.call("sessions.selectModel", select).await {
+                tracing::warn!("dsh selectModel failed (continuing on defaults): {error:#}");
+            }
+        }
+
+        let mut active: Option<ActiveDshTurn> = None;
+        let bypass_approvals = opts.bypass_approvals;
+        // A pending ask_user_question: (frame rpcId, question items). The next
+        // StartTurn answers it (free-text) instead of sending a new prompt.
+        let mut pending_question: Option<(String, Vec<Value>)> = None;
+        loop {
+            tokio::select! {
+                command = rx.recv() => {
+                    match command {
+                        Some(AcpSessionCommand::StartTurn { prompt, images, sink, outcome }) => {
+                            let mut translator = EventTranslator::new(CliBackend::Dsh);
+                            translator.resume_id = Some(session_id.clone());
+                            emit_protocol(&sink, &conversation_id, translator.start());
+                            if let Some((question_rpc, items)) = pending_question.take() {
+                                // The user's message answers the pending question.
+                                let answers: Vec<Value> = items.iter().map(|item| json!({
+                                    "id": item.get("id").cloned().unwrap_or(json!("q")),
+                                    "selected": [],
+                                    "custom": prompt,
+                                })).collect();
+                                let answered = host.call("respond", json!({
+                                    "type": "client-response",
+                                    "rpcId": question_rpc,
+                                    "result": { "ok": true, "value": {
+                                        "sessionId": session_id,
+                                        "answer": { "answers": answers },
+                                    }},
+                                })).await;
+                                match answered {
+                                    Ok(_) => {
+                                        // The same dsh turn resumes; stream it into this new bubble.
+                                        active = Some(ActiveDshTurn { sink, outcome, translator });
+                                    }
+                                    Err(error) => {
+                                        let events = translator.finish(Some(&format!("answer delivery failed: {error:#}")));
+                                        emit_protocol(&sink, &conversation_id, events);
+                                        let _ = outcome.send(CliTurnOutcome {
+                                            resume_id: Some(session_id.clone()),
+                                            messages: std::mem::take(&mut translator.messages),
+                                            aborted: false,
+                                            streamed: false,
+                                            resume_rejected: false,
+                                        });
+                                    }
+                                }
+                                continue;
+                            }
+                            // dsh's LLM protocol has no image blocks yet
+                            // (dsh-external/issues#131): save attachments to
+                            // disk and reference them by path — with the
+                            // dsh-vision plugin mounted the model views them
+                            // through its view_image tool.
+                            let mut prompt = prompt;
+                            for (index, (mime, base64_data)) in images.iter().enumerate() {
+                                let ext = match mime.as_str() {
+                                    "image/jpeg" => "jpg",
+                                    "image/webp" => "webp",
+                                    "image/gif" => "gif",
+                                    _ => "png",
+                                };
+                                let path = std::env::temp_dir().join(format!(
+                                    "dsh-companion-attachment-{}-{index}.{ext}",
+                                    std::process::id()
+                                ));
+                                use base64::Engine as _;
+                                if base64::engine::general_purpose::STANDARD
+                                    .decode(base64_data)
+                                    .ok()
+                                    .and_then(|bytes| std::fs::write(&path, bytes).ok())
+                                    .is_some()
+                                {
+                                    prompt.push_str(&format!(
+                                        "\n\n[attached image {}: {} — view it with the view_image tool if available, otherwise read what you can from context]",
+                                        index + 1,
+                                        path.display()
+                                    ));
+                                }
+                            }
+                            let sent = host.call("sessions.prompt", json!({
+                                "sessionId": session_id,
+                                "mode": "queue",
+                                "content": [{ "type": "text", "text": prompt }],
+                            })).await;
+                            match sent {
+                                Ok(_) => active = Some(ActiveDshTurn { sink, outcome, translator }),
+                                Err(error) => {
+                                    let events = translator.finish(Some(&format!("{error:#}")));
+                                    emit_protocol(&sink, &conversation_id, events);
+                                    let _ = outcome.send(CliTurnOutcome {
+                                        resume_id: Some(session_id.clone()),
+                                        messages: std::mem::take(&mut translator.messages),
+                                        aborted: false,
+                                        streamed: false,
+                                        resume_rejected: false,
+                                    });
+                                }
+                            }
+                        }
+                        Some(AcpSessionCommand::RespondQuestion { request_id, response }) => {
+                            let raw = request_id.as_str().unwrap_or("");
+                            let rpc = raw.strip_prefix("q::").unwrap_or(raw).to_string();
+                            let items = pending_question
+                                .take()
+                                .filter(|(pending_rpc, _)| *pending_rpc == rpc)
+                                .map(|(_, items)| items)
+                                .unwrap_or_default();
+                            // Card answers: { answers: { <id>: { answers: [..] } } }.
+                            let by_id = response
+                                .get("answers")
+                                .cloned()
+                                .unwrap_or_else(|| json!({}));
+                            let answers: Vec<Value> = items.iter().enumerate().map(|(i, item)| {
+                                let id = item.get("id").and_then(Value::as_str)
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| format!("q{i}"));
+                                let picked: Vec<String> = by_id
+                                    .get(&id)
+                                    .and_then(|a| a.get("answers"))
+                                    .and_then(Value::as_array)
+                                    .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                                    .unwrap_or_default();
+                                let labels: Vec<&str> = item.get("options").and_then(Value::as_array)
+                                    .map(|opts| opts.iter().filter_map(|o| o.get("label").and_then(Value::as_str)).collect())
+                                    .unwrap_or_default();
+                                let (selected, custom): (Vec<String>, Vec<String>) =
+                                    picked.into_iter().partition(|p| labels.contains(&p.as_str()));
+                                let mut answer = json!({ "id": id, "selected": selected });
+                                if !custom.is_empty() {
+                                    answer["custom"] = json!(custom.join("; "));
+                                }
+                                answer
+                            }).collect();
+                            let result = host.call("respond", json!({
+                                "type": "client-response",
+                                "rpcId": rpc,
+                                "result": { "ok": true, "value": {
+                                    "sessionId": session_id,
+                                    "answer": { "answers": answers },
+                                }},
+                            })).await;
+                            if let Err(error) = result {
+                                tracing::warn!("dsh question answer rejected: {error:#}");
+                            }
+                        }
+                        Some(AcpSessionCommand::RespondPermission { request_id, allow }) => {
+                            // request_id = "<rpcId>::<approvalId>" (see frame handling).
+                            let raw = request_id.as_str().unwrap_or("");
+                            let (rpc_id, approval_id) = raw.split_once("::").unwrap_or((raw, raw));
+                            let outcome = if allow { "allowed-once" } else { "rejected" };
+                            let _ = host.call("respond", json!({
+                                "type": "client-response",
+                                "rpcId": rpc_id,
+                                "result": { "ok": true, "value": {
+                                    "sessionId": session_id,
+                                    "approvalId": approval_id,
+                                    "outcome": outcome,
+                                }},
+                            })).await;
+                        }
+                        Some(AcpSessionCommand::Abort) => {
+                            let _ = host.call("sessions.cancel", json!({ "sessionId": session_id })).await;
+                            // Settle the turn NOW with everything streamed so
+                            // far — the trajectory must survive an abort even
+                            // if the host's turn/end never reaches us.
+                            pending_question = None;
+                            if let Some(mut turn) = active.take() {
+                                let events = turn.translator.finish(None);
+                                emit_protocol(&turn.sink, &conversation_id, events);
+                                let _ = turn.outcome.send(CliTurnOutcome {
+                                    resume_id: Some(session_id.clone()),
+                                    messages: std::mem::take(&mut turn.translator.messages),
+                                    aborted: true,
+                                    streamed: true,
+                                    resume_rejected: false,
+                                });
+                            }
+                        }
+                        Some(AcpSessionCommand::Shutdown) | None => break,
+                    }
+                }
+                event = event_rx.recv() => {
+                    let Some(envelope) = event else { break };
+                    let rpc_id = envelope.get("rpcId").and_then(Value::as_str).unwrap_or("").to_string();
+                    let frame = envelope.get("frame").cloned().unwrap_or(Value::Null);
+                    let frame_type = frame.get("type").and_then(Value::as_str).unwrap_or("");
+                    match frame_type {
+                        "session/event" => {
+                            let Some(turn) = active.as_mut() else { continue };
+                            let event = frame.get("event").cloned().unwrap_or(Value::Null);
+                            let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
+                            if event_type == "turn/end" {
+                                let reason = event.get("data").and_then(|d| d.get("reason"));
+                                let error = reason
+                                    .and_then(|r| r.get("kind"))
+                                    .and_then(Value::as_str)
+                                    .filter(|kind| *kind != "completed")
+                                    .map(|kind| {
+                                        let detail = reason
+                                            .and_then(|r| r.get("message"))
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("");
+                                        if detail.is_empty() { format!("turn ended: {kind}") } else { detail.to_string() }
+                                    });
+                                let mut turn = active.take().expect("checked above");
+                                let events = turn.translator.finish(error.as_deref());
+                                emit_protocol(&turn.sink, &conversation_id, events);
+                                let _ = turn.outcome.send(CliTurnOutcome {
+                                    resume_id: Some(session_id.clone()),
+                                    messages: std::mem::take(&mut turn.translator.messages),
+                                    aborted: false,
+                                    streamed: true,
+                                    resume_rejected: false,
+                                });
+                            } else {
+                                let events = turn.translator.on_dsh_event(&event);
+                                emit_protocol(&turn.sink, &conversation_id, events);
+                            }
+                        }
+                        "approval/requested" => {
+                            if bypass_approvals {
+                                let approval_id = frame
+                                    .get("approvalId")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("");
+                                let _ = host.call("respond", json!({
+                                    "type": "client-response",
+                                    "rpcId": rpc_id,
+                                    "result": { "ok": true, "value": {
+                                        "sessionId": session_id,
+                                        "approvalId": approval_id,
+                                        "outcome": "allowed-once",
+                                    }},
+                                })).await;
+                                continue;
+                            }
+                            let Some(turn) = active.as_ref() else {
+                                // Nothing can answer: reject to unblock the agent.
+                                let approval_id = frame.get("approvalId").and_then(Value::as_str).unwrap_or("");
+                                let _ = host.call("respond", json!({
+                                    "type": "client-response",
+                                    "rpcId": rpc_id,
+                                    "result": { "ok": true, "value": {
+                                        "sessionId": session_id,
+                                        "approvalId": approval_id,
+                                        "outcome": "rejected",
+                                    }},
+                                })).await;
+                                continue;
+                            };
+                            let approval_id = frame.get("approvalId").and_then(Value::as_str).unwrap_or("");
+                            let tool_name = frame.get("toolName").and_then(Value::as_str).unwrap_or("tool");
+                            emit_protocol(&turn.sink, &conversation_id, vec![json!({
+                                "type": "cli_control_request",
+                                "requestId": format!("{rpc_id}::{approval_id}"),
+                                "source": "acp",
+                                "toolName": tool_name,
+                                "input": { "title": tool_name, "reason": frame.get("reason") },
+                                "toolUseId": frame.get("callId"),
+                                "suggestions": Value::Null,
+                            })]);
+                        }
+                        "question/requested" => {
+                            let items = frame.get("questions").and_then(Value::as_array).cloned().unwrap_or_default();
+                            if let Some(turn) = active.as_ref() {
+                                // Render cetus's native interactive question card;
+                                // the answer arrives as RespondQuestion.
+                                let questions: Vec<Value> = items.iter().enumerate().map(|(i, item)| json!({
+                                    "id": item.get("id").cloned().unwrap_or(json!(format!("q{i}"))),
+                                    "question": item.get("question").cloned().unwrap_or(json!("")),
+                                    "header": item.get("header").cloned().unwrap_or(json!("Question")),
+                                    "options": item.get("options").cloned().unwrap_or(json!([])),
+                                    "multiSelect": item.get("multiSelect").cloned().unwrap_or(json!(false)),
+                                    "isOther": true,
+                                    "isSecret": false,
+                                })).collect();
+                                emit_protocol(&turn.sink, &conversation_id, vec![json!({
+                                    "type": "cli_control_request",
+                                    "requestId": format!("q::{rpc_id}"),
+                                    "source": "dsh",
+                                    "requestKind": "request_user_input",
+                                    "toolName": "ask_user_question",
+                                    "input": { "questions": questions },
+                                    "toolUseId": Value::Null,
+                                })]);
+                                pending_question = Some((rpc_id.clone(), items));
+                            } else {
+                                // No open UI turn to carry the question: cancel politely.
+                                let _ = host.call("respond", json!({
+                                    "type": "client-response",
+                                    "rpcId": rpc_id,
+                                    "result": { "ok": false, "error": {
+                                        "code": "cancelled",
+                                        "message": "no interactive surface for this question; continue with reasonable assumptions",
+                                        "details": {},
+                                    }},
+                                })).await;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        host.routes.lock().unwrap().remove(&session_id);
+    });
+
+    Ok(handle)
+}
+
+/// Fail every queued command on a session whose host never came up.
+async fn dsh_fail_all(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<AcpSessionCommand>,
+    conversation_id: &Option<String>,
+    message: &str,
+) {
+    while let Some(command) = rx.recv().await {
+        match command {
+            AcpSessionCommand::StartTurn { sink, outcome, .. } => {
+                let mut translator = EventTranslator::new(CliBackend::Dsh);
+                emit_protocol(&sink, conversation_id, translator.start());
+                let events = translator.finish(Some(message));
+                emit_protocol(&sink, conversation_id, events);
+                let _ = outcome.send(CliTurnOutcome {
+                    resume_id: None,
+                    messages: std::mem::take(&mut translator.messages),
+                    aborted: false,
+                    streamed: false,
+                    resume_rejected: false,
+                });
+            }
+            AcpSessionCommand::Shutdown => break,
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod dsh_tests {
+    use super::*;
+
+    fn event_types(events: &[Value]) -> Vec<&str> {
+        events
+            .iter()
+            .filter_map(|event| {
+                event
+                    .pointer("/assistantMessageEvent/type")
+                    .and_then(Value::as_str)
+                    .or_else(|| event.get("type").and_then(Value::as_str))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn dsh_has_no_one_shot_headless_argv() {
+        assert!(CliBackend::Dsh
+            .turn_args("ignored", &CliRunOpts::default())
+            .is_empty());
+    }
+
+    #[test]
+    fn dsh_stream_preserves_markdown_and_reasoning() {
+        let mut translator = EventTranslator::new(CliBackend::Dsh);
+        let mut events = translator.start();
+        events.extend(translator.on_dsh_event(&json!({
+            "type": "assistant/chunk",
+            "data": { "chunk": { "type": "reasoning-delta", "index": 0, "text": "checking\n" } }
+        })));
+        events.extend(translator.on_dsh_event(&json!({
+            "type": "assistant/chunk",
+            "data": { "chunk": { "type": "text-delta", "index": 1, "text": "```rs\n    let x = 1;\n```\n\n" } }
+        })));
+        events.extend(translator.on_dsh_event(&json!({
+            "type": "assistant/message",
+            "data": { "message": { "content": [] } }
+        })));
+        events.extend(translator.finish(None));
+
+        let types = event_types(&events);
+        assert!(types.contains(&"thinking_delta"));
+        assert!(types.contains(&"text_delta"));
+        assert_eq!(
+            translator.messages[0]["content"][1]["text"],
+            "```rs\n    let x = 1;\n```\n\n"
+        );
+    }
+
+    #[test]
+    fn dsh_tool_events_translate_to_cards_and_artifacts() {
+        let mut translator = EventTranslator::new(CliBackend::Dsh);
+        let mut events = translator.on_dsh_event(&json!({
+            "type": "tool/call",
+            "data": { "callId": "call-1", "name": "send_artifact", "arguments": "{\"path\":\"/tmp/report.pdf\"}" }
+        }));
+        events.extend(translator.on_dsh_event(&json!({
+            "type": "tool/result",
+            "data": {
+                "message": { "callId": "call-1", "content": [{ "type": "text", "text": "delivered" }] },
+                "meta": { "kind": "artifact", "path": "/tmp/report.pdf", "mimeType": "application/pdf" }
+            }
+        })));
+
+        assert!(events
+            .iter()
+            .any(|event| event.get("type") == Some(&json!("tool_execution_start"))));
+        let end = events
+            .iter()
+            .find(|event| event.get("type") == Some(&json!("tool_execution_end")))
+            .expect("tool result event");
+        assert_eq!(end["result"]["details"]["kind"], "artifact");
+        assert_eq!(end["result"]["details"]["path"], "/tmp/report.pdf");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_dsh_bridge_smoke() {
+        struct Sink(std::sync::Mutex<Vec<Value>>);
+        impl EventSink for Sink {
+            fn emit(&self, event: RuntimeEvent) {
+                if let RuntimeEvent::Protocol { event, .. } = event {
+                    self.0.lock().unwrap().push(event);
+                }
+            }
+        }
+
+        // Exercise the embedded bridge in an otherwise clean DSH_HOME so this
+        // cannot accidentally pass through a developer's existing companion
+        // plugin mount. Preserve only provider credentials when present.
+        let original_home = dsh_home();
+        let isolated_home =
+            std::env::temp_dir().join(format!("cetus-live-dsh-home-{}", std::process::id()));
+        std::fs::create_dir_all(&isolated_home).unwrap();
+        if let Ok(credentials) = std::fs::read(original_home.join(".env")) {
+            std::fs::write(isolated_home.join(".env"), credentials).unwrap();
+        }
+        std::env::set_var("DSH_HOME", &isolated_home);
+
+        let cwd = std::env::temp_dir().join("cetus-live-dsh");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let sink = Arc::new(Sink(std::sync::Mutex::new(Vec::new())));
+        let session = spawn_dsh_session(
+            "dsh",
+            &cwd,
+            Some("live-dsh".into()),
+            std::env::vars().collect(),
+            CliRunOpts {
+                bypass_approvals: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(180),
+            session
+                .start_turn(
+                    "Reply with exactly CETUS_DSH_OK. Do not use tools.".into(),
+                    Vec::new(),
+                    sink.clone(),
+                )
+                .unwrap(),
+        )
+        .await
+        .expect("live Dsh turn timed out")
+        .expect("live Dsh session exited");
+        session.shutdown();
+        dsh_shutdown_host();
+        let messages = serde_json::to_string(&outcome.messages).unwrap();
+        assert!(messages.contains("CETUS_DSH_OK"), "{messages}");
+        assert!(sink.0.lock().unwrap().iter().any(|event| {
+            event
+                .pointer("/assistantMessageEvent/type")
+                .and_then(Value::as_str)
+                == Some("text_delta")
+        }));
+    }
 }
 
 impl CliBackend {
@@ -48,6 +1304,7 @@ impl CliBackend {
             CliBackend::OpenCode => "opencode",
             CliBackend::Grok => "grok",
             CliBackend::Kimi => "kimi",
+            CliBackend::Dsh => "dsh",
         }
     }
 
@@ -58,6 +1315,7 @@ impl CliBackend {
             "opencode" => Some(CliBackend::OpenCode),
             "grok" | "grok-build" => Some(CliBackend::Grok),
             "kimi" | "kimi-cli" => Some(CliBackend::Kimi),
+            "dsh" | "deepseek-harness" => Some(CliBackend::Dsh),
             _ => None,
         }
     }
@@ -70,6 +1328,7 @@ impl CliBackend {
             CliBackend::OpenCode => "opencode",
             CliBackend::Grok => "grok",
             CliBackend::Kimi => "kimi",
+            CliBackend::Dsh => "dsh",
         }
     }
 
@@ -148,11 +1407,11 @@ impl CliBackend {
                 a.push("stream-json".into());
                 a.push("--include-partial-messages".into());
                 a.push("--verbose".into()); // required for stream-json to emit all events
-                // Adaptive-thinking models (Opus 4.8 / Fable 5) omit thinking
-                // text unless the client opts into a display mode, and
-                // headless -p additionally forces "omitted" when unset — every
-                // thinking block would arrive as signature-only with an empty
-                // body. Hidden flag; accepted since at least 2.1.204.
+                                            // Adaptive-thinking models (Opus 4.8 / Fable 5) omit thinking
+                                            // text unless the client opts into a display mode, and
+                                            // headless -p additionally forces "omitted" when unset — every
+                                            // thinking block would arrive as signature-only with an empty
+                                            // body. Hidden flag; accepted since at least 2.1.204.
                 a.push("--thinking-display".into());
                 a.push("summarized".into());
                 a.push("--permission-prompt-tool".into());
@@ -211,6 +1470,9 @@ impl CliBackend {
                 a.push(prompt.into());
             }
             CliBackend::OpenCode | CliBackend::Grok | CliBackend::Kimi => {
+                let _ = (prompt, opts);
+            }
+            CliBackend::Dsh => {
                 let _ = (prompt, opts);
             }
         }
@@ -283,7 +1545,14 @@ fn normalize_content(v: &Value) -> Value {
                             it.clone()
                         } else if matches!(
                             o.get("type").and_then(|t| t.as_str()),
-                            Some("image" | "input_image" | "inputImage" | "input_file" | "inputFile" | "file")
+                            Some(
+                                "image"
+                                    | "input_image"
+                                    | "inputImage"
+                                    | "input_file"
+                                    | "inputFile"
+                                    | "file"
+                            )
                         ) {
                             json!({ "type": "text", "text": "[Artifact delivered to user]" })
                         } else if let Some(t) = o.get("text").and_then(|t| t.as_str()) {
@@ -300,14 +1569,7 @@ fn normalize_content(v: &Value) -> Value {
         Value::Object(object)
             if matches!(
                 object.get("type").and_then(Value::as_str),
-                Some(
-                    "image"
-                        | "input_image"
-                        | "inputImage"
-                        | "input_file"
-                        | "inputFile"
-                        | "file"
-                )
+                Some("image" | "input_image" | "inputImage" | "input_file" | "inputFile" | "file")
             ) =>
         {
             // `extracted_artifact_details` materializes inline base64 before
@@ -365,10 +1627,19 @@ fn persist_tool_output(dir: Option<&Path>, id: &str, output: &str) -> Option<Pat
     std::fs::create_dir_all(dir).ok()?;
     let safe_id: String = id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
         .take(80)
         .collect();
-    let millis = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_millis();
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_millis();
     let sequence = ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let path = dir.join(format!("tool-output-{safe_id}-{millis}-{sequence}.log"));
     std::fs::write(&path, output).ok()?;
@@ -445,7 +1716,10 @@ fn artifact_kind(mime: &str) -> &'static str {
     } else if mime == "text/html" {
         "html"
     } else if mime.starts_with("text/")
-        || matches!(mime, "application/json" | "application/xml" | "application/yaml")
+        || matches!(
+            mime,
+            "application/json" | "application/xml" | "application/yaml"
+        )
     {
         "text"
     } else {
@@ -453,7 +1727,11 @@ fn artifact_kind(mime: &str) -> &'static str {
     }
 }
 
-fn artifact_details(path: &Path, mime_override: Option<&str>, caption: Option<&str>) -> Option<Value> {
+fn artifact_details(
+    path: &Path,
+    mime_override: Option<&str>,
+    caption: Option<&str>,
+) -> Option<Value> {
     let metadata = std::fs::metadata(path).ok()?;
     if !metadata.is_file() {
         return None;
@@ -497,9 +1775,14 @@ fn persist_inline_artifact(data: &str, mime: &str, dir: &Path) -> Option<Value> 
     if data.trim().is_empty() {
         return None;
     }
-    let bytes = base64::engine::general_purpose::STANDARD.decode(data).ok()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .ok()?;
     std::fs::create_dir_all(dir).ok()?;
-    let millis = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_millis();
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_millis();
     let sequence = ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let path = dir.join(format!(
         "runtime-artifact-{millis}-{sequence}.{}",
@@ -510,12 +1793,21 @@ fn persist_inline_artifact(data: &str, mime: &str, dir: &Path) -> Option<Value> 
 }
 
 fn resolve_file_path(raw: &str, cwd: Option<&Path>) -> Option<PathBuf> {
-    let raw = raw.trim().trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | '<' | '>' | '(' | ')' | '[' | ']' | ',' | ';'));
+    let raw = raw.trim().trim_matches(|c: char| {
+        matches!(
+            c,
+            '"' | '\'' | '`' | '<' | '>' | '(' | ')' | '[' | ']' | ',' | ';'
+        )
+    });
     if raw.is_empty() || raw.starts_with("data:") || raw.contains("\0") {
         return None;
     }
     let path = PathBuf::from(raw);
-    let path = if path.is_absolute() { path } else { cwd?.join(path) };
+    let path = if path.is_absolute() {
+        path
+    } else {
+        cwd?.join(path)
+    };
     path.is_file().then_some(path)
 }
 
@@ -556,14 +1848,20 @@ fn collect_artifacts(
                 if let Some((meta, data)) = rest.split_once(',') {
                     if meta.ends_with(";base64") {
                         if let Some(dir) = artifact_dir {
-                            if let Some(artifact) = persist_inline_artifact(data, meta.trim_end_matches(";base64"), dir) {
+                            if let Some(artifact) =
+                                persist_inline_artifact(data, meta.trim_end_matches(";base64"), dir)
+                            {
                                 out.push(artifact);
                             }
                         }
                     }
                 }
             } else {
-                out.extend(paths_from_text(text, cwd).into_iter().filter_map(|path| artifact_details(&path, None, None)));
+                out.extend(
+                    paths_from_text(text, cwd)
+                        .into_iter()
+                        .filter_map(|path| artifact_details(&path, None, None)),
+                );
             }
         }
         Value::Array(items) => {
@@ -582,20 +1880,45 @@ fn collect_artifacts(
                 .or_else(|| object.get("media_type"))
                 .and_then(Value::as_str);
             let caption = object.get("caption").and_then(Value::as_str);
-            for key in ["path", "file_path", "filePath", "output_path", "outputPath", "local_path", "localPath"] {
-                if let Some(path) = object.get(key).and_then(Value::as_str).and_then(|p| resolve_file_path(p, cwd)) {
+            for key in [
+                "path",
+                "file_path",
+                "filePath",
+                "output_path",
+                "outputPath",
+                "local_path",
+                "localPath",
+            ] {
+                if let Some(path) = object
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .and_then(|p| resolve_file_path(p, cwd))
+                {
                     if let Some(artifact) = artifact_details(&path, mime, caption) {
                         out.push(artifact);
                     }
                 }
             }
             let block_type = object.get("type").and_then(Value::as_str).unwrap_or("");
-            if matches!(block_type, "image" | "input_image" | "inputImage" | "input_file" | "inputFile" | "file") {
-                if let Some(url) = object.get("image_url").or_else(|| object.get("imageUrl")).or_else(|| object.get("url")) {
+            if matches!(
+                block_type,
+                "image" | "input_image" | "inputImage" | "input_file" | "inputFile" | "file"
+            ) {
+                if let Some(url) = object
+                    .get("image_url")
+                    .or_else(|| object.get("imageUrl"))
+                    .or_else(|| object.get("url"))
+                {
                     collect_artifacts(url, artifact_dir, cwd, out);
                 }
-                if let (Some(data), Some(dir)) = (object.get("data").and_then(Value::as_str), artifact_dir) {
-                    if let Some(artifact) = persist_inline_artifact(data, mime.unwrap_or("application/octet-stream"), dir) {
+                if let (Some(data), Some(dir)) =
+                    (object.get("data").and_then(Value::as_str), artifact_dir)
+                {
+                    if let Some(artifact) = persist_inline_artifact(
+                        data,
+                        mime.unwrap_or("application/octet-stream"),
+                        dir,
+                    ) {
                         out.push(artifact);
                     }
                 }
@@ -604,7 +1927,21 @@ fn collect_artifacts(
                 }
             }
             for (key, child) in object {
-                if !matches!(key.as_str(), "path" | "file_path" | "filePath" | "output_path" | "outputPath" | "local_path" | "localPath" | "data" | "image_url" | "imageUrl" | "url" | "source") {
+                if !matches!(
+                    key.as_str(),
+                    "path"
+                        | "file_path"
+                        | "filePath"
+                        | "output_path"
+                        | "outputPath"
+                        | "local_path"
+                        | "localPath"
+                        | "data"
+                        | "image_url"
+                        | "imageUrl"
+                        | "url"
+                        | "source"
+                ) {
                     collect_artifacts(child, artifact_dir, cwd, out);
                 }
             }
@@ -613,12 +1950,20 @@ fn collect_artifacts(
     }
 }
 
-fn extracted_artifact_details(value: &Value, artifact_dir: Option<&Path>, cwd: Option<&Path>) -> Option<Value> {
+fn extracted_artifact_details(
+    value: &Value,
+    artifact_dir: Option<&Path>,
+    cwd: Option<&Path>,
+) -> Option<Value> {
     let mut artifacts = Vec::new();
     collect_artifacts(value, artifact_dir, cwd, &mut artifacts);
     let mut seen = HashSet::new();
     artifacts.retain(|artifact| {
-        artifact.get("path").and_then(Value::as_str).map(|path| seen.insert(path.to_string())).unwrap_or(false)
+        artifact
+            .get("path")
+            .and_then(Value::as_str)
+            .map(|path| seen.insert(path.to_string()))
+            .unwrap_or(false)
     });
     match artifacts.len() {
         0 => None,
@@ -649,10 +1994,14 @@ fn is_background_launch_ack(content: &Value) -> bool {
 }
 
 fn claude_prompt_tokens(usage: &Value) -> u64 {
-    ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
-        .into_iter()
-        .filter_map(|key| usage.get(key).and_then(Value::as_u64))
-        .sum()
+    [
+        "input_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    ]
+    .into_iter()
+    .filter_map(|key| usage.get(key).and_then(Value::as_u64))
+    .sum()
 }
 
 /// Stateful translator from a backend's raw JSONL lines to Cetus `PiEvent`
@@ -790,7 +2139,16 @@ fn task_kind(v: &Value) -> String {
 /// One line summarizing a subagent tool call's input — the field that carries
 /// the "what" of the call, mirroring the frontend's summarizeArgs.
 fn summarize_tool_input(input: &Value) -> String {
-    for key in ["description", "command", "file_path", "path", "pattern", "query", "url", "prompt"] {
+    for key in [
+        "description",
+        "command",
+        "file_path",
+        "path",
+        "pattern",
+        "query",
+        "url",
+        "prompt",
+    ] {
         if let Some(s) = input.get(key).and_then(|v| v.as_str()) {
             let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
             let mut out: String = s.chars().take(120).collect();
@@ -1068,7 +2426,9 @@ impl EventTranslator {
             && events.iter().any(|e| {
                 matches!(
                     e.get("type").and_then(|t| t.as_str()),
-                    Some("message_update") | Some("tool_execution_start") | Some("tool_execution_end")
+                    Some("message_update")
+                        | Some("tool_execution_start")
+                        | Some("tool_execution_end")
                 )
             })
         {
@@ -1216,7 +2576,10 @@ impl EventTranslator {
             );
             out.push(am(json!({ "type": start, "contentIndex": our_index })));
         }
-        let block = self.codex_live_blocks.get_mut(&key).expect("block inserted");
+        let block = self
+            .codex_live_blocks
+            .get_mut(&key)
+            .expect("block inserted");
         block.buffer.push_str(delta);
         let event = match block.kind {
             LiveKind::Text => "text_delta",
@@ -1246,17 +2609,17 @@ impl EventTranslator {
         let single = keys.len() == 1;
         let mut out = Vec::new();
         for key in keys {
-            let mut block = self.codex_live_blocks.remove(&key).expect("live block exists");
+            let mut block = self
+                .codex_live_blocks
+                .remove(&key)
+                .expect("live block exists");
             if single {
                 if let Some(final_text) = authoritative.filter(|text| !text.is_empty()) {
                     block.buffer = final_text.to_string();
                 }
             }
             let (end, persisted) = match block.kind {
-                LiveKind::Text => (
-                    "text_end",
-                    json!({ "type": "text", "text": block.buffer }),
-                ),
+                LiveKind::Text => ("text_end", json!({ "type": "text", "text": block.buffer })),
                 LiveKind::Thinking => (
                     "thinking_end",
                     json!({ "type": "thinking", "thinking": block.buffer }),
@@ -1375,11 +2738,8 @@ impl EventTranslator {
         details: Value,
         is_error: bool,
     ) -> Vec<Value> {
-        let artifact_details = extracted_artifact_details(
-            content,
-            self.artifact_dir.as_deref(),
-            self.cwd.as_deref(),
-        );
+        let artifact_details =
+            extracted_artifact_details(content, self.artifact_dir.as_deref(), self.cwd.as_deref());
         let details = match artifact_details {
             Some(artifacts) if details.is_null() => artifacts,
             Some(artifacts) => json!({ "artifacts": artifacts, "runtimeDetails": details }),
@@ -1550,7 +2910,10 @@ impl EventTranslator {
             // ends the task — don't hold the turn open for it. Keep the step
             // trace on the settled card (and the persisted row).
             let mut details = {
-                let t = self.background_tasks.get_mut(&task_id).expect("task exists");
+                let t = self
+                    .background_tasks
+                    .get_mut(&task_id)
+                    .expect("task exists");
                 t.done = true;
                 t.details(if is_error { "failed" } else { "completed" })
             };
@@ -1639,7 +3002,10 @@ impl EventTranslator {
             return Vec::new();
         }
         let text = if task.status_text.is_empty() {
-            format!("{} agent running — {}", task.subagent_type, task.description)
+            format!(
+                "{} agent running — {}",
+                task.subagent_type, task.description
+            )
         } else {
             task.status_text.clone()
         };
@@ -1736,18 +3102,21 @@ impl EventTranslator {
             "task_started" => {
                 let tool_use_id = v.get("tool_use_id").and_then(|t| t.as_str()).unwrap_or("");
                 if !tool_use_id.is_empty() {
-                    self.background_tasks.insert(task_id.to_string(), BackgroundTask {
-                        tool_use_id: tool_use_id.to_string(),
-                        subagent_type: task_kind(v),
-                        description: v
-                            .get("description")
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("background task")
-                            .to_string(),
-                        done: false,
-                        steps: Vec::new(),
-                        status_text: String::new(),
-                    });
+                    self.background_tasks.insert(
+                        task_id.to_string(),
+                        BackgroundTask {
+                            tool_use_id: tool_use_id.to_string(),
+                            subagent_type: task_kind(v),
+                            description: v
+                                .get("description")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("background task")
+                                .to_string(),
+                            done: false,
+                            steps: Vec::new(),
+                            status_text: String::new(),
+                        },
+                    );
                 }
                 // No event yet: the tool card may not exist until toolcall_end,
                 // and the launch ack result paints the initial status anyway.
@@ -1790,14 +3159,20 @@ impl EventTranslator {
                 };
                 task.done = true;
                 let task = task.clone();
-                let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("completed");
+                let status = v
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("completed");
                 let is_err = status != "completed";
                 // The notification carries the subagent's actual report in
                 // `summary` — for an async task this is the only place it
                 // surfaces (no main-chain tool_result follows).
                 let text = match v.get("summary").and_then(|s| s.as_str()) {
                     Some(s) if !s.trim().is_empty() => s.to_string(),
-                    _ => format!("{} agent {} — {}", task.subagent_type, status, task.description),
+                    _ => format!(
+                        "{} agent {} — {}",
+                        task.subagent_type, status, task.description
+                    ),
                 };
                 let content = json!([{ "type": "text", "text": text }]);
                 let mut details = task.details(status);
@@ -1849,6 +3224,7 @@ impl EventTranslator {
             CliBackend::ClaudeCode => self.on_claude(&v),
             CliBackend::Codex => self.on_codex(&v),
             CliBackend::OpenCode | CliBackend::Grok | CliBackend::Kimi => Vec::new(),
+            CliBackend::Dsh => Vec::new(),
         };
         self.with_open(events)
     }
@@ -1856,20 +3232,19 @@ impl EventTranslator {
     fn on_claude(&mut self, v: &Value) -> Vec<Value> {
         let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match ty {
-            "system" => {
-                match v.get("subtype").and_then(|s| s.as_str()).unwrap_or("") {
-                    "init" => {
-                        if let Some(sid) = v.get("session_id").and_then(|s| s.as_str()) {
-                            self.resume_id = Some(sid.to_string());
-                        }
-                        Vec::new()
+            "system" => match v.get("subtype").and_then(|s| s.as_str()).unwrap_or("") {
+                "init" => {
+                    if let Some(sid) = v.get("session_id").and_then(|s| s.as_str()) {
+                        self.resume_id = Some(sid.to_string());
                     }
-                    sub @ ("task_started" | "task_progress" | "task_updated"
-                    | "task_notification") => self.on_claude_task_event(sub, v),
-                    "background_tasks_changed" => self.on_claude_background_tasks_changed(v),
-                    _ => Vec::new(),
+                    Vec::new()
                 }
-            }
+                sub @ ("task_started" | "task_progress" | "task_updated" | "task_notification") => {
+                    self.on_claude_task_event(sub, v)
+                }
+                "background_tasks_changed" => self.on_claude_background_tasks_changed(v),
+                _ => Vec::new(),
+            },
             // Token-level partials (--include-partial-messages). These carry
             // the live content; the cumulative "assistant" snapshots below are
             // ignored to avoid double-rendering.
@@ -1913,7 +3288,8 @@ impl EventTranslator {
                                 }
                             }
                             "thinking" => {
-                                let thinking = b.get("thinking").and_then(Value::as_str).unwrap_or("");
+                                let thinking =
+                                    b.get("thinking").and_then(Value::as_str).unwrap_or("");
                                 if !thinking.is_empty() {
                                     out.extend(self.emit_thinking(thinking));
                                 }
@@ -1970,10 +3346,8 @@ impl EventTranslator {
                     .iter()
                     .filter_map(|c| {
                         let name = c.get("name").and_then(|n| n.as_str())?;
-                        let description = c
-                            .get("description")
-                            .and_then(|d| d.as_str())
-                            .unwrap_or("");
+                        let description =
+                            c.get("description").and_then(|d| d.as_str()).unwrap_or("");
                         let is_skill = ["(user)", "(project)", "(plugin)", "(builtin)"]
                             .iter()
                             .any(|suffix| description.trim_end().ends_with(suffix));
@@ -2006,11 +3380,9 @@ impl EventTranslator {
                 if let Some(blocks) = content {
                     for b in blocks {
                         if b.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
-                            let id = b
-                                .get("tool_use_id")
-                                .and_then(|t| t.as_str())
-                                .unwrap_or("");
-                            let is_err = b.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
+                            let id = b.get("tool_use_id").and_then(|t| t.as_str()).unwrap_or("");
+                            let is_err =
+                                b.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
                             let c = b.get("content").cloned().unwrap_or(Value::Null);
                             out.extend(self.emit_claude_tool_result(id, &c, is_err));
                         }
@@ -2118,15 +3490,20 @@ impl EventTranslator {
                         if !initial.is_empty() {
                             self.claude_streamed_content = true;
                         }
-                        self.live_blocks.insert(idx, LiveBlock {
-                            our_index,
-                            kind: LiveKind::Text,
-                            buffer: initial.to_string(),
-                            tool: None,
-                            closed: false,
-                            started: true,
-                        });
-                        let mut out = vec![am(json!({ "type": "text_start", "contentIndex": our_index }))];
+                        self.live_blocks.insert(
+                            idx,
+                            LiveBlock {
+                                our_index,
+                                kind: LiveKind::Text,
+                                buffer: initial.to_string(),
+                                tool: None,
+                                closed: false,
+                                started: true,
+                            },
+                        );
+                        let mut out = vec![am(
+                            json!({ "type": "text_start", "contentIndex": our_index }),
+                        )];
                         if !initial.is_empty() {
                             out.push(am(json!({
                                 "type": "text_delta",
@@ -2145,18 +3522,23 @@ impl EventTranslator {
                         // thinking_delta — see LiveBlock::started.
                         let started = !initial.is_empty();
                         let our_index = if started { self.alloc_index() } else { 0 };
-                        self.live_blocks.insert(idx, LiveBlock {
-                            our_index,
-                            kind: LiveKind::Thinking,
-                            buffer: initial.to_string(),
-                            tool: None,
-                            closed: false,
-                            started,
-                        });
+                        self.live_blocks.insert(
+                            idx,
+                            LiveBlock {
+                                our_index,
+                                kind: LiveKind::Thinking,
+                                buffer: initial.to_string(),
+                                tool: None,
+                                closed: false,
+                                started,
+                            },
+                        );
                         if started {
                             vec![
                                 am(json!({ "type": "thinking_start", "contentIndex": our_index })),
-                                am(json!({ "type": "thinking_delta", "contentIndex": our_index, "delta": initial })),
+                                am(
+                                    json!({ "type": "thinking_delta", "contentIndex": our_index, "delta": initial }),
+                                ),
                             ]
                         } else {
                             Vec::new()
@@ -2168,15 +3550,20 @@ impl EventTranslator {
                         let name = cb.get("name").and_then(|t| t.as_str()).unwrap_or("tool");
                         self.tool_names.insert(id.to_string(), name.to_string());
                         let our_index = self.alloc_index();
-                        self.live_blocks.insert(idx, LiveBlock {
-                            our_index,
-                            kind: LiveKind::ToolUse,
-                            buffer: String::new(),
-                            tool: Some((id.to_string(), name.to_string())),
-                            closed: false,
-                            started: true,
-                        });
-                        vec![am(json!({ "type": "toolcall_start", "contentIndex": our_index }))]
+                        self.live_blocks.insert(
+                            idx,
+                            LiveBlock {
+                                our_index,
+                                kind: LiveKind::ToolUse,
+                                buffer: String::new(),
+                                tool: Some((id.to_string(), name.to_string())),
+                                closed: false,
+                                started: true,
+                            },
+                        );
+                        vec![am(
+                            json!({ "type": "toolcall_start", "contentIndex": our_index }),
+                        )]
                     }
                     _ => Vec::new(),
                 }
@@ -2278,8 +3665,7 @@ impl EventTranslator {
                     }
                     LiveKind::ToolUse => {
                         let (id, name) = block.tool.clone().unwrap_or_default();
-                        let args: Value =
-                            serde_json::from_str(&block.buffer).unwrap_or(json!({}));
+                        let args: Value = serde_json::from_str(&block.buffer).unwrap_or(json!({}));
                         self.assistant_blocks.push(json!({
                             "type": "toolCall", "id": id, "name": name, "arguments": args,
                         }));
@@ -2296,8 +3682,7 @@ impl EventTranslator {
                     .pointer("/usage/output_tokens")
                     .and_then(Value::as_u64)
                 {
-                    self.claude_context_used =
-                        self.claude_context_used.saturating_add(output);
+                    self.claude_context_used = self.claude_context_used.saturating_add(output);
                 }
                 self.claude_context_event().into_iter().collect()
             }
@@ -2315,17 +3700,18 @@ impl EventTranslator {
                 Vec::new()
             }
             "item.agent_message.delta" => {
-                let id = v.get("item_id").and_then(Value::as_str).unwrap_or("message");
+                let id = v
+                    .get("item_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("message");
                 let delta = v.get("delta").and_then(Value::as_str).unwrap_or("");
-                self.emit_codex_delta(
-                    format!("message:{id}"),
-                    id,
-                    LiveKind::Text,
-                    delta,
-                )
+                self.emit_codex_delta(format!("message:{id}"), id, LiveKind::Text, delta)
             }
             "item.reasoning.summary_delta" => {
-                let id = v.get("item_id").and_then(Value::as_str).unwrap_or("reasoning");
+                let id = v
+                    .get("item_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("reasoning");
                 let part = v.get("summary_index").and_then(Value::as_i64).unwrap_or(0);
                 let delta = v.get("delta").and_then(Value::as_str).unwrap_or("");
                 self.emit_codex_delta(
@@ -2336,7 +3722,10 @@ impl EventTranslator {
                 )
             }
             "item.reasoning.text_delta" => {
-                let id = v.get("item_id").and_then(Value::as_str).unwrap_or("reasoning");
+                let id = v
+                    .get("item_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("reasoning");
                 let part = v.get("content_index").and_then(Value::as_i64).unwrap_or(0);
                 let delta = v.get("delta").and_then(Value::as_str).unwrap_or("");
                 self.emit_codex_delta(
@@ -2349,12 +3738,7 @@ impl EventTranslator {
             "item.plan.delta" => {
                 let id = v.get("item_id").and_then(Value::as_str).unwrap_or("plan");
                 let delta = v.get("delta").and_then(Value::as_str).unwrap_or("");
-                self.emit_codex_delta(
-                    format!("plan:{id}"),
-                    id,
-                    LiveKind::Thinking,
-                    delta,
-                )
+                self.emit_codex_delta(format!("plan:{id}"), id, LiveKind::Thinking, delta)
             }
             "item.tool_output.delta" => {
                 let id = v.get("item_id").and_then(Value::as_str).unwrap_or("item");
@@ -2412,7 +3796,8 @@ impl EventTranslator {
                         steps: Vec::new(),
                         status_text: String::new(),
                     };
-                    self.background_tasks.insert(thread_id.to_string(), task.clone());
+                    self.background_tasks
+                        .insert(thread_id.to_string(), task.clone());
                     let mut out = self.emit_tool_call(
                         id,
                         "Agent",
@@ -2429,7 +3814,10 @@ impl EventTranslator {
                     }));
                     return out;
                 }
-                if matches!(item_ty, "dynamic_tool_call" | "image_generation" | "mcp_tool_call") {
+                if matches!(
+                    item_ty,
+                    "dynamic_tool_call" | "image_generation" | "mcp_tool_call"
+                ) {
                     let id = item.get("id").and_then(Value::as_str).unwrap_or("item");
                     let name = if item_ty == "image_generation" {
                         "image_generation"
@@ -2507,9 +3895,15 @@ impl EventTranslator {
                             .filter(|parts| !parts.is_empty())
                             .or_else(|| item.get("content").and_then(Value::as_array))
                             .map(|parts| {
-                                parts.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n")
+                                parts
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
                             })
-                            .or_else(|| item.get("text").and_then(Value::as_str).map(str::to_string))
+                            .or_else(|| {
+                                item.get("text").and_then(Value::as_str).map(str::to_string)
+                            })
                             .unwrap_or_default();
                         let streamed = self.close_codex_item(id, Some(&completed));
                         if !streamed.is_empty() {
@@ -2558,12 +3952,8 @@ impl EventTranslator {
                         let cmd = item.get("command").cloned().unwrap_or(Value::Null);
                         let args = json!({ "command": cmd });
                         let mut completed = self.emit_tool_call(id, "shell", &args);
-                        completed.push(
-                            json!({ "type": "tool_execution_start", "toolCallId": id }),
-                        );
-                        completed.extend(
-                            self.emit_codex_command_result_end(id, &output, is_err),
-                        );
+                        completed.push(json!({ "type": "tool_execution_start", "toolCallId": id }));
+                        completed.extend(self.emit_codex_command_result_end(id, &output, is_err));
                         completed
                     }
                     "file_change" => {
@@ -2592,10 +3982,7 @@ impl EventTranslator {
                         }
                     }
                     "dynamic_tool_call" => {
-                        let name = item
-                            .get("tool")
-                            .and_then(Value::as_str)
-                            .unwrap_or("tool");
+                        let name = item.get("tool").and_then(Value::as_str).unwrap_or("tool");
                         let args = item.get("arguments").cloned().unwrap_or(Value::Null);
                         let result = item
                             .get("content_items")
@@ -2611,7 +3998,9 @@ impl EventTranslator {
                         out
                     }
                     "image_generation" => {
-                        let result = if let Some(path) = item.get("saved_path").and_then(Value::as_str) {
+                        let result = if let Some(path) =
+                            item.get("saved_path").and_then(Value::as_str)
+                        {
                             json!({ "type": "file", "path": path, "mimeType": "image/png" })
                         } else {
                             json!({
@@ -2682,7 +4071,9 @@ impl EventTranslator {
                                 .and_then(Value::as_str)
                                 .filter(|s| !s.trim().is_empty())
                                 .map(str::to_string)
-                                .unwrap_or_else(|| format!("{} agent {status}", task.subagent_type));
+                                .unwrap_or_else(|| {
+                                    format!("{} agent {status}", task.subagent_type)
+                                });
                             if terminal {
                                 out.extend(self.emit_tool_result_end_with_details(
                                     &task.tool_use_id,
@@ -2704,7 +4095,10 @@ impl EventTranslator {
                         out
                     }
                     "error" => {
-                        let msg = item.get("message").and_then(|m| m.as_str()).unwrap_or("error");
+                        let msg = item
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("error");
                         self.emit_text(&format!("⚠️ {msg}"))
                     }
                     _ => Vec::new(),
@@ -2868,6 +4262,7 @@ fn auth_expired_hint(backend: CliBackend, stderr: &str) -> Option<String> {
         CliBackend::Grok => "grok login",
         // Kimi has no login subcommand — signing in happens inside the TUI.
         CliBackend::Kimi => "kimi, then /login",
+        CliBackend::Dsh => "dsh web, then finish provider setup",
     };
     Some(format!(
         "{} session has expired. Run `{}` in a terminal to sign in again, then retry.",
@@ -2927,7 +4322,10 @@ enum ClaudeSessionCommand {
     /// A mid-turn user message: `line` goes to stdin like Input, and
     /// `message` (the PiMessage-shaped user row) is queued on the translator
     /// to splice into the transcript at its merge point.
-    Steer { line: String, message: Value },
+    Steer {
+        line: String,
+        message: Value,
+    },
     Abort,
     Shutdown,
 }
@@ -3008,7 +4406,9 @@ pub fn spawn_claude_session(
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
-    let mut child = cmd.spawn().with_context(|| format!("failed to launch `{bin}`"))?;
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("failed to launch `{bin}`"))?;
     let mut stdin = child.stdin.take().context("Claude Code stdin missing")?;
     let stdout = child.stdout.take().context("Claude Code stdout missing")?;
     let stderr = child.stderr.take();
@@ -3289,6 +4689,10 @@ enum AcpSessionCommand {
         request_id: Value,
         allow: bool,
     },
+    RespondQuestion {
+        request_id: Value,
+        response: Value,
+    },
     Abort,
     Shutdown,
 }
@@ -3316,6 +4720,15 @@ impl AcpSessionHandle {
         self.tx
             .send(AcpSessionCommand::RespondPermission { request_id, allow })
             .map_err(|_| anyhow::anyhow!("ACP session has exited"))
+    }
+
+    pub fn respond_question(&self, request_id: Value, response: Value) -> Result<()> {
+        self.tx
+            .send(AcpSessionCommand::RespondQuestion {
+                request_id,
+                response,
+            })
+            .map_err(|_| anyhow::anyhow!("agent session has exited"))
     }
 
     pub fn abort(&self) {
@@ -3360,21 +4773,20 @@ async fn acp_write(stdin: &mut tokio::process::ChildStdin, value: &Value) -> std
 /// found".
 async fn acp_decline_request(stdin: &mut tokio::process::ChildStdin, request: &Value) {
     let Some(id) = request.get("id") else { return };
-    let response = if request.get("method").and_then(Value::as_str)
-        == Some("session/request_permission")
-    {
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": { "outcome": { "outcome": "cancelled" } }
-        })
-    } else {
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": { "code": -32601, "message": "Unsupported ACP client method" }
-        })
-    };
+    let response =
+        if request.get("method").and_then(Value::as_str) == Some("session/request_permission") {
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": { "outcome": { "outcome": "cancelled" } }
+            })
+        } else {
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32601, "message": "Unsupported ACP client method" }
+            })
+        };
     let _ = acp_write(stdin, &response).await;
 }
 
@@ -3444,7 +4856,10 @@ fn acp_allow_option(params: &Value, allow: bool) -> Option<Value> {
 /// `cancelled` are normal; the rest end the turn with nothing rendered, so
 /// surface them instead of showing an empty answer.
 fn acp_stop_reason_error(response: &Value) -> Option<String> {
-    match response.pointer("/result/stopReason").and_then(Value::as_str)? {
+    match response
+        .pointer("/result/stopReason")
+        .and_then(Value::as_str)?
+    {
         "end_turn" | "cancelled" => None,
         "refusal" => Some("The agent declined to continue this turn.".to_string()),
         "max_tokens" => Some("The agent stopped: token limit reached.".to_string()),
@@ -3683,14 +5098,9 @@ pub fn spawn_acp_session(
                 if let Some(effort) = opts.effort.as_ref() {
                     params["reasoningEffort"] = json!(effort);
                 }
-                if let Err(error) = acp_handshake_request(
-                    &mut stdin,
-                    &mut reader,
-                    4,
-                    "session/set_model",
-                    params,
-                )
-                .await
+                if let Err(error) =
+                    acp_handshake_request(&mut stdin, &mut reader, 4, "session/set_model", params)
+                        .await
                 {
                     tracing::warn!("Grok ACP session/set_model failed: {error}");
                 }
@@ -3786,6 +5196,9 @@ pub fn spawn_acp_session(
                             ).await;
                         }
                     }
+                    // Native ACP currently exposes permission requests only;
+                    // structured question responses are used by Dsh sessions.
+                    Some(AcpSessionCommand::RespondQuestion { .. }) => {}
                     Some(AcpSessionCommand::Abort) => {
                         let _ = acp_write(
                             &mut stdin,
@@ -4110,7 +5523,12 @@ fn codex_skill_commands(result: &Value) -> Vec<Value> {
                 .into_iter()
                 .flatten()
         })
-        .filter(|skill| skill.get("enabled").and_then(Value::as_bool).unwrap_or(true))
+        .filter(|skill| {
+            skill
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(true)
+        })
         .filter_map(|skill| {
             let name = skill.get("name").and_then(Value::as_str)?;
             if !seen.insert(name.to_lowercase()) {
@@ -4134,11 +5552,7 @@ fn codex_skill_commands(result: &Value) -> Vec<Value> {
 /// `skills/list` is available immediately after the app-server initialize
 /// handshake, so new-chat surfaces can prewarm their slash menu without
 /// polluting Codex's saved thread inventory.
-pub async fn probe_codex_skills(
-    bin: &str,
-    cwd: &Path,
-    force_reload: bool,
-) -> Result<Vec<Value>> {
+pub async fn probe_codex_skills(bin: &str, cwd: &Path, force_reload: bool) -> Result<Vec<Value>> {
     let mut cmd = TokioCommand::new(bin);
     cmd.args(["app-server", "--listen", "stdio://"])
         .current_dir(cwd)
@@ -4149,8 +5563,14 @@ pub async fn probe_codex_skills(
     let mut child = cmd
         .spawn()
         .with_context(|| format!("failed to launch `{bin} app-server` for skill discovery"))?;
-    let mut stdin = child.stdin.take().context("Codex app-server stdin missing")?;
-    let stdout = child.stdout.take().context("Codex app-server stdout missing")?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .context("Codex app-server stdin missing")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("Codex app-server stdout missing")?;
     let mut reader = BufReader::new(stdout).lines();
     let cwd_string = cwd.to_string_lossy().into_owned();
 
@@ -4267,7 +5687,9 @@ fn normalize_codex_app_delta(method: &str, params: &Value) -> Option<Value> {
 }
 
 fn codex_context_event(params: &Value, transcript_bytes: usize) -> Option<Value> {
-    let usage = params.get("tokenUsage").or_else(|| params.get("token_usage"))?;
+    let usage = params
+        .get("tokenUsage")
+        .or_else(|| params.get("token_usage"))?;
     let used_tokens = usage
         .pointer("/last/totalTokens")
         .or_else(|| usage.pointer("/last/total_tokens"))
@@ -4371,9 +5793,17 @@ pub fn spawn_codex_session(
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
-    let mut child = cmd.spawn().with_context(|| format!("failed to launch `{bin} app-server`"))?;
-    let mut stdin = child.stdin.take().context("Codex app-server stdin missing")?;
-    let stdout = child.stdout.take().context("Codex app-server stdout missing")?;
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("failed to launch `{bin} app-server`"))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .context("Codex app-server stdin missing")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("Codex app-server stdout missing")?;
     let stderr = child.stderr.take();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = CodexSessionHandle { tx };
@@ -4398,19 +5828,31 @@ pub fn spawn_codex_session(
         }
         let mut reader = BufReader::new(stdout).lines();
         let initialized = async {
-            write_json_line(&mut stdin, &json!({
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "clientInfo": { "name": "cetus", "title": "Cetus", "version": "0.1.0" },
-                    "capabilities": { "experimentalApi": true, "requestAttestation": false }
-                }
-            })).await?;
+            write_json_line(
+                &mut stdin,
+                &json!({
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "clientInfo": { "name": "cetus", "title": "Cetus", "version": "0.1.0" },
+                        "capabilities": { "experimentalApi": true, "requestAttestation": false }
+                    }
+                }),
+            )
+            .await?;
             read_rpc_response(&mut reader, 1).await?;
             write_json_line(&mut stdin, &json!({ "method": "initialized" })).await?;
 
-            let policy = if opts.bypass_approvals { "danger-full-access" } else { "workspace-write" };
-            let method = if opts.resume.is_some() { "thread/resume" } else { "thread/start" };
+            let policy = if opts.bypass_approvals {
+                "danger-full-access"
+            } else {
+                "workspace-write"
+            };
+            let method = if opts.resume.is_some() {
+                "thread/resume"
+            } else {
+                "thread/start"
+            };
             let mut params = json!({
                 "cwd": cwd_string.clone(),
                 "approvalPolicy": "never",
@@ -4421,22 +5863,36 @@ pub fn spawn_codex_session(
                 params["threadId"] = json!(resume);
                 params["excludeTurns"] = json!(true);
             }
-            if let Some(model) = &opts.model { params["model"] = json!(model); }
-            write_json_line(&mut stdin, &json!({ "id": 2, "method": method, "params": params })).await?;
+            if let Some(model) = &opts.model {
+                params["model"] = json!(model);
+            }
+            write_json_line(
+                &mut stdin,
+                &json!({ "id": 2, "method": method, "params": params }),
+            )
+            .await?;
             let result = read_rpc_response(&mut reader, 2).await?;
-            let thread_id = result.pointer("/thread/id").and_then(Value::as_str)
+            let thread_id = result
+                .pointer("/thread/id")
+                .and_then(Value::as_str)
                 .map(str::to_string)
                 .ok_or_else(|| anyhow::anyhow!("Codex app-server returned no thread id"))?;
 
-            write_json_line(&mut stdin, &json!({
-                "id": 3,
-                "method": "skills/list",
-                "params": { "cwds": [cwd_string.clone()], "forceReload": false },
-            })).await?;
+            write_json_line(
+                &mut stdin,
+                &json!({
+                    "id": 3,
+                    "method": "skills/list",
+                    "params": { "cwds": [cwd_string.clone()], "forceReload": false },
+                }),
+            )
+            .await?;
             let skill_commands = match tokio::time::timeout(
                 Duration::from_secs(5),
                 read_rpc_response(&mut reader, 3),
-            ).await {
+            )
+            .await
+            {
                 Ok(Ok(result)) => codex_skill_commands(&result),
                 Ok(Err(error)) => {
                     tracing::warn!("Codex skills/list failed during startup: {error}");
@@ -4448,7 +5904,8 @@ pub fn spawn_codex_session(
                 }
             };
             Ok::<_, anyhow::Error>((thread_id, skill_commands))
-        }.await;
+        }
+        .await;
 
         let (thread_id, skill_commands) = match initialized {
             Ok(initialized) => initialized,
@@ -4462,8 +5919,11 @@ pub fn spawn_codex_session(
                         emit(&sink, tr.start());
                         emit(&sink, tr.finish(Some(&error.to_string())));
                         let _ = outcome.send(CliTurnOutcome {
-                            resume_id: None, messages: tr.take_messages(), aborted: false,
-                            streamed: tr.opened, resume_rejected: opts.resume.is_some(),
+                            resume_id: None,
+                            messages: tr.take_messages(),
+                            aborted: false,
+                            streamed: tr.opened,
+                            resume_rejected: opts.resume.is_some(),
                         });
                     }
                     Some(CodexSessionCommand::Compact { outcome, .. }) => {
@@ -5078,17 +6538,28 @@ pub fn spawn_codex_session(
             }
         }
         if let Some(turn) = active.take() {
-            emit(&turn.sink, tr.finish(Some("Codex app-server exited unexpectedly")));
+            emit(
+                &turn.sink,
+                tr.finish(Some("Codex app-server exited unexpectedly")),
+            );
             let streamed = tr.opened;
             let _ = turn.outcome.send(CliTurnOutcome {
-                resume_id: Some(thread_id.clone()), messages: tr.take_messages(), aborted: false,
-                streamed, resume_rejected: false,
+                resume_id: Some(thread_id.clone()),
+                messages: tr.take_messages(),
+                aborted: false,
+                streamed,
+                resume_rejected: false,
             });
         }
         if let Some((_prompt, _images, sink, outcome)) = pending_turn.take() {
             tr.begin_next_turn();
             emit(&sink, tr.start());
-            emit(&sink, tr.finish(Some("Codex app-server exited before the queued turn started")));
+            emit(
+                &sink,
+                tr.finish(Some(
+                    "Codex app-server exited before the queued turn started",
+                )),
+            );
             let streamed = tr.opened;
             let _ = outcome.send(CliTurnOutcome {
                 resume_id: Some(thread_id.clone()),
@@ -5102,14 +6573,19 @@ pub fn spawn_codex_session(
             let _ = outcome.send(Err("Codex app-server exited during compaction".into()));
         }
         for (_, (_, _, outcome)) in pending_plugin_installs.drain() {
-            let _ = outcome.send(Err("Codex app-server exited during plugin installation".into()));
+            let _ = outcome.send(Err(
+                "Codex app-server exited during plugin installation".into()
+            ));
         }
         if compacting {
-            emit(&base_sink, vec![json!({
-                "type": "compaction_end",
-                "reason": compact_reason,
-                "aborted": true,
-            })]);
+            emit(
+                &base_sink,
+                vec![json!({
+                    "type": "compaction_end",
+                    "reason": compact_reason,
+                    "aborted": true,
+                })],
+            );
         }
         let _ = child.wait().await;
     });
@@ -5237,10 +6713,7 @@ pub async fn run_cli_turn(
         None
     };
 
-    let stdout = child
-        .stdout
-        .take()
-        .context("child stdout missing")?;
+    let stdout = child.stdout.take().context("child stdout missing")?;
     let stderr = child.stderr.take();
 
     let mut reader = BufReader::new(stdout).lines();
@@ -5306,8 +6779,7 @@ pub async fn run_cli_turn(
                 tr.saw_result = false;
                 // The child reads queued stdin right after `result`; the
                 // steered turn's first status line lands well within 2s.
-                let deadline =
-                    tokio::time::Instant::now() + std::time::Duration::from_millis(2000);
+                let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(2000);
                 let mut resumed = false;
                 loop {
                     let line = tokio::select! {
@@ -5536,15 +7008,18 @@ mod tests {
 
     #[test]
     fn codex_context_uses_last_request_not_cumulative_thread_spend() {
-        let event = codex_context_event(&json!({
-            "threadId": "thread-1",
-            "turnId": "turn-1",
-            "tokenUsage": {
-                "total": { "totalTokens": 900000 },
-                "last": { "totalTokens": 64000 },
-                "modelContextWindow": 258400
-            }
-        }), 12_345)
+        let event = codex_context_event(
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "tokenUsage": {
+                    "total": { "totalTokens": 900000 },
+                    "last": { "totalTokens": 64000 },
+                    "modelContextWindow": 258400
+                }
+            }),
+            12_345,
+        )
         .unwrap();
         assert_eq!(event["usedTokens"], json!(64000));
         assert_eq!(event["contextWindow"], json!(258400));
@@ -5564,7 +7039,11 @@ mod tests {
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-9","name":"Bash","input":{}}}}"#));
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\": "}}}"#));
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"ls\"}"}}}"#));
-        ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#));
+        ev.extend(
+            tr.on_line(
+                r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            ),
+        );
         // the first content event opens the assistant bubble (deferred
         // message_start — not emitted at spawn time)
         assert_eq!(
@@ -5576,7 +7055,10 @@ mod tests {
             ]
         );
         // the tool_use id + parsed input land on toolcall_end
-        assert_eq!(ev[2]["assistantMessageEvent"]["toolCall"]["id"], json!("tool-9"));
+        assert_eq!(
+            ev[2]["assistantMessageEvent"]["toolCall"]["id"],
+            json!("tool-9")
+        );
         assert_eq!(
             ev[2]["assistantMessageEvent"]["toolCall"]["arguments"]["command"],
             json!("ls")
@@ -5591,7 +7073,10 @@ mod tests {
         let ev = tr.on_line(
             r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-9","content":"file.txt","is_error":false}]}}"#,
         );
-        assert_eq!(types(&ev), vec!["tool_execution_start", "tool_execution_end"]);
+        assert_eq!(
+            types(&ev),
+            vec!["tool_execution_start", "tool_execution_end"]
+        );
         assert_eq!(ev[1]["toolCallId"], json!("tool-9"));
         assert_eq!(ev[1]["result"]["content"][0]["text"], json!("file.txt"));
 
@@ -5601,7 +7086,11 @@ mod tests {
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#));
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"do"}}}"#));
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ne"}}}"#));
-        ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#));
+        ev.extend(
+            tr.on_line(
+                r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            ),
+        );
         assert_eq!(
             types(&ev),
             vec![
@@ -5668,7 +7157,11 @@ mod tests {
         let mut ev = Vec::new();
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#));
         ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"after"}}}"#));
-        ev.extend(tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#));
+        ev.extend(
+            tr.on_line(
+                r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            ),
+        );
         assert_eq!(
             types(&ev),
             vec![
@@ -5678,10 +7171,7 @@ mod tests {
                 "message_update:text_end"
             ]
         );
-        assert_eq!(
-            ev[1]["assistantMessageEvent"]["contentIndex"],
-            json!(0)
-        );
+        assert_eq!(ev[1]["assistantMessageEvent"]["contentIndex"], json!(0));
 
         tr.on_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"after"}"#);
         tr.finish(None);
@@ -5744,7 +7234,10 @@ mod tests {
                 "agent_settled"
             ]
         );
-        assert_eq!(ev[0]["assistantMessageEvent"]["content"], json!("partial answ"));
+        assert_eq!(
+            ev[0]["assistantMessageEvent"]["content"],
+            json!("partial answ")
+        );
         let messages = tr.take_messages();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["content"][0]["text"], json!("partial answ"));
@@ -5776,13 +7269,19 @@ mod tests {
         tr.finish(None);
         let msgs = tr.take_messages();
         assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0]["content"][0]["text"], json!("Current session: 28% used"));
+        assert_eq!(
+            msgs[0]["content"][0]["text"],
+            json!("Current session: 28% used")
+        );
 
         // A real-model snapshot is a fallback when this CLI emitted no
         // stream_event content at all.
         let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
         let fallback = tr.on_line(r#"{"type":"assistant","message":{"model":"claude-fable-5","content":[{"type":"text","text":"fallback"}]}}"#);
-        assert_eq!(fallback[2]["assistantMessageEvent"]["delta"], json!("fallback"));
+        assert_eq!(
+            fallback[2]["assistantMessageEvent"]["delta"],
+            json!("fallback")
+        );
 
         // Once partial content was observed, its cumulative snapshot remains
         // redundant and must not duplicate the visible response.
@@ -5823,13 +7322,19 @@ mod tests {
             .is_empty());
         // the next block still takes index 0 — the ghost consumed nothing
         let ev = tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}}"#);
-        assert_eq!(ev.last().unwrap()["assistantMessageEvent"]["contentIndex"], json!(0));
+        assert_eq!(
+            ev.last().unwrap()["assistantMessageEvent"]["contentIndex"],
+            json!(0)
+        );
         tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hi"}}}"#);
         tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":1}}"#);
         tr.finish(None);
         let msgs = tr.take_messages();
         assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0]["content"], json!([{ "type": "text", "text": "hi" }]));
+        assert_eq!(
+            msgs[0]["content"],
+            json!([{ "type": "text", "text": "hi" }])
+        );
     }
 
     /// With a thinking display active the deltas carry text: thinking_start is
@@ -5846,9 +7351,16 @@ mod tests {
             .filter_map(|e| e["assistantMessageEvent"]["type"].as_str())
             .collect();
         assert_eq!(kinds, vec!["thinking_start", "thinking_delta"]);
-        let ev = tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
-        assert_eq!(ev[0]["assistantMessageEvent"]["type"], json!("thinking_end"));
-        assert_eq!(ev[0]["assistantMessageEvent"]["content"], json!("let me see"));
+        let ev = tr
+            .on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
+        assert_eq!(
+            ev[0]["assistantMessageEvent"]["type"],
+            json!("thinking_end")
+        );
+        assert_eq!(
+            ev[0]["assistantMessageEvent"]["content"],
+            json!("let me see")
+        );
         tr.finish(None);
         let msgs = tr.take_messages();
         assert_eq!(
@@ -5867,7 +7379,10 @@ mod tests {
         assert_eq!(types(&ev), vec!["cli_control_request"]);
         assert_eq!(ev[0]["requestId"], json!("req-1"));
         assert_eq!(ev[0]["toolName"], json!("AskUserQuestion"));
-        assert_eq!(ev[0]["input"]["questions"][0]["question"], json!("Which color?"));
+        assert_eq!(
+            ev[0]["input"]["questions"][0]["question"],
+            json!("Which color?")
+        );
         // the init handshake ack is swallowed
         assert!(tr
             .on_line(r#"{"type":"control_response","response":{"subtype":"success","request_id":"init-1","response":{}}}"#)
@@ -5902,7 +7417,10 @@ mod tests {
         assert_eq!(types(&ev), vec!["cli_commands"]);
         assert_eq!(ev[0]["commands"][0]["name"], json!("usage"));
         assert_eq!(ev[0]["commands"][0]["kind"], json!("command"));
-        assert_eq!(ev[0]["commands"][1]["argumentHint"], json!("<instructions>"));
+        assert_eq!(
+            ev[0]["commands"][1]["argumentHint"],
+            json!("<instructions>")
+        );
     }
 
     #[test]
@@ -5984,9 +7502,11 @@ mod tests {
             user["message"]["content"][1]["source"]["media_type"],
             json!("image/png")
         );
-        let resp: Value =
-            serde_json::from_str(&claude_control_response_line("r1", &json!({"behavior":"allow"})))
-                .unwrap();
+        let resp: Value = serde_json::from_str(&claude_control_response_line(
+            "r1",
+            &json!({"behavior":"allow"}),
+        ))
+        .unwrap();
         assert_eq!(resp["response"]["request_id"], json!("r1"));
         assert_eq!(resp["response"]["response"]["behavior"], json!("allow"));
     }
@@ -6011,7 +7531,10 @@ mod tests {
                 "tool_execution_end"
             ]
         );
-        assert_eq!(ev[2]["assistantMessageEvent"]["toolCall"]["name"], json!("shell"));
+        assert_eq!(
+            ev[2]["assistantMessageEvent"]["toolCall"]["name"],
+            json!("shell")
+        );
 
         let ev = tr.on_line(
             r#"{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"OK"}}"#,
@@ -6073,11 +7596,13 @@ mod tests {
             r#"{"type":"item.completed","item":{"id":"r1","type":"reasoning","summary":["Checking the repo"],"content":[]}}"#,
         );
         assert_eq!(types(&end), vec!["message_update:thinking_end"]);
-        assert_eq!(end[0]["assistantMessageEvent"]["content"], json!("Checking the repo"));
-
-        let first = tr.on_line(
-            r#"{"type":"item.agent_message.delta","item_id":"m1","delta":"partial"}"#,
+        assert_eq!(
+            end[0]["assistantMessageEvent"]["content"],
+            json!("Checking the repo")
         );
+
+        let first =
+            tr.on_line(r#"{"type":"item.agent_message.delta","item_id":"m1","delta":"partial"}"#);
         assert_eq!(
             types(&first),
             vec!["message_update:text_start", "message_update:text_delta"]
@@ -6087,7 +7612,10 @@ mod tests {
             r#"{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"final answer"}}"#,
         );
         assert_eq!(types(&end), vec!["message_update:text_end"]);
-        assert_eq!(end[0]["assistantMessageEvent"]["content"], json!("final answer"));
+        assert_eq!(
+            end[0]["assistantMessageEvent"]["content"],
+            json!("final answer")
+        );
 
         tr.finish(None);
         let messages = tr.take_messages();
@@ -6101,19 +7629,16 @@ mod tests {
         tr.on_line(
             r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","command":"build"}}"#,
         );
-        let first = tr.on_line(
-            r#"{"type":"item.tool_output.delta","item_id":"cmd1","delta":"line 1\n"}"#,
-        );
-        let second = tr.on_line(
-            r#"{"type":"item.tool_output.delta","item_id":"cmd1","delta":"line 2"}"#,
-        );
+        let first =
+            tr.on_line(r#"{"type":"item.tool_output.delta","item_id":"cmd1","delta":"line 1\n"}"#);
+        let second =
+            tr.on_line(r#"{"type":"item.tool_output.delta","item_id":"cmd1","delta":"line 2"}"#);
         assert_eq!(types(&first), vec!["tool_execution_delta"]);
         assert_eq!(first[0]["delta"], json!("line 1\n"));
         assert!(second.is_empty(), "updates inside 50ms should be coalesced");
         std::thread::sleep(TOOL_OUTPUT_FLUSH_INTERVAL + Duration::from_millis(5));
-        let third = tr.on_line(
-            r#"{"type":"item.tool_output.delta","item_id":"cmd1","delta":"line 3"}"#,
-        );
+        let third =
+            tr.on_line(r#"{"type":"item.tool_output.delta","item_id":"cmd1","delta":"line 3"}"#);
         assert_eq!(types(&third), vec!["tool_execution_delta"]);
         assert_eq!(third[0]["delta"], json!("line 2line 3"));
         assert_eq!(third[0]["totalBytes"], json!(19));
@@ -6125,8 +7650,8 @@ mod tests {
             "cetus-tool-output-test-{}",
             ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
-        let mut tr = EventTranslator::new(CliBackend::Codex)
-            .with_artifact_storage(dir.clone(), dir.clone());
+        let mut tr =
+            EventTranslator::new(CliBackend::Codex).with_artifact_storage(dir.clone(), dir.clone());
         tr.on_line(
             r#"{"type":"item.started","item":{"id":"cmd-large","type":"command_execution","command":"build"}}"#,
         );
@@ -6148,7 +7673,10 @@ mod tests {
             .unwrap();
         let preview = end["result"]["content"][0]["text"].as_str().unwrap();
         assert!(preview.len() <= TOOL_OUTPUT_PREVIEW_BYTES);
-        assert_eq!(end["result"]["details"]["toolOutput"]["truncated"], json!(true));
+        assert_eq!(
+            end["result"]["details"]["toolOutput"]["truncated"],
+            json!(true)
+        );
         let path = end["result"]["details"]["toolOutput"]["path"]
             .as_str()
             .unwrap();
@@ -6159,9 +7687,7 @@ mod tests {
     #[test]
     fn codex_finish_preserves_an_interrupted_partial_message() {
         let mut tr = EventTranslator::new(CliBackend::Codex);
-        tr.on_line(
-            r#"{"type":"item.agent_message.delta","item_id":"m1","delta":"still working"}"#,
-        );
+        tr.on_line(r#"{"type":"item.agent_message.delta","item_id":"m1","delta":"still working"}"#);
         let end = tr.finish(None);
         assert_eq!(types(&end)[0], "message_update:text_end");
         assert_eq!(
@@ -6216,7 +7742,10 @@ mod tests {
         }));
         let ev = tr.on_line(&json!({ "type": "item.completed", "item": completed }).to_string());
         assert_eq!(types(&ev), vec!["tool_execution_end"]);
-        assert_eq!(ev[0]["result"]["content"][0]["text"], json!("parser is sound"));
+        assert_eq!(
+            ev[0]["result"]["content"][0]["text"],
+            json!("parser is sound")
+        );
         assert_eq!(
             ev[0]["result"]["details"]["subagent"]["status"],
             json!("completed")
@@ -6230,10 +7759,7 @@ mod tests {
         // pair (agent_end + the settle signal) alone.
         let mut tr = EventTranslator::new(CliBackend::Codex);
         assert_eq!(types(&tr.start()), vec!["agent_start"]);
-        assert_eq!(
-            types(&tr.finish(None)),
-            vec!["agent_end", "agent_settled"]
-        );
+        assert_eq!(types(&tr.finish(None)), vec!["agent_end", "agent_settled"]);
 
         let mut tr = EventTranslator::new(CliBackend::Codex);
         let ev = tr.finish(Some("boom"));
@@ -6383,7 +7909,10 @@ mod tests {
             .unwrap();
         let pid = std::fs::read_to_string(&pid_file).unwrap();
         assert_eq!(first.messages[0]["content"][0]["text"], json!("turn-1"));
-        assert!(session.is_alive(), "result must not tear down the CLI session");
+        assert!(
+            session.is_alive(),
+            "result must not tear down the CLI session"
+        );
 
         let second = session
             .start_turn(
@@ -6459,13 +7988,10 @@ mod tests {
         .unwrap();
 
         // The continuation turn's reply lands on the orphan channel.
-        let orphaned = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            orphan_rx.recv(),
-        )
-        .await
-        .expect("continuation message not shipped")
-        .unwrap();
+        let orphaned = tokio::time::timeout(std::time::Duration::from_secs(5), orphan_rx.recv())
+            .await
+            .expect("continuation message not shipped")
+            .unwrap();
         assert_eq!(orphaned[0]["content"][0]["text"], json!("monitor woke me"));
 
         // A normal turn afterwards is unaffected and does NOT re-carry it.
@@ -6478,7 +8004,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.messages.len(), 1);
-        assert_eq!(outcome.messages[0]["content"][0]["text"], json!("real turn"));
+        assert_eq!(
+            outcome.messages[0]["content"][0]["text"],
+            json!("real turn")
+        );
 
         session.shutdown();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -6557,11 +8086,10 @@ mod tests {
         assert_eq!(outcome.messages[0]["content"][0]["text"], json!("launched"));
 
         // The continuation turn's reply still reaches the orphan channel.
-        let orphaned =
-            tokio::time::timeout(std::time::Duration::from_secs(5), orphan_rx.recv())
-                .await
-                .expect("continuation message not shipped")
-                .unwrap();
+        let orphaned = tokio::time::timeout(std::time::Duration::from_secs(5), orphan_rx.recv())
+            .await
+            .expect("continuation message not shipped")
+            .unwrap();
         assert_eq!(
             orphaned[0]["content"][0]["text"],
             json!("task finished, continuing")
@@ -6583,13 +8111,29 @@ mod tests {
             .filter(|t| {
                 matches!(
                     t.as_str(),
-                    "agent_start" | "message_start" | "message_update" | "message_end" | "agent_end"
+                    "agent_start"
+                        | "message_start"
+                        | "message_update"
+                        | "message_end"
+                        | "agent_end"
                 )
             })
             .collect();
-        assert_eq!(order.first().map(String::as_str), Some("agent_start"), "{order:?}");
-        assert_eq!(order.get(1).map(String::as_str), Some("message_start"), "{order:?}");
-        assert_eq!(order.last().map(String::as_str), Some("agent_end"), "{order:?}");
+        assert_eq!(
+            order.first().map(String::as_str),
+            Some("agent_start"),
+            "{order:?}"
+        );
+        assert_eq!(
+            order.get(1).map(String::as_str),
+            Some("message_start"),
+            "{order:?}"
+        );
+        assert_eq!(
+            order.last().map(String::as_str),
+            Some("agent_end"),
+            "{order:?}"
+        );
         assert!(
             order[..order.len() - 1].contains(&"message_end".to_string()),
             "{order:?}"
@@ -6672,7 +8216,10 @@ mod tests {
             event["assistantMessageEvent"]["type"] == json!("text_delta")
                 && event["assistantMessageEvent"]["delta"] == json!("turn-1")
         }));
-        assert!(session.is_alive(), "turn/completed must not stop app-server");
+        assert!(
+            session.is_alive(),
+            "turn/completed must not stop app-server"
+        );
 
         let second = session
             .start_turn("two".into(), Vec::new(), sink.clone() as Arc<dyn EventSink>)
@@ -6745,13 +8292,21 @@ mod tests {
         )
         .unwrap();
         let outcome = session
-            .start_turn("begin".into(), Vec::new(), sink.clone() as Arc<dyn EventSink>)
+            .start_turn(
+                "begin".into(),
+                Vec::new(),
+                sink.clone() as Arc<dyn EventSink>,
+            )
             .unwrap();
         let observed = sink.clone();
         for _ in 0..200 {
-            if observed.0.lock().unwrap().iter().any(|event| {
-                event["assistantMessageEvent"]["delta"] == json!("before steer")
-            }) {
+            if observed
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| event["assistantMessageEvent"]["delta"] == json!("before steer"))
+            {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -6775,7 +8330,9 @@ mod tests {
         session.compact("manual").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let events = sink.0.lock().unwrap();
-        assert!(events.iter().any(|event| event["type"] == "compaction_start"));
+        assert!(events
+            .iter()
+            .any(|event| event["type"] == "compaction_start"));
         assert!(events.iter().any(|event| {
             event["type"] == "compaction_end" && event["aborted"] == json!(false)
         }));
@@ -6836,7 +8393,11 @@ mod tests {
         )
         .unwrap();
         let outcome = session
-            .start_turn("suggest a plugin".into(), Vec::new(), sink.clone() as Arc<dyn EventSink>)
+            .start_turn(
+                "suggest a plugin".into(),
+                Vec::new(),
+                sink.clone() as Arc<dyn EventSink>,
+            )
             .unwrap();
 
         let responder = session.clone();
@@ -6943,7 +8504,11 @@ mod tests {
         .unwrap();
         // Nobody answers the suggestion — the session must decline it itself.
         let outcome = session
-            .start_turn("suggest a plugin".into(), Vec::new(), sink.clone() as Arc<dyn EventSink>)
+            .start_turn(
+                "suggest a plugin".into(),
+                Vec::new(),
+                sink.clone() as Arc<dyn EventSink>,
+            )
             .unwrap();
         let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), outcome)
             .await
@@ -6952,7 +8517,8 @@ mod tests {
 
         let events = sink.0.lock().unwrap();
         assert!(events.iter().any(|event| {
-            event["type"] == json!("cli_control_request") && event["requestId"] == json!("request-9")
+            event["type"] == json!("cli_control_request")
+                && event["requestId"] == json!("request-9")
         }));
         assert!(events.iter().any(|event| {
             event["type"] == json!("cli_control_resolved")
@@ -6976,8 +8542,7 @@ mod tests {
     /// promptly with whatever streamed instead of waiting out the child.
     #[tokio::test]
     async fn run_cli_turn_abort_kills_child() {
-        let dir =
-            std::env::temp_dir().join(format!("cetus-cli-abort-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cetus-cli-abort-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("fake-slow.sh");
         std::fs::write(
@@ -7055,10 +8620,8 @@ mod tests {
     /// make every later `--resume` fail with "No conversation found".
     #[tokio::test]
     async fn run_cli_turn_abort_before_content_marks_unstreamed() {
-        let dir = std::env::temp_dir().join(format!(
-            "cetus-cli-abort-early-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("cetus-cli-abort-early-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("fake-boot.sh");
         // The marker file signals "init is in the pipe" so the stop below can't
@@ -7114,7 +8677,9 @@ mod tests {
         assert!(!outcome.resume_rejected);
         // No error bubble — a user stop is not a failure.
         let events = sink.0.lock().unwrap();
-        assert!(!types(&events).iter().any(|t| t == "message_update:text_end"));
+        assert!(!types(&events)
+            .iter()
+            .any(|t| t == "message_update:text_end"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -7124,10 +8689,8 @@ mod tests {
     /// "agent reported an error" replaced with an actionable message.
     #[tokio::test]
     async fn run_cli_turn_dead_resume_token_flags_rejection() {
-        let dir = std::env::temp_dir().join(format!(
-            "cetus-cli-dead-resume-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("cetus-cli-dead-resume-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("fake-dead-resume.sh");
         std::fs::write(
@@ -7251,7 +8814,10 @@ mod tests {
         let elapsed = started.elapsed();
         // Held open through the grace window, but nowhere near the child's
         // 30s idle sleep.
-        assert!(elapsed >= std::time::Duration::from_millis(1900), "{elapsed:?}");
+        assert!(
+            elapsed >= std::time::Duration::from_millis(1900),
+            "{elapsed:?}"
+        );
         assert!(elapsed < std::time::Duration::from_secs(10), "{elapsed:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -7314,7 +8880,10 @@ mod tests {
         // runner did not kill the child at the first result.
         let all = serde_json::to_string(&outcome.messages).unwrap();
         assert!(all.contains("the subagent found it"), "{all}");
-        assert!(all.contains("found it"), "notification summary persisted: {all}");
+        assert!(
+            all.contains("found it"),
+            "notification summary persisted: {all}"
+        );
         let elapsed = started.elapsed();
         // Closed after the continuation + one quiet window, not the 30s idle.
         assert!(elapsed < std::time::Duration::from_secs(10), "{elapsed:?}");
@@ -7326,8 +8895,7 @@ mod tests {
     /// the steered turn streams fully and its own `result` closes the run.
     #[tokio::test]
     async fn run_cli_turn_steer_new_turn_keeps_streaming() {
-        let dir =
-            std::env::temp_dir().join(format!("cetus-cli-steer-turn-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cetus-cli-steer-turn-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("fake-steered.sh");
         std::fs::write(
@@ -7406,7 +8974,10 @@ mod tests {
             })
             .map(|(k, v)| {
                 if k == "PATH" {
-                    (k, "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin".to_string())
+                    (
+                        k,
+                        "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin".to_string(),
+                    )
                 } else {
                     (k, v)
                 }
@@ -7436,7 +9007,10 @@ mod tests {
         eprintln!("events: {tys:?}");
         eprintln!("messages: {:?}", outcome.messages);
         assert!(outcome.resume_id.is_some(), "session id captured");
-        assert!(tys.iter().any(|t| t == "message_update:text_delta"), "streamed deltas");
+        assert!(
+            tys.iter().any(|t| t == "message_update:text_delta"),
+            "streamed deltas"
+        );
         assert_eq!(tys.last().map(String::as_str), Some("agent_settled"));
         assert!(outcome
             .messages
@@ -7447,9 +9021,14 @@ mod tests {
     #[test]
     fn backend_ids_round_trip() {
         assert_eq!(CliBackend::from_id("codex"), Some(CliBackend::Codex));
-        assert_eq!(CliBackend::from_id("claude-code"), Some(CliBackend::ClaudeCode));
+        assert_eq!(
+            CliBackend::from_id("claude-code"),
+            Some(CliBackend::ClaudeCode)
+        );
         assert_eq!(CliBackend::from_id("pi"), None);
         assert_eq!(CliBackend::Codex.as_str(), "codex");
+        assert_eq!(CliBackend::from_id("dsh"), Some(CliBackend::Dsh));
+        assert_eq!(CliBackend::Dsh.default_bin(), "dsh");
     }
 
     #[test]
@@ -7459,7 +9038,10 @@ mod tests {
         let hint = auth_expired_hint(CliBackend::Codex, codex_dump).unwrap();
         assert!(hint.contains("codex login"), "actionable: {hint}");
         assert!(hint.len() < 200, "short, not a log wall");
-        assert_eq!(auth_expired_hint(CliBackend::Codex, "some unrelated panic"), None);
+        assert_eq!(
+            auth_expired_hint(CliBackend::Codex, "some unrelated panic"),
+            None
+        );
         let claude_hint =
             auth_expired_hint(CliBackend::ClaudeCode, "OAuth token has expired").unwrap();
         assert!(claude_hint.contains("/login"));
@@ -7513,7 +9095,10 @@ mod tests {
         tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"bg1","tool_use_id":"tA","description":"scan repo","subagent_type":"Explore"}"#);
         // The subagent calls a tool → a running step appears on the Agent card.
         let ev = tr.on_line(r#"{"type":"assistant","parent_tool_use_id":"tA","message":{"content":[{"type":"tool_use","id":"inner-1","name":"Bash","input":{"command":"ls -la","description":"List files"}}]}}"#);
-        let update = ev.iter().find(|e| e["type"] == "tool_execution_update").unwrap();
+        let update = ev
+            .iter()
+            .find(|e| e["type"] == "tool_execution_update")
+            .unwrap();
         assert_eq!(update["toolCallId"], json!("tA"));
         let steps = &update["partialResult"]["details"]["subagent"]["steps"];
         assert_eq!(steps[0]["tool"], json!("Bash"));
@@ -7521,14 +9106,26 @@ mod tests {
         assert_eq!(steps[0]["done"], json!(false));
         // Its tool_result settles that step.
         let ev = tr.on_line(r#"{"type":"user","parent_tool_use_id":"tA","message":{"content":[{"type":"tool_result","tool_use_id":"inner-1","content":"ls output","is_error":false}]}}"#);
-        let update = ev.iter().find(|e| e["type"] == "tool_execution_update").unwrap();
-        assert_eq!(update["partialResult"]["details"]["subagent"]["steps"][0]["done"], json!(true));
+        let update = ev
+            .iter()
+            .find(|e| e["type"] == "tool_execution_update")
+            .unwrap();
+        assert_eq!(
+            update["partialResult"]["details"]["subagent"]["steps"][0]["done"],
+            json!(true)
+        );
         // task_progress keeps carrying the accumulated steps.
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_progress","task_id":"bg1","tool_use_id":"tA","description":"Reading main.rs"}"#);
-        assert_eq!(ev[0]["partialResult"]["details"]["subagent"]["steps"][0]["tool"], json!("Bash"));
+        assert_eq!(
+            ev[0]["partialResult"]["details"]["subagent"]["steps"][0]["tool"],
+            json!("Bash")
+        );
         // Nothing leaked into the main transcript.
         tr.finish(None);
-        assert!(tr.take_messages().iter().all(|m| m["role"] != json!("toolResult")));
+        assert!(tr
+            .take_messages()
+            .iter()
+            .all(|m| m["role"] != json!("toolResult")));
     }
 
     #[test]
@@ -7540,15 +9137,30 @@ mod tests {
         tr.on_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tA","content":[{"type":"text","text":"Async agent launched successfully. agentId: abc"}],"is_error":false}]}}"#);
         tr.on_line(r#"{"type":"assistant","parent_tool_use_id":"tA","message":{"content":[{"type":"tool_use","id":"inner-1","name":"Read","input":{"file_path":"main.rs"}}]}}"#);
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"bg1","tool_use_id":"tA","status":"completed","summary":"Found 3 files: main.rs, a.txt, b.txt"}"#);
-        let end = ev.iter().find(|e| e["type"] == "tool_execution_end").unwrap();
-        assert_eq!(end["result"]["content"][0]["text"], json!("Found 3 files: main.rs, a.txt, b.txt"));
-        assert_eq!(end["result"]["details"]["subagent"]["steps"][0]["tool"], json!("Read"));
+        let end = ev
+            .iter()
+            .find(|e| e["type"] == "tool_execution_end")
+            .unwrap();
+        assert_eq!(
+            end["result"]["content"][0]["text"],
+            json!("Found 3 files: main.rs, a.txt, b.txt")
+        );
+        assert_eq!(
+            end["result"]["details"]["subagent"]["steps"][0]["tool"],
+            json!("Read")
+        );
         // The persisted row was rewritten with the report + step trace, so a
         // reloaded conversation replays the same card.
         tr.finish(None);
         let msgs = tr.take_messages();
-        let row = msgs.iter().find(|m| m["role"] == json!("toolResult")).unwrap();
-        assert_eq!(row["content"][0]["text"], json!("Found 3 files: main.rs, a.txt, b.txt"));
+        let row = msgs
+            .iter()
+            .find(|m| m["role"] == json!("toolResult"))
+            .unwrap();
+        assert_eq!(
+            row["content"][0]["text"],
+            json!("Found 3 files: main.rs, a.txt, b.txt")
+        );
         assert_eq!(row["details"]["subagent"]["type"], json!("Explore"));
     }
 
@@ -7564,12 +9176,29 @@ mod tests {
         // …and immediately answers the tool call with the internal launch ack.
         let ev = tr.on_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tA","content":[{"type":"text","text":"Async agent launched successfully. agentId: abc (internal ID - do not mention)"}],"is_error":false}]}}"#);
         let tys = types(&ev);
-        assert!(tys.contains(&"tool_execution_update".to_string()), "{tys:?}");
-        assert!(!tys.contains(&"tool_execution_end".to_string()), "card must stay running: {tys:?}");
-        let update = ev.iter().find(|e| e["type"] == "tool_execution_update").unwrap();
-        let shown = update["partialResult"]["content"][0]["text"].as_str().unwrap();
-        assert!(shown.contains("Explore"), "clean status, not the ack blob: {shown}");
-        assert!(!shown.contains("agentId"), "internal metadata hidden: {shown}");
+        assert!(
+            tys.contains(&"tool_execution_update".to_string()),
+            "{tys:?}"
+        );
+        assert!(
+            !tys.contains(&"tool_execution_end".to_string()),
+            "card must stay running: {tys:?}"
+        );
+        let update = ev
+            .iter()
+            .find(|e| e["type"] == "tool_execution_update")
+            .unwrap();
+        let shown = update["partialResult"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(
+            shown.contains("Explore"),
+            "clean status, not the ack blob: {shown}"
+        );
+        assert!(
+            !shown.contains("agentId"),
+            "internal metadata hidden: {shown}"
+        );
         // Progress paints onto the same card.
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_progress","task_id":"bg1","tool_use_id":"tA","description":"Running ls","subagent_type":"Explore"}"#);
         assert_eq!(ev[0]["type"], json!("tool_execution_update"));
@@ -7578,16 +9207,22 @@ mod tests {
         tr.on_line(r#"{"type":"result","subtype":"success","is_error":false}"#);
         assert!(tr.saw_result && tr.has_pending_tasks());
         tr.saw_result = false; // what the runner does in this case
-        // Completion settles the card and releases the turn.
+                               // Completion settles the card and releases the turn.
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"bg1","tool_use_id":"tA","status":"completed"}"#);
-        let end = ev.iter().find(|e| e["type"] == "tool_execution_end").unwrap();
+        let end = ev
+            .iter()
+            .find(|e| e["type"] == "tool_execution_end")
+            .unwrap();
         assert_eq!(end["toolCallId"], json!("tA"));
         assert_eq!(end["isError"], json!(false));
         assert!(!tr.has_pending_tasks());
         // The persisted toolResult row carries the final status, not the ack.
         tr.finish(None);
         let msgs = tr.take_messages();
-        let row = msgs.iter().find(|m| m["role"] == json!("toolResult")).unwrap();
+        let row = msgs
+            .iter()
+            .find(|m| m["role"] == json!("toolResult"))
+            .unwrap();
         assert_eq!(row["toolName"], json!("Agent"));
         let text = row["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("completed"), "{text}");
@@ -7604,13 +9239,19 @@ mod tests {
         tr.on_line(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#);
 
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"bg1","tool_use_id":"tA","description":"scan repo","subagent_type":"Explore"}"#);
-        let snap = ev.iter().find(|e| e["type"] == "cli_background_tasks").unwrap();
+        let snap = ev
+            .iter()
+            .find(|e| e["type"] == "cli_background_tasks")
+            .unwrap();
         assert_eq!(snap["tasks"][0]["taskId"], json!("bg1"));
         assert_eq!(snap["tasks"][0]["kind"], json!("Explore"));
         assert_eq!(snap["tasks"][0]["description"], json!("scan repo"));
 
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_progress","task_id":"bg1","tool_use_id":"tA","description":"Running ls","subagent_type":"Explore"}"#);
-        let snap = ev.iter().find(|e| e["type"] == "cli_background_tasks").unwrap();
+        let snap = ev
+            .iter()
+            .find(|e| e["type"] == "cli_background_tasks")
+            .unwrap();
         assert_eq!(snap["tasks"][0]["statusText"], json!("Running ls"));
 
         // A sidechain step changes the card's step list but not the strip —
@@ -7619,7 +9260,10 @@ mod tests {
         assert!(!types(&ev).contains(&"cli_background_tasks".to_string()));
 
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"bg1","tool_use_id":"tA","status":"completed","summary":"done"}"#);
-        let snap = ev.iter().find(|e| e["type"] == "cli_background_tasks").unwrap();
+        let snap = ev
+            .iter()
+            .find(|e| e["type"] == "cli_background_tasks")
+            .unwrap();
         assert_eq!(snap["tasks"], json!([]));
     }
 
@@ -7633,9 +9277,15 @@ mod tests {
     fn monitor_stays_in_strip_without_holding_the_turn() {
         let mut tr = EventTranslator::new(CliBackend::ClaudeCode);
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"b864cfibk","tool_use_id":"tM","description":"content change in /tmp/flag.txt","task_type":"local_bash"}"#);
-        let snap = ev.iter().find(|e| e["type"] == "cli_background_tasks").unwrap();
+        let snap = ev
+            .iter()
+            .find(|e| e["type"] == "cli_background_tasks")
+            .unwrap();
         assert_eq!(snap["tasks"][0]["kind"], json!("Bash"));
-        assert_eq!(snap["tasks"][0]["description"], json!("content change in /tmp/flag.txt"));
+        assert_eq!(
+            snap["tasks"][0]["description"],
+            json!("content change in /tmp/flag.txt")
+        );
         // local_bash never holds the turn — the reply can settle while the
         // monitor keeps watching.
         assert!(!tr.has_pending_turn_tasks());
@@ -7643,7 +9293,10 @@ mod tests {
         // The CLI's authoritative list re-emits the same snapshot (this is
         // what a resumed process reports even when our registry is empty).
         let ev = tr.on_line(r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b864cfibk","task_type":"local_bash","description":"content change in /tmp/flag.txt"}]}"#);
-        let snap = ev.iter().find(|e| e["type"] == "cli_background_tasks").unwrap();
+        let snap = ev
+            .iter()
+            .find(|e| e["type"] == "cli_background_tasks")
+            .unwrap();
         assert_eq!(snap["tasks"][0]["taskId"], json!("b864cfibk"));
         assert_eq!(snap["tasks"][0]["kind"], json!("Bash"));
 
@@ -7668,16 +9321,36 @@ mod tests {
         tr.on_line(r#"{"type":"system","subtype":"task_started","task_id":"wf1","tool_use_id":"tW","description":"Deep research harness"}"#);
         let ev = tr.on_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tW","content":"Workflow launched in background. Task ID: wabc123\nSummary: Deep research harness\nTranscript dir: /tmp/x","is_error":false}]}}"#);
         let tys = types(&ev);
-        assert!(tys.contains(&"tool_execution_update".to_string()), "{tys:?}");
-        assert!(!tys.contains(&"tool_execution_end".to_string()), "card must stay running: {tys:?}");
+        assert!(
+            tys.contains(&"tool_execution_update".to_string()),
+            "{tys:?}"
+        );
+        assert!(
+            !tys.contains(&"tool_execution_end".to_string()),
+            "card must stay running: {tys:?}"
+        );
         assert!(tr.has_pending_tasks(), "the runner must hold the turn open");
-        let update = ev.iter().find(|e| e["type"] == "tool_execution_update").unwrap();
-        let shown = update["partialResult"]["content"][0]["text"].as_str().unwrap();
-        assert!(shown.starts_with("Workflow running in background"), "{shown}");
-        assert!(!shown.contains("Task ID"), "internal metadata hidden: {shown}");
+        let update = ev
+            .iter()
+            .find(|e| e["type"] == "tool_execution_update")
+            .unwrap();
+        let shown = update["partialResult"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(
+            shown.starts_with("Workflow running in background"),
+            "{shown}"
+        );
+        assert!(
+            !shown.contains("Task ID"),
+            "internal metadata hidden: {shown}"
+        );
         // Completion notification carries the report and releases the turn.
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"wf1","tool_use_id":"tW","status":"completed","summary":"the findings"}"#);
-        let end = ev.iter().find(|e| e["type"] == "tool_execution_end").unwrap();
+        let end = ev
+            .iter()
+            .find(|e| e["type"] == "tool_execution_end")
+            .unwrap();
         assert_eq!(end["result"]["content"][0]["text"], json!("the findings"));
         assert!(!tr.has_pending_tasks());
     }
@@ -7696,20 +9369,49 @@ mod tests {
 
         let ev = tr.on_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tBash","content":"Command running in background with ID: shell1. Output is being written to: /tmp/shell1.output. You will be notified when it completes.","is_error":false}]}}"#);
         let tys = types(&ev);
-        assert!(tys.contains(&"tool_execution_update".to_string()), "{tys:?}");
-        assert!(!tys.contains(&"tool_execution_end".to_string()), "card must stay running: {tys:?}");
-        assert!(tr.has_pending_tasks(), "the runner must keep reading the monitor stream");
-        assert!(!tr.has_pending_turn_tasks(), "background Bash must not keep the model turn open");
-        let update = ev.iter().find(|e| e["type"] == "tool_execution_update").unwrap();
-        assert_eq!(update["partialResult"]["details"]["subagent"]["type"], json!("Bash"));
-        let shown = update["partialResult"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            tys.contains(&"tool_execution_update".to_string()),
+            "{tys:?}"
+        );
+        assert!(
+            !tys.contains(&"tool_execution_end".to_string()),
+            "card must stay running: {tys:?}"
+        );
+        assert!(
+            tr.has_pending_tasks(),
+            "the runner must keep reading the monitor stream"
+        );
+        assert!(
+            !tr.has_pending_turn_tasks(),
+            "background Bash must not keep the model turn open"
+        );
+        let update = ev
+            .iter()
+            .find(|e| e["type"] == "tool_execution_update")
+            .unwrap();
+        assert_eq!(
+            update["partialResult"]["details"]["subagent"]["type"],
+            json!("Bash")
+        );
+        let shown = update["partialResult"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
         assert!(shown.starts_with("Background command running"), "{shown}");
-        assert!(!shown.contains("/tmp/shell1.output"), "internal output path hidden: {shown}");
+        assert!(
+            !shown.contains("/tmp/shell1.output"),
+            "internal output path hidden: {shown}"
+        );
 
         let ev = tr.on_line(r#"{"type":"system","subtype":"task_notification","task_id":"shell1","tool_use_id":"tBash","status":"completed","summary":"Background command completed (exit code 0)"}"#);
-        let end = ev.iter().find(|e| e["type"] == "tool_execution_end").unwrap();
+        let end = ev
+            .iter()
+            .find(|e| e["type"] == "tool_execution_end")
+            .unwrap();
         assert_eq!(end["toolCallId"], json!("tBash"));
-        assert_eq!(end["result"]["details"]["subagent"]["status"], json!("completed"));
+        assert_eq!(
+            end["result"]["details"]["subagent"]["status"],
+            json!("completed")
+        );
         assert!(!tr.has_pending_tasks());
     }
 
@@ -7846,8 +9548,8 @@ mod tests {
     #[test]
     fn codex_image_generation_becomes_answer_artifact() {
         let dir = artifact_test_dir("codex-image");
-        let mut tr = EventTranslator::new(CliBackend::Codex)
-            .with_artifact_storage(dir.clone(), dir.clone());
+        let mut tr =
+            EventTranslator::new(CliBackend::Codex).with_artifact_storage(dir.clone(), dir.clone());
         let encoded = base64::engine::general_purpose::STANDARD.encode(b"fake-png");
         let item = normalize_codex_app_item(
             json!({ "type": "imageGeneration", "id": "img-1", "result": encoded }),
@@ -7869,8 +9571,8 @@ mod tests {
         let archive = dir.join("bundle.xyz");
         std::fs::write(&pdf, b"pdf").unwrap();
         std::fs::write(&archive, b"other").unwrap();
-        let mut tr = EventTranslator::new(CliBackend::Codex)
-            .with_artifact_storage(dir.clone(), dir.clone());
+        let mut tr =
+            EventTranslator::new(CliBackend::Codex).with_artifact_storage(dir.clone(), dir.clone());
         let item = normalize_codex_app_item(json!({
             "type": "dynamicToolCall",
             "id": "tool-1",
@@ -7996,7 +9698,10 @@ mod tests {
         ] {
             let path = dir.join(name);
             std::fs::write(&path, b"x").unwrap();
-            assert_eq!(artifact_details(&path, None, None).unwrap()["artifactKind"], json!(expected));
+            assert_eq!(
+                artifact_details(&path, None, None).unwrap()["artifactKind"],
+                json!(expected)
+            );
         }
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -8094,9 +9799,8 @@ mod tests {
 
     #[test]
     fn acp_stop_reasons_surface_only_when_abnormal() {
-        let reason = |value: &str| {
-            acp_stop_reason_error(&json!({ "result": { "stopReason": value } }))
-        };
+        let reason =
+            |value: &str| acp_stop_reason_error(&json!({ "result": { "stopReason": value } }));
         assert_eq!(reason("end_turn"), None);
         assert_eq!(reason("cancelled"), None);
         assert!(reason("refusal").unwrap().contains("declined"));

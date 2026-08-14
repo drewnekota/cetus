@@ -30,7 +30,14 @@ fn main() {
     }
     println!("== persisted rows ==");
     for m in tr.take_messages() {
-        println!("{}", serde_json::to_string(&m).unwrap().chars().take(220).collect::<String>());
+        println!(
+            "{}",
+            serde_json::to_string(&m)
+                .unwrap()
+                .chars()
+                .take(220)
+                .collect::<String>()
+        );
     }
 }
 
@@ -50,7 +57,9 @@ fn brief(e: &serde_json::Value) -> String {
                 "tool_execution_update id={} steps={} text={:.60}",
                 e["toolCallId"].as_str().unwrap_or("?"),
                 steps,
-                e["partialResult"]["content"][0]["text"].as_str().unwrap_or("")
+                e["partialResult"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap_or("")
             )
         }
         "tool_execution_end" => {

@@ -280,7 +280,11 @@ pub fn shell_word(s: &str) -> String {
 }
 
 pub fn join_remote(base: &str, child: &str) -> String {
-    format!("{}/{}", base.trim_end_matches('/'), child.trim_start_matches('/'))
+    format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        child.trim_start_matches('/')
+    )
 }
 
 fn ensure_remote_dir(workspace: &RemoteWorkspace, path: &str) -> Result<()> {

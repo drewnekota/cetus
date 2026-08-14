@@ -85,6 +85,8 @@ fn classify(name: &str) -> (&'static str, String) {
         ("agent", "Grok Build".to_string())
     } else if lower == "kimi" {
         ("agent", "Kimi CLI".to_string())
+    } else if lower == "dsh" {
+        ("agent", "Dsh".to_string())
     } else if lower.contains("speech-helper") || lower.contains("spawn-disclaim") {
         ("helper", "Speech helper".to_string())
     } else {

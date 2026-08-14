@@ -8,6 +8,7 @@ import {
   CetusIcon,
   ClaudeCodeIcon,
   CodexIcon,
+  DshIcon,
   GrokIcon,
   KimiIcon,
   OpenCodeIcon,
@@ -54,6 +55,7 @@ export const BACKENDS: { id: BackendId; label: string; icon: AppIcon }[] = [
   { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
   { id: "grok", label: "Grok Build", icon: GrokIcon },
   { id: "kimi", label: "Kimi CLI", icon: KimiIcon },
+  { id: "dsh", label: "Dsh", icon: DshIcon },
 ];
 
 export function useRuntimeCatalog() {
@@ -68,12 +70,17 @@ export function useRuntimeCatalog() {
   return { orderedBackends, enabledBackendIds };
 }
 
-export type TunableBackendId = "claude-code" | "codex" | "grok";
+export type TunableBackendId = "claude-code" | "codex" | "grok" | "dsh";
 
 export function backendSupportsTuning(
   backend: BackendId,
 ): backend is TunableBackendId {
-  return backend === "claude-code" || backend === "codex" || backend === "grok";
+  return (
+    backend === "claude-code" ||
+    backend === "codex" ||
+    backend === "grok" ||
+    backend === "dsh"
+  );
 }
 
 /** The next runtime in the user's picker order, wrapping around. Bound to Tab
@@ -183,6 +190,11 @@ export const CLI_MODELS: Record<
     { id: "", label: "Default" },
     { id: "grok-4.5", label: "Grok 4.5" },
   ],
+  dsh: [
+    { id: "", label: "Default" },
+    { id: "deepseek-v4-flash", label: "DeepSeek-V4-Flash" },
+    { id: "deepseek-v4-pro", label: "DeepSeek-V4-Pro" },
+  ],
 };
 
 /** Reasoning-effort levels per CLI backend, matching what each CLI accepts
@@ -212,6 +224,13 @@ export const CLI_EFFORTS: Record<
     { id: "low", label: "Low" },
     { id: "medium", label: "Medium" },
     { id: "high", label: "High" },
+  ],
+  dsh: [
+    { id: "", label: "Default" },
+    { id: "low", label: "Low" },
+    { id: "medium", label: "Medium" },
+    { id: "high", label: "High" },
+    { id: "max", label: "Max" },
   ],
 };
 

@@ -69,3 +69,7 @@ export function KimiIcon({ className }: { className?: string }) {
     <BrandImage src="/brands/kimi.svg" label="Kimi" className={className} />
   );
 }
+
+export function DshIcon({ className }: { className?: string }) {
+  return <BrandImage src="/brands/dsh.svg" label="Dsh" className={className} />;
+}

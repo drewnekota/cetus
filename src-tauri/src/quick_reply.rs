@@ -121,6 +121,7 @@ pub fn resolve_backend(store: &crate::store::Store, requested: &str) -> String {
         "opencode" => settings.opencode_enabled,
         "grok" => settings.grok_enabled,
         "kimi" => settings.kimi_enabled,
+        "dsh" => settings.dsh_enabled,
         _ => false,
     };
     if enabled {
@@ -137,6 +138,7 @@ fn runtime_label(id: &str) -> &str {
         "opencode" => "OpenCode",
         "grok" => "Grok Build",
         "kimi" => "Kimi CLI",
+        "dsh" => "Dsh",
         _ => "Cetus",
     }
 }
@@ -181,7 +183,21 @@ async fn call_cli_runtime(
         ..Default::default()
     };
     let sink: Arc<dyn cetus_bridge::pi_rpc::EventSink> = sink;
-    let outcome = if backend.is_acp() {
+    let outcome = if backend == cetus_bridge::cli_agent::CliBackend::Dsh {
+        let session = cetus_bridge::cli_agent::spawn_dsh_session(
+            backend.default_bin(),
+            &cwd,
+            None,
+            crate::secrets::load_env(),
+            opts,
+        )?;
+        let receiver = session.start_turn(prompt.to_string(), image_blocks, sink)?;
+        let result = tokio::time::timeout(REQUEST_TIMEOUT, receiver).await;
+        session.shutdown();
+        result
+            .context("quick-reply runtime timed out")?
+            .context("quick-reply runtime exited")?
+    } else if backend.is_acp() {
         let session = cetus_bridge::cli_agent::spawn_acp_session(
             backend,
             backend.default_bin(),

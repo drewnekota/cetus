@@ -1,0 +1,11 @@
+{
+  "id": "dsh-artifact",
+  "version": "0.1.0",
+  "main": "./lib/index.js",
+  "description": "File-delivery protocol for dsh: a send_artifact tool whose tool/result meta carries a structured artifact descriptor any client can render",
+  "engines": { "dsh": ">=0.0.1" },
+  "contributes": {
+    "tools": ["send_artifact"],
+    "skills": []
+  }
+}

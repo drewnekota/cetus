@@ -17,7 +17,8 @@ export const DEFAULT_CLI_AGENT_SETTINGS: CliAgentSettings = {
   opencodeEnabled: true,
   grokEnabled: true,
   kimiEnabled: true,
-  runtimeOrder: ["pi", "claude-code", "codex", "opencode", "grok", "kimi"],
+  dshEnabled: true,
+  runtimeOrder: ["pi", "claude-code", "codex", "opencode", "grok", "kimi", "dsh"],
 };
 
 export const OPEN_RUNTIME_SETTINGS_EVENT = "cetus-open-runtime-settings";
@@ -37,6 +38,8 @@ export function isBackendEnabled(
       return settings.grokEnabled;
     case "kimi":
       return settings.kimiEnabled;
+    case "dsh":
+      return settings.dshEnabled;
     default:
       return true;
   }

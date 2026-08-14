@@ -1014,6 +1014,7 @@ pub async fn set_conversation_backend(
         "opencode" => cli_settings.opencode_enabled,
         "grok" => cli_settings.grok_enabled,
         "kimi" => cli_settings.kimi_enabled,
+        "dsh" => cli_settings.dsh_enabled,
         _ => true,
     };
     if !enabled {
@@ -1064,6 +1065,7 @@ fn backend_label(id: &str) -> &str {
         "opencode" => "OpenCode",
         "grok" => "Grok Build",
         "kimi" => "Kimi CLI",
+        "dsh" => "Dsh",
         other => other,
     }
 }

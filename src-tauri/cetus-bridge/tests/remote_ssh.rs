@@ -44,11 +44,11 @@ async fn remote_ssh_pi_rpc_runs_and_syncs_session() {
 
     let old_path = std::env::var("PATH").unwrap_or_default();
     let old_root = std::env::var("CETUS_REMOTE_ROOT").ok();
+    std::env::set_var("PATH", format!("{}:{old_path}", fake_bin.to_string_lossy()));
     std::env::set_var(
-        "PATH",
-        format!("{}:{old_path}", fake_bin.to_string_lossy()),
+        "CETUS_REMOTE_ROOT",
+        remote_root.to_string_lossy().to_string(),
     );
-    std::env::set_var("CETUS_REMOTE_ROOT", remote_root.to_string_lossy().to_string());
 
     let remote_workspace = format!("devbox:{}", workspace.to_string_lossy());
     let pi = PiRpc::spawn(
@@ -102,7 +102,10 @@ async fn remote_ssh_pi_rpc_runs_and_syncs_session() {
         .await
         .unwrap_err()
         .to_string();
-    assert!(error.contains("pi process exited"), "unexpected error: {error}");
+    assert!(
+        error.contains("pi process exited"),
+        "unexpected error: {error}"
+    );
     assert!(
         started.elapsed() < std::time::Duration::from_secs(3),
         "SSH process exit took too long to reach the caller"

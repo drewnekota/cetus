@@ -234,7 +234,7 @@ export const api = {
     id: string,
     requestId: string | number,
     response: unknown,
-    source?: "claude-code" | "codex" | "acp",
+    source?: "claude-code" | "codex" | "acp" | "dsh",
     installPluginId?: string,
   ) => invoke<void>("cli_control_respond", {
     id,
@@ -356,6 +356,7 @@ export const api = {
       opencode: boolean;
       grok: boolean;
       kimi: boolean;
+      dsh: boolean;
     }>("get_cli_runtime_status"),
   listApiKeysMasked: () => invoke<Record<string, string>>("list_api_keys_masked"),
   revealApiKey: (provider: string) =>

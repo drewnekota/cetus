@@ -12,6 +12,7 @@
   --runtime-opencode: light-dark(#201d1d, #d6d3d1);
   --runtime-grok: #71717a;
   --runtime-kimi: #1783ff;
+  --runtime-dsh: #4d6bfe;
   --background: var(--surface);
   --foreground: var(--ink);
   --card: var(--surface);

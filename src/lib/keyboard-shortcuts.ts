@@ -21,6 +21,7 @@ export type ShortcutId =
   | "runtimeSlot4"
   | "runtimeSlot5"
   | "runtimeSlot6"
+  | "runtimeSlot7"
   | "toggleWorkspace"
   | "toggleTerminal"
   | "openBrowserTab"
@@ -48,7 +49,7 @@ export type ShortcutMap = Record<ShortcutId, string>;
 export const KEYBOARD_SHORTCUTS_STORAGE_KEY = "cetus:keyboardShortcuts";
 export const KEYBOARD_SHORTCUTS_EVENT = "cetus-keyboard-shortcuts-changed";
 
-/** ⌃1…⌃6 are positional: they select the 1st…6th *enabled* runtime in the
+/** ⌃1…⌃7 are positional: they select the 1st…7th *enabled* runtime in the
  *  order set in Settings › Runtimes, rather than being pinned to one runtime.
  *  Length matches the number of runtimes Cetus ships. */
 export const RUNTIME_SLOT_SHORTCUT_IDS = [
@@ -58,6 +59,7 @@ export const RUNTIME_SLOT_SHORTCUT_IDS = [
   "runtimeSlot4",
   "runtimeSlot5",
   "runtimeSlot6",
+  "runtimeSlot7",
 ] as const satisfies readonly ShortcutId[];
 
 /** Bindings replaced by the positional slots in 0.3.41. Carried over by index

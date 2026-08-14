@@ -1,0 +1,30 @@
+{
+  "name": "@dsh-external/dsh-vision",
+  "version": "0.1.0",
+  "description": "给纯文本的 DeepSeek 加上眼睛：view_image 工具经任意 OpenAI 兼容 VLM 端点回答关于图片的问题（默认智谱免费 glm-4.6v-flash 零成本开箱，可换通义 qwen3-vl / Ollama 本地 / 未来 DeepSeek 官方识图 API）",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["lib"],
+  "license": "BSD-3-Clause",
+  "engines": { "dsh": ">=0.0.1" },
+  "dshx": {
+    "contributes": { "tools": ["view_image"], "skills": [] }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-system-prompt": "^0.0.1",
+    "@deepseek-ai/dsh-tools": "^0.0.1",
+    "cordis": "^4.0.0-rc.7"
+  },
+  "dependencies": {
+    "schemastery": "^3.18.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

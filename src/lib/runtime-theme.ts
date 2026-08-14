@@ -11,6 +11,7 @@ export const RUNTIME_THEME: Record<BackendId, { color: string }> = {
   opencode: { color: "var(--runtime-opencode)" },
   grok: { color: "var(--runtime-grok)" },
   kimi: { color: "var(--runtime-kimi)" },
+  dsh: { color: "var(--runtime-dsh)" },
 };
 
 export type RuntimeThemeStyle = CSSProperties & {

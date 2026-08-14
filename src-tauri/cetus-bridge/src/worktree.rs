@@ -35,7 +35,9 @@ pub fn sanitize_slug(input: &str) -> String {
 
 /// Where a task's worktree lives for a given repo. Pure; no filesystem touch.
 pub fn worktree_path(repo: &Path, slug: &str) -> PathBuf {
-    repo.join(".cetus").join("worktrees").join(sanitize_slug(slug))
+    repo.join(".cetus")
+        .join("worktrees")
+        .join(sanitize_slug(slug))
 }
 
 /// The branch name a task's worktree checks out.
@@ -105,8 +107,7 @@ pub fn ensure_worktree(repo: &Path, slug: &str, base: Option<&str>) -> Result<Pa
         return Ok(path);
     }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("mkdir {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
     }
     let branch = branch_name(slug);
     let path_str = path.to_string_lossy().to_string();

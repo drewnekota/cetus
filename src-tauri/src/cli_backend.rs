@@ -38,6 +38,7 @@ pub struct CliAgentSettings {
     pub opencode_enabled: bool,
     pub grok_enabled: bool,
     pub kimi_enabled: bool,
+    pub dsh_enabled: bool,
     pub runtime_order: Vec<String>,
 }
 
@@ -51,6 +52,7 @@ impl Default for CliAgentSettings {
             opencode_enabled: true,
             grok_enabled: true,
             kimi_enabled: true,
+            dsh_enabled: true,
             runtime_order: vec![
                 "pi".into(),
                 "claude-code".into(),
@@ -58,13 +60,22 @@ impl Default for CliAgentSettings {
                 "opencode".into(),
                 "grok".into(),
                 "kimi".into(),
+                "dsh".into(),
             ],
         }
     }
 }
 
 const SETTINGS_KEY: &str = "cli_agents";
-const RUNTIME_IDS: [&str; 6] = ["pi", "claude-code", "codex", "opencode", "grok", "kimi"];
+const RUNTIME_IDS: [&str; 7] = [
+    "pi",
+    "claude-code",
+    "codex",
+    "opencode",
+    "grok",
+    "kimi",
+    "dsh",
+];
 
 pub fn load_settings(store: &Store) -> CliAgentSettings {
     let mut settings = store
@@ -260,6 +271,7 @@ pub struct CliRuntimeStatus {
     pub opencode: bool,
     pub grok: bool,
     pub kimi: bool,
+    pub dsh: bool,
 }
 
 #[tauri::command]
@@ -270,6 +282,7 @@ pub async fn get_cli_runtime_status() -> Result<CliRuntimeStatus, String> {
         opencode: executable_on_path("opencode"),
         grok: executable_on_path("grok"),
         kimi: executable_on_path("kimi"),
+        dsh: executable_on_path("dsh"),
     })
 }
 
@@ -646,6 +659,30 @@ pub async fn cli_control_respond(
     source: Option<String>,
     install_plugin_id: Option<String>,
 ) -> Result<(), String> {
+    if source.as_deref() == Some("dsh") {
+        let session = state
+            .acp_session(&id)
+            .ok_or_else(|| "Dsh session is no longer running".to_string())?;
+        if request_id
+            .as_str()
+            .is_some_and(|raw| raw.starts_with("q::"))
+        {
+            return session
+                .respond_question(request_id, response)
+                .map_err(|error| error.to_string());
+        }
+        let allow = response
+            .get("behavior")
+            .and_then(Value::as_str)
+            .is_some_and(|behavior| behavior == "allow")
+            || response
+                .get("action")
+                .and_then(Value::as_str)
+                .is_some_and(|action| action == "accept");
+        return session
+            .respond_permission(request_id, allow)
+            .map_err(|error| error.to_string());
+    }
     if source.as_deref() == Some("acp") {
         let allow = response
             .get("behavior")
@@ -939,7 +976,8 @@ pub fn dispatch_turn(
     // (native content blocks); codex ingests file paths via `-i`. Both get the
     // on-disk paths appended to the prompt (image_refs) for file-based reuse.
     let is_codex = backend == cetus_bridge::cli_agent::CliBackend::Codex;
-    let image_blocks: Vec<(String, String)> = if is_codex {
+    let is_dsh = backend == cetus_bridge::cli_agent::CliBackend::Dsh;
+    let image_blocks: Vec<(String, String)> = if is_codex || is_dsh {
         Vec::new()
     } else {
         images
@@ -967,7 +1005,7 @@ pub fn dispatch_turn(
     };
     // codex has no --append-system-prompt equivalent, so the Cetus hint rides
     // the first turn's prompt (resumed turns already have it in context).
-    if (is_codex || backend.is_acp()) && resume_before.is_empty() {
+    if (is_codex || is_dsh || backend.is_acp()) && resume_before.is_empty() {
         prompt = format!(
             "<cetus-env>\n{}\n</cetus-env>\n\n{prompt}",
             crate::control::AGENT_HINT
@@ -1010,7 +1048,7 @@ pub fn dispatch_turn(
         image_blocks: image_blocks.clone(),
         // claude: the Cetus hint goes on the system prompt every turn (codex
         // and the ACP runtimes got it as a first-turn preamble above).
-        append_system_prompt: (!is_codex && !backend.is_acp())
+        append_system_prompt: (!is_codex && !is_dsh && !backend.is_acp())
             .then(|| crate::control::AGENT_HINT.to_string()),
         cold_start_preamble: acp_cold_start_preamble,
         client_version: Some(handle.package_info().version.to_string()),
@@ -1154,19 +1192,30 @@ pub fn dispatch_turn(
         return Ok(());
     }
 
-    if backend.is_acp() {
+    if backend.is_acp() || backend == cetus_bridge::cli_agent::CliBackend::Dsh {
         let session = match state.acp_session(&conv.id) {
             Some(session) => session,
             None => {
-                let session = match cetus_bridge::cli_agent::spawn_acp_session(
-                    backend,
-                    &bin,
-                    &cwd,
-                    Some(artifacts_dir(&state.app_data_dir, &conv.id)),
-                    Some(conv.id.clone()),
-                    env,
-                    opts,
-                ) {
+                let spawned = if backend == cetus_bridge::cli_agent::CliBackend::Dsh {
+                    cetus_bridge::cli_agent::spawn_dsh_session(
+                        &bin,
+                        &cwd,
+                        Some(conv.id.clone()),
+                        env,
+                        opts,
+                    )
+                } else {
+                    cetus_bridge::cli_agent::spawn_acp_session(
+                        backend,
+                        &bin,
+                        &cwd,
+                        Some(artifacts_dir(&state.app_data_dir, &conv.id)),
+                        Some(conv.id.clone()),
+                        env,
+                        opts,
+                    )
+                };
+                let session = match spawned {
                     Ok(session) => session,
                     Err(error) => {
                         state.end_cli_turn(&conv.id);
@@ -1503,9 +1552,18 @@ mod tests {
         assert!(settings.opencode_enabled);
         assert!(settings.grok_enabled);
         assert!(settings.kimi_enabled);
+        assert!(settings.dsh_enabled);
         assert_eq!(
             settings.runtime_order,
-            ["pi", "claude-code", "codex", "opencode", "grok", "kimi"]
+            [
+                "pi",
+                "claude-code",
+                "codex",
+                "opencode",
+                "grok",
+                "kimi",
+                "dsh"
+            ]
         );
     }
 
@@ -1518,7 +1576,15 @@ mod tests {
         normalize_runtime_order(&mut settings);
         assert_eq!(
             settings.runtime_order,
-            ["kimi", "pi", "claude-code", "codex", "opencode", "grok"]
+            [
+                "kimi",
+                "pi",
+                "claude-code",
+                "codex",
+                "opencode",
+                "grok",
+                "dsh"
+            ]
         );
     }
 
