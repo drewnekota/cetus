@@ -173,6 +173,7 @@ pub async fn get_cli_defaults(backend: String) -> Result<CliDefaults, String> {
         }
         "codex" => codex_defaults(&home),
         "grok" => probe_grok_defaults().await.unwrap_or_default(),
+        "dsh" => dsh_defaults(&home),
         _ => CliDefaults::default(),
     })
 }
@@ -627,6 +628,65 @@ fn codex_defaults(home: &Path) -> CliDefaults {
         effort,
         models: (!models.is_empty()).then_some(models),
     }
+}
+
+/// DSH persists the selection made by its model picker under the
+/// `agent-default-model` mapping in `$DSH_HOME/settings.yaml`. Keep this
+/// deliberately small instead of adding a YAML dependency for three scalar
+/// fields; stop at the next top-level key so similarly named plugin settings
+/// cannot be mistaken for the agent defaults.
+fn dsh_defaults(home: &Path) -> CliDefaults {
+    let dsh_home = std::env::var_os("DSH_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".dsh"));
+    let raw = std::fs::read_to_string(dsh_home.join("settings.yaml")).unwrap_or_default();
+    dsh_defaults_from_settings(&raw)
+}
+
+fn dsh_defaults_from_settings(raw: &str) -> CliDefaults {
+    let mut in_defaults = false;
+    let mut model = None;
+    let mut effort = None;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indented = line.starts_with([' ', '\t']);
+        if !indented {
+            in_defaults = trimmed == "agent-default-model:";
+            continue;
+        }
+        if !in_defaults {
+            continue;
+        }
+        if let Some(value) = yaml_scalar(trimmed, "model") {
+            model = Some(value);
+        } else if let Some(value) = yaml_scalar(trimmed, "reasoningEffort") {
+            effort = Some(value);
+        }
+    }
+    CliDefaults {
+        model,
+        effort,
+        models: None,
+    }
+}
+
+fn yaml_scalar(line: &str, key: &str) -> Option<String> {
+    let value = line.strip_prefix(key)?.strip_prefix(':')?.trim();
+    let value = value.split(" #").next()?.trim();
+    let unquoted = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value);
+    (!unquoted.is_empty()).then(|| unquoted.to_string())
 }
 
 /// `key = "value"` on a single TOML line → value. Rejects longer keys sharing
@@ -1636,6 +1696,25 @@ mod tests {
         assert_eq!(commands[1]["argumentHint"], "[<target>]");
         // A models-only ack (no catalog) must not fabricate entries.
         assert!(claude_commands_from_initialize(&json!({"response":{"response":{}}})).is_empty());
+    }
+
+    #[test]
+    fn dsh_settings_resolve_default_model_and_effort() {
+        let defaults = dsh_defaults_from_settings(
+            r#"
+ui-onboarding:
+  welcomeNoticeVersion: 1
+agent-default-model:
+  provider: deepseek-official
+  model: "deepseek-v4-flash"
+  reasoningEffort: high # selected in the DSH picker
+another-plugin:
+  model: must-not-win
+"#,
+        );
+        assert_eq!(defaults.model.as_deref(), Some("deepseek-v4-flash"));
+        assert_eq!(defaults.effort.as_deref(), Some("high"));
+        assert!(defaults.models.is_none());
     }
 
     #[test]
