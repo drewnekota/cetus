@@ -71,5 +71,11 @@ export function KimiIcon({ className }: { className?: string }) {
 }
 
 export function DshIcon({ className }: { className?: string }) {
-  return <BrandImage src="/brands/dsh.svg" label="Dsh" className={className} />;
+  return (
+    <BrandImage
+      src="/brands/dsh.svg"
+      label="DeepSeek Harness"
+      className={className}
+    />
+  );
 }

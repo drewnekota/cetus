@@ -55,7 +55,7 @@ export const BACKENDS: { id: BackendId; label: string; icon: AppIcon }[] = [
   { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
   { id: "grok", label: "Grok Build", icon: GrokIcon },
   { id: "kimi", label: "Kimi CLI", icon: KimiIcon },
-  { id: "dsh", label: "Dsh", icon: DshIcon },
+  { id: "dsh", label: "DeepSeek Harness", icon: DshIcon },
 ];
 
 export function useRuntimeCatalog() {
