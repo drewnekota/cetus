@@ -1506,7 +1506,9 @@ fn porcelain_status(xy: &[u8]) -> &'static str {
 fn git_status_for_path(path: &Path, records: &[(PathBuf, String)]) -> Option<String> {
     records
         .iter()
-        .filter(|(record, _)| record == path || record.starts_with(path))
+        .filter(|(record, status)| {
+            record == path || (status != "ignored" && record.starts_with(path))
+        })
         .map(|(_, status)| status.clone())
         .min_by_key(|status| match status.as_str() {
             "conflict" => 0,
@@ -2837,7 +2839,10 @@ mod tests {
     fn workspace_directory_reports_git_states_symlinks_and_deleted_files() {
         let root = std::env::temp_dir().join(format!("cetus-listing-{}", Uuid::new_v4()));
         std::fs::create_dir_all(root.join("cache")).unwrap();
-        std::fs::write(root.join(".gitignore"), "cache/\n").unwrap();
+        std::fs::create_dir_all(root.join("nested/cache")).unwrap();
+        std::fs::write(root.join(".gitignore"), "cache/\nnested/cache/\n").unwrap();
+        std::fs::write(root.join("nested/tracked.txt"), "tracked").unwrap();
+        std::fs::write(root.join("nested/cache/ignored.txt"), "ignored").unwrap();
         std::fs::write(root.join("tracked.txt"), "initial").unwrap();
         std::fs::write(root.join("deleted.txt"), "delete me").unwrap();
         run_git(&root, &["init", "-q"]);
@@ -2869,6 +2874,8 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(entry("cache").git_status.as_deref(), Some("ignored"));
+        assert_eq!(entry("nested").git_status, None);
+        assert!(!entry("nested").is_ignored);
         assert_eq!(entry("tracked.txt").git_status.as_deref(), Some("modified"));
         assert_eq!(
             entry("untracked.txt").git_status.as_deref(),
