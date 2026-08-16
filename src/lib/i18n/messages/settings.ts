@@ -237,6 +237,9 @@ export const settings = {
     "appearance.theme.label": "Theme",
     "appearance.theme.description":
       "Follow the system appearance, or lock to light or dark.",
+    "appearance.permaLayers.label": "Smooth hover rendering",
+    "appearance.permaLayers.description":
+      "Keeps hover fades on dedicated compositing layers so rows don't twitch at fractional zoom. Uses extra graphics memory; turn off to compare.",
 
     // --- Keyboard shortcuts ----------------------------------------------
     "keyboard.title": "Keyboard shortcuts",
@@ -830,6 +833,8 @@ export const settings = {
     "appearance.description": "设置 Cetus 各处使用的主题，更改即时生效。",
     "appearance.theme.label": "主题",
     "appearance.theme.description": "跟随系统外观，或锁定为浅色或深色。",
+    "appearance.permaLayers.label": "平滑悬停渲染",
+    "appearance.permaLayers.description": "为悬停淡入淡出保留专用合成层，避免分数缩放下的行抖动。会占用更多图形内存；可关闭以对比。",
 
     "keyboard.title": "键盘快捷键",
     "keyboard.description":
@@ -1292,6 +1297,9 @@ export const settings = {
     "appearance.theme.label": "テーマ",
     "appearance.theme.description":
       "システムの外観に従うか、ライトまたはダークに固定します。",
+    "appearance.permaLayers.label": "ホバー描画の平滑化",
+    "appearance.permaLayers.description":
+      "ホバーのフェードを専用の合成レイヤーに保持し、小数ズームでの行の揺れを防ぎます。グラフィックスメモリを余分に使用します。比較のためにオフにできます。",
 
     "voice.title": "音声入力",
     "voice.description":
@@ -1668,6 +1676,9 @@ export const settings = {
     "appearance.theme.label": "테마",
     "appearance.theme.description":
       "시스템 모양을 따르거나 라이트 또는 다크로 고정합니다.",
+    "appearance.permaLayers.label": "부드러운 호버 렌더링",
+    "appearance.permaLayers.description":
+      "호버 페이드를 전용 합성 레이어에 유지하여 소수 배율에서 행이 흔들리지 않게 합니다. 그래픽 메모리를 추가로 사용하며, 비교를 위해 끌 수 있습니다.",
 
     "voice.title": "음성 받아쓰기",
     "voice.description":
@@ -2041,6 +2052,9 @@ export const settings = {
     "appearance.theme.label": "Tema",
     "appearance.theme.description":
       "Sigue la apariencia del sistema, o fíjala en claro u oscuro.",
+    "appearance.permaLayers.label": "Renderizado suave al pasar el cursor",
+    "appearance.permaLayers.description":
+      "Mantiene los fundidos de hover en capas de composición dedicadas para que las filas no tiemblen con zoom fraccionario. Usa más memoria gráfica; desactívalo para comparar.",
 
     "voice.title": "Dictado por voz",
     "voice.description":
@@ -2414,6 +2428,9 @@ export const settings = {
     "appearance.theme.label": "Tema",
     "appearance.theme.description":
       "Acompanhe a aparência do sistema ou fixe em claro ou escuro.",
+    "appearance.permaLayers.label": "Renderização suave ao passar o mouse",
+    "appearance.permaLayers.description":
+      "Mantém os fades de hover em camadas de composição dedicadas para que as linhas não tremam em zoom fracionário. Usa mais memória gráfica; desative para comparar.",
 
     "voice.title": "Ditado por voz",
     "voice.description":
@@ -2784,6 +2801,9 @@ export const settings = {
     "appearance.theme.label": "Thème",
     "appearance.theme.description":
       "Suivez l'apparence du système, ou verrouillez en clair ou sombre.",
+    "appearance.permaLayers.label": "Rendu fluide au survol",
+    "appearance.permaLayers.description":
+      "Conserve les fondus de survol sur des calques de composition dédiés pour éviter le tremblement des lignes en zoom fractionnaire. Utilise plus de mémoire graphique ; désactivez pour comparer.",
 
     "voice.title": "Dictée vocale",
     "voice.description":
@@ -3154,6 +3174,9 @@ export const settings = {
     "appearance.theme.label": "Theme",
     "appearance.theme.description":
       "Dem Systemerscheinungsbild folgen oder auf hell oder dunkel festlegen.",
+    "appearance.permaLayers.label": "Flüssiges Hover-Rendering",
+    "appearance.permaLayers.description":
+      "Hält Hover-Überblendungen auf eigenen Compositing-Ebenen, damit Zeilen bei gebrochenem Zoom nicht zittern. Verbraucht zusätzlichen Grafikspeicher; zum Vergleich abschaltbar.",
 
     "voice.title": "Sprachdiktat",
     "voice.description":
@@ -3524,6 +3547,9 @@ export const settings = {
     "appearance.theme.label": "Tema",
     "appearance.theme.description":
       "Segui l'aspetto del sistema o blocca su chiaro o scuro.",
+    "appearance.permaLayers.label": "Rendering fluido al passaggio del mouse",
+    "appearance.permaLayers.description":
+      "Mantiene le dissolvenze hover su livelli di composizione dedicati per evitare tremolii delle righe con zoom frazionario. Usa più memoria grafica; disattiva per confrontare.",
 
     "voice.title": "Dettatura vocale",
     "voice.description":
@@ -3894,6 +3920,9 @@ export const settings = {
     "appearance.theme.label": "Тема",
     "appearance.theme.description":
       "Следовать оформлению системы или зафиксировать светлую либо тёмную.",
+    "appearance.permaLayers.label": "Плавная отрисовка при наведении",
+    "appearance.permaLayers.description":
+      "Держит эффекты наведения на отдельных слоях композиции, чтобы строки не дёргались при дробном масштабе. Использует больше графической памяти; можно отключить для сравнения.",
 
     "voice.title": "Голосовая диктовка",
     "voice.description":

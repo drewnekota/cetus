@@ -132,6 +132,57 @@ fn phys_footprint(pid: u32) -> Option<u64> {
     (ret == 0).then_some(info.ri_phys_footprint)
 }
 
+/// The WebContent renderer pid behind each of our webviews, `(label, pid)`.
+///
+/// Renderers are children of launchd, not of cetus, so the subtree walk in the
+/// snapshot never sees them — yet they hold the page's real weight (JS heap,
+/// decoded images, compositing surfaces; the 2026-08-15 investigation caught
+/// the main one at 3.8GB). Resolved via the WKWebView `_webProcessIdentifier`
+/// SPI; `with_webview` hops to the main thread, so give it a short timeout
+/// rather than blocking a snapshot behind a busy UI thread.
+#[cfg(target_os = "macos")]
+pub fn webview_renderer_pids(app: &tauri::AppHandle) -> Vec<(String, u32)> {
+    use tauri::Manager;
+    let mut out: Vec<(String, u32)> = Vec::new();
+    for (label, webview) in app.webview_windows() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sent = webview.with_webview(move |pw| {
+            let pid: i32 = unsafe {
+                let wk: &objc2::runtime::AnyObject =
+                    &*(pw.inner() as *mut objc2::runtime::AnyObject);
+                objc2::msg_send![wk, _webProcessIdentifier]
+            };
+            let _ = tx.send(pid);
+        });
+        if sent.is_err() {
+            continue;
+        }
+        if let Ok(pid) = rx.recv_timeout(std::time::Duration::from_millis(300)) {
+            if pid > 0 {
+                out.push((label, pid as u32));
+            }
+        }
+    }
+    out.sort();
+    out.dedup_by_key(|(_, pid)| *pid);
+    out
+}
+
+/// One log-friendly line of renderer footprints ("main=812MB quick=54MB"),
+/// empty when nothing resolves. Sampled periodically from lib.rs so the log
+/// files carry a footprint time series — the measurement the compositing-layer
+/// A/B (Settings → Appearance) is judged by.
+#[cfg(target_os = "macos")]
+pub fn webview_footprint_report(app: &tauri::AppHandle) -> String {
+    webview_renderer_pids(app)
+        .into_iter()
+        .filter_map(|(label, pid)| {
+            phys_footprint(pid).map(|b| format!("{label}={}MB", b / (1024 * 1024)))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Panel memory for one process: footprint on macOS (kernel may refuse for
 /// processes we don't own — fall back to the RSS sysinfo already fetched).
 fn row_memory(pid: Pid, rss: u64) -> u64 {
@@ -234,7 +285,10 @@ mod gpu {
 }
 
 #[tauri::command]
-pub async fn resources_snapshot(state: State<'_, AppState>) -> Result<ResourcesSnapshot, String> {
+pub async fn resources_snapshot(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ResourcesSnapshot, String> {
     let self_pid = Pid::from_u32(std::process::id());
 
     // Snapshot the process table + host memory + GPU. spawn_blocking: the
@@ -321,6 +375,30 @@ pub async fn resources_snapshot(state: State<'_, AppState>) -> Result<ResourcesS
             process_count: 1,
         });
     }
+
+    // The out-of-process WebKit renderers (see webview_renderer_pids): grouped
+    // with the app since that's where a user perceives their weight. The panel's
+    // existing severity thresholds then flag a ballooning webview by themselves.
+    #[cfg(target_os = "macos")]
+    for (label, pid) in webview_renderer_pids(&app) {
+        let spid = Pid::from_u32(pid);
+        let (cpu, rss) = by_pid
+            .get(&spid)
+            .map(|(_, c, m, _)| (*c, *m))
+            .unwrap_or((0.0, 0));
+        rows.push(ResourceRow {
+            pid,
+            label: format!("Web renderer ({label})"),
+            kind: "app".to_string(),
+            conversation_id: None,
+            conversation_title: None,
+            cpu,
+            memory_bytes: row_memory(spid, rss),
+            process_count: 1,
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
 
     // One row per direct child, subtree-aggregated (a claude turn's shell
     // commands and MCP servers fold into its row).

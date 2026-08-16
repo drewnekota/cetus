@@ -1267,8 +1267,28 @@ pub async fn save_artifact_copy(app: tauri::AppHandle, path: String) -> CmdResul
     let Some(target) = rx.await.map_err(err)? else {
         return Ok(None);
     };
-    std::fs::copy(&source, &target).map_err(err)?;
-    Ok(Some(target.to_string_lossy().to_string()))
+    // Outcome is ALSO emitted as an event: the invoke callback dies with a
+    // webview reload, and the copy happens after the panel closes — possibly
+    // long after — so the return value alone can be undeliverable.
+    match std::fs::copy(&source, &target) {
+        Ok(_) => {
+            let dest = target.to_string_lossy().to_string();
+            let _ = app.emit_to(
+                "main",
+                "artifact-saved",
+                serde_json::json!({ "path": dest, "name": name }),
+            );
+            Ok(Some(dest))
+        }
+        Err(e) => {
+            let _ = app.emit_to(
+                "main",
+                "artifact-save-failed",
+                serde_json::json!({ "name": name, "error": e.to_string() }),
+            );
+            Err(err(e))
+        }
+    }
 }
 
 #[tauri::command]

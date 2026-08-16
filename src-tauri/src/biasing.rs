@@ -57,9 +57,11 @@ fn learned_lock() -> &'static std::sync::Mutex<()> {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Build the recognition corpus from all enabled sources. Cheap and infallible —
-/// any source that errors simply contributes nothing.
-pub fn build(app_data_dir: &Path, manual: &str) -> Corpus {
+/// Hotword list only (sources 1–4) — no focused-field read. For callers where
+/// the "what the user is writing right now" context makes no sense, like the
+/// meeting transcriber (a meeting-start snapshot of some random focused field
+/// would be stale and off-topic for the whole call).
+pub fn hotwords(app_data_dir: &Path, manual: &str) -> Vec<String> {
     let mut hotwords: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
@@ -85,6 +87,18 @@ pub fn build(app_data_dir: &Path, manual: &str) -> Corpus {
     }
     let n_memory = hotwords.len() - n_manual - n_corrections - n_learned;
 
+    tracing::debug!(
+        "biasing: hotwords ({} = manual {n_manual} + corrections {n_corrections} + learned {n_learned} + memory {n_memory}): {hotwords:?}",
+        hotwords.len()
+    );
+    hotwords
+}
+
+/// Build the recognition corpus from all enabled sources. Cheap and infallible —
+/// any source that errors simply contributes nothing.
+pub fn build(app_data_dir: &Path, manual: &str) -> Corpus {
+    let hotwords = hotwords(app_data_dir, manual);
+
     // 5. Live context: cursor-aware text from the focused field. Keep the old
     // subtree reader as a fallback while the richer snapshot handles standard
     // ranges and Chromium/Electron TextMarkers first.
@@ -93,10 +107,6 @@ pub fn build(app_data_dir: &Path, manual: &str) -> Corpus {
         .filter(|text| !text.is_empty())
         .or_else(|| focused_snippet(MAX_CONTEXT_CHARS));
 
-    tracing::debug!(
-        "biasing: hotwords ({} = manual {n_manual} + corrections {n_corrections} + learned {n_learned} + memory {n_memory}): {hotwords:?}",
-        hotwords.len()
-    );
     match &context {
         Some(c) => tracing::debug!(
             "biasing: focused-field context ({} chars): {:?}",

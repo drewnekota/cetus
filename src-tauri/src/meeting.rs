@@ -63,6 +63,71 @@ const RECALL_TEXT_CAP: usize = 2000;
 /// How often the monitor loop runs retention pruning.
 const PRUNE_INTERVAL_SECS: u64 = 3600;
 
+/// Native apps trusted to represent a call when they hold the microphone.
+/// Everything else is ignored by auto-detect and remains available through the
+/// manual button/hotkey. Browser bundles are handled separately below because
+/// a browser using the mic is not evidence of a meeting by itself.
+const MEETING_APP_BUNDLES: &[&str] = &[
+    "us.zoom.xos",
+    "com.microsoft.teams",
+    "com.microsoft.teams2",
+    "com.apple.FaceTime",
+    "com.tinyspeck.slackmacgap",
+    "com.larksuite.suite",
+    "com.bytedance.feishu",
+    "com.tencent.meeting",
+    "com.tencent.voov",
+    "com.alibaba.DingTalkMac",
+    "com.cisco.webexmeetingsapp",
+    "Cisco-Systems.Spark",
+    "net.whatsapp.WhatsApp",
+    "com.hnc.Discord",
+    "org.telegram.desktop",
+];
+
+/// Browsers whose active-tab URL Cetus can read through the existing bounded
+/// AppleScript bridge. Firefox is deliberately absent: without a reliable URL
+/// signal, treating the whole browser as a meeting app would recreate the
+/// false-positive behavior this allowlist is meant to prevent.
+const MEETING_BROWSER_BUNDLES: &[&str] = &[
+    "com.apple.Safari",
+    "com.apple.SafariTechnologyPreview",
+    "com.google.Chrome",
+    "com.google.Chrome.canary",
+    "com.google.Chrome.beta",
+    "com.brave.Browser",
+    "com.brave.Browser.beta",
+    "com.brave.Browser.nightly",
+    "com.microsoft.edgemac",
+    "com.microsoft.edgemac.Beta",
+    "com.vivaldi.Vivaldi",
+    "com.operasoftware.Opera",
+    "company.thebrowser.Browser",
+    "com.thebrowser.Browser",
+];
+
+/// A microphone-using browser only qualifies when its active tab is on one of
+/// these meeting/calling domains. Subdomains match as well.
+const MEETING_WEB_DOMAINS: &[&str] = &[
+    "meet.google.com",
+    "teams.microsoft.com",
+    "teams.live.com",
+    "zoom.us",
+    "webex.com",
+    "meet.jit.si",
+    "whereby.com",
+    "around.co",
+    "slack.com",
+    "discord.com",
+    "web.whatsapp.com",
+    "web.telegram.org",
+    "meeting.tencent.com",
+    "voovmeeting.com",
+    "meeting.dingtalk.com",
+    "vc.feishu.cn",
+    "larksuite.com",
+];
+
 const SUMMARY_MODEL: &str = "deepseek-v4-pro";
 
 /// PID to terminate on process exit. Negative means a process group created by
@@ -161,7 +226,10 @@ pub fn load_settings(store: &Store) -> MeetingSettings {
     // while preserving every user-recorded custom binding.
     let legacy_default = cfg!(target_os = "macos") && settings.toggle_hotkey == "Ctrl+Alt+M"
         || !cfg!(target_os = "macos")
-            && matches!(settings.toggle_hotkey.as_str(), "Ctrl+Alt+M" | "Cmd+Shift+M");
+            && matches!(
+                settings.toggle_hotkey.as_str(),
+                "Ctrl+Alt+M" | "Cmd+Shift+M"
+            );
     if legacy_default {
         settings.toggle_hotkey = default_toggle_hotkey();
     }
@@ -664,6 +732,7 @@ async fn run_reader(
                         let (mic, system, tasks) = spawn_cloud_asr(
                             app.clone(),
                             store.clone(),
+                            &app_data,
                             id.clone(),
                             recall.clone(),
                             app_hint.clone(),
@@ -815,6 +884,7 @@ type CloudAsrChannels = (
 fn spawn_cloud_asr(
     app: AppHandle,
     store: Arc<Store>,
+    app_data: &Path,
     id: String,
     recall: PathBuf,
     app_hint: Option<String>,
@@ -825,12 +895,27 @@ fn spawn_cloud_asr(
         .flatten()
         .unwrap_or_default();
     let resource = crate::doubao::DEFAULT_RESOURCE_ID.to_string();
+    // Same personal-vocabulary biasing as dictation (manual word list +
+    // correction-confirmed + learned + memory terms), minus the focused-field
+    // context — a meeting-start snapshot of whatever field happens to be
+    // focused would be stale and off-topic for the whole call. Both streams
+    // share one corpus: "Them" says the same proper nouns back at you.
+    let quick_settings = crate::quick::load_settings(&store);
+    let corpus = if quick_settings.voice_context_biasing {
+        crate::doubao::Corpus {
+            hotwords: crate::biasing::hotwords(app_data, &quick_settings.voice_hotwords),
+            ..Default::default()
+        }
+    } else {
+        crate::doubao::Corpus::default()
+    };
     let (mic_tx, mic_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     let (system_tx, system_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     let mut tasks = Vec::new();
     for (source, rx) in [("mic", mic_rx), ("system", system_rx)] {
         let key = key.clone();
         let resource = resource.clone();
+        let corpus = corpus.clone();
         let store = store.clone();
         let id = id.clone();
         let recall = recall.clone();
@@ -849,7 +934,14 @@ fn spawn_cloud_asr(
                     return;
                 }
                 let ts = now_ms();
-                emit_caption(&app_for_sentence, &id_for_sentence, source, "final", ts, text);
+                emit_caption(
+                    &app_for_sentence,
+                    &id_for_sentence,
+                    source,
+                    "final",
+                    ts,
+                    text,
+                );
                 if let Err(e) =
                     store_for_sentence.insert_meeting_segment(&id_for_sentence, ts, source, text)
                 {
@@ -884,7 +976,7 @@ fn spawn_cloud_asr(
             if let Err(e) = crate::doubao::stream_hands_free(
                 &key,
                 &resource,
-                crate::doubao::Corpus::default(),
+                corpus,
                 rx,
                 on_partial,
                 on_sentence,
@@ -1097,6 +1189,84 @@ fn append_recall(
 // Auto-detect monitor loop
 // =============================================================================
 
+fn is_native_meeting_app(bundle: &str) -> bool {
+    MEETING_APP_BUNDLES.contains(&bundle)
+}
+
+fn is_meeting_browser(bundle: &str) -> bool {
+    MEETING_BROWSER_BUNDLES.contains(&bundle)
+}
+
+fn url_host(url: &str) -> Option<&str> {
+    let (_, rest) = url.trim().split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit('@').next()?;
+    let host = host_port.split(':').next()?.trim_end_matches('.');
+    (!host.is_empty()).then_some(host)
+}
+
+fn is_meeting_web_url(url: &str) -> bool {
+    let Some(host) = url_host(url) else {
+        return false;
+    };
+    MEETING_WEB_DOMAINS.iter().any(|domain| {
+        host.eq_ignore_ascii_case(domain)
+            || host
+                .strip_suffix(domain)
+                .is_some_and(|prefix| prefix.ends_with('.'))
+    })
+}
+
+#[cfg(test)]
+mod auto_detect_tests {
+    use super::*;
+
+    #[test]
+    fn native_allowlist_rejects_dictation_apps() {
+        assert!(is_native_meeting_app("us.zoom.xos"));
+        assert!(is_native_meeting_app("com.microsoft.teams2"));
+        assert!(!is_native_meeting_app("com.example.doubao-input"));
+        assert!(!is_native_meeting_app("com.apple.VoiceMemos"));
+    }
+
+    #[test]
+    fn meeting_domains_match_exact_hosts_and_subdomains() {
+        assert!(is_meeting_web_url("https://meet.google.com/abc-defg-hij"));
+        assert!(is_meeting_web_url("https://acme.zoom.us/j/123"));
+        assert!(is_meeting_web_url("https://teams.microsoft.com/v2/"));
+        assert!(!is_meeting_web_url(
+            "https://example.com/?next=meet.google.com"
+        ));
+        assert!(!is_meeting_web_url("https://notzoom.us.example.com/j/123"));
+        assert!(!is_meeting_web_url("not a url"));
+    }
+
+    #[test]
+    fn ordinary_browser_mic_use_is_not_a_native_meeting_app() {
+        assert!(is_meeting_browser("com.google.Chrome"));
+        assert!(!is_native_meeting_app("com.google.Chrome"));
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn trusted_meeting_app(apps: &[String]) -> Option<String> {
+    if let Some(bundle) = apps.iter().find(|bundle| is_native_meeting_app(bundle)) {
+        return Some(bundle.clone());
+    }
+    for bundle in apps.iter().filter(|bundle| is_meeting_browser(bundle)) {
+        let browser = bundle.clone();
+        let url = tokio::task::spawn_blocking(move || crate::ax::fetch_browser_url(&browser))
+            .await
+            .ok()
+            .flatten()
+            .map(|(url, _)| url);
+        if url.as_deref().is_some_and(is_meeting_web_url) {
+            return Some(bundle.clone());
+        }
+    }
+    None
+}
+
 /// Start the background mic-use monitor. Cheap when disabled (polls the toggle
 /// every few seconds); spawns the `monitor` helper only while auto-detect is on.
 pub fn spawn_monitor(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
@@ -1119,8 +1289,12 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
         tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
         tokio::process::ChildStdin,
     )> = None;
+    let mut raw_mic_active = false;
+    let mut raw_mic_apps: Vec<String> = Vec::new();
     let mut mic_active = false;
-    let mut mic_apps: Vec<String> = Vec::new();
+    // Once a browser tab qualifies, keep the browser trusted while it retains
+    // the mic so switching tabs during a call does not stop the session.
+    let mut trusted_app: Option<String> = None;
     let mut active_since: Option<Instant> = None;
     let mut inactive_since: Option<Instant> = None;
     let mut last_prune = Instant::now();
@@ -1142,6 +1316,9 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
                 let _ = c.wait().await;
             }
             mic_active = false;
+            raw_mic_active = false;
+            raw_mic_apps.clear();
+            trusted_app = None;
             active_since = None;
             inactive_since = None;
             tokio::time::sleep(Duration::from_secs(4)).await;
@@ -1215,27 +1392,17 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
                             .into_iter()
                             .filter(|p| Some(*p as u32) != own_pid)
                             .collect();
-                        let now_active = !pids.is_empty();
-                        if now_active != mic_active {
-                            mic_active = now_active;
-                            if mic_active {
-                                active_since = Some(Instant::now());
-                                inactive_since = None;
-                                mic_apps = mic
-                                    .get("apps")
-                                    .and_then(|a| a.as_array())
-                                    .map(|a| {
-                                        a.iter()
-                                            .filter_map(|x| x.as_str())
-                                            .map(String::from)
-                                            .collect()
-                                    })
-                                    .unwrap_or_default();
-                            } else {
-                                inactive_since = Some(Instant::now());
-                                active_since = None;
-                            }
-                        }
+                        raw_mic_active = !pids.is_empty();
+                        raw_mic_apps = mic
+                            .get("apps")
+                            .and_then(|a| a.as_array())
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|x| x.as_str())
+                                    .map(String::from)
+                                    .collect()
+                            })
+                            .unwrap_or_default();
                     } else if v.get("warn").is_some() {
                         // monitor_unavailable: OS too old for process objects.
                         tracing::warn!("meeting auto-detect unavailable on this macOS");
@@ -1253,6 +1420,29 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
             None => {}
+        }
+
+        // Convert raw microphone occupancy into trusted meeting occupancy.
+        // Unknown apps (dictation tools, voice memos, games, arbitrary sites)
+        // never enter the auto-start/stop state machine.
+        if !raw_mic_active {
+            trusted_app = None;
+        } else if !trusted_app
+            .as_ref()
+            .is_some_and(|bundle| raw_mic_apps.contains(bundle))
+        {
+            trusted_app = trusted_meeting_app(&raw_mic_apps).await;
+        }
+        let now_active = trusted_app.is_some();
+        if now_active != mic_active {
+            mic_active = now_active;
+            if mic_active {
+                active_since = Some(Instant::now());
+                inactive_since = None;
+            } else {
+                inactive_since = Some(Instant::now());
+                active_since = None;
+            }
         }
 
         // Debounced state machine.
@@ -1276,8 +1466,8 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
                     .map(|t| t.elapsed().as_secs() >= AUTO_START_SECS)
                     .unwrap_or(false) =>
             {
-                let hint = mic_apps.first().cloned();
-                tracing::info!("meeting auto-start: mic in use by {mic_apps:?}");
+                let hint = trusted_app.clone();
+                tracing::info!("meeting auto-start: trusted mic app {hint:?}");
                 if let Err(e) = start_internal(&app, &store, &app_data, true, hint).await {
                     tracing::warn!("meeting auto-start failed: {e}");
                     // Don't retry every tick on a hard failure.
@@ -1472,7 +1662,10 @@ pub async fn meeting_audio_dir(
 /// the panel is non-resizable for the user, and resize + reanchor must be one
 /// main-thread mutation to avoid a visible two-step jump.
 const HUD_COLLAPSED: (f64, f64) = (220.0, 52.0);
-const HUD_EXPANDED: (f64, f64) = (420.0, 320.0);
+// Expanded size leaves 20px side / 16px bottom transparent margins around the
+// 400px-wide caption card so its CSS drop shadow fades out inside the window
+// instead of being hard-clipped at the window edge (a visible gray rectangle).
+const HUD_EXPANDED: (f64, f64) = (440.0, 336.0);
 
 /// Grow/shrink the meeting pill window in place, keeping its top-center anchor
 /// (the capsule must not move under the cursor mid-hover).

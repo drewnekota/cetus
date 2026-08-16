@@ -1333,6 +1333,53 @@ pub fn run() {
             // removed in favor of stock macOS behavior: activation alone brings
             // nothing back; recall paths are the Dock click (`Reopen` handler),
             // the summon hotkey, and the tray.
+            //
+            // What remains is a WATCH-ONLY probe for the "Mission Control
+            // leaves the main window at the bottom" family: every activation /
+            // deactivation / Space change logs each window's ordering state
+            // (search the log for "activation-watch") so the next recurrence
+            // can be attributed. Sole permitted action: a quick-launcher panel
+            // found still ordered in while its `shown` flag says dismissed (a
+            // leaked dismiss path — the prime suspect for stealing Mission
+            // Control's raise) is parked again. orderOut only; per the note
+            // above, this observer must NEVER order any window front.
+            #[cfg(target_os = "macos")]
+            {
+                let app_h = app.handle().clone();
+                panel::install_activation_watch(move |event| {
+                    let labels: Vec<(String, usize)> = app_h
+                        .webview_windows()
+                        .iter()
+                        .filter_map(|(label, w)| {
+                            w.ns_window().ok().map(|p| (label.clone(), p as usize))
+                        })
+                        .collect();
+                    tracing::info!(
+                        "activation-watch {event}: {}",
+                        panel::order_snapshot(&labels)
+                    );
+                    if event != "did-become-active" {
+                        return;
+                    }
+                    let launcher_shown = app_h
+                        .state::<AppState>()
+                        .quick
+                        .shown
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    if launcher_shown {
+                        return;
+                    }
+                    if let Some(w) = app_h.get_webview_window("quick") {
+                        if w.is_visible().unwrap_or(false) {
+                            tracing::warn!(
+                                "activation-watch: quick launcher ordered-in while \
+                                 dismissed — parking it"
+                            );
+                            quick::park_quick(&app_h);
+                        }
+                    }
+                });
+            }
             for label in ["quick", "voice"] {
                 if let Some(win) = app.get_webview_window(label) {
                     let win_for_hide = win.clone();
@@ -1537,6 +1584,29 @@ pub fn run() {
                     quick_settings.auto_update,
                 ));
                 updater::spawn_periodic_checks(app.handle().clone());
+            }
+
+            // Renderer-footprint time series for the log files: the main
+            // webview's memory has ratcheted to multi-GB over a day of use
+            // (2026-08-15 investigation), and log-file curves are how the
+            // compositing-layer A/B in Settings → Appearance gets judged.
+            #[cfg(target_os = "macos")]
+            {
+                let probe_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut tick =
+                        tokio::time::interval(std::time::Duration::from_secs(300));
+                    tick.set_missed_tick_behavior(
+                        tokio::time::MissedTickBehavior::Delay,
+                    );
+                    loop {
+                        tick.tick().await;
+                        let report = resources::webview_footprint_report(&probe_handle);
+                        if !report.is_empty() {
+                            tracing::info!("webview memory: {report}");
+                        }
+                    }
+                });
             }
             Ok(())
         })

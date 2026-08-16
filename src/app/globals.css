@@ -300,6 +300,17 @@
   opacity: 1;
 }
 
+/* A/B escape hatch for the permanent layers above (Settings → Appearance,
+   applied via layer-prefs.ts). Each permanent translateZ(0) pins a long-lived
+   IOSurface, and measurement (2026-08-15) showed the main webview's graphics
+   memory ratcheting by hundreds of MB per active hour — suspected but not yet
+   proven to be these layers. Turning them off trades the subpixel hover-jitter
+   fix for a footprint comparison over real use; remove whichever side loses. */
+html.no-perma-layers .fade-layer,
+html.no-perma-layers [data-message-hover-target] > [data-message-actions] {
+  transform: none;
+}
+
 /* WebKit can paint an outside ::marker beyond an ol's scrollable overflow
    area even when the list has ample start padding. The first digit of wider
    markers is then clipped (most visibly from 20 onward). Keep the native

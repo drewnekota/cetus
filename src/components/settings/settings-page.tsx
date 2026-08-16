@@ -67,6 +67,10 @@ import {
   setThemePreference,
   type ThemePreference,
 } from "@/lib/theme-prefs";
+import {
+  getPermaLayersEnabled,
+  setPermaLayersEnabled,
+} from "@/lib/layer-prefs";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import {
   LOCALE_NATIVE_NAMES,
@@ -1847,11 +1851,13 @@ function LauncherSection() {
 
 function AppearanceSection() {
   const [theme, setThemeState] = useState<ThemePreference>(DEFAULT_THEME);
+  const [permaLayers, setPermaLayers] = useState(true);
   const { t } = useTranslation("settings");
 
   // Reflect the persisted choice once we're in the browser (localStorage).
   useEffect(() => {
     setThemeState(getThemePreference());
+    setPermaLayers(getPermaLayersEnabled());
   }, []);
 
   function chooseTheme(pref: ThemePreference) {
@@ -1889,6 +1895,25 @@ function AppearanceSection() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 space-y-0.5">
+            <Label htmlFor="perma-layers" className="font-medium">
+              {t("appearance.permaLayers.label")}
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              {t("appearance.permaLayers.description")}
+            </p>
+          </div>
+          <Switch
+            id="perma-layers"
+            checked={permaLayers}
+            onCheckedChange={(v) => {
+              setPermaLayersEnabled(v); // persists + applies the root class live
+              setPermaLayers(v);
+            }}
+          />
         </div>
       </div>
 

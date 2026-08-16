@@ -23,7 +23,7 @@ export const meeting = {
       "Master switch. Off means Cetus never listens, including auto-detection.",
     "autoDetect.label": "Start automatically",
     "autoDetect.description":
-      "Begin transcribing when another app (Zoom, Teams, FaceTime…) starts using the microphone, and stop when the call ends.",
+      "Begin transcribing when a known meeting app (Zoom, Teams, FaceTime…) uses the microphone. Browsers only qualify on supported meeting sites; other apps are ignored.",
     "systemAudio.label": "Transcribe other participants",
     "systemAudio.description":
       "Also transcribe the system audio output (what you hear). Requires macOS 14.2+; falls back to mic-only below that.",
@@ -57,6 +57,7 @@ export const meeting = {
     "transcript.empty": "Listening for the first words…",
     "transcript.you": "You",
     "transcript.them": "Them",
+    "transcript.close": "Close captions",
     "delete.label": "Delete",
     "audio.reveal": "Show audio files",
     "notify.started.title": "Transcribing meeting",
@@ -83,7 +84,7 @@ export const meeting = {
     "enable.description": "总开关。关闭后 Cetus 绝不监听，自动检测也不会运行。",
     "autoDetect.label": "自动开始",
     "autoDetect.description":
-      "当其他应用（Zoom、Teams、FaceTime 等）开始使用麦克风时自动开始转写，通话结束后自动停止。",
+      "当已知会议应用（Zoom、Teams、FaceTime 等）使用麦克风时自动转写；浏览器仅在支持的会议网站中触发，其他应用会被忽略。",
     "systemAudio.label": "转写其他参会者",
     "systemAudio.description":
       "同时转写系统音频输出（你听到的内容）。需要 macOS 14.2+；低于该版本时仅转写麦克风。",
@@ -117,6 +118,7 @@ export const meeting = {
     "transcript.empty": "正在等待第一句话…",
     "transcript.you": "我",
     "transcript.them": "对方",
+    "transcript.close": "关闭字幕",
     "delete.label": "删除",
     "audio.reveal": "查看音频文件",
     "notify.started.title": "正在转写会议",
@@ -140,7 +142,7 @@ export const meeting = {
       "マスタースイッチ。オフの間、Cetus は自動検出を含め一切リッスンしません。",
     "autoDetect.label": "自動開始",
     "autoDetect.description":
-      "他のアプリ（Zoom、Teams、FaceTime など）がマイクを使い始めたら文字起こしを開始し、通話終了後に停止します。",
+      "既知の会議アプリ（Zoom、Teams、FaceTime など）がマイクを使うと自動で文字起こしします。ブラウザは対応する会議サイトのみが対象で、その他のアプリは無視されます。",
     "systemAudio.label": "他の参加者も文字起こし",
     "systemAudio.description":
       "システム音声出力（あなたに聞こえる音）も文字起こしします。macOS 14.2 以降が必要。それ未満ではマイクのみになります。",
@@ -184,7 +186,7 @@ export const meeting = {
       "마스터 스위치입니다. 끄면 자동 감지를 포함해 Cetus가 절대 듣지 않습니다.",
     "autoDetect.label": "자동 시작",
     "autoDetect.description":
-      "다른 앱(Zoom, Teams, FaceTime 등)이 마이크를 사용하기 시작하면 전사를 시작하고 통화가 끝나면 중지합니다.",
+      "알려진 회의 앱(Zoom, Teams, FaceTime 등)이 마이크를 사용하면 자동으로 전사합니다. 브라우저는 지원되는 회의 사이트에서만 감지되며 다른 앱은 무시됩니다.",
     "systemAudio.label": "다른 참가자도 전사",
     "systemAudio.description":
       "시스템 오디오 출력(내가 듣는 소리)도 전사합니다. macOS 14.2 이상 필요. 그 미만에서는 마이크만 전사합니다.",
@@ -228,7 +230,7 @@ export const meeting = {
       "Interruptor maestro. Apagado, Cetus nunca escucha, ni siquiera la detección automática.",
     "autoDetect.label": "Iniciar automáticamente",
     "autoDetect.description":
-      "Empieza a transcribir cuando otra app (Zoom, Teams, FaceTime…) usa el micrófono y se detiene al terminar la llamada.",
+      "Empieza a transcribir cuando una app de reuniones conocida (Zoom, Teams, FaceTime…) usa el micrófono. En el navegador solo se admiten sitios de reuniones compatibles; las demás apps se ignoran.",
     "systemAudio.label": "Transcribir a los demás participantes",
     "systemAudio.description":
       "Transcribe también la salida de audio del sistema (lo que oyes). Requiere macOS 14.2+; por debajo, solo micrófono.",
@@ -272,7 +274,7 @@ export const meeting = {
       "Interruptor mestre. Desligado, o Cetus nunca escuta, nem mesmo a detecção automática.",
     "autoDetect.label": "Iniciar automaticamente",
     "autoDetect.description":
-      "Começa a transcrever quando outro app (Zoom, Teams, FaceTime…) usa o microfone e para quando a chamada termina.",
+      "Começa a transcrever quando um app de reunião conhecido (Zoom, Teams, FaceTime…) usa o microfone. No navegador, apenas sites de reunião compatíveis contam; os outros apps são ignorados.",
     "systemAudio.label": "Transcrever os outros participantes",
     "systemAudio.description":
       "Transcreve também a saída de áudio do sistema (o que você ouve). Requer macOS 14.2+; abaixo disso, apenas microfone.",
@@ -316,7 +318,7 @@ export const meeting = {
       "Interrupteur principal. Désactivé, Cetus n'écoute jamais, détection automatique comprise.",
     "autoDetect.label": "Démarrage automatique",
     "autoDetect.description":
-      "Commence la transcription quand une autre app (Zoom, Teams, FaceTime…) utilise le micro et s'arrête à la fin de l'appel.",
+      "Commence la transcription lorsqu’une app de réunion connue (Zoom, Teams, FaceTime…) utilise le micro. Dans le navigateur, seuls les sites de réunion compatibles sont pris en compte ; les autres apps sont ignorées.",
     "systemAudio.label": "Transcrire les autres participants",
     "systemAudio.description":
       "Transcrit aussi la sortie audio système (ce que vous entendez). Nécessite macOS 14.2+ ; en dessous, micro uniquement.",
@@ -360,7 +362,7 @@ export const meeting = {
       "Hauptschalter. Ausgeschaltet hört Cetus niemals zu, auch nicht zur automatischen Erkennung.",
     "autoDetect.label": "Automatisch starten",
     "autoDetect.description":
-      "Beginnt die Transkription, wenn eine andere App (Zoom, Teams, FaceTime…) das Mikrofon nutzt, und stoppt nach dem Anruf.",
+      "Startet die Transkription, wenn eine bekannte Meeting-App (Zoom, Teams, FaceTime…) das Mikrofon nutzt. Browser zählen nur auf unterstützten Meeting-Websites; andere Apps werden ignoriert.",
     "systemAudio.label": "Andere Teilnehmer transkribieren",
     "systemAudio.description":
       "Transkribiert auch die Systemaudio-Ausgabe (was du hörst). Benötigt macOS 14.2+; darunter nur Mikrofon.",
@@ -404,7 +406,7 @@ export const meeting = {
       "Interruttore principale. Spento, Cetus non ascolta mai, nemmeno per il rilevamento automatico.",
     "autoDetect.label": "Avvio automatico",
     "autoDetect.description":
-      "Inizia a trascrivere quando un'altra app (Zoom, Teams, FaceTime…) usa il microfono e si ferma a fine chiamata.",
+      "Inizia a trascrivere quando un’app di riunioni nota (Zoom, Teams, FaceTime…) usa il microfono. Nel browser contano solo i siti di riunioni supportati; le altre app vengono ignorate.",
     "systemAudio.label": "Trascrivi gli altri partecipanti",
     "systemAudio.description":
       "Trascrive anche l'uscita audio di sistema (ciò che senti). Richiede macOS 14.2+; sotto, solo microfono.",
@@ -448,7 +450,7 @@ export const meeting = {
       "Главный переключатель. Выключено — Cetus никогда не слушает, включая автообнаружение.",
     "autoDetect.label": "Автоматический запуск",
     "autoDetect.description":
-      "Начинает расшифровку, когда другое приложение (Zoom, Teams, FaceTime…) использует микрофон, и останавливается после звонка.",
+      "Начинает расшифровку, когда микрофон использует известное приложение для встреч (Zoom, Teams, FaceTime…). В браузере учитываются только поддерживаемые сайты встреч; остальные приложения игнорируются.",
     "systemAudio.label": "Расшифровывать других участников",
     "systemAudio.description":
       "Также расшифровывает системный звук (то, что вы слышите). Требуется macOS 14.2+; ниже — только микрофон.",

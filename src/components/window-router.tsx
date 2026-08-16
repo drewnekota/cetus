@@ -5,6 +5,7 @@ import { SnipOverlay } from "@/components/quick/snip-overlay";
 import { VoiceHud } from "@/components/quick/voice-hud";
 import { MeetingHud } from "@/components/quick/meeting-hud";
 import { Toaster } from "@/components/ui/sonner";
+import { ArtifactSaveToasts } from "@/components/artifact-save-toasts";
 
 /** cetus runs two webviews off one static bundle: the full app (`main`) and the
  *  frameless global launcher (`quick`). Render the launcher only in the quick
@@ -40,6 +41,8 @@ export function WindowRouter({ children }: { children: React.ReactNode }) {
     <>
       {children}
       <Toaster />
+      {/* Save-panel outcomes arrive as events (they can outlive page state). */}
+      <ArtifactSaveToasts />
     </>
   );
 }

@@ -1102,3 +1102,151 @@ pub fn present_inactive(ns_window: *mut c_void) {
         let _: () = msg_send![window, orderFrontRegardless];
     }
 }
+
+// =============================================================================
+// Activation watch — diagnostics for the "Mission Control leaves the main
+// window at the bottom" family. On every app activation / deactivation / Space
+// change the caller gets a chance to dump [`order_snapshot`] to the log, so a
+// recurrence can finally be attributed to whichever window sat in front of the
+// main one at that instant. IRON RULE: nothing reached from these observers may
+// ever order a window front — the old summon-on-activate observer that did
+// exactly that was itself the root cause of this bug family.
+// =============================================================================
+
+/// Copy an `NSString*` into a Rust `String`. `None` for null.
+unsafe fn nsstring_to_string(s: *mut AnyObject) -> Option<String> {
+    if s.is_null() {
+        return None;
+    }
+    Some((*s.cast::<objc2_foundation::NSString>()).to_string())
+}
+
+/// One entry per `NSApp.windows` member:
+/// `[<label> vis=_ key=_ ord=_ lvl=_ space=_ mini=_]`.
+///
+/// `labels` maps NSWindow pointers to Tauri window labels; windows not in the
+/// map (AppKit internals such as the status-bar item) fall back to their class
+/// name. `ord` is `orderedIndex` — front-to-back position among the app's
+/// visible windows, so the *lowest* ordered-in window during a bad Mission
+/// Control raise is the culprit. MUST run on the main thread.
+pub fn order_snapshot(labels: &[(String, usize)]) -> String {
+    unsafe {
+        let Some(app_cls) = AnyClass::get(c"NSApplication") else {
+            return String::new();
+        };
+        let nsapp: *mut AnyObject = msg_send![app_cls, sharedApplication];
+        if nsapp.is_null() {
+            return String::new();
+        }
+        let windows: *mut AnyObject = msg_send![nsapp, windows];
+        if windows.is_null() {
+            return String::new();
+        }
+        let n: usize = msg_send![windows, count];
+        let mut parts: Vec<String> = Vec::with_capacity(n);
+        for i in 0..n {
+            let w: *mut AnyObject = msg_send![windows, objectAtIndex: i];
+            if w.is_null() {
+                continue;
+            }
+            let label = labels
+                .iter()
+                .find(|(_, ptr)| *ptr == w as usize)
+                .map(|(l, _)| l.clone())
+                .unwrap_or_else(|| {
+                    let cls: *mut AnyObject = msg_send![w, className];
+                    nsstring_to_string(cls).unwrap_or_else(|| "?".into())
+                });
+            let vis: Bool = msg_send![w, isVisible];
+            let key: Bool = msg_send![w, isKeyWindow];
+            let ord: isize = msg_send![w, orderedIndex];
+            let lvl: isize = msg_send![w, level];
+            let space: Bool = msg_send![w, isOnActiveSpace];
+            let mini: Bool = msg_send![w, isMiniaturized];
+            parts.push(format!(
+                "[{label} vis={} key={} ord={ord} lvl={lvl} space={} mini={}]",
+                vis.as_bool() as u8,
+                key.as_bool() as u8,
+                space.as_bool() as u8,
+                mini.as_bool() as u8,
+            ));
+        }
+        parts.join(" ")
+    }
+}
+
+/// Install block observers for app activation, deactivation, and active-Space
+/// changes, all delivered on the main queue. `on_event` receives a short tag
+/// ("did-become-active" / "did-resign-active" / "active-space-changed") and is
+/// expected to log an [`order_snapshot`]; it must never order windows front
+/// (orderOut-only cleanup is allowed). Installs once; the observer tokens are
+/// retained and intentionally leaked — they live as long as the app. MUST run
+/// on the main thread.
+pub fn install_activation_watch(on_event: impl Fn(&'static str) + 'static) {
+    static INSTALLED: OnceLock<()> = OnceLock::new();
+    if INSTALLED.set(()).is_err() {
+        return;
+    }
+    let on_event = std::rc::Rc::new(on_event);
+    unsafe {
+        let Some(nc_cls) = AnyClass::get(c"NSNotificationCenter") else {
+            return;
+        };
+        let default_nc: *mut AnyObject = msg_send![nc_cls, defaultCenter];
+        let Some(queue_cls) = AnyClass::get(c"NSOperationQueue") else {
+            return;
+        };
+        let main_queue: *mut AnyObject = msg_send![queue_cls, mainQueue];
+        // Space changes are posted on NSWorkspace's own center, not the default
+        // one.
+        let workspace_nc: *mut AnyObject = match AnyClass::get(c"NSWorkspace") {
+            Some(ws_cls) => {
+                let ws: *mut AnyObject = msg_send![ws_cls, sharedWorkspace];
+                if ws.is_null() {
+                    std::ptr::null_mut()
+                } else {
+                    msg_send![ws, notificationCenter]
+                }
+            }
+            None => std::ptr::null_mut(),
+        };
+        let observers: [(*mut AnyObject, &str, &'static str); 3] = [
+            (
+                default_nc,
+                "NSApplicationDidBecomeActiveNotification",
+                "did-become-active",
+            ),
+            (
+                default_nc,
+                "NSApplicationDidResignActiveNotification",
+                "did-resign-active",
+            ),
+            (
+                workspace_nc,
+                "NSWorkspaceActiveSpaceDidChangeNotification",
+                "active-space-changed",
+            ),
+        ];
+        for (center, name, tag) in observers {
+            if center.is_null() || main_queue.is_null() {
+                continue;
+            }
+            let cb = on_event.clone();
+            let block = RcBlock::new(move |_note: *mut AnyObject| cb(tag));
+            let ns_name = objc2_foundation::NSString::from_str(name);
+            let null: *mut AnyObject = std::ptr::null_mut();
+            let token: *mut AnyObject = msg_send![
+                center,
+                addObserverForName: &*ns_name,
+                object: null,
+                queue: main_queue,
+                usingBlock: &*block,
+            ];
+            // The token is autoreleased; retain it (and never release) so the
+            // observer stays registered for the app's lifetime.
+            if !token.is_null() {
+                let _: *mut AnyObject = msg_send![token, retain];
+            }
+        }
+    }
+}

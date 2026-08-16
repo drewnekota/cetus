@@ -157,6 +157,14 @@ fn full_client_request(hands_free: bool, corpus: &Corpus, two_pass: bool) -> Vec
                                                                // Server-side disfluency removal (语义顺滑): hands-free inserts raw ASR
                                                                // text with no LLM cleanup pass, so fillers/repeats must be handled here.
         req["enable_ddc"] = serde_json::Value::from(true);
+        if two_pass {
+            // 二遍识别 on the `bigmodel_async` endpoint: each VAD-complete
+            // sentence is re-decoded by the non-streaming model *before* it
+            // turns `definite` — exactly the text hands-free inserts per
+            // sentence, so the accuracy win lands on what's kept, while the
+            // live partials stay streaming-fast.
+            req["enable_nonstream"] = serde_json::Value::from(true);
+        }
     } else {
         // Push-to-talk reads the whole `full` text once, on release — it never
         // consumes per-sentence `definite` markers, so there's nothing to gain
@@ -478,24 +486,148 @@ pub async fn stream_hands_free(
     key: &str,
     resource_id: &str,
     corpus: Corpus,
-    pcm_rx: mpsc::Receiver<Vec<u8>>,
+    mut pcm_rx: mpsc::Receiver<Vec<u8>>,
     on_partial: impl Fn(&str) + Send + Sync + 'static,
     on_sentence: impl Fn(&str) + Send + Sync + 'static,
 ) -> Result<()> {
+    use std::sync::atomic::Ordering;
+
+    if !TWO_PASS_OK.load(Ordering::Relaxed) {
+        let (_, err) = run(
+            URL,
+            key,
+            resource_id,
+            &corpus,
+            pcm_rx,
+            true,
+            false,
+            &on_partial,
+            &on_sentence,
+        )
+        .await;
+        return match err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        };
+    }
+
+    // Two-pass attempt with a lossless early-failure fallback. Replay is only
+    // safe while NO sentence has been delivered (delivered sentences are already
+    // inserted and would duplicate), so the pump tees audio into a bounded
+    // buffer until the first sentence lands — an entitlement rejection kills the
+    // session within seconds, long before the buffer cap matters.
+    let first_sentence = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let sentence_seen = first_sentence.clone();
+    let on_sentence = move |s: &str| {
+        sentence_seen.store(true, Ordering::Relaxed);
+        on_sentence(s);
+    };
+
+    // Replay buffer cap — 60s of 16 kHz mono s16le (~1.9 MB). Past this the
+    // fallback goes live-only (losing buffered audio), never unbounded memory.
+    const BUFFER_CAP_BYTES: usize = 60 * 32000;
+    let (tx1, rx1) = mpsc::channel::<Vec<u8>>(64);
+    let (swap_tx, mut swap_rx) = tokio::sync::oneshot::channel::<mpsc::Sender<Vec<u8>>>();
+    let pump_first_sentence = first_sentence.clone();
+    let pump = tokio::spawn(async move {
+        let mut out = tx1;
+        let mut buf: Vec<Vec<u8>> = Vec::new();
+        let mut buf_bytes = 0usize;
+        let mut buffering = true;
+        let mut swapped = false;
+        loop {
+            tokio::select! {
+                chunk = pcm_rx.recv() => {
+                    let Some(chunk) = chunk else { break };
+                    if buffering {
+                        if pump_first_sentence.load(Ordering::Relaxed) {
+                            buffering = false;
+                            buf.clear();
+                        } else if buf_bytes + chunk.len() <= BUFFER_CAP_BYTES {
+                            buf_bytes += chunk.len();
+                            buf.push(chunk.clone());
+                        } else {
+                            tracing::warn!(
+                                "doubao hands-free: replay buffer cap hit with no sentence yet; fallback will be live-only"
+                            );
+                            buffering = false;
+                            buf.clear();
+                        }
+                    }
+                    // The attempt's receiver may already be gone (session died);
+                    // the buffer above is what carries that audio across.
+                    let _ = out.send(chunk).await;
+                }
+                new_out = &mut swap_rx, if !swapped => {
+                    swapped = true;
+                    let Ok(tx2) = new_out else { continue };
+                    out = tx2;
+                    // Buffered audio first, then live chunks resume — order is
+                    // preserved because live receive waits on this arm. Paced
+                    // like the PTT replay (the realtime endpoint documents
+                    // 100-200ms cadence; ~15ms/chunk ≈ 6× realtime).
+                    for c in buf.drain(..) {
+                        if out.send(c).await.is_err() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+                    }
+                    buffering = false;
+                }
+            }
+        }
+    });
+
     let (_, err) = run(
+        URL_ASYNC,
+        key,
+        resource_id,
+        &corpus,
+        rx1,
+        true,
+        true,
+        &on_partial,
+        &on_sentence,
+    )
+    .await;
+    let Some(e) = err else {
+        // Clean end (audio source closed) — the pump has already drained.
+        pump.abort();
+        return Ok(());
+    };
+    if first_sentence.load(Ordering::Relaxed) {
+        // Died mid-stream after sentences were delivered: replay would
+        // duplicate them, so surface the error (same as pre-two-pass behavior).
+        pump.abort();
+        return Err(e);
+    }
+    // Died before ANY sentence — the signature of a missing `bigmodel_async`
+    // entitlement / rejected parameter. Stop trying two-pass this run and
+    // replay the teed audio on the plain endpoint, then continue live.
+    TWO_PASS_OK.store(false, Ordering::Relaxed);
+    tracing::warn!(
+        "doubao hands-free two-pass failed before any sentence ({e}); replaying on the plain endpoint"
+    );
+    let (tx2, rx2) = mpsc::channel::<Vec<u8>>(64);
+    if swap_tx.send(tx2).is_err() {
+        // Pump already exited: the audio source closed with nothing delivered.
+        return Err(e);
+    }
+    let (_, err2) = run(
         URL,
         key,
         resource_id,
         &corpus,
-        pcm_rx,
+        rx2,
         true,
         false,
         &on_partial,
         &on_sentence,
     )
     .await;
-    match err {
-        Some(e) => Err(e),
+    pump.abort();
+    match err2 {
+        Some(e2) => Err(e2),
         None => Ok(()),
     }
 }
