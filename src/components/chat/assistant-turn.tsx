@@ -43,13 +43,18 @@ function isProcessBlock(b: RenderedBlock): b is Extract<ProcessBlock, { kind: "t
   return false;
 }
 
-/** Collapse the whole turn's work into a single activity segment (codex-style).
- *  Everything up to and including the last process block folds into the
- *  timeline — including intermediate narration text between tool runs. Only
- *  what follows the last process block (the final answer, artifact previews)
- *  stays expanded. Non-foldable blocks (artifacts, attachments) never fold
- *  regardless of position; they render inline in their original order. */
-function buildSegments(messages: RenderedMessage[]): Segment[] {
+/** Segment the turn's blocks for display.
+ *
+ *  While the turn is LIVE, nothing extra folds: intermediate narration renders
+ *  inline as it streams, and only consecutive thinking/tool runs group into
+ *  small live activity bars — the same in-progress view as always.
+ *
+ *  Once the turn SETTLES, the whole work run (thinking + tool calls +
+ *  intermediate narration, up to and including the last process block) folds
+ *  into a single outer activity segment (codex-style); only what follows it
+ *  (the final answer, artifact previews) stays expanded. Non-foldable blocks
+ *  (artifacts, attachments) never fold regardless of position. */
+function buildSegments(messages: RenderedMessage[], live: boolean): Segment[] {
   type Flat = { b: RenderedBlock; at: number };
   const flat: Flat[] = [];
   for (const m of messages) {
@@ -61,6 +66,42 @@ function buildSegments(messages: RenderedMessage[]): Segment[] {
       if (b.kind === "thinking" && !b.text && !b.streaming) continue;
       flat.push({ b, at: m.createdAt });
     }
+  }
+
+  if (live) {
+    // In-progress: narration stays inline; each run of consecutive process
+    // blocks becomes its own live activity bar, exactly where it occurred.
+    const segments: Segment[] = [];
+    let run: { steps: ProcessBlock[]; min: number; max: number } | null = null;
+    const flush = () => {
+      if (run) {
+        segments.push({
+          type: "activity",
+          steps: run.steps,
+          durationMs: run.max - run.min,
+          startedAt: run.min,
+          trailing: false,
+        });
+        run = null;
+      }
+    };
+    for (const { b, at } of flat) {
+      if (isProcessBlock(b)) {
+        if (!run) run = { steps: [], min: at, max: at };
+        run.steps.push(b);
+        run.min = Math.min(run.min, at);
+        run.max = Math.max(run.max, at);
+      } else {
+        flush();
+        segments.push({ type: "answer", block: b });
+      }
+    }
+    flush();
+    // Only a trailing activity (no answer after it yet) may show the running
+    // spinner + live ticker state.
+    const last = segments[segments.length - 1];
+    if (last?.type === "activity") last.trailing = true;
+    return segments;
   }
 
   let lastProc = -1;
@@ -121,7 +162,9 @@ export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = fa
   const messages = useMessagesByKeys(convId, keys);
   // Recompute segments only when the merged messages actually change (the array
   // ref is stable between unrelated parent re-renders thanks to useShallow).
-  const segments = useMemo(() => buildSegments(messages), [messages]);
+  // `active` flips once at settle, re-folding the live view into the single
+  // collapsed activity.
+  const segments = useMemo(() => buildSegments(messages, active), [messages, active]);
   // Cheap, short-circuiting check for "is there any answer text" — replaces
   // joining the whole answer string on every render just to gate the copy button.
   const hasAnswerText = useMemo(
@@ -172,11 +215,15 @@ export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = fa
               seg.type === "activity" ? (
                 <ActivityGroup
                   key={i}
-                  id={`${convId ?? ""}:${keys[0]}:activity`}
+                  // Live bars get positional ids; the settled whole-turn fold
+                  // gets a fresh id so it starts collapsed regardless of what
+                  // was toggled open mid-run.
+                  id={`${convId ?? ""}:${keys[0]}:${active ? `a${i}` : "activity"}`}
                   steps={seg.steps}
                   durationMs={seg.durationMs}
                   startedAt={seg.startedAt}
                   active={active && seg.trailing}
+                  plain={!active}
                 />
               ) : (
                 // Answer content and activity bars share the same 88% reading

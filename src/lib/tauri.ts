@@ -677,6 +677,9 @@ export const api = {
     invoke<MeetingSegment[]>("meeting_transcript", { id }),
   meetingHudSetExpanded: (expanded: boolean) =>
     invoke<void>("meeting_hud_set_expanded", { expanded }),
+  /** Cursor-over-pill test done backend-side in one AppKit coordinate space —
+   *  see `meeting_hud_cursor_inside` for why the JS cursor APIs can't. */
+  meetingHudCursorInside: () => invoke<boolean>("meeting_hud_cursor_inside"),
 
   // DEV-ONLY eval bridge (only registered when the `devtest` Cargo feature is on).
   testEval: (js: string, label?: string) =>

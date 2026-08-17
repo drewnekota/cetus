@@ -18,7 +18,10 @@
 //! macOS 14.2+ — the system audio output via a CoreAudio process tap, each
 //! stream transcribed on-device with SFSpeechRecognizer. Segments land in
 //! SQLite (`meetings` / `meeting_segments`) for the UI and in a rolling JSONL
-//! recall log (read by the `meeting-recall` pi extension) for the agent. Both
+//! recall log (read by the `meeting-recall` pi extension) for the agent; CLI
+//! runtimes (claude-code / codex) reach the same transcripts via
+//! `cetus meeting …` on the control socket (see `cli_list` / `cli_transcript`).
+//! Both
 //! engines additionally stream per-utterance partial hypotheses, broadcast as
 //! `meeting-caption` events (Granola-style live captions: hover the recording
 //! pill to watch them settle; see `emit_caption`). When
@@ -44,6 +47,25 @@ const AUTO_START_SECS: u64 = 6;
 /// …and must be gone this long before an auto session auto-stops (call apps
 /// briefly release the device when switching audio routes).
 const AUTO_STOP_SECS: u64 = 30;
+/// Silence backstop for auto sessions: several conferencing apps (Tencent
+/// Meeting, Zoom, …) keep the microphone device open after the call ends, so
+/// the mic-release auto-stop above never fires and the session records until
+/// the 6h cap. When neither ASR stream has produced a caption (partial or
+/// final) for this long, the call is over — finalize AND suppress auto-detect
+/// until the app releases the mic (without suppression the monitor would
+/// restart a fresh session on its next tick and recording would never
+/// actually end). The suppression is the trade-off that sets this threshold:
+/// a fully-silent stretch this long mid-call ends recording for the rest of
+/// that call (the hotkey re-arms it), so it must be longer than an ordinary
+/// mid-meeting lull — but short enough that a dead call doesn't keep the
+/// red pill up for long. Auto-only: a manual session is the user's explicit
+/// intent (e.g. taping an in-person session with long silences), and it can
+/// only end by explicit stop or the max cap. An empty-transcript session is
+/// deleted on stop anyway, so a session cut short by mistake with no speech
+/// in it loses nothing.
+const AUTO_IDLE_STOP_SECS: u64 = 5 * 60;
+/// Cadence of the session watchdog's max-duration / idle checks.
+const WATCHDOG_TICK_SECS: u64 = 60;
 /// Hard cap on a single session's length. A manual session is ended only by an
 /// explicit stop, so without this a forgotten/walked-away session would hold the
 /// mic + system-audio tap + two speech recognizers open indefinitely. Applies to
@@ -421,6 +443,9 @@ struct ActiveSession {
     stdin: Option<tokio::process::ChildStdin>,
     child_pid: Option<u32>,
     segments: Arc<AtomicI64>,
+    /// Epoch-ms of the last ASR caption (partial or final) from either stream.
+    /// Read by the watchdog's idle check; starts at session start.
+    last_activity: Arc<AtomicI64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -528,6 +553,7 @@ async fn start_internal(
         }
 
         let segments = Arc::new(AtomicI64::new(0));
+        let last_activity = Arc::new(AtomicI64::new(started_ts));
         *slot = Some(ActiveSession {
             id: id.clone(),
             started_ts,
@@ -541,32 +567,56 @@ async fn start_internal(
             child_pid: child.id(),
             stdin: Some(stdin),
             segments: segments.clone(),
+            last_activity: last_activity.clone(),
         });
         drop(slot);
 
         emit_meeting_event(app, "started", &id, app_hint.as_deref(), None);
         spawn_pill_watcher(app.clone(), id.clone());
-        // Max-duration safety stop: finalize the session after MAX_SESSION_SECS if
-        // it's still the same one running. A plain sleep (no polling) — the id
-        // check makes it a no-op once the session has ended normally.
+        // Session watchdog: finalize after MAX_SESSION_SECS (any session), or —
+        // auto sessions only — after AUTO_IDLE_STOP_SECS without a caption from
+        // either ASR stream (see the constant for why mic release alone is not
+        // a reliable end-of-call signal). The id check makes every tick a no-op
+        // once the session has ended normally.
         {
             let app = app.clone();
             let watchdog_id = id.clone();
+            let last_activity = last_activity.clone();
             tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(MAX_SESSION_SECS)).await;
-                let runtime = app.state::<MeetingRuntime>();
-                let still_ours = runtime
-                    .active
-                    .lock()
-                    .await
-                    .as_ref()
-                    .map(|s| s.id == watchdog_id)
-                    .unwrap_or(false);
-                if still_ours {
-                    tracing::info!(
-                        "meeting: max session duration reached; auto-finalizing {watchdog_id}"
-                    );
-                    let _ = stop_internal(&app, false).await;
+                loop {
+                    tokio::time::sleep(Duration::from_secs(WATCHDOG_TICK_SECS)).await;
+                    let runtime = app.state::<MeetingRuntime>();
+                    let ours = {
+                        let slot = runtime.active.lock().await;
+                        match slot.as_ref() {
+                            Some(s) if s.id == watchdog_id => Some((s.started_ts, s.auto)),
+                            _ => None,
+                        }
+                    };
+                    let Some((started_ts, auto)) = ours else {
+                        return;
+                    };
+                    let now = now_ms();
+                    let over_max = now - started_ts >= (MAX_SESSION_SECS * 1000) as i64;
+                    let idle = auto
+                        && now - last_activity.load(Ordering::Relaxed)
+                            >= (AUTO_IDLE_STOP_SECS * 1000) as i64;
+                    if over_max || idle {
+                        tracing::info!(
+                            "meeting: {} reached; auto-finalizing {watchdog_id}",
+                            if over_max {
+                                "max session duration"
+                            } else {
+                                "transcript silence limit"
+                            }
+                        );
+                        // suppress_auto: the call app may still hold the mic
+                        // (that is precisely the case the idle stop exists
+                        // for) — without suppression the monitor would restart
+                        // a session immediately and this stop would be a no-op.
+                        let _ = stop_internal(&app, true).await;
+                        return;
+                    }
                 }
             });
         }
@@ -588,12 +638,14 @@ async fn start_internal(
 /// The reader task (not this fn) does the actual cleanup, so crash and stop
 /// funnel through one place; we just nudge stdin and wait for it.
 ///
-/// `user_initiated` marks a stop the user asked for (pill button, Settings,
-/// hotkey) as opposed to the auto-stop / max-duration watchdogs. A user stop
-/// suppresses auto-detect until the current call releases the mic — otherwise
-/// "cancel" during a live call is un-cancelable: the monitor still sees the
-/// call app on the mic and restarts a session seconds later.
-async fn stop_internal(app: &AppHandle, user_initiated: bool) -> Result<bool, String> {
+/// `suppress_auto` marks a stop that is final for the current call — the user
+/// asked (pill button, Settings, hotkey) or a watchdog concluded the call is
+/// over (idle / max duration). It suppresses auto-detect until the call app
+/// releases the mic; otherwise the stop is un-stoppable: the monitor still
+/// sees the app on the mic and restarts a session on its next tick. The one
+/// caller passing `false` is the mic-release auto-stop, where the occupancy
+/// that would retrigger is already gone.
+async fn stop_internal(app: &AppHandle, suppress_auto: bool) -> Result<bool, String> {
     let runtime = app.state::<MeetingRuntime>();
     let (stdin, pid) = {
         let mut slot = runtime.active.lock().await;
@@ -602,7 +654,7 @@ async fn stop_internal(app: &AppHandle, user_initiated: bool) -> Result<bool, St
             Some(s) => (s.stdin.take(), s.child_pid),
         }
     };
-    if user_initiated {
+    if suppress_auto {
         runtime.auto_suppressed.store(true, Ordering::Relaxed);
     }
     if let Some(mut stdin) = stdin {
@@ -1095,6 +1147,16 @@ async fn summarize(
 /// the consumer today, but the transcript view in Settings listens too, and
 /// broadcast is the pattern that survived the emit_to("main") regression.
 fn emit_caption(app: &AppHandle, id: &str, source: &str, kind: &str, ts: i64, text: &str) {
+    // Any caption (either stream, partial or final) proves the call is still
+    // alive — feed the watchdog's idle check. Both the local-engine reader and
+    // the cloud-ASR tasks funnel through here, so this is the one choke point.
+    // try_lock: this is a sync path and a missed bump self-heals on the next
+    // caption, which arrives multiple times per second during speech.
+    if let Ok(slot) = app.state::<MeetingRuntime>().active.try_lock() {
+        if let Some(s) = slot.as_ref().filter(|s| s.id == id) {
+            s.last_activity.store(now_ms(), Ordering::Relaxed);
+        }
+    }
     let _ = app.emit(
         "meeting-caption",
         json!({
@@ -1126,6 +1188,116 @@ fn emit_meeting_event(
             "title": title,
         }),
     );
+}
+
+// ---- `cetus meeting` CLI (agent-facing) -------------------------------------
+//
+// Server-side formatting for the control socket's `meeting.*` ops, mirroring
+// `ambient.rs` for `cetus context`: the std-only CLI prints the returned text
+// raw. This is what makes meeting transcripts reachable from every runtime —
+// the pi extension (`meeting-recall.ts`) covers only the built-in agent, while
+// claude-code / codex sessions see the `cetus` shim on their PATH.
+
+fn fmt_cli_ts(ts: i64, fmt: &str) -> String {
+    Local
+        .timestamp_millis_opt(ts)
+        .single()
+        .map(|dt| dt.format(fmt).to_string())
+        .unwrap_or_default()
+}
+
+/// `cetus meeting list`: one line per recorded meeting, newest first.
+pub fn cli_list(store: &Store, limit: u32) -> Result<String, String> {
+    let meetings = store
+        .list_meetings(limit.clamp(1, 200))
+        .map_err(|e| e.to_string())?;
+    if meetings.is_empty() {
+        return Ok(
+            "No recorded meetings. Meeting capture may be off (Settings → Meetings), \
+             or nothing has been recorded yet."
+                .to_string(),
+        );
+    }
+    let mut out = String::from(
+        "Recorded meetings (newest first). \
+         `cetus meeting transcript <id|latest>` prints one in full.\n",
+    );
+    for m in &meetings {
+        let start = fmt_cli_ts(m.started_ts, "%Y-%m-%d %H:%M");
+        let end = match m.ended_ts {
+            Some(t) => fmt_cli_ts(t, "%H:%M"),
+            None => "LIVE".to_string(),
+        };
+        out.push_str(&format!(
+            "\n{}  {start}–{end}  {} segments{}{}",
+            m.id,
+            m.segment_count,
+            m.app_name
+                .as_deref()
+                .map(|a| format!("  [{a}]"))
+                .unwrap_or_default(),
+            m.title
+                .as_deref()
+                .map(|t| format!("  {t}"))
+                .unwrap_or_default(),
+        ));
+    }
+    Ok(out)
+}
+
+/// `cetus meeting transcript <id|latest>`: header + summary + full transcript.
+pub fn cli_transcript(store: &Store, id: &str) -> Result<String, String> {
+    let id = if id == "latest" {
+        store
+            .list_meetings(1)
+            .map_err(|e| e.to_string())?
+            .first()
+            .map(|m| m.id.clone())
+            .ok_or_else(|| "no recorded meetings".to_string())?
+    } else {
+        id.to_string()
+    };
+    let meeting = store
+        .list_meetings(200)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|m| m.id == id)
+        .ok_or_else(|| format!("no meeting with id {id:?} — run `cetus meeting list`"))?;
+    let segs = store.meeting_segments(&id).map_err(|e| e.to_string())?;
+
+    let mut out = format!(
+        "Meeting {}\nStarted: {}{}{}\n",
+        meeting.id,
+        fmt_cli_ts(meeting.started_ts, "%Y-%m-%d %H:%M:%S"),
+        match meeting.ended_ts {
+            Some(t) => format!("\nEnded: {}", fmt_cli_ts(t, "%Y-%m-%d %H:%M:%S")),
+            None => "\nEnded: (still recording)".to_string(),
+        },
+        meeting
+            .app_name
+            .as_deref()
+            .map(|a| format!("\nApp: {a}"))
+            .unwrap_or_default(),
+    );
+    if let Some(title) = meeting.title.as_deref().filter(|t| !t.is_empty()) {
+        out.push_str(&format!("Title: {title}\n"));
+    }
+    if let Some(summary) = meeting.summary.as_deref().filter(|s| !s.is_empty()) {
+        out.push_str(&format!("\n## Summary\n{summary}\n"));
+    }
+    out.push_str("\n## Transcript (`you` = the user's mic; `them` = everyone else, heard through system audio)\n");
+    if segs.is_empty() {
+        out.push_str("(no transcript segments)\n");
+    }
+    for s in &segs {
+        let who = if s.source == "mic" { "you" } else { "them" };
+        out.push_str(&format!(
+            "[{}] {who}: {}\n",
+            fmt_cli_ts(s.ts, "%H:%M:%S"),
+            s.text
+        ));
+    }
+    Ok(out)
 }
 
 // ---- recall log (agent-facing) ----------------------------------------------
@@ -1436,10 +1608,17 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
         let now_active = trusted_app.is_some();
         if now_active != mic_active {
             mic_active = now_active;
+            // Info-level on the occupancy edges: these are rare (call
+            // start/end) and are the evidence needed to diagnose "the meeting
+            // app quit but recording kept going" — was the release ever seen?
             if mic_active {
+                tracing::info!("meeting monitor: trusted mic occupancy by {trusted_app:?}");
                 active_since = Some(Instant::now());
                 inactive_since = None;
             } else {
+                tracing::info!(
+                    "meeting monitor: trusted mic occupancy ended (remaining mic apps: {raw_mic_apps:?})"
+                );
                 inactive_since = Some(Instant::now());
                 active_since = None;
             }
@@ -1480,6 +1659,7 @@ async fn monitor_loop(app: AppHandle, store: Arc<Store>, app_data: PathBuf) {
                         .map(|t| t.elapsed().as_secs() >= AUTO_STOP_SECS)
                         .unwrap_or(false) =>
             {
+                tracing::info!("meeting auto-stop: trusted mic released");
                 if let Err(e) = stop_internal(&app, false).await {
                     tracing::warn!("meeting auto-stop failed: {e}");
                 }
@@ -1692,6 +1872,36 @@ pub async fn meeting_hud_set_expanded(app: AppHandle, expanded: bool) -> Result<
                 }
             })
             .map_err(|e| e.to_string())
+    }
+}
+
+/// Whether the cursor is currently over the meeting pill window (with a small
+/// grace margin). The expanded HUD polls this instead of doing its own
+/// cursor-vs-frame math: Tauri's JS `cursorPosition()` and the window geometry
+/// live in different coordinate spaces on scaled/secondary displays, which made
+/// the frontend's containment test read "outside" while hovering and fold the
+/// card moments after it opened.
+#[tauri::command]
+pub async fn meeting_hud_cursor_inside(app: AppHandle) -> Result<bool, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Ok(false)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app.clone()
+            .run_on_main_thread(move || {
+                let inside = app
+                    .get_webview_window("meeting")
+                    .and_then(|win| win.ns_window().ok())
+                    .map(|ptr| crate::panel::cursor_inside_window(ptr, 16.0))
+                    .unwrap_or(false);
+                let _ = tx.send(inside);
+            })
+            .map_err(|e| e.to_string())?;
+        rx.await.map_err(|e| e.to_string())
     }
 }
 

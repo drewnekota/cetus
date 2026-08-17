@@ -1,7 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Square, X } from "lucide-react";
-import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import { Spinner } from "@/components/ui/spinner";
 import {
   api,
@@ -216,21 +215,19 @@ export function MeetingHud() {
   // elsewhere in the app — and this card auto-scrolls on every caption), which
   // leaves the panel stuck open with no way to close it. While expanded, poll
   // the real cursor against the window frame and fold once it has truly left.
+  // The containment test runs backend-side (`meeting_hud_cursor_inside`): the
+  // JS cursorPosition()/outerPosition() pair mixes coordinate spaces on
+  // scaled/secondary displays and read "outside" during a legitimate hover,
+  // auto-folding the card moments after it opened.
   useEffect(() => {
     if (!expanded) return;
-    const win = getCurrentWindow();
     let cancelled = false;
     let outsideSince: number | null = null;
     const timer = setInterval(() => {
-      Promise.all([cursorPosition(), win.outerPosition(), win.outerSize()])
-        .then(([cur, pos, size]) => {
+      api
+        .meetingHudCursorInside()
+        .then((inside) => {
           if (cancelled) return;
-          const slop = 16; // physical px of grace around the window edge
-          const inside =
-            cur.x >= pos.x - slop &&
-            cur.x <= pos.x + size.width + slop &&
-            cur.y >= pos.y - slop &&
-            cur.y <= pos.y + size.height + slop;
           if (inside) {
             outsideSince = null;
             return;

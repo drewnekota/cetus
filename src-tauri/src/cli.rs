@@ -27,7 +27,15 @@ USAGE
                                        window-level timeline with durations
   cetus context search <words> [flags] Full-text search over captured screen text
   cetus context get <id>               Full captured text of one entry
+  cetus meeting list [--limit <n>]     Recorded meetings (on-device transcription)
+  cetus meeting transcript <id|latest> One meeting: summary + full transcript
   cetus ping | version | help
+
+WHEN TO REACH FOR WHAT
+  The user asks what they did / read / worked on earlier → `cetus context`
+  The user refers to something said in a meeting or call → `cetus meeting`
+  You made or fetched a file the user should receive    → `cetus artifact`
+  Recurring or scheduled work                           → `cetus cron`
 
 CONTEXT — Cetus's opt-in ambient screen memory, unified over its two collectors
 (AX text sampling and screenshot+OCR capture; either may be enabled). To answer
@@ -47,6 +55,12 @@ CONTEXT FLAGS (timeline & search; default range = today):
   --by app                           Timeline: rollup only, no per-window lines
   --text                             Timeline: add screen-text excerpts
   --limit <n>                        Search: max hits (default 10, max 40)
+
+MEETING — Cetus transcribes meetings on-device (opt-in). In a transcript,
+`you` is the user's microphone; `them` is everyone else, heard through system
+audio. `list` shows recent sessions (LIVE = still recording); `transcript`
+prints one meeting's summary plus its full timestamped transcript — grep it
+for specifics. Text only; audio, when kept, never leaves the machine.
 
 INPUT JSON — create requires name/prompt/schedule; edit takes any subset:
   {"name":"…","prompt":"…","schedule":<schedule>,
@@ -87,8 +101,20 @@ fn run_inner(args: &[String]) -> Result<String, String> {
         | ["cron"]
         | ["cron", "help"]
         | ["context"]
-        | ["context", "help"] => Ok(HELP.to_string()),
+        | ["context", "help"]
+        | ["meeting"]
+        | ["meeting", "help"] => Ok(HELP.to_string()),
         ["context", rest @ ..] => context_cmd(rest),
+        ["meeting", "list"] => {
+            request(&json!({ "op": "meeting.list" })).map(text_field)
+        }
+        ["meeting", "list", "--limit", n] => {
+            let n: u64 = n.parse().map_err(|_| format!("bad --limit {n:?}"))?;
+            request(&json!({ "op": "meeting.list", "limit": n })).map(text_field)
+        }
+        ["meeting", "transcript", id] => {
+            request(&json!({ "op": "meeting.transcript", "id": id })).map(text_field)
+        }
         ["ping"] => request(&json!({ "op": "ping" })).map(|_| "ok".to_string()),
         ["version"] => request(&json!({ "op": "version" })).map(pretty),
         ["artifact", path] => artifact_marker(path),
@@ -418,6 +444,8 @@ mod tests {
             "context timeline",
             "context search",
             "context get",
+            "meeting list",
+            "meeting transcript",
         ] {
             assert!(HELP.contains(cmd), "help is missing `{cmd}`");
         }

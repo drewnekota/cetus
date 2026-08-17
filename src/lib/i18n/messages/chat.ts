@@ -194,6 +194,7 @@ export const chat = {
     // Activity group (collapsed tool/thinking timeline)
     "activity.working": "Working…",
     "activity.thought": "Thought",
+    "activity.worked": "Worked for {duration}",
 
     // Vision card
     "vision.image": "{count} image",
@@ -408,6 +409,7 @@ export const chat = {
 
     "activity.working": "处理中……",
     "activity.thought": "已思考",
+    "activity.worked": "已处理 {duration}",
 
     "vision.image": "{count} 张图片",
     "vision.image_plural": "{count} 张图片",

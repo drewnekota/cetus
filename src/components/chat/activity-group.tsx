@@ -13,18 +13,20 @@ import { TextBlock } from "./message-blocks";
  *  intermediate narration text the agent emitted between tool runs. */
 type ProcessBlock = Extract<RenderedBlock, { kind: "thinking" | "tool_use" | "text" }>;
 
-/** Render the turn's whole work run (thinking + tool calls + intermediate
+/** Render a run of the agent's work (thinking + tool calls + intermediate
  *  narration) as a single collapsible activity. Collapsed by default — while
  *  the agent is running the header updates in place to show a live elapsed
  *  timer and the current action (so the list doesn't grow a card per step);
- *  once settled it shows a "N steps · Xs" summary that expands to the full
- *  timeline. */
+ *  once the turn settles the whole run renders as `plain`: a bare
+ *  "Worked for Xs" text line (no card chrome) that expands the full timeline
+ *  in place. */
 export function ActivityGroup({
   id,
   steps,
   durationMs,
   startedAt,
   active,
+  plain = false,
 }: {
   /** Stable id (conversation + turn) so the expanded state and the per-step
    *  expanders survive the virtualized list unmounting this turn. */
@@ -37,6 +39,9 @@ export function ActivityGroup({
    *  activity. Individual tool blocks settle between calls, so their
    *  `streaming` flag alone is not a reliable indication of completion. */
   active: boolean;
+  /** Settled whole-turn fold: render as a bare text disclosure line instead of
+   *  the boxed live activity bar — no extra nesting chrome. */
+  plain?: boolean;
 }) {
   const { t } = useTranslation("chat");
   const [open, toggle] = useDisclosure(id);
@@ -58,6 +63,47 @@ export function ActivityGroup({
 
   // While running: surface what's happening right now in the header.
   const current = running ? currentAction(steps) : null;
+
+  const timeline = steps.map((s, i) =>
+    s.kind === "thinking" ? (
+      <ThinkingBlock key={i} id={id ? `${id}:s${i}` : undefined} text={s.text} streaming={s.streaming} />
+    ) : s.kind === "text" ? (
+      // Intermediate narration between tool runs — full markdown, but
+      // muted so the timeline still reads as process, not answer.
+      <div key={i} className="px-2 py-1 text-muted-foreground">
+        <TextBlock text={s.text} streaming={s.streaming} isUser={false} />
+      </div>
+    ) : (
+      <ToolUseCard key={i} id={id ? `${id}:s${i}` : undefined} block={s} />
+    ),
+  );
+
+  if (plain) {
+    // Settled whole-turn fold: a bare "Worked for Xs" line, no card chrome —
+    // expanding reveals the timeline inline, without adding a nesting level.
+    const label = dur
+      ? t("activity.worked", { duration: dur })
+      : toolCount > 0
+        ? t(toolCount === 1 ? "agent.step" : "agent.step_plural", { count: toolCount })
+        : t("activity.thought");
+    return (
+      <div className="w-full max-w-[88%]">
+        <button
+          onClick={toggle}
+          className="flex items-center gap-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {hasError && <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning" />}
+          <span>{label}</span>
+          {open ? (
+            <ChevronDown className="h-3 w-3 shrink-0" />
+          ) : (
+            <ChevronRight className="h-3 w-3 shrink-0" />
+          )}
+        </button>
+        {open && <div className="mt-1 space-y-0.5">{timeline}</div>}
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-[88%] rounded-md border border-border/60 bg-muted/30">
@@ -102,21 +148,7 @@ export function ActivityGroup({
         )}
       </button>
       {open && (
-        <div className="space-y-0.5 border-t border-border/40 px-1.5 py-1.5">
-          {steps.map((s, i) =>
-            s.kind === "thinking" ? (
-              <ThinkingBlock key={i} id={id ? `${id}:s${i}` : undefined} text={s.text} streaming={s.streaming} />
-            ) : s.kind === "text" ? (
-              // Intermediate narration between tool runs — full markdown, but
-              // muted so the timeline still reads as process, not answer.
-              <div key={i} className="px-2 py-1 text-muted-foreground">
-                <TextBlock text={s.text} streaming={s.streaming} isUser={false} />
-              </div>
-            ) : (
-              <ToolUseCard key={i} id={id ? `${id}:s${i}` : undefined} block={s} />
-            ),
-          )}
-        </div>
+        <div className="space-y-0.5 border-t border-border/40 px-1.5 py-1.5">{timeline}</div>
       )}
     </div>
   );

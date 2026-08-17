@@ -350,6 +350,31 @@ pub fn resize_keep_top_center(ns_window: *mut c_void, width: f64, height: f64) {
     }
 }
 
+/// Whether the global cursor is inside `ns_window`'s frame, padded by `slop`
+/// points on every side. Both `NSEvent.mouseLocation` and the window frame are
+/// AppKit global points (bottom-left origin), so the containment test needs no
+/// coordinate conversion — unlike pairing Tauri's `cursor_position()` (physical
+/// pixels) with window geometry, which misresolves on scaled/secondary
+/// displays (see `bottom_center_on_mouse_screen`).
+pub fn cursor_inside_window(ns_window: *mut c_void, slop: f64) -> bool {
+    if ns_window.is_null() {
+        return false;
+    }
+    let obj = ns_window as *mut AnyObject;
+    unsafe {
+        let Some(ns_event) = AnyClass::get(c"NSEvent") else {
+            return false;
+        };
+        let mouse: NSPoint = msg_send![ns_event, mouseLocation];
+        let window: &AnyObject = &*obj;
+        let f: NSRect = msg_send![window, frame];
+        mouse.x >= f.origin.x - slop
+            && mouse.x <= f.origin.x + f.size.width + slop
+            && mouse.y >= f.origin.y - slop
+            && mouse.y <= f.origin.y + f.size.height + slop
+    }
+}
+
 /// `visibleFrame` (excludes the menu bar and Dock) of the screen that currently
 /// holds the mouse cursor. Containment is tested against the full frame — the
 /// cursor can legitimately sit in the menu bar.
