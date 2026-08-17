@@ -27,10 +27,6 @@
 
 <p align="center"><img src="docs/cetus-community-wechat.jpg" width="360" alt="Cetus 社区微信群二维码" /></p>
 
-### 友情链接
-
-- [LINUX DO](https://linux.do) —— 有理想的新社区。
-
 ![Cetus runtime 选择器 —— Claude Code、Codex、DeepSeek Harness、OpenCode、Grok Build、Kimi CLI 都在同一个 macOS app 里](docs/screenshot-runtime-picker.png)
 
 ![Cetus 操作演示 —— 唤起 agent、创建自动化任务并切换 runtime](docs/cetus-demo.gif)
@@ -240,6 +236,13 @@ host/extension bridge 被拆成了两个独立、与具体 provider 无关的包
 - **[`@cetus/bridge-protocol`](packages/cetus-bridge-protocol)**（TypeScript）—— extension 侧协议：共享的 `HOST_TUNNELS` 哨兵列表、`callHost()`、`toolResult()`，以及 host tunnel 的类型定义。
 
 两个包都是 MIT 协议，且不含任何 Cetus / DeepSeek 专属代码，其他 agent host 也可以复用同一套 bridge。协议与安全边界详见 [docs/bridge.md](docs/bridge.md)。
+
+<details>
+<summary>友情链接</summary>
+
+- [LINUX DO](https://linux.do) —— 有理想的新社区。
+
+</details>
 
 ## 许可证
 

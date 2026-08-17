@@ -27,10 +27,6 @@
 
 <p align="center"><img src="docs/cetus-community-wechat.jpg" width="360" alt="WeChat QR code for the Cetus community group" /></p>
 
-### Friendly links
-
-- [LINUX DO](https://linux.do) — A community of idealists.
-
 ![Cetus runtime picker — Claude Code, Codex, DeepSeek Harness, OpenCode, Grok Build, and Kimi CLI in one macOS app](docs/screenshot-runtime-picker.png)
 
 ![Cetus demo — launch an agent, schedule an automation, and switch runtimes](docs/cetus-demo.gif)
@@ -241,6 +237,13 @@ The host/extension bridge is factored into two standalone, provider-neutral pack
 - **[`@cetus/bridge-protocol`](packages/cetus-bridge-protocol)** (TypeScript) — the extension-side protocol: the shared `HOST_TUNNELS` sentinels, `callHost()`, `toolResult()`, and host-tunnel types.
 
 Both are MIT-licensed and carry no Cetus- or DeepSeek-specific code, so other agent hosts can reuse the same bridge. See [docs/bridge.md](docs/bridge.md) for the protocol and security boundary.
+
+<details>
+<summary>Friendly links</summary>
+
+- [LINUX DO](https://linux.do) — A community of idealists.
+
+</details>
 
 ## License
 
