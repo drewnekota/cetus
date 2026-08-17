@@ -853,7 +853,8 @@ pub fn spawn_dsh_session(
                                         active = Some(ActiveDshTurn { sink, outcome, translator });
                                     }
                                     Err(error) => {
-                                        let events = translator.finish(Some(&format!("answer delivery failed: {error:#}")));
+                                        let msg = format!("answer delivery failed: {error:#}");
+                                        let events = translator.finish(Some(&msg));
                                         emit_protocol(&sink, &conversation_id, events);
                                         let _ = outcome.send(CliTurnOutcome {
                                             resume_id: Some(session_id.clone()),
@@ -861,6 +862,7 @@ pub fn spawn_dsh_session(
                                             aborted: false,
                                             streamed: false,
                                             resume_rejected: false,
+                                            error: Some(msg),
                                         });
                                     }
                                 }
@@ -905,7 +907,8 @@ pub fn spawn_dsh_session(
                             match sent {
                                 Ok(_) => active = Some(ActiveDshTurn { sink, outcome, translator }),
                                 Err(error) => {
-                                    let events = translator.finish(Some(&format!("{error:#}")));
+                                    let msg = format!("{error:#}");
+                                    let events = translator.finish(Some(&msg));
                                     emit_protocol(&sink, &conversation_id, events);
                                     let _ = outcome.send(CliTurnOutcome {
                                         resume_id: Some(session_id.clone()),
@@ -913,6 +916,7 @@ pub fn spawn_dsh_session(
                                         aborted: false,
                                         streamed: false,
                                         resume_rejected: false,
+                                        error: Some(msg),
                                     });
                                 }
                             }
@@ -993,6 +997,7 @@ pub fn spawn_dsh_session(
                                     aborted: true,
                                     streamed: true,
                                     resume_rejected: false,
+                                    error: None,
                                 });
                             }
                         }
@@ -1031,6 +1036,7 @@ pub fn spawn_dsh_session(
                                     aborted: false,
                                     streamed: true,
                                     resume_rejected: false,
+                                    error,
                                 });
                             } else {
                                 let events = turn.translator.on_dsh_event(&event);
@@ -1147,6 +1153,7 @@ async fn dsh_fail_all(
                     aborted: false,
                     streamed: false,
                     resume_rejected: false,
+                    error: Some(message.to_string()),
                 });
             }
             AcpSessionCommand::Shutdown => break,
@@ -4203,6 +4210,12 @@ pub struct CliTurnOutcome {
     /// see `streamed`). The caller should clear the stored token so the next
     /// turn starts a fresh session instead of failing the same way forever.
     pub resume_rejected: bool,
+    /// The turn's terminal failure, when it had one (error result, failed
+    /// turn-end, dirty exit). Carried even when the error text was NOT
+    /// rendered into the transcript (content had already streamed) — the
+    /// caller inspects it to auto-retry transient failures (429 bursts,
+    /// upstream overloads) via [`is_transient_agent_error`].
+    pub error: Option<String>,
 }
 
 /// True for stdout lines showing claude actually started processing more work
@@ -4273,6 +4286,32 @@ fn auth_expired_hint(backend: CliBackend, stderr: &str) -> Option<String> {
 
 /// True when an error text reads as a usage/credit/quota limit — the runtime
 /// is fine, the account just can't run more turns right now.
+/// True for transient provider failures worth an automatic retry: rate-limit
+/// bursts and upstream overloads recover on their own after a short wait.
+/// Quota/credit exhaustion is excluded — those 429s hold until the billing
+/// window resets, so retrying just burns the attempt (the usage-limit hint
+/// with its runtime-switch way out is the right surface for them).
+pub fn is_transient_agent_error(text: &str) -> bool {
+    if is_usage_limit(text) {
+        return false;
+    }
+    let t = text.to_lowercase();
+    [
+        "429",
+        "too many requests",
+        "exceeded retry limit",
+        "rate limit",
+        "rate_limit",
+        "overloaded",
+        "internal server error",
+        "service unavailable",
+        "gateway timeout",
+        "529",
+    ]
+    .iter()
+    .any(|p| t.contains(p))
+}
+
 fn is_usage_limit(text: &str) -> bool {
     let t = text.to_lowercase();
     [
@@ -4473,6 +4512,7 @@ pub fn spawn_claude_session(
                             let _ = outcome.send(CliTurnOutcome {
                                 resume_id: tr.resume_id.clone(), messages: Vec::new(),
                                 aborted: false, streamed: false, resume_rejected: false,
+                                error: None,
                             });
                             continue;
                         }
@@ -4504,6 +4544,7 @@ pub fn spawn_claude_session(
                                 resume_id: tr.resume_id.clone(), messages: tr.take_messages(),
                                 aborted: false, streamed: tr.opened,
                                 resume_rejected: false,
+                                error: Some("Claude Code stdin closed".to_string()),
                             });
                             break;
                         }
@@ -4609,8 +4650,14 @@ pub fn spawn_claude_session(
                             tr.saw_result = false;
                             continue;
                         };
+                        // Take the error unconditionally for the outcome (the
+                        // auto-retry decision needs it either way) but render
+                        // it only when nothing streamed — claude repeats the
+                        // error text in the result payload, and the streamed
+                        // version is already on screen.
+                        let result_error = tr.result_error.take();
                         let err = if tr.messages.is_empty() && tr.assistant_blocks_empty() {
-                            tr.result_error.take()
+                            result_error.clone()
                         } else { None };
                         emit(&turn.sink, tr.finish(err.as_deref()));
                         let streamed = tr.opened;
@@ -4620,6 +4667,7 @@ pub fn spawn_claude_session(
                             aborted: interrupted,
                             streamed,
                             resume_rejected: false,
+                            error: result_error,
                         });
                     }
                 }
@@ -4643,6 +4691,7 @@ pub fn spawn_claude_session(
                 aborted: killed,
                 streamed,
                 resume_rejected: false,
+                error: err,
             });
         } else if let Some(orphan) = &orphan_messages {
             // No active turn to carry them: settle and ship whatever a
@@ -4901,6 +4950,7 @@ fn fail_queued_acp_turns(
                 aborted: false,
                 streamed: false,
                 resume_rejected: false,
+                error: Some(error.to_string()),
             });
         }
     }
@@ -5141,6 +5191,7 @@ pub fn spawn_acp_session(
                                 aborted: false,
                                 streamed: false,
                                 resume_rejected: false,
+                                error: None,
                             });
                             continue;
                         }
@@ -5169,10 +5220,11 @@ pub fn spawn_acp_session(
                             "params": { "sessionId": session_id, "prompt": blocks }
                         });
                         if let Err(error) = acp_write(&mut stdin, &request).await {
+                            let msg = format!("ACP stdin closed: {error}");
                             emit_protocol(
                                 &sink,
                                 &conversation_id,
-                                translator.finish(Some(&format!("ACP stdin closed: {error}"))),
+                                translator.finish(Some(&msg)),
                             );
                             let streamed = translator.opened;
                             let _ = outcome.send(CliTurnOutcome {
@@ -5181,6 +5233,7 @@ pub fn spawn_acp_session(
                                 aborted: false,
                                 streamed,
                                 resume_rejected: false,
+                                error: Some(msg),
                             });
                             break;
                         }
@@ -5218,6 +5271,7 @@ pub fn spawn_acp_session(
                                 aborted: true,
                                 streamed,
                                 resume_rejected: false,
+                                error: None,
                             });
                         }
                     }
@@ -5320,6 +5374,7 @@ pub fn spawn_acp_session(
                             aborted: false,
                             streamed,
                             resume_rejected: false,
+                            error,
                         });
                         continue;
                     }
@@ -5346,6 +5401,7 @@ pub fn spawn_acp_session(
                 aborted: false,
                 streamed,
                 resume_rejected: false,
+                error: Some("ACP process exited unexpectedly".to_string()),
             });
         }
         let _ = child.wait().await;
@@ -5924,6 +5980,7 @@ pub fn spawn_codex_session(
                             aborted: false,
                             streamed: tr.opened,
                             resume_rejected: opts.resume.is_some(),
+                            error: Some(error.to_string()),
                         });
                     }
                     Some(CodexSessionCommand::Compact { outcome, .. }) => {
@@ -5994,6 +6051,7 @@ pub fn spawn_codex_session(
                             let _ = outcome.send(CliTurnOutcome {
                                 resume_id: Some(thread_id.clone()), messages: Vec::new(),
                                 aborted: false, streamed: false, resume_rejected: false,
+                                error: None,
                             });
                             continue;
                         }
@@ -6015,6 +6073,7 @@ pub fn spawn_codex_session(
                             let _ = outcome.send(CliTurnOutcome {
                                 resume_id: Some(thread_id.clone()), messages: tr.take_messages(),
                                 aborted: false, streamed: tr.opened, resume_rejected: false,
+                                error: Some(error.to_string()),
                             });
                             break;
                         }
@@ -6424,6 +6483,7 @@ pub fn spawn_codex_session(
                                                 aborted: false,
                                                 streamed: tr.opened,
                                                 resume_rejected: false,
+                                                error: Some(error.to_string()),
                                             });
                                         } else {
                                             active = Some(ActiveClaudeTurn { sink, outcome });
@@ -6486,6 +6546,7 @@ pub fn spawn_codex_session(
                             let _ = turn.outcome.send(CliTurnOutcome {
                                 resume_id: Some(thread_id.clone()), messages: tr.take_messages(),
                                 aborted: status == "interrupted", streamed, resume_rejected: false,
+                                error,
                             });
                             active_turn_id = None;
                             if proactive_compact_due && !compacting {
@@ -6549,6 +6610,7 @@ pub fn spawn_codex_session(
                 aborted: false,
                 streamed,
                 resume_rejected: false,
+                error: Some("Codex app-server exited unexpectedly".to_string()),
             });
         }
         if let Some((_prompt, _images, sink, outcome)) = pending_turn.take() {
@@ -6567,6 +6629,7 @@ pub fn spawn_codex_session(
                 aborted: false,
                 streamed,
                 resume_rejected: false,
+                error: Some("Codex app-server exited before the queued turn started".to_string()),
             });
         }
         for (_, outcome) in pending_compact_requests.drain() {
@@ -6677,6 +6740,7 @@ pub async fn run_cli_turn(
                 aborted: false,
                 streamed: false,
                 resume_rejected: false,
+                error: Some(msg),
             });
         }
     };
@@ -6884,6 +6948,7 @@ pub async fn run_cli_turn(
                 aborted,
                 streamed: tr.opened,
                 resume_rejected: false,
+                error: Some(msg),
             });
         }
     };
@@ -6949,6 +7014,10 @@ pub async fn run_cli_turn(
         ));
     }
 
+    // The outcome carries the failure even when it wasn't rendered (content
+    // streamed, so the error text is already on screen via the stream) — the
+    // caller needs it for the transient-error auto-retry decision.
+    let outcome_error = err.clone().or_else(|| tr.result_error.take());
     // Captured before finish(): an error emitted there opens the bubble too,
     // but only pre-existing streamed content means the CLI saved the session.
     let streamed = tr.opened;
@@ -6959,12 +7028,31 @@ pub async fn run_cli_turn(
         aborted,
         streamed,
         resume_rejected,
+        error: outcome_error,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transient_agent_error_classification() {
+        // The auto-retry class: rate-limit bursts and upstream overloads.
+        assert!(is_transient_agent_error(
+            "exceeded retry limit, last status: 429 Too Many Requests, request id: fd69baec"
+        ));
+        assert!(is_transient_agent_error("API Error: 529 Overloaded"));
+        assert!(is_transient_agent_error("500 Internal Server Error"));
+        // Quota exhaustion mentions limits too but holds until reset — no retry.
+        assert!(!is_transient_agent_error("Claude AI usage limit reached|1755400000"));
+        assert!(!is_transient_agent_error(
+            "Your credit balance is too low to access the Anthropic API"
+        ));
+        // Unclassified failures stay with the user.
+        assert!(!is_transient_agent_error("agent reported an error"));
+        assert!(!is_transient_agent_error("Codex app-server exited unexpectedly"));
+    }
 
     fn types(events: &[Value]) -> Vec<String> {
         events

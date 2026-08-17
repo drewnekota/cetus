@@ -79,20 +79,21 @@ export function ActivityGroup({
   );
 
   if (plain) {
-    // Settled whole-turn fold: a bare "Worked for Xs" line, no card chrome —
+    // Settled whole-turn fold: a bare "N steps · Xs" line, no card chrome —
     // expanding reveals the timeline inline, without adding a nesting level.
-    const label = dur
-      ? t("activity.worked", { duration: dur })
-      : toolCount > 0
-        ? t(toolCount === 1 ? "agent.step" : "agent.step_plural", { count: toolCount })
-        : t("activity.thought");
+    const label =
+      toolCount > 0
+        ? t(toolCount === 1 ? "agent.step" : "agent.step_plural", { count: toolCount }) +
+          (dur ? ` · ${dur}` : "")
+        : dur
+          ? t("activity.worked", { duration: dur })
+          : t("activity.thought");
     return (
       <div className="w-full max-w-[88%]">
         <button
           onClick={toggle}
           className="flex items-center gap-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
-          {hasError && <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning" />}
           <span>{label}</span>
           {open ? (
             <ChevronDown className="h-3 w-3 shrink-0" />

@@ -147,6 +147,20 @@ pub struct AppState {
     /// the runtime directly, so the new-chat composer (which has no
     /// conversation yet) can show the runtime's real commands and skills.
     cli_command_catalogs: std::sync::Mutex<HashMap<String, Vec<serde_json::Value>>>,
+    /// Auto-retry bookkeeping for CLI turns that settled on a transient
+    /// provider error (429 burst / overload), keyed by conversation id.
+    /// `generation` counts dispatches: a scheduled retry snapshots it and
+    /// fires only if nothing else (user send, steer redispatch) dispatched in
+    /// the meantime. `attempts` counts consecutive auto-retries and resets on
+    /// any turn that settles without a transient error.
+    cli_auto_retry: std::sync::Mutex<HashMap<String, CliAutoRetry>>,
+}
+
+/// See [`AppState::cli_auto_retry`].
+#[derive(Default, Clone, Copy)]
+pub struct CliAutoRetry {
+    pub attempts: u32,
+    pub generation: u64,
 }
 
 /// One line bound for a running CLI turn's stdin.
@@ -380,6 +394,46 @@ impl AppState {
     /// CLI's stdin.
     pub fn cli_turn_active(&self, conv_id: &str) -> bool {
         self.cli_turns.lock().unwrap().contains_key(conv_id)
+    }
+
+    /// Count a turn dispatch for this conversation and return the new
+    /// generation. A scheduled auto-retry snapshots this and gives way when
+    /// the generation moved on before it fired (something else dispatched).
+    pub fn bump_cli_dispatch(&self, conv_id: &str) -> u64 {
+        let mut map = self.cli_auto_retry.lock().unwrap();
+        let entry = map.entry(conv_id.to_string()).or_default();
+        entry.generation += 1;
+        entry.generation
+    }
+
+    /// Current dispatch generation (see `bump_cli_dispatch`).
+    pub fn cli_dispatch_generation(&self, conv_id: &str) -> u64 {
+        self.cli_auto_retry
+            .lock()
+            .unwrap()
+            .get(conv_id)
+            .map(|entry| entry.generation)
+            .unwrap_or(0)
+    }
+
+    /// Record one more auto-retry attempt; returns the 1-based attempt number,
+    /// or None once `max` consecutive attempts have been spent.
+    pub fn next_cli_auto_retry(&self, conv_id: &str, max: u32) -> Option<u32> {
+        let mut map = self.cli_auto_retry.lock().unwrap();
+        let entry = map.entry(conv_id.to_string()).or_default();
+        if entry.attempts >= max {
+            return None;
+        }
+        entry.attempts += 1;
+        Some(entry.attempts)
+    }
+
+    /// Reset the consecutive auto-retry counter (a turn settled without a
+    /// transient error, so the next failure starts a fresh retry budget).
+    pub fn reset_cli_auto_retry(&self, conv_id: &str) {
+        if let Some(entry) = self.cli_auto_retry.lock().unwrap().get_mut(conv_id) {
+            entry.attempts = 0;
+        }
     }
 
     /// Return the settlement signal only when a registered turn has already
@@ -1237,6 +1291,7 @@ pub fn run() {
                 acp_sessions: std::sync::Mutex::new(HashMap::new()),
                 cli_commands: std::sync::Mutex::new(HashMap::new()),
                 cli_command_catalogs: std::sync::Mutex::new(HashMap::new()),
+                cli_auto_retry: std::sync::Mutex::new(HashMap::new()),
             });
             let remote_runtime = remote::RemoteRuntime::new(&app.state::<AppState>().store);
             app.manage(remote_runtime);

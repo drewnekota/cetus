@@ -1017,6 +1017,11 @@ pub fn dispatch_turn(
             std::env::var("PATH").unwrap_or_default()
         ),
     ));
+    // Every dispatch advances the conversation's generation, standing down any
+    // auto-retry scheduled against the previous turn's transient failure —
+    // whatever is dispatching now (user send, steer redispatch, the retry
+    // itself) supersedes it.
+    state.bump_cli_dispatch(&conv.id);
     // One turn per conversation; also the abort command's kill switch and the
     // stdin channel control responses ride in on. Registered before the user
     // message persists so a rejected double-send doesn't strand a transcript
@@ -1202,6 +1207,7 @@ pub fn dispatch_turn(
             store.set_run_state(&conv_id, settled_run_state(&outcome)).ok();
             let st = task_handle.state::<AppState>();
             st.end_cli_turn(&conv_id);
+            maybe_auto_retry_cli_turn(&task_handle, &conv_id, outcome.as_ref());
         });
         return Ok(());
     }
@@ -1255,6 +1261,7 @@ pub fn dispatch_turn(
             store.set_run_state(&conv_id, settled_run_state(&outcome)).ok();
             let st = task_handle.state::<AppState>();
             st.end_cli_turn(&conv_id);
+            maybe_auto_retry_cli_turn(&task_handle, &conv_id, outcome.as_ref());
         });
         return Ok(());
     }
@@ -1316,6 +1323,7 @@ pub fn dispatch_turn(
             store.set_run_state(&conv_id, settled_run_state(&outcome)).ok();
             let state = task_handle.state::<AppState>();
             state.end_cli_turn(&conv_id);
+            maybe_auto_retry_cli_turn(&task_handle, &conv_id, outcome.as_ref());
         });
         return Ok(());
     }
@@ -1435,6 +1443,96 @@ fn persist_cli_outcome(
             store.set_session_file(conv_id, resume).ok();
         }
     }
+}
+
+/// Consecutive automatic retries a conversation gets before the error is left
+/// for the user, and the backoff before each attempt. The vendor CLI already
+/// exhausted its own API-level retries by the time the turn settles, so the
+/// waits start long and grow.
+const CLI_AUTO_RETRY_MAX: u32 = 3;
+const CLI_AUTO_RETRY_BACKOFF_SECS: [u64; 3] = [20, 60, 180];
+
+/// The visible continuation prompt an auto-retry dispatches. Not a replay of
+/// the original message: the session resumes with its full context (or the
+/// transcript replays as a handoff preamble when no session was saved), so the
+/// agent picks the task back up instead of redoing it.
+const CLI_AUTO_RETRY_PROMPT: &str = "The previous turn stopped early due to a transient provider \
+     error (rate limited or overloaded). This is an automatic retry: review what has already been \
+     done in this conversation, then continue the original task from where it left off. Don't \
+     redo work that has already completed.";
+
+/// Schedule an automatic continuation turn when a CLI turn settled on a
+/// transient provider failure (429 burst, upstream overload — see
+/// `is_transient_agent_error`; quota exhaustion and hard failures keep the
+/// current behavior of surfacing the error and waiting for the user). The
+/// retry sleeps out a backoff, then stands down if anything else dispatched a
+/// turn on this conversation in the meantime.
+fn maybe_auto_retry_cli_turn(
+    handle: &AppHandle,
+    conv_id: &str,
+    outcome: Option<&cetus_bridge::cli_agent::CliTurnOutcome>,
+) {
+    let state = handle.state::<AppState>();
+    let Some(outcome) = outcome else { return };
+    let transient = !outcome.aborted
+        && outcome
+            .error
+            .as_deref()
+            .is_some_and(cetus_bridge::cli_agent::is_transient_agent_error);
+    if !transient {
+        // Includes clean settles: the next transient failure starts with a
+        // fresh retry budget.
+        state.reset_cli_auto_retry(conv_id);
+        return;
+    }
+    let Some(attempt) = state.next_cli_auto_retry(conv_id, CLI_AUTO_RETRY_MAX) else {
+        tracing::warn!(
+            "cli auto-retry for {conv_id} gave up after {CLI_AUTO_RETRY_MAX} attempts; leaving the error to the user"
+        );
+        // Reset so a manual resend that fails transiently earns a new budget.
+        state.reset_cli_auto_retry(conv_id);
+        return;
+    };
+    let delay = CLI_AUTO_RETRY_BACKOFF_SECS[(attempt as usize - 1).min(2)];
+    let generation = state.cli_dispatch_generation(conv_id);
+    tracing::info!(
+        "transient CLI error on {conv_id}; auto-retry {attempt}/{CLI_AUTO_RETRY_MAX} in {delay}s"
+    );
+    let handle = handle.clone();
+    let conv_id = conv_id.to_string();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+        let state = handle.state::<AppState>();
+        // Stand down if anything else dispatched during the backoff (the
+        // generation moved), a turn is running right now, or the conversation
+        // is gone / no longer idle (aborted, interrupted-by-restart…).
+        if state.cli_dispatch_generation(&conv_id) != generation
+            || state.cli_turn_active(&conv_id)
+        {
+            return;
+        }
+        let conv = match state.store.get(&conv_id) {
+            Ok(Some(conv)) if conv.run_state == "idle" => conv,
+            _ => return,
+        };
+        // Paint the continuation prompt live before the turn's stream starts —
+        // dispatch_turn persists the row, but nothing else would render it
+        // until a reload (backend-initiated turns have no optimistic bubble).
+        {
+            use cetus_bridge::pi_rpc::EventSink;
+            let sink = crate::tauri_bridge::TauriEventSink::new(handle.clone());
+            sink.emit(cetus_bridge::bridge::RuntimeEvent::Protocol {
+                conversation_id: Some(conv_id.clone()),
+                event: serde_json::json!({
+                    "type": "message_start",
+                    "message": cli_user_message_json(CLI_AUTO_RETRY_PROMPT, &[]),
+                }),
+            });
+        }
+        if let Err(error) = dispatch_turn(&handle, &conv, CLI_AUTO_RETRY_PROMPT, Vec::new()) {
+            tracing::warn!("cli auto-retry dispatch failed for {conv_id}: {error}");
+        }
+    });
 }
 
 /// Event sink that trips `closing` the instant a turn's `agent_end` flows

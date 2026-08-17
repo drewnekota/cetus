@@ -775,15 +775,24 @@ impl Store {
     }
 
     /// A CLI conversation's full transcript, oldest first, as PiMessage JSON.
+    /// Each message carries the row's `created_at` as a `timestamp` field (ms)
+    /// so reloaded history keeps real wall-clock times — the activity fold's
+    /// "Worked for Xs" duration is derived from these on the frontend.
     pub fn list_cli_messages(&self, conv_id: &str) -> Result<Vec<serde_json::Value>> {
         let conn = self.read_conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT message_json FROM cli_messages WHERE conversation_id = ?1 ORDER BY id ASC",
+            "SELECT message_json, created_at FROM cli_messages WHERE conversation_id = ?1 ORDER BY id ASC",
         )?;
-        let rows = stmt.query_map(params![conv_id], |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![conv_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
         let mut out = Vec::new();
         for r in rows {
-            if let Ok(v) = serde_json::from_str(&r?) {
+            let (json, ts) = r?;
+            if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&json) {
+                if let Some(obj) = v.as_object_mut() {
+                    obj.entry("timestamp").or_insert(ts.into());
+                }
                 out.push(v);
             }
         }

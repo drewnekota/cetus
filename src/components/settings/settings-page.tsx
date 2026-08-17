@@ -1472,9 +1472,17 @@ function VisionModelBlock({ onError }: { onError: (e: string | null) => void }) 
           value={cfg.provider === "" ? "auto" : cfg.provider}
           onValueChange={(v) => {
             const provider = v === "auto" ? "" : v;
-            // Provider is the primary choice — apply it immediately, resetting
+            const next = { provider, model: "", baseUrl: "" };
+            // "custom" can't be saved without a base URL — stage it locally so
+            // the URL field appears, and let the user save once it's filled in.
+            if (provider === "custom") {
+              onError(null);
+              setCfg(next);
+              return;
+            }
+            // Other providers are valid as-is — apply immediately, resetting
             // the model/URL overrides to the new provider's defaults.
-            save({ provider, model: "", baseUrl: "" });
+            save(next);
           }}
           disabled={busy}
         >

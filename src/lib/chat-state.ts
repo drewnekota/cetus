@@ -166,7 +166,10 @@ function inflate(msg: PiMessage): RenderedMessage {
     key: (msg.id as string) || genKey("hist"),
     role,
     blocks,
-    createdAt: nowMs(),
+    // CLI transcripts carry the persisted row time (ms) as `timestamp` — keep
+    // it so the settled activity fold can still show a real duration after a
+    // reload instead of collapsing every message onto "now".
+    createdAt: typeof msg.timestamp === "number" ? msg.timestamp : nowMs(),
   };
 }
 
