@@ -27,6 +27,10 @@
 
 <p align="center"><img src="docs/cetus-community-wechat.jpg" width="360" alt="Cetus 社区微信群二维码" /></p>
 
+### 友情链接
+
+- [LINUX DO](https://linux.do) —— 有理想的新社区。
+
 ![Cetus runtime 选择器 —— Claude Code、Codex、DeepSeek Harness、OpenCode、Grok Build、Kimi CLI 都在同一个 macOS app 里](docs/screenshot-runtime-picker.png)
 
 ![Cetus 操作演示 —— 唤起 agent、创建自动化任务并切换 runtime](docs/cetus-demo.gif)

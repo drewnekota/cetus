@@ -13,7 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useTranslation } from "@/lib/i18n";
 import { api } from "@/lib/tauri";
-import { CetusIcon, ClaudeCodeIcon, CodexIcon } from "@/components/brand-icons";
+import { CetusIcon } from "@/components/brand-icons";
+import { BACKENDS } from "@/components/chat/backend-picker";
+import type { BackendId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
   APPLICABLE_PERMISSIONS,
@@ -22,6 +24,21 @@ import {
 } from "@/components/settings/permission-row";
 
 const ONBOARDING_KEY = "cetus:onboardingDone";
+
+type CliRuntimeStatus = Awaited<ReturnType<typeof api.getCliRuntimeStatus>>;
+
+const CLI_STATUS_OFFLINE: CliRuntimeStatus = {
+  claudeCode: false,
+  codex: false,
+  opencode: false,
+  grok: false,
+  kimi: false,
+  dsh: false,
+};
+
+function cliStatusKey(id: BackendId): keyof CliRuntimeStatus {
+  return id === "claude-code" ? "claudeCode" : (id as keyof CliRuntimeStatus);
+}
 
 function markDone() {
   try {
@@ -38,10 +55,7 @@ export function Onboarding() {
   const [show, setShow] = useState<boolean | null>(null);
   const [step, setStep] = useState<0 | 1>(0);
   const [deepseekReady, setDeepseekReady] = useState<boolean | null>(null);
-  const [cliStatus, setCliStatus] = useState<{
-    claudeCode: boolean;
-    codex: boolean;
-  } | null>(null);
+  const [cliStatus, setCliStatus] = useState<CliRuntimeStatus | null>(null);
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [deepseekKey, setDeepseekKey] = useState("");
   const [savingKey, setSavingKey] = useState(false);
@@ -66,7 +80,7 @@ export function Onboarding() {
     api
       .getCliRuntimeStatus()
       .then(setCliStatus)
-      .catch(() => setCliStatus({ claudeCode: false, codex: false }));
+      .catch(() => setCliStatus(CLI_STATUS_OFFLINE));
   }, [show]);
 
   // Probe statuses only once the permissions step is on screen.
@@ -124,22 +138,21 @@ export function Onboarding() {
                 onConfigure={() => setShowKeyInput((value) => !value)}
                 configureLabel={t("onboarding.runtime.configure")}
               />
-              <RuntimeCard
-                icon={ClaudeCodeIcon}
-                name="Claude Code"
-                description={t("onboarding.runtime.claude.description")}
-                ready={cliStatus?.claudeCode ?? null}
-                readyLabel={t("onboarding.runtime.ready")}
-                missingLabel={t("onboarding.runtime.notInstalled")}
-              />
-              <RuntimeCard
-                icon={CodexIcon}
-                name="Codex"
-                description={t("onboarding.runtime.codex.description")}
-                ready={cliStatus?.codex ?? null}
-                readyLabel={t("onboarding.runtime.ready")}
-                missingLabel={t("onboarding.runtime.notInstalled")}
-              />
+              {BACKENDS.filter((backend) => backend.id !== "pi").map(
+                (backend) => (
+                  <RuntimeCard
+                    key={backend.id}
+                    icon={backend.icon}
+                    name={backend.label}
+                    description={t("onboarding.runtime.cli.description", {
+                      name: backend.label,
+                    })}
+                    ready={cliStatus?.[cliStatusKey(backend.id)] ?? null}
+                    readyLabel={t("onboarding.runtime.ready")}
+                    missingLabel={t("onboarding.runtime.notInstalled")}
+                  />
+                ),
+              )}
             </div>
 
             {showKeyInput && !deepseekReady && (
@@ -248,7 +261,7 @@ function RuntimeCard({
   return (
     <div
       className={cn(
-        "flex min-h-44 flex-col rounded-xl border p-4 transition-colors",
+        "flex min-h-36 flex-col rounded-xl border p-4 transition-colors",
         ready ? "border-success/35 bg-success/[0.035]" : "border-border bg-card",
       )}
     >
