@@ -293,6 +293,7 @@ export function ChatPane({
       <MessageListBoundary key={convId ?? "new"}>
         <MessageList
           convId={convId}
+          workspaceDir={workspaceDir}
           isStreaming={isStreaming}
           onRetry={onRetry}
           onForkMessage={onForkMessage}
@@ -511,6 +512,7 @@ function buildGroups(keys: string[], roles: string[]): MessageGroup[] {
  *  messages are added or removed (message_start / user_sent). */
 function MessageList({
   convId,
+  workspaceDir,
   isStreaming,
   onRetry,
   onForkMessage,
@@ -519,6 +521,7 @@ function MessageList({
   opticalCenter,
 }: {
   convId: string | null;
+  workspaceDir: string | null;
   isStreaming: boolean;
   onRetry?: () => void;
   onForkMessage?: (messageKey: string, messageIndex: number) => void;
@@ -991,6 +994,7 @@ function MessageList({
         g.kind === "assistant" ? (
           <AssistantGroup
             convId={convId}
+            workspaceDir={workspaceDir}
             keys={g.keys}
             active={isStreaming && isLast}
             onFork={

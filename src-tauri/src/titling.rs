@@ -403,11 +403,35 @@ fn sanitize(raw: &str) -> String {
         .find(|l| !l.trim().is_empty())
         .unwrap_or("")
         .trim();
+    // Treat wrapping quotes and adjacent sentence punctuation as one wrapper.
+    // Models sometimes return `“Title”。`, where stripping quotes before
+    // punctuation would leave the closing quote behind.
     let trimmed = first_line
-        .trim_matches(|c| c == '"' || c == '\'' || c == '“' || c == '”' || c == '`')
-        .trim()
-        .trim_end_matches(['.', '。', '!', '！', '?', '？'])
+        .trim_matches(|c| {
+            matches!(
+                c,
+                '"' | '\'' | '“' | '”' | '`' | '.' | '。' | '!' | '！' | '?' | '？'
+            )
+        })
         .trim();
+    // Some OpenAI-compatible gateways occasionally surface an internal model
+    // tool-call sentinel as `content`. Never let that implementation detail
+    // replace the safe mechanical title already shown in the sidebar.
+    let lower = trimmed.to_ascii_lowercase();
+    if [
+        "<|",
+        "|>",
+        "dsml",
+        "tool_call",
+        "tool call",
+        "function_call",
+        "cetus-attachments",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+    {
+        return String::new();
+    }
     let truncated: String = trimmed.chars().take(MAX_TITLE_CHARS).collect();
     if trimmed.chars().count() > MAX_TITLE_CHARS {
         format!("{truncated}…")
@@ -418,7 +442,18 @@ fn sanitize(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_zh_en_spacing;
+    use super::{normalize_zh_en_spacing, sanitize};
+
+    #[test]
+    fn rejects_internal_protocol_as_a_title() {
+        assert!(sanitize("<|DSML|><|tool_call|>read_document").is_empty());
+        assert!(sanitize("tool_call: read_document").is_empty());
+    }
+
+    #[test]
+    fn keeps_normal_titles() {
+        assert_eq!(sanitize("“应用机会分析”。"), "应用机会分析");
+    }
 
     #[test]
     fn spaces_chinese_and_english_terms() {

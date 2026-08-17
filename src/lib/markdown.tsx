@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 import { defaultUrlTransform, type Components } from "react-markdown";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
@@ -104,8 +104,23 @@ export function localPathFromHref(href: string): string | null {
 }
 
 /** Open web links in the browser and local links with their default app. */
-export function openMarkdownLink(href: string) {
-  const path = localPathFromHref(href);
+export const MarkdownWorkspaceContext = createContext<string | null>(null);
+
+/** Resolve a model-emitted relative file link against its conversation workspace. */
+export function relativePathFromHref(href: string, workspaceDir?: string | null): string | null {
+  if (!workspaceDir || !href || href.startsWith("#")) return null;
+  // Anything with a URI scheme is not a relative filesystem path. This also
+  // keeps mailto:, data:, and custom schemes out of open_path.
+  if (/^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//")) return null;
+
+  const relative = decodeLocalPath(href.split(/[?#]/, 1)[0]);
+  if (!relative) return null;
+  const separator = workspaceDir.includes("\\") ? "\\" : "/";
+  return `${workspaceDir.replace(/[\\/]+$/, "")}${separator}${relative}`;
+}
+
+export function openMarkdownLink(href: string, workspaceDir?: string | null) {
+  const path = localPathFromHref(href) ?? relativePathFromHref(href, workspaceDir);
   const request = path
     ? invoke("open_path", { path })
     : invoke("open_external", { url: href });
@@ -115,14 +130,15 @@ export function openMarkdownLink(href: string) {
 /** Link renderer for assistant markdown — relies on prose styles for color. */
 export const markdownComponents: Components = {
   a({ href, children, ...props }) {
+    const workspaceDir = useContext(MarkdownWorkspaceContext);
     return (
       <a
         {...props}
         href={href}
         onClick={(e) => {
-          if (!href) return;
+          if (!href || href.startsWith("#")) return;
           e.preventDefault();
-          openMarkdownLink(href);
+          openMarkdownLink(href, workspaceDir);
         }}
       >
         {children}

@@ -891,6 +891,41 @@ fn strip_context_fence(msg: &str) -> &str {
     msg
 }
 
+/// Return only human-readable content for conversation naming. File prompts
+/// carry a private path block for the agent; feeding that block to the title
+/// model can make its protocol (or even a tool-call sentinel) become the
+/// sidebar title. When there is no accompanying prose, use the attached file
+/// names instead.
+fn title_source(msg: &str) -> String {
+    const OPEN: &str = "<cetus-attachments>";
+    const CLOSE: &str = "</cetus-attachments>";
+
+    let msg = strip_context_fence(msg);
+    let Some(open) = msg.find(OPEN) else {
+        return msg.trim().to_string();
+    };
+
+    let prose = msg[..open].trim();
+    if !prose.is_empty() {
+        return prose.to_string();
+    }
+
+    let block_start = open + OPEN.len();
+    let block_end = msg[block_start..]
+        .find(CLOSE)
+        .map(|offset| block_start + offset)
+        .unwrap_or(msg.len());
+    msg[block_start..block_end]
+        .lines()
+        .filter_map(|line| {
+            let item = line.trim().strip_prefix("- ")?;
+            item.split_once(" → ").map(|(name, _)| name.trim())
+        })
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>()
+        .join("、")
+}
+
 #[tauri::command]
 pub async fn send_prompt(
     state: State<'_, AppState>,
@@ -920,15 +955,15 @@ pub async fn send_prompt(
         // Same title contract as the pi path: paint the mechanical fallback
         // immediately, upgrade to an AI title in the background on first send.
         let was_untitled = conv.title.trim().is_empty();
-        let title_src = strip_context_fence(&message);
-        let fallback = derive_title(title_src);
+        let title_src = title_source(&message);
+        let fallback = derive_title(&title_src);
         state.store.set_title_if_empty(&id, &fallback, now).ok();
         if was_untitled && !title_src.trim().is_empty() {
             spawn_auto_title(
                 state.store.clone(),
                 state.handle().clone(),
                 id.clone(),
-                title_src.to_string(),
+                title_src,
                 fallback,
             );
         }
@@ -964,15 +999,15 @@ pub async fn send_prompt(
         .unwrap_or(false);
     // Title from the user's prose, not the quick-launcher context fence that may
     // lead the message — otherwise the thread would be named "<context …>".
-    let title_src = strip_context_fence(&message);
-    let fallback = derive_title(title_src);
+    let title_src = title_source(&message);
+    let fallback = derive_title(&title_src);
     state.store.set_title_if_empty(&id, &fallback, now).ok();
     if was_untitled && !title_src.trim().is_empty() {
         spawn_auto_title(
             state.store.clone(),
             state.handle().clone(),
             id.clone(),
-            title_src.to_string(),
+            title_src,
             fallback,
         );
     }
@@ -2844,6 +2879,23 @@ pub async fn set_theme_appearance(app: tauri::AppHandle, preference: String) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn title_source_hides_attachment_protocol() {
+        let prompt = "按照文件里的 SOP 分析机会\n\n<cetus-attachments>\n\
+The user attached these files. Use the read_document tool on each path to read them:\n\
+- guide.pdf → /tmp/guide.pdf\n</cetus-attachments>";
+        assert_eq!(title_source(prompt), "按照文件里的 SOP 分析机会");
+    }
+
+    #[test]
+    fn title_source_uses_file_names_for_attachment_only_messages() {
+        let prompt = "\n\n<cetus-attachments>\n\
+The user attached these files. Use the read_document tool on each path to read them:\n\
+- guide.pdf → /tmp/guide.pdf\n\
+- data.csv → /tmp/data.csv\n</cetus-attachments>";
+        assert_eq!(title_source(prompt), "guide.pdf、data.csv");
+    }
 
     fn run_git(root: &Path, args: &[&str]) {
         let status = std::process::Command::new("git")

@@ -7,9 +7,11 @@ import { useTranslation } from "@/lib/i18n";
 import { AnswerBlock, MessageActions } from "./message-blocks";
 import { messageHoverProps } from "./hover-owner";
 import { ActivityGroup, type ProcessBlock } from "./activity-group";
+import { MarkdownWorkspaceContext } from "@/lib/markdown";
 
 interface Props {
   convId: string | null;
+  workspaceDir?: string | null;
   /** Keys of the consecutive assistant (+tool) messages merged into this turn. */
   keys: string[];
   /** Copy this conversation through this assistant turn into a new conversation. */
@@ -80,7 +82,7 @@ function answerText(messages: RenderedMessage[]): string {
 /** A whole assistant turn — one or more consecutive assistant messages rendered
  *  under a single ASSISTANT header. Tool calls + thinking collapse into compact
  *  activity widgets; the natural-language answer stays expanded below. */
-export function AssistantGroup({ convId, keys, onFork, active = false }: Props) {
+export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = false }: Props) {
   const { t } = useTranslation("chat");
   const messages = useMessagesByKeys(convId, keys);
   // Recompute segments only when the merged messages actually change (the array
@@ -121,42 +123,44 @@ export function AssistantGroup({ convId, keys, onFork, active = false }: Props) 
   const lastCreatedAt = messages[messages.length - 1].createdAt;
 
   return (
-    <div className="flex w-full justify-start py-3">
-      <div
-        data-message-hover-target
-        {...messageHoverProps}
-        className="flex min-w-0 w-full flex-col gap-2 items-start"
-      >
-        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          {t("pane.assistant")}
+    <MarkdownWorkspaceContext.Provider value={workspaceDir ?? null}>
+      <div className="flex w-full justify-start py-3">
+        <div
+          data-message-hover-target
+          {...messageHoverProps}
+          className="flex min-w-0 w-full flex-col gap-2 items-start"
+        >
+          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            {t("pane.assistant")}
+          </div>
+          <div className="flex min-w-0 w-full max-w-full flex-col gap-2">
+            {segments.map((seg, i) =>
+              seg.type === "activity" ? (
+                <ActivityGroup
+                  key={i}
+                  id={`${convId ?? ""}:${keys[0]}:a${i}`}
+                  steps={seg.steps}
+                  durationMs={seg.durationMs}
+                  active={active && i === segments.length - 1}
+                />
+              ) : (
+                // Answer content and activity bars share the same 88% reading
+                // width so the assistant turn keeps a consistent right edge.
+                <div key={i} className="min-w-0 w-full max-w-[88%]">
+                  <AnswerBlock block={seg.block} isUser={false} />
+                </div>
+              ),
+            )}
+          </div>
+          <MessageActions
+            getText={getAnswerText}
+            hasText={hasAnswerText}
+            createdAt={lastCreatedAt}
+            isUser={false}
+            onFork={onFork}
+          />
         </div>
-        <div className="flex min-w-0 w-full max-w-full flex-col gap-2">
-          {segments.map((seg, i) =>
-            seg.type === "activity" ? (
-              <ActivityGroup
-                key={i}
-                id={`${convId ?? ""}:${keys[0]}:a${i}`}
-                steps={seg.steps}
-                durationMs={seg.durationMs}
-                active={active && i === segments.length - 1}
-              />
-            ) : (
-              // Answer content and activity bars share the same 88% reading
-              // width so the assistant turn keeps a consistent right edge.
-              <div key={i} className="min-w-0 w-full max-w-[88%]">
-                <AnswerBlock block={seg.block} isUser={false} />
-              </div>
-            ),
-          )}
-        </div>
-        <MessageActions
-          getText={getAnswerText}
-          hasText={hasAnswerText}
-          createdAt={lastCreatedAt}
-          isUser={false}
-          onFork={onFork}
-        />
       </div>
-    </div>
+    </MarkdownWorkspaceContext.Provider>
   );
 }
