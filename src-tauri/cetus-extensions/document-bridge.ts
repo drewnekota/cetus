@@ -25,6 +25,8 @@ import { extname } from "node:path";
 import { Type } from "typebox";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { errMsg } from "./bridge/protocol";
+import { visionChain } from "./bridge/vision-core";
+import { buildVisionChain, NO_PROVIDER_HINT } from "./bridge/vision-config";
 
 const GEMINI_MODEL = "gemini-flash-latest";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
@@ -186,17 +188,38 @@ async function readXlsx(path: string): Promise<string> {
 
 // ---- Images --------------------------------------------------------------
 
+/** Images go through the same user-configurable provider chain as attached
+ *  screenshots (vision-bridge) — shared vision-core client, shared config. */
 async function imageExtract(path: string, mimeType: string, question: string): Promise<string> {
-	return geminiExtract(path, mimeType, question);
+	const chain = await buildVisionChain();
+	if (chain.length === 0) throw new Error(NO_PROVIDER_HINT);
+	const source = `data:${mimeType};base64,${(await fs.readFile(path)).toString("base64")}`;
+	const { text } = await visionChain(chain, {
+		source,
+		question:
+			`Describe this image in detail for a text-only assistant: visible text verbatim, ` +
+			`objects, layout, and anything relevant to: ${question || "what is this?"}. Plain text only.`,
+		maxTokens: 4096,
+		timeoutMs: GEMINI_TIMEOUT_MS,
+		label: "read_document",
+	});
+	return text;
 }
 
-// ---- Gemini (pdf + image) -----------------------------------------------
+// ---- Gemini (pdf) --------------------------------------------------------
 
+/** PDFs stay on Gemini's native generateContent — it ingests whole PDFs
+ *  (including scanned ones) directly, which OpenAI-compatible VLM endpoints
+ *  don't. Without a Gemini key the agent is told to rasterize instead. */
 async function geminiExtract(path: string, mimeType: string, question: string): Promise<string> {
 	const apiKey = process.env.GEMINI_API_KEY?.trim();
 	if (!apiKey) {
 		throw new Error(
-			"GEMINI_API_KEY is not set — needed to read PDFs/images. Add it in cetus Settings → Gemini.",
+			"reading PDFs directly needs a Gemini API key (cetus Settings → API keys). " +
+				"Alternative: convert the pages to images yourself (e.g. `sips -s format png` " +
+				"or `pdftoppm`/`mutool draw` if installed, one image per page) and call " +
+				"read_document on each page image — image reading works with any configured " +
+				"vision provider.",
 		);
 	}
 	const data = (await fs.readFile(path)).toString("base64");

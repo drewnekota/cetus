@@ -36,10 +36,20 @@ pub const KNOWN_PROVIDERS: &[(&str, &str)] = &[
     ("exa", "EXA_API_KEY"),
     // Optional search/extract fallback for the same web-search extension.
     ("tavily", "TAVILY_API_KEY"),
-    // Vision provider: the vision-bridge extension transcribes attached images
-    // via Gemini (gemini-3.5-flash) so the text-only DeepSeek model can reason
-    // about them. Also the only path for PDFs (read_document).
+    // Vision providers: the vision-bridge / document-bridge extensions
+    // transcribe attached images through an OpenAI-compatible VLM chain
+    // (see vision.rs + cetus-extensions/bridge/vision-core.ts). Gemini also
+    // remains the native path for PDFs (read_document).
     ("gemini", "GEMINI_API_KEY"),
+    // Zhipu / BigModel — glm-4.6v-flash is free, good default for CN users.
+    ("zhipu", "ZHIPUAI_API_KEY"),
+    // Alibaba DashScope — qwen3-vl family.
+    ("dashscope", "DASHSCOPE_API_KEY"),
+    // Moonshot — kimi vision models.
+    ("moonshot", "MOONSHOT_API_KEY"),
+    // Key for a user-supplied custom OpenAI-compatible vision endpoint
+    // (Settings → Vision model → Custom). Local endpoints don't need it.
+    ("vision_custom", "VISION_API_KEY"),
     // Volcano Engine (Doubao) real-time streaming ASR — the voice-dictation
     // engine (new-console `X-Api-Key`; see doubao.rs / voice.rs).
     ("doubao", "DOUBAO_API_KEY"),

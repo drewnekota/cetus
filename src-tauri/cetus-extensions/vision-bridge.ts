@@ -18,38 +18,22 @@
  * When a vision-capable model is active, this is a no-op — images pass through
  * untouched (same policy as pi's own downgrade check).
  *
- * Providers (keys injected into the env by the cetus host from the OS keychain),
- * tried in order until one succeeds:
- *   1. GEMINI_API_KEY — Gemini generateContent (gemini-3.5-flash).
- *   2. ARK_API_KEY    — Volcano Ark OpenAI-compatible chat completions with a
- *      Doubao vision model. This is the fallback when Gemini is unconfigured OR
- *      fails — notably Gemini's 400 "User location is not supported" geo-block,
- *      which otherwise leaves the agent blind to the image. The Ark endpoint is
- *      reachable from regions Gemini blocks.
+ * Providers: an ordered OpenAI-compatible chain built by
+ * `bridge/vision-config.ts` from the user's Settings choice (vision.json via
+ * CETUS_VISION_CONFIG) plus whichever API keys are configured — Gemini (via
+ * its OpenAI-compat endpoint), Volcano Ark/Doubao, Zhipu, DashScope, Moonshot,
+ * local Ollama, or a custom endpoint. Any failure (including Gemini's 400
+ * "User location is not supported" geo-block) falls through to the next
+ * provider; the actual HTTP client is the shared `bridge/vision-core.ts`
+ * (same file dsh-vision uses).
  * If EVERY provider fails, the turn is annotated so the agent tells the user it
  * could not read the image instead of confabulating an answer from elsewhere.
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { errMsg } from "./bridge/protocol";
-
-// ---- Provider configuration ------------------------------------------------
-
-/** Gemini generateContent base; the model id is appended before `:generateContent`. */
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-/** Gemini vision model id. */
-const GEMINI_VISION_MODEL = "gemini-3.5-flash";
-
-/** Volcano Ark (火山方舟) OpenAI-compatible chat-completions endpoint — the same
- *  one titling.rs uses for dictation cleanup, but with a multimodal Doubao model
- *  so it can read images. Used as the fallback when Gemini is unconfigured or
- *  geo-blocked. */
-const ARK_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions";
-/** Doubao multimodal model on Ark. Overridable via env in case the snapshot is
- *  retired on the account (mirrors titling.rs's model-override + fallback idea).
- *  Seed 2.0 is multimodal, so the same family cetus already uses for text works
- *  for vision too. */
-const ARK_VISION_MODEL = process.env.CETUS_VISION_FALLBACK_MODEL?.trim() || "doubao-seed-1-6-250615";
+import { visionChain } from "./bridge/vision-core";
+import { buildVisionChain, NO_PROVIDER_HINT } from "./bridge/vision-config";
 
 /** Per-request round-trip cap. The `input` handler blocks the prompt turn,
  *  which the cetus host drives with the STALL-based timeout, not the 30s request
@@ -71,6 +55,11 @@ const TIMEOUT_MS = 80_000;
  *  provider hangs past its own cap. Images run concurrently, so the normal worst
  *  case is ~one image's request budget; this only trips on a pathological hang. */
 const OVERALL_BUDGET_MS = 95_000;
+
+/** A faithful screenshot transcription measured ~1.4k tokens on Gemini; leave
+ *  generous headroom for dense UIs and thinking-mode VLMs that burn budget on
+ *  reasoning before the answer. */
+const MAX_TOKENS = 4096;
 
 /** Instruction given to the vision model. Kept terse + faithful: we want a
  *  description the downstream text model can reason about, not a summary. */
@@ -101,118 +90,19 @@ function safeNotify(
 
 // ---- Vision provider -------------------------------------------------------
 
-async function withTimeout<T>(p: (signal: AbortSignal) => Promise<T>): Promise<T> {
-	const ctl = new AbortController();
-	const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
-	try {
-		return await p(ctl.signal);
-	} finally {
-		clearTimeout(timer);
-	}
-}
-
-/** Transcribe via Gemini (generateContent, inline_data). Throws on any failure. */
-async function transcribeWithGemini(img: ImageContent, key: string): Promise<string> {
-	const url = `${GEMINI_BASE}/${GEMINI_VISION_MODEL}:generateContent`;
-	const body = {
-		contents: [
-			{
-				parts: [
-					{ text: TRANSCRIBE_PROMPT },
-					{ inline_data: { mime_type: img.mimeType || "image/jpeg", data: img.data } },
-				],
-			},
-		],
-		// NOTE: do NOT try to suppress thinking here. gemini-3.5-flash is a
-		// reasoning model; measured on real screenshots, forcing `thinkingLevel:
-		// "low"` or `thinkingBudget: 0` made the round-trip SLOWER and noisier
-		// (50-88s) than letting it think by default (~20-25s for a faithful
-		// 1.4k-token transcription). The default is both faster and more accurate.
-	};
-	const resp = await withTimeout((signal) =>
-		fetch(url, {
-			method: "POST",
-			headers: { "content-type": "application/json", "x-goog-api-key": key },
-			body: JSON.stringify(body),
-			signal,
-		}),
-	);
-	if (!resp.ok) {
-		throw new Error(`Gemini ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
-	}
-	const json: any = await resp.json();
-	const parts = json?.candidates?.[0]?.content?.parts;
-	const text = Array.isArray(parts) ? parts.map((p: any) => p?.text ?? "").join("") : "";
-	const trimmed = text.trim();
-	if (!trimmed) throw new Error("Gemini returned empty transcription");
-	return trimmed;
-}
-
-/** Transcribe via Volcano Ark (OpenAI-compatible chat completions, image_url
- *  content) with a Doubao multimodal model. Throws on any failure. Reachable
- *  from regions where Gemini returns a 400 geo-block. */
-async function transcribeWithArk(img: ImageContent, key: string): Promise<string> {
-	const dataUrl = `data:${img.mimeType || "image/jpeg"};base64,${img.data}`;
-	const body = {
-		model: ARK_VISION_MODEL,
-		messages: [
-			{
-				role: "user",
-				content: [
-					{ type: "text", text: TRANSCRIBE_PROMPT },
-					{ type: "image_url", image_url: { url: dataUrl } },
-				],
-			},
-		],
-	};
-	const resp = await withTimeout((signal) =>
-		fetch(ARK_URL, {
-			method: "POST",
-			headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-			body: JSON.stringify(body),
-			signal,
-		}),
-	);
-	if (!resp.ok) {
-		throw new Error(`Ark ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
-	}
-	const json: any = await resp.json();
-	const text = json?.choices?.[0]?.message?.content;
-	const trimmed = (typeof text === "string" ? text : "").trim();
-	if (!trimmed) throw new Error("Ark returned empty transcription");
-	return trimmed;
-}
-
-/**
- * Transcribe one image, trying each configured provider in order (Gemini, then
- * Volcano Ark) until one succeeds. Throws only if NONE is configured or every
- * one fails — so a Gemini geo-block (400 "User location is not supported")
- * transparently falls through to Ark instead of leaving the model blind.
- */
+/** Transcribe one image through the configured provider chain. */
 async function transcribeImage(img: ImageContent): Promise<string> {
-	const geminiKey = process.env.GEMINI_API_KEY?.trim();
-	const arkKey = process.env.ARK_API_KEY?.trim();
-	const errors: string[] = [];
-
-	if (geminiKey) {
-		try {
-			return await transcribeWithGemini(img, geminiKey);
-		} catch (e) {
-			errors.push(`gemini: ${errMsg(e)}`);
-		}
-	}
-	if (arkKey) {
-		try {
-			return await transcribeWithArk(img, arkKey);
-		} catch (e) {
-			errors.push(`ark: ${errMsg(e)}`);
-		}
-	}
-
-	if (errors.length === 0) {
-		throw new Error("no vision provider configured (set GEMINI_API_KEY or ARK_API_KEY)");
-	}
-	throw new Error(errors.join("; "));
+	const chain = await buildVisionChain();
+	if (chain.length === 0) throw new Error(NO_PROVIDER_HINT);
+	const source = `data:${img.mimeType || "image/jpeg"};base64,${img.data}`;
+	const { text } = await visionChain(chain, {
+		source,
+		question: TRANSCRIBE_PROMPT,
+		maxTokens: MAX_TOKENS,
+		timeoutMs: TIMEOUT_MS,
+		label: "vision",
+	});
+	return text;
 }
 
 // ---- Extension entry -------------------------------------------------------

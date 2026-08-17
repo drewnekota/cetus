@@ -97,6 +97,7 @@ import {
   type MeetingSettings,
   type MeetingStatus,
   type MeetingSegment,
+  type VisionConfig,
 } from "@/lib/tauri";
 import type {
   AutoArchiveSettings,
@@ -225,9 +226,30 @@ const PROVIDERS: { id: string; labelKey: string; envHint: string }[] = [
   // Volcano Ark LLM key — fast dictation cleanup/rewrite (Doubao flash). Separate
   // from the Doubao speech key above; get it from the Ark console (火山方舟).
   { id: "volc_ark", labelKey: "providers.volcArk", envHint: "ARK_API_KEY" },
-  // Vision + PDFs: the vision bridge transcribes attached images via Gemini
-  // (gemini-3.5-flash) so the text-only DeepSeek model can read them.
+  // Vision + PDFs: the vision bridge transcribes attached images through an
+  // OpenAI-compatible VLM chain (see the Vision model picker below). Gemini is
+  // also the only native PDF reader (read_document).
   { id: "gemini", labelKey: "providers.gemini", envHint: "GEMINI_API_KEY" },
+  // Vision-only providers for the same chain. Zhipu's glm-4.6v-flash is free.
+  { id: "zhipu", labelKey: "providers.zhipu", envHint: "ZHIPUAI_API_KEY" },
+  { id: "dashscope", labelKey: "providers.dashscope", envHint: "DASHSCOPE_API_KEY" },
+  { id: "moonshot", labelKey: "providers.moonshot", envHint: "MOONSHOT_API_KEY" },
+  // Only used when the Vision model picker is set to a custom endpoint.
+  { id: "vision_custom", labelKey: "providers.visionCustom", envHint: "VISION_API_KEY" },
+];
+
+/** Vision model dropdown entries. Brand names stay literal; only "auto" and
+ *  "custom" need i18n. Default model ids mirror
+ *  src-tauri/cetus-extensions/bridge/vision-config.ts PRESETS. */
+const VISION_PROVIDERS: { id: string; label?: string; labelKey?: string; defaultModel?: string }[] = [
+  { id: "", labelKey: "apiKeys.vision.auto" },
+  { id: "gemini", label: "Gemini", defaultModel: "gemini-3.5-flash" },
+  { id: "volc_ark", label: "Volcano Ark (Doubao)", defaultModel: "doubao-seed-1-6-250615" },
+  { id: "zhipu", label: "Zhipu GLM", defaultModel: "glm-4.6v-flash" },
+  { id: "dashscope", label: "DashScope (Qwen)", defaultModel: "qwen3-vl-flash" },
+  { id: "moonshot", label: "Moonshot (Kimi)", defaultModel: "kimi-k3" },
+  { id: "ollama", label: "Ollama (local)", defaultModel: "qwen3-vl:4b" },
+  { id: "custom", labelKey: "apiKeys.vision.custom" },
 ];
 
 type SectionId =
@@ -1384,9 +1406,131 @@ function ApiKeysSection({
             {t("apiKeys.deepseekUrl.hint")}
           </p>
         </div>
+
+        <VisionModelBlock onError={setError} />
       </div>
       {error && <div className="mt-4 text-xs text-destructive">{error}</div>}
     </section>
+  );
+}
+
+/** Vision model picker: which VLM transcribes attached images (and image
+ *  files via read_document) for the text-only chat model. Persisted host-side
+ *  (vision.rs) and exported to vision.json, which the pi extensions re-read on
+ *  every call — so changes apply on the next turn, no key/pi restart needed. */
+function VisionModelBlock({ onError }: { onError: (e: string | null) => void }) {
+  const { t } = useTranslation("settings");
+  const { t: tc } = useTranslation("common");
+  const [cfg, setCfg] = useState<VisionConfig>({ provider: "", model: "", baseUrl: "" });
+  const [saved, setSaved] = useState<VisionConfig>({ provider: "", model: "", baseUrl: "" });
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .getVisionConfig()
+      .then((c) => {
+        setCfg(c);
+        setSaved(c);
+      })
+      .catch(() => {});
+  }, []);
+
+  const dirty =
+    cfg.provider !== saved.provider ||
+    cfg.model.trim() !== saved.model ||
+    cfg.baseUrl.trim() !== saved.baseUrl;
+  const preset = VISION_PROVIDERS.find((p) => p.id === cfg.provider);
+  const showBaseUrl = cfg.provider === "custom" || cfg.provider === "ollama";
+
+  async function save(next: VisionConfig) {
+    setBusy(true);
+    onError(null);
+    try {
+      const clean = {
+        provider: next.provider,
+        model: next.model.trim(),
+        baseUrl: next.baseUrl.trim(),
+      };
+      await api.setVisionConfig(clean);
+      setCfg(clean);
+      setSaved(clean);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-1.5 border-t border-border pt-5">
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-medium">{t("apiKeys.vision.label")}</span>
+        {dirty && <span className="text-xs text-warning">{t("apiKeys.unsaved")}</span>}
+      </div>
+      <div className="flex gap-2">
+        <Select
+          value={cfg.provider === "" ? "auto" : cfg.provider}
+          onValueChange={(v) => {
+            const provider = v === "auto" ? "" : v;
+            // Provider is the primary choice — apply it immediately, resetting
+            // the model/URL overrides to the new provider's defaults.
+            save({ provider, model: "", baseUrl: "" });
+          }}
+          disabled={busy}
+        >
+          <SelectTrigger className="w-56">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {VISION_PROVIDERS.map((p) => (
+              <SelectItem key={p.id || "auto"} value={p.id || "auto"}>
+                {p.labelKey ? t(p.labelKey) : p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {cfg.provider !== "" && (
+          <Input
+            type="text"
+            placeholder={preset?.defaultModel ?? t("apiKeys.vision.modelPlaceholder")}
+            value={cfg.model}
+            onChange={(e) => setCfg((c) => ({ ...c, model: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && dirty) {
+                e.preventDefault();
+                save(cfg);
+              }
+            }}
+            disabled={busy}
+            className="flex-1 font-mono"
+          />
+        )}
+        {dirty && (
+          <Button size="sm" onClick={() => save(cfg)} disabled={busy}>
+            {tc("action.save")}
+          </Button>
+        )}
+      </div>
+      {showBaseUrl && (
+        <Input
+          type="text"
+          placeholder={
+            cfg.provider === "ollama" ? "http://localhost:11434/v1" : "https://…/v1"
+          }
+          value={cfg.baseUrl}
+          onChange={(e) => setCfg((c) => ({ ...c, baseUrl: e.target.value }))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && dirty) {
+              e.preventDefault();
+              save(cfg);
+            }
+          }}
+          disabled={busy}
+          className="font-mono"
+        />
+      )}
+      <p className="text-xs text-muted-foreground">{t("apiKeys.vision.hint")}</p>
+    </div>
   );
 }
 
