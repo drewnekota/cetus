@@ -87,6 +87,7 @@ import {
   type PiEvent,
   type PiMessage,
   type QuickLaunchPayload,
+  type RunState,
   type BackendId,
   type UpdateDownloadProgress,
   backendSupportsSteer,
@@ -443,6 +444,14 @@ export default function Home() {
       (conversations.find((c) => c.id === activeId)?.backend as
         | BackendId
         | undefined) ?? null,
+    [conversations, activeId],
+  );
+  // Interrupted-run banner: the active conversation's last CLI turn was cut
+  // down mid-run (persisted run_state, swept at boot/exit) and nothing has
+  // started since. ChatPane additionally hides the banner while streaming.
+  const activeConvInterrupted = useMemo(
+    () =>
+      conversations.find((c) => c.id === activeId)?.runState === "interrupted",
     [conversations, activeId],
   );
   const streamingIds = useStreamingIds();
@@ -2561,13 +2570,14 @@ export default function Home() {
     openTerminalWithCommand(command);
   }
 
-  /** True when `id` runs on a CLI backend (claude-code / codex). Their runner
-   *  persists a stopped turn's partial messages, so an abort keeps what
-   *  streamed on screen instead of dropping the in-flight turn (pi's
-   *  semantics — see end_stream's keepPartial). */
+  /** True when `id` runs on any CLI backend (claude-code / codex / the ACP
+   *  runtimes / dsh — everything except pi). Their runner persists a stopped
+   *  turn's partial messages, so an abort keeps what streamed on screen
+   *  instead of dropping the in-flight turn (pi's semantics — see
+   *  end_stream's keepPartial). */
   function isCliConv(id: string | null): boolean {
     const b = conversationsRef.current.find((c) => c.id === id)?.backend;
-    return b === "claude-code" || b === "codex";
+    return !!b && b !== "pi";
   }
 
   async function onAbort() {
@@ -2581,6 +2591,35 @@ export default function Home() {
     // next reopen and leave only the user bubble).
     chatStore.getState().endStream(activeId, isCliConv(activeId));
     await api.abort(activeId);
+  }
+
+  /** Optimistically repaint one conversation's run_state so the interrupted
+   *  banner reacts instantly; the next refreshList re-syncs from the store. */
+  function setLocalRunState(id: string, runState: RunState) {
+    setConversations((cs) =>
+      cs.map((c) => (c.id === id ? { ...c, runState } : c)),
+    );
+  }
+
+  /** Resume a turn that a quit/update restart cut down mid-run. Not a replay
+   *  of the original prompt: the session resumes with its full context, and a
+   *  visible continuation message asks the agent to check what already
+   *  happened before finishing the task — so side effects (files written,
+   *  messages sent) aren't blindly redone. */
+  function onResumeInterrupted() {
+    if (!activeId) return;
+    setLocalRunState(activeId, "running");
+    onSend(
+      "The previous run was interrupted by an app restart. Review the conversation and the current workspace state, then continue the original task from where it left off. Don't redo work that has already completed.",
+      [],
+    ).catch(console.error);
+  }
+
+  /** Dismiss the interrupted-run banner without resuming. */
+  function onDismissInterrupted() {
+    if (!activeId) return;
+    setLocalRunState(activeId, "idle");
+    api.clearInterrupted(activeId).catch(console.error);
   }
 
   /** Roll the last failed/empty turn out of history, then resubmit the last
@@ -3518,6 +3557,9 @@ export default function Home() {
                 onBash={onBash}
                 onAbort={onAbort}
                 onRetry={onRetry}
+                interrupted={activeConvInterrupted}
+                onResumeInterrupted={onResumeInterrupted}
+                onDismissInterrupted={onDismissInterrupted}
                 onForkMessage={(messageKey, messageIndex) => {
                   const c = conversationsRef.current.find(
                     (x) => x.id === activeIdRef.current,

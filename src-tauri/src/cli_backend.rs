@@ -1172,6 +1172,10 @@ pub fn dispatch_turn(
                 return Err(error.to_string());
             }
         };
+        // Persisted AFTER start_turn succeeded so a failed spawn never leaves a
+        // phantom "running" row; anything still "running" at boot was therefore
+        // a real in-flight turn the app died under (see mark_running_interrupted).
+        store.set_run_state(&conv_id, "running").ok();
         tokio::spawn(async move {
             let mut outcome_rx = outcome_rx;
             let mut input_rx = input_rx;
@@ -1192,9 +1196,10 @@ pub fn dispatch_turn(
                     }
                 }
             };
-            if let Some(o) = outcome {
-                persist_cli_outcome(&store, &conv_id, &o);
+            if let Some(o) = &outcome {
+                persist_cli_outcome(&store, &conv_id, o);
             }
+            store.set_run_state(&conv_id, settled_run_state(&outcome)).ok();
             let st = task_handle.state::<AppState>();
             st.end_cli_turn(&conv_id);
         });
@@ -1235,6 +1240,7 @@ pub fn dispatch_turn(
                 return Err(error.to_string());
             }
         };
+        store.set_run_state(&conv_id, "running").ok();
         tokio::spawn(async move {
             let mut outcome_rx = outcome_rx;
             let outcome = loop {
@@ -1243,9 +1249,10 @@ pub fn dispatch_turn(
                     _ = kill.notified() => session.abort_turn(),
                 }
             };
-            if let Some(o) = outcome {
-                persist_cli_outcome(&store, &conv_id, &o);
+            if let Some(o) = &outcome {
+                persist_cli_outcome(&store, &conv_id, o);
             }
+            store.set_run_state(&conv_id, settled_run_state(&outcome)).ok();
             let st = task_handle.state::<AppState>();
             st.end_cli_turn(&conv_id);
         });
@@ -1294,6 +1301,7 @@ pub fn dispatch_turn(
                 return Err(error.to_string());
             }
         };
+        store.set_run_state(&conv_id, "running").ok();
         tokio::spawn(async move {
             let mut outcome_rx = outcome_rx;
             let outcome = loop {
@@ -1302,9 +1310,10 @@ pub fn dispatch_turn(
                     _ = kill.notified() => session.abort(),
                 }
             };
-            if let Some(outcome) = outcome {
-                persist_cli_outcome(&store, &conv_id, &outcome);
+            if let Some(o) = &outcome {
+                persist_cli_outcome(&store, &conv_id, o);
             }
+            store.set_run_state(&conv_id, settled_run_state(&outcome)).ok();
             let state = task_handle.state::<AppState>();
             state.end_cli_turn(&conv_id);
         });
@@ -1396,6 +1405,18 @@ pub async fn compact_codex_conversation(
         .compact("manual")
         .await
         .map_err(|error| error.to_string())
+}
+
+/// Final `run_state` for a turn whose runner loop exited. No outcome means the
+/// session died without settling (channel dropped — app teardown or a vanished
+/// child): that's an interruption, not a finish, so the restart UI offers to
+/// resume it.
+fn settled_run_state(outcome: &Option<cetus_bridge::cli_agent::CliTurnOutcome>) -> &'static str {
+    match outcome {
+        Some(o) if o.aborted => "aborted",
+        Some(_) => "idle",
+        None => "interrupted",
+    }
 }
 
 fn persist_cli_outcome(

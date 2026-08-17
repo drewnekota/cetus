@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, CheckCircle2, AlertCircle } from "lucide-react";
 import type { RenderedBlock } from "@/lib/types";
 import { useTranslation } from "@/lib/i18n";
@@ -6,34 +7,51 @@ import { useDisclosure } from "@/lib/disclosure";
 import { Spinner } from "@/components/ui/spinner";
 import { ToolUseCard, summarizeArgs, subagentInfo } from "./tool-use-card";
 import { ThinkingBlock } from "./thinking-block";
+import { TextBlock } from "./message-blocks";
 
-type ProcessBlock = Extract<RenderedBlock, { kind: "thinking" | "tool_use" }>;
+/** Steps foldable into the activity timeline: thinking, tool calls, and
+ *  intermediate narration text the agent emitted between tool runs. */
+type ProcessBlock = Extract<RenderedBlock, { kind: "thinking" | "tool_use" | "text" }>;
 
-/** Render a run of consecutive process blocks (thinking + tool calls) as a
- *  single collapsible activity. Collapsed by default — while the agent is
- *  running the header updates in place to show the current action (so the list
- *  doesn't grow a card per step); once settled it shows a "Worked for Xs · N
- *  steps" summary that expands to the full timeline. */
+/** Render the turn's whole work run (thinking + tool calls + intermediate
+ *  narration) as a single collapsible activity. Collapsed by default — while
+ *  the agent is running the header updates in place to show a live elapsed
+ *  timer and the current action (so the list doesn't grow a card per step);
+ *  once settled it shows a "N steps · Xs" summary that expands to the full
+ *  timeline. */
 export function ActivityGroup({
   id,
   steps,
   durationMs,
+  startedAt,
   active,
 }: {
-  /** Stable id (conversation + turn + segment) so the expanded state and the
-   *  per-step expanders survive the virtualized list unmounting this turn. */
+  /** Stable id (conversation + turn) so the expanded state and the per-step
+   *  expanders survive the virtualized list unmounting this turn. */
   id?: string;
   steps: ProcessBlock[];
   durationMs: number;
-  /** The whole agent turn is still open and this is its trailing activity.
-   *  Individual tool blocks settle between calls, so their `streaming` flag
-   *  alone is not a reliable indication that the agent has finished. */
+  /** Wall-clock start of the activity; drives the live elapsed timer. */
+  startedAt?: number;
+  /** The whole agent turn is still open and no answer has started after this
+   *  activity. Individual tool blocks settle between calls, so their
+   *  `streaming` flag alone is not a reliable indication of completion. */
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
   const [open, toggle] = useDisclosure(id);
 
-  const running = active || steps.some((s) => s.streaming === true);
+  const running = active || steps.some((s) => s.kind !== "text" && s.streaming === true);
+
+  // Live elapsed timer while running; freezes into `durationMs` on settle.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+  const liveDur = running && startedAt ? formatDuration(now - startedAt) : null;
   const hasError = steps.some((s) => s.kind === "tool_use" && s.result?.isError);
   const toolCount = steps.reduce((n, s) => (s.kind === "tool_use" ? n + 1 : n), 0);
   const dur = formatDuration(durationMs);
@@ -62,6 +80,7 @@ export function ActivityGroup({
         {running ? (
           <>
             <span className="shrink-0 font-medium text-foreground">{t("activity.working")}</span>
+            {liveDur && <span className="shrink-0 tabular-nums">· {liveDur}</span>}
             {toolCount > 0 && (
               <span className="shrink-0">
                 · {t(toolCount === 1 ? "agent.step" : "agent.step_plural", { count: toolCount })}
@@ -87,6 +106,12 @@ export function ActivityGroup({
           {steps.map((s, i) =>
             s.kind === "thinking" ? (
               <ThinkingBlock key={i} id={id ? `${id}:s${i}` : undefined} text={s.text} streaming={s.streaming} />
+            ) : s.kind === "text" ? (
+              // Intermediate narration between tool runs — full markdown, but
+              // muted so the timeline still reads as process, not answer.
+              <div key={i} className="px-2 py-1 text-muted-foreground">
+                <TextBlock text={s.text} streaming={s.streaming} isUser={false} />
+              </div>
             ) : (
               <ToolUseCard key={i} id={id ? `${id}:s${i}` : undefined} block={s} />
             ),
@@ -101,7 +126,9 @@ export function ActivityGroup({
  *  in the live header: a running tool shows its name + arg preview; thinking
  *  shows the "Thinking" label. */
 function currentAction(steps: ProcessBlock[]): string {
-  const active = [...steps].reverse().find((s) => s.streaming === true) ?? steps[steps.length - 1];
+  // Narration text is content, not an action — skip it when picking the label.
+  const procs = steps.filter((s) => s.kind !== "text");
+  const active = [...procs].reverse().find((s) => s.streaming === true) ?? procs[procs.length - 1];
   if (!active) return "";
   if (active.kind === "thinking") return "thinking";
   // A running subagent (claude-code Task/Agent) streams its live status into

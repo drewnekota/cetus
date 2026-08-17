@@ -301,6 +301,7 @@ async fn op_agent_prompt(
         backend: crate::store::default_backend(),
         cli_model: String::new(),
         cli_effort: String::new(),
+        run_state: "idle".to_string(),
     };
     state
         .store

@@ -413,6 +413,7 @@ pub async fn new_conversation(
         backend: crate::store::default_backend(),
         cli_model: String::new(),
         cli_effort: String::new(),
+        run_state: "idle".to_string(),
     };
     state.store.insert(&c).map_err(err)?;
     Ok(c)
@@ -487,6 +488,7 @@ pub async fn fork_conversation(
         backend: crate::store::default_backend(),
         cli_model: String::new(),
         cli_effort: String::new(),
+        run_state: "idle".to_string(),
     };
     state.store.insert(&c).map_err(err)?;
 
@@ -571,6 +573,7 @@ async fn fork_cli_conversation(
         backend: source.backend.clone(),
         cli_model: source.cli_model.clone(),
         cli_effort: source.cli_effort.clone(),
+        run_state: "idle".to_string(),
     };
     state.store.insert(&c).map_err(err)?;
     state
@@ -711,6 +714,14 @@ pub async fn set_conversation_unread(
         .store
         .set_unread(&id, if unread { Some(now_ms()) } else { None })
         .map_err(err)
+}
+
+/// Dismiss a conversation's interrupted-run banner without resuming the turn.
+/// Guarded on the current state (see `Store::clear_interrupted`) so it can't
+/// stomp a turn that started in the meantime.
+#[tauri::command]
+pub async fn clear_interrupted(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    state.store.clear_interrupted(&id).map_err(err)
 }
 
 #[tauri::command]

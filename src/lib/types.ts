@@ -753,6 +753,11 @@ export interface MemoryPatch {
  *  the board's actions move it to "approved" or back to "none". */
 export type ReviewState = "none" | "pending" | "approved" | "changes_requested";
 
+/** Persisted turn lifecycle for CLI-backend conversations. "interrupted" means
+ *  the last turn was cut down without settling (app quit / update restart /
+ *  crash) — the chat offers to resume it. pi conversations stay "idle". */
+export type RunState = "idle" | "running" | "aborted" | "interrupted";
+
 export interface Conversation {
   id: string;
   title: string;
@@ -787,6 +792,8 @@ export interface Conversation {
   /** Human-in-the-loop review state. "pending" → the board's "Needs review"
    *  column; defaults to "none". */
   reviewState: ReviewState;
+  /** Persisted turn lifecycle; "interrupted" drives the resume banner. */
+  runState?: RunState;
 }
 
 // pi message types we actually render. AgentMessage in pi can carry many roles;

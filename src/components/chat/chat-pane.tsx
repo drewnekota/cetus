@@ -132,6 +132,13 @@ interface Props {
    *  The main shell enables this only while the right workspace dock is closed;
    *  embedded/detail chat surfaces keep true geometric centering. */
   opticalCenter?: boolean;
+  /** The last turn was cut down mid-run (app quit / update restart / crash) —
+   *  show the resume banner above the composer. Hidden while streaming. */
+  interrupted?: boolean;
+  /** Resume the interrupted turn (sends a continuation prompt). */
+  onResumeInterrupted?: () => void;
+  /** Dismiss the interrupted-run banner without resuming. */
+  onDismissInterrupted?: () => void;
 }
 
 /** The shared "chat experience" body — messages list + composer with
@@ -169,6 +176,9 @@ export function ChatPane({
   backendSwitch,
   onRequestBackendSwitch,
   opticalCenter = false,
+  interrupted,
+  onResumeInterrupted,
+  onDismissInterrupted,
 }: Props) {
   const { locale } = useTranslation("chat");
   const hasMessages = useHasMessages(convId);
@@ -309,6 +319,12 @@ export function ChatPane({
           }`}
         >
           {convId ? <BackgroundAgentsBar convId={convId} backend={backend} /> : null}
+          {interrupted && !isStreaming ? (
+            <InterruptedBar
+              onResume={onResumeInterrupted}
+              onDismiss={onDismissInterrupted}
+            />
+          ) : null}
           {compaction.active ? <CompactionBar reason={compaction.reason} /> : null}
           {convId ? <CliControlCard convId={convId} /> : null}
           {convId ? <AgentControlCard conversationId={convId} /> : null}
@@ -358,6 +374,48 @@ function CompactionBar({ reason }: { reason: string | null }) {
       <Spinner className="size-3 text-sky-600" />
       <span className="font-medium text-foreground">Compacting context…</span>
       {reason ? <span className="truncate">{reason}</span> : null}
+    </div>
+  );
+}
+
+/** Offer to pick an interrupted turn back up. Shown when the conversation's
+ *  persisted run_state is "interrupted" — its last turn died mid-run (app
+ *  quit, update restart, or crash) instead of settling. Resume continues the
+ *  original task via the conversation's resumed session; dismiss just clears
+ *  the marker. */
+function InterruptedBar({
+  onResume,
+  onDismiss,
+}: {
+  onResume?: () => void;
+  onDismiss?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+      <span className="font-medium text-foreground">Run interrupted</span>
+      <span className="min-w-0 truncate">
+        The last run was cut short by a restart.
+      </span>
+      <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        {onResume ? (
+          <button
+            type="button"
+            onClick={onResume}
+            className="rounded-md bg-foreground px-2 py-0.5 font-medium text-background transition-opacity hover:opacity-85"
+          >
+            Resume
+          </button>
+        ) : null}
+        {onDismiss ? (
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="rounded-md border border-border px-2 py-0.5 font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Dismiss
+          </button>
+        ) : null}
+      </span>
     </div>
   );
 }

@@ -21,32 +21,37 @@ interface Props {
 }
 
 type Segment =
-  | { type: "activity"; steps: ProcessBlock[]; durationMs: number }
+  | {
+      type: "activity";
+      steps: ProcessBlock[];
+      durationMs: number;
+      /** Wall-clock start of the activity, for the live elapsed ticker. */
+      startedAt: number;
+      /** No answer content follows the activity yet — the turn is still all
+       *  process, so the bar may show the running (spinner + ticker) state. */
+      trailing: boolean;
+    }
   | { type: "answer"; block: RenderedBlock };
 
 /** Is this block part of the agent's "process" (folded into the activity
  *  timeline) rather than the answer? send_artifact renders as a rich preview, so
  *  it counts as answer even though it rides the tool-call plumbing. */
-function isProcessBlock(b: RenderedBlock): b is ProcessBlock {
+function isProcessBlock(b: RenderedBlock): b is Extract<ProcessBlock, { kind: "thinking" | "tool_use" }> {
   if (b.kind === "thinking") return true;
   if (b.kind === "tool_use")
     return !(b.result && artifactsFromDetails(b.result.details).length > 0);
   return false;
 }
 
-/** Walk every block across the merged messages in order, collapsing each run of
- *  consecutive process blocks into one activity segment and leaving answer
- *  blocks inline. Order is preserved, so an answer that lands between two tool
- *  runs splits the activity exactly where it occurred. */
+/** Collapse the whole turn's work into a single activity segment (codex-style).
+ *  Everything up to and including the last process block folds into the
+ *  timeline — including intermediate narration text between tool runs. Only
+ *  what follows the last process block (the final answer, artifact previews)
+ *  stays expanded. Non-foldable blocks (artifacts, attachments) never fold
+ *  regardless of position; they render inline in their original order. */
 function buildSegments(messages: RenderedMessage[]): Segment[] {
-  const segments: Segment[] = [];
-  let run: { steps: ProcessBlock[]; min: number; max: number } | null = null;
-  const flush = () => {
-    if (run) {
-      segments.push({ type: "activity", steps: run.steps, durationMs: run.max - run.min });
-      run = null;
-    }
-  };
+  type Flat = { b: RenderedBlock; at: number };
+  const flat: Flat[] = [];
   for (const m of messages) {
     for (const b of m.blocks) {
       // Settled empty thinking: transcripts persisted before the CLI opted
@@ -54,18 +59,47 @@ function buildSegments(messages: RenderedMessage[]): Segment[] {
       // an empty "Thinking" step says nothing, drop it. A live empty block
       // (streaming) stays: its text is still arriving.
       if (b.kind === "thinking" && !b.text && !b.streaming) continue;
-      if (isProcessBlock(b)) {
-        if (!run) run = { steps: [], min: m.createdAt, max: m.createdAt };
-        run.steps.push(b);
-        run.min = Math.min(run.min, m.createdAt);
-        run.max = Math.max(run.max, m.createdAt);
-      } else {
-        flush();
-        segments.push({ type: "answer", block: b });
-      }
+      flat.push({ b, at: m.createdAt });
     }
   }
-  flush();
+
+  let lastProc = -1;
+  for (let i = 0; i < flat.length; i++) if (isProcessBlock(flat[i].b)) lastProc = i;
+
+  // No process at all (plain text reply): no activity bar.
+  if (lastProc === -1) return flat.map((f) => ({ type: "answer", block: f.b }));
+
+  const segments: Segment[] = [];
+  const steps: ProcessBlock[] = [];
+  let min = Infinity;
+  // The activity "ends" when the first post-process block (the answer) begins,
+  // so the settled duration lands where the live ticker stopped instead of
+  // jumping back to the last tool call's timestamp.
+  let endAt = -Infinity;
+  let activityIdx = -1;
+  for (let i = 0; i < flat.length; i++) {
+    const { b, at } = flat[i];
+    const folds = i <= lastProc && (isProcessBlock(b) || b.kind === "text");
+    if (folds) {
+      if (activityIdx === -1) {
+        activityIdx = segments.length;
+        segments.push({ type: "activity", steps, durationMs: 0, startedAt: 0, trailing: false });
+      }
+      steps.push(b as ProcessBlock);
+      min = Math.min(min, at);
+      endAt = Math.max(endAt, at);
+    } else {
+      if (i === lastProc + 1) endAt = Math.max(endAt, at);
+      segments.push({ type: "answer", block: b });
+    }
+  }
+  segments[activityIdx] = {
+    type: "activity",
+    steps,
+    durationMs: endAt - min,
+    startedAt: min,
+    trailing: lastProc === flat.length - 1,
+  };
   return segments;
 }
 
@@ -138,10 +172,11 @@ export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = fa
               seg.type === "activity" ? (
                 <ActivityGroup
                   key={i}
-                  id={`${convId ?? ""}:${keys[0]}:a${i}`}
+                  id={`${convId ?? ""}:${keys[0]}:activity`}
                   steps={seg.steps}
                   durationMs={seg.durationMs}
-                  active={active && i === segments.length - 1}
+                  startedAt={seg.startedAt}
+                  active={active && seg.trailing}
                 />
               ) : (
                 // Answer content and activity bars share the same 88% reading

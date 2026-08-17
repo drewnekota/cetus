@@ -276,6 +276,8 @@ export const api = {
     }),
   compactConversation: (id: string) => invoke<void>("compact_conversation", { id }),
   abort: (id: string) => invoke<void>("abort", { id }),
+  /** Dismiss a conversation's interrupted-run banner without resuming. */
+  clearInterrupted: (id: string) => invoke<void>("clear_interrupted", { id }),
   /** Run a one-shot shell command locally (the composer's `!` bash mode) in
    *  `cwd` (defaults to the workspace). Bypasses the agent; the result is
    *  rendered inline in the chat. Rejects only on spawn failure — a non-zero

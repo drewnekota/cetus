@@ -1019,6 +1019,18 @@ pub fn run() {
             );
 
             let store = Arc::new(store::Store::open(&db_path).expect("open sqlite store"));
+            // A fresh process can't have live CLI turns, so any row still
+            // "running" was cut down mid-run — by a crash or kill that never
+            // reached the exit hook below. Demote them so the UI can offer to
+            // resume. (Quit/update-restart already demoted theirs on exit;
+            // this boot sweep is the backstop and the primary path.)
+            match store.mark_running_interrupted() {
+                Ok(n) if n > 0 => {
+                    tracing::info!("marked {n} conversation(s) interrupted from a previous run")
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("interrupted-run sweep failed: {e}"),
+            }
             // Dsh bridge tools call back into Cetus over the authenticated
             // reverse-RPC channel. The handler executes only after AppState is
             // managed, when the shared Dsh host is first started.
@@ -1667,6 +1679,7 @@ pub fn run() {
         commands::set_active_conversation,
         commands::set_conversation_unread,
         commands::archive_conversation,
+        commands::clear_interrupted,
         commands::set_review_state,
         commands::delete_conversation,
         commands::rename_conversation,
@@ -1849,6 +1862,7 @@ pub fn run() {
         commands::set_active_conversation,
         commands::set_conversation_unread,
         commands::archive_conversation,
+        commands::clear_interrupted,
         commands::set_review_state,
         commands::delete_conversation,
         commands::rename_conversation,
@@ -2043,6 +2057,11 @@ pub fn run() {
                 // A dev hot-reload or app quit must never orphan a meeting
                 // helper with the microphone/system-audio tap still active.
                 meeting::shutdown_capture();
+                // The sessions killed below take their in-flight turns with
+                // them — no outcome will ever settle, so persist the
+                // interruption first (synchronous rusqlite write; the process
+                // is exiting and spawned tasks wouldn't run).
+                let _ = _app.state::<AppState>().store.mark_running_interrupted();
                 _app.state::<AppState>().kill_all_cli_sessions();
             }
             // cetus is resident: closing the window only hides it. A macOS dock

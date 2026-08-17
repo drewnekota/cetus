@@ -63,6 +63,21 @@ pub struct Conversation {
     /// codex `model_reasoning_effort`). Empty → the CLI's default.
     #[serde(default)]
     pub cli_effort: String,
+    /// Persisted run lifecycle for CLI-backend turns, so a restart can tell a
+    /// finished conversation from one whose turn was cut down mid-run.
+    /// "idle" (no turn / finished normally) | "running" (a turn is in flight —
+    /// only ever true while the app lives; leftovers at boot mean a crash) |
+    /// "aborted" (the user pressed Stop — never offered a resume) |
+    /// "interrupted" (the turn died without settling: app quit/update restart,
+    /// crash, or the child vanished — the UI offers to resume it). pi turns
+    /// don't participate and stay "idle".
+    #[serde(default = "default_run_state")]
+    pub run_state: String,
+}
+
+/// Default run state for rows/payloads that predate the `run_state` column.
+pub fn default_run_state() -> String {
+    "idle".to_string()
 }
 
 /// Default backend for rows/payloads that predate the `backend` column.
@@ -402,6 +417,15 @@ impl Store {
             "resume_tokens",
             "TEXT NOT NULL DEFAULT '{}'",
         )?;
+        // Persisted turn lifecycle (idle | running | aborted | interrupted) so
+        // a restart can offer to resume turns that were cut down mid-run.
+        // Additive; pre-existing rows default to 'idle'.
+        ensure_column(
+            &conn,
+            "conversations",
+            "run_state",
+            "TEXT NOT NULL DEFAULT 'idle'",
+        )?;
         // Coding-agent backend for automations (pi | claude-code | codex) and
         // the CLI model override their fired conversations inherit. Additive.
         ensure_column(
@@ -459,8 +483,8 @@ impl Store {
     pub fn insert(&self, c: &Conversation) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO conversations (id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            "INSERT INTO conversations (id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 c.id,
                 c.title,
@@ -479,6 +503,7 @@ impl Store {
                 c.backend,
                 c.cli_model,
                 c.cli_effort,
+                c.run_state,
             ],
         )?;
         Ok(())
@@ -487,10 +512,10 @@ impl Store {
     pub fn list(&self, include_archived: bool) -> Result<Vec<Conversation>> {
         let conn = self.read_conn.lock().unwrap();
         let sql = if include_archived {
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state
              FROM conversations WHERE archived_at IS NOT NULL ORDER BY archived_at DESC"
         } else {
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state
              FROM conversations WHERE archived_at IS NULL ORDER BY updated_at DESC"
         };
         let mut stmt = conn.prepare(sql)?;
@@ -505,7 +530,7 @@ impl Store {
     pub fn get(&self, id: &str) -> Result<Option<Conversation>> {
         let conn = self.read_conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state
              FROM conversations WHERE id = ?1",
         )?;
         let row = stmt
@@ -671,6 +696,44 @@ impl Store {
         conn.execute(
             "UPDATE conversations SET review_state = ?1, updated_at = ?2 WHERE id = ?3",
             params![state, ts, id],
+        )?;
+        Ok(())
+    }
+
+    /// Set the persisted turn lifecycle ("idle" | "running" | "aborted" |
+    /// "interrupted"). Deliberately does NOT touch `updated_at`: this is
+    /// machine state flipping on every turn, and bumping it would reorder the
+    /// sidebar and reset the auto-archive idle clock.
+    pub fn set_run_state(&self, id: &str, state: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET run_state = ?1 WHERE id = ?2",
+            params![state, id],
+        )?;
+        Ok(())
+    }
+
+    /// Demote every "running" row to "interrupted". Called on app exit (the
+    /// still-registered turns are about to be killed) and again at boot — a
+    /// crash or kill -9 never reaches the exit hook, but a fresh process can't
+    /// have live turns, so any leftover "running" row was cut down mid-run.
+    /// Returns how many rows flipped.
+    pub fn mark_running_interrupted(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE conversations SET run_state = 'interrupted' WHERE run_state = 'running'",
+            [],
+        )?;
+        Ok(n)
+    }
+
+    /// Dismiss an interrupted-run marker without resuming. Guarded on the
+    /// current state so it can't stomp a turn that started in the meantime.
+    pub fn clear_interrupted(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET run_state = 'idle' WHERE id = ?1 AND run_state = 'interrupted'",
+            params![id],
         )?;
         Ok(())
     }
@@ -1821,6 +1884,7 @@ fn row_to_conversation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> 
         backend: r.get(14)?,
         cli_model: r.get(15)?,
         cli_effort: r.get(16)?,
+        run_state: r.get(17)?,
     })
 }
 
@@ -1972,6 +2036,47 @@ mod tests {
     }
 
     #[test]
+    fn run_state_sweep_and_dismiss() {
+        let (store, path) = temp_store();
+        let conv = Conversation {
+            id: "c1".into(),
+            title: String::new(),
+            session_file: String::new(),
+            workspace_dir: "/tmp".into(),
+            model: Default::default(),
+            created_at: 1,
+            updated_at: 1,
+            archived_at: None,
+            unread_at: None,
+            source_automation_id: None,
+            parallel_group_id: None,
+            solution_index: None,
+            review_state: "none".into(),
+            backend: "claude-code".into(),
+            cli_model: String::new(),
+            cli_effort: String::new(),
+            run_state: "idle".to_string(),
+        };
+        store.insert(&conv).unwrap();
+
+        // The boot/exit sweep only touches rows caught mid-run.
+        store.set_run_state("c1", "running").unwrap();
+        assert_eq!(store.mark_running_interrupted().unwrap(), 1);
+        assert_eq!(store.get("c1").unwrap().unwrap().run_state, "interrupted");
+        assert_eq!(store.mark_running_interrupted().unwrap(), 0);
+
+        // Dismiss clears an interruption, but never a live/aborted state.
+        store.clear_interrupted("c1").unwrap();
+        assert_eq!(store.get("c1").unwrap().unwrap().run_state, "idle");
+        store.set_run_state("c1", "aborted").unwrap();
+        store.clear_interrupted("c1").unwrap();
+        assert_eq!(store.get("c1").unwrap().unwrap().run_state, "aborted");
+
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn switch_backend_stashes_and_restores_resume_tokens() {
         let (store, path) = temp_store();
         let conv = Conversation {
@@ -1991,6 +2096,7 @@ mod tests {
             backend: "codex".into(),
             cli_model: String::new(),
             cli_effort: String::new(),
+            run_state: "idle".to_string(),
         };
         store.insert(&conv).unwrap();
         store.set_session_file("c1", "codex-thread-1").unwrap();
@@ -2060,6 +2166,7 @@ mod tests {
             backend: "pi".into(),
             cli_model: String::new(),
             cli_effort: String::new(),
+            run_state: "idle".to_string(),
         };
         store.insert(&conv).unwrap();
 
