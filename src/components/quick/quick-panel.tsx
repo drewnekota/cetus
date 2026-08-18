@@ -206,9 +206,7 @@ export function QuickPanel() {
         return;
       }
       const b = BACKENDS.find((x) => x.id === id);
-      // Same runtime again (e.g. a repeated shortcut) is a no-op so it doesn't
-      // reset the model/effort overrides.
-      if (!b || b.id === backend) return;
+      if (!b) return;
       const tuning = backendSupportsTuning(b.id)
         ? loadCliTuningChoice(b.id)
         : { model: "", effort: "" };
@@ -221,7 +219,7 @@ export function QuickPanel() {
         cliEffort: tuning.effort,
       });
     },
-    [backend, entries],
+    [entries],
   );
 
   /** Keyboard slot switch: presets carry fixed tuning, runtimes reuse the
@@ -234,9 +232,12 @@ export function QuickPanel() {
         setCliEffort(target.effort ?? "");
         return;
       }
+      // Same runtime again (e.g. a repeated shortcut) is a no-op so it doesn't
+      // reset the model/effort overrides.
+      if (target.backend === backend) return;
       onBackendChange(target.backend);
     },
-    [onBackendChange],
+    [backend, onBackendChange],
   );
 
   const onCliModelChange = useCallback(
@@ -782,7 +783,13 @@ export function QuickPanel() {
             pickingWorkspaceRef.current = active;
           }}
         />
-        <BackendSelect value={backend} onChange={onBackendChange} includePresets />
+        <BackendSelect
+          value={backend}
+          onChange={onBackendChange}
+          includePresets
+          model={cliModel}
+          effort={cliEffort}
+        />
         {backend === "pi" ? (
           <ModelPicker
             value={modelChoice}
@@ -992,10 +999,16 @@ function BackendSelect({
   value,
   onChange,
   includePresets,
+  model,
+  effort,
 }: {
   value: BackendId;
   onChange: (id: string) => void;
   includePresets?: boolean;
+  /** Current model/effort overrides, used to put the checkmark on a preset
+   *  row (instead of its runtime) when the selection matches one exactly. */
+  model?: string;
+  effort?: string;
 }) {
   const { entries, enabledBackendIds } = useRuntimeCatalog();
   const availableEntries = entries.filter((entry) =>
@@ -1005,8 +1018,15 @@ function BackendSelect({
   );
   const current = BACKENDS.find((b) => b.id === value) ?? BACKENDS[0];
   const TriggerIcon = current.icon;
+  const matchedPreset = availableEntries.find(
+    (entry) =>
+      entry.kind === "preset" &&
+      entry.preset.backend === value &&
+      entry.preset.model === (model ?? "") &&
+      entry.preset.effort === (effort ?? ""),
+  );
   return (
-    <Select value={value} onValueChange={onChange}>
+    <Select value={matchedPreset ? matchedPreset.id : value} onValueChange={onChange}>
       <SelectTrigger
         size="sm"
         style={{ ...runtimeThemeStyle(value), color: "var(--runtime-color)" }}

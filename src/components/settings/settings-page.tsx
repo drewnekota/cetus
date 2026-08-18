@@ -18,9 +18,7 @@ import {
 } from "@/components/brand-icons";
 import {
   ArchiveRestore,
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
   AudioLines,
   Blocks,
   Cloud,
@@ -30,6 +28,7 @@ import {
   ExternalLink,
   FileText,
   FolderOpen,
+  GripVertical,
   KeyRound,
   Mic,
   Monitor,
@@ -41,6 +40,21 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   BACKENDS,
   CLI_EFFORTS,
@@ -665,6 +679,51 @@ function runtimeEnabledPatch(
   }
 }
 
+/** A runtime row wired into dnd-kit's sortable list. The grip on the left edge
+ *  is the drag handle; the rest of the row keeps its clicks (switch, delete). */
+function SortableRuntimeRow({
+  id,
+  children,
+}: {
+  id: string;
+  children: React.ReactNode;
+}) {
+  const { t } = useTranslation("settings");
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      data-testid={`runtime-settings-row-${id}`}
+      className={cn(
+        "flex items-center gap-3 bg-card px-4 py-3",
+        // Lift the dragged row above its siblings so it slides over them.
+        isDragging && "relative z-10 shadow-lg",
+      )}
+    >
+      <button
+        type="button"
+        data-testid={`runtime-drag-${id}`}
+        aria-label={t("runtimes.dragToReorder")}
+        title={t("runtimes.dragToReorder")}
+        {...attributes}
+        {...listeners}
+        className="flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/60 hover:bg-muted hover:text-foreground active:cursor-grabbing"
+      >
+        <GripVertical className="size-4" />
+      </button>
+      {children}
+    </div>
+  );
+}
+
 function RuntimesSection() {
   const { t } = useTranslation("settings");
   const [settings, setSettings] = useState<CliAgentSettings>(
@@ -674,6 +733,10 @@ function RuntimesSection() {
     ReturnType<typeof api.getCliRuntimeStatus>
   > | null>(null);
   const shortcuts = useKeyboardShortcuts();
+  // A few px of travel before a drag starts, so the grip still takes clicks.
+  const dragSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
 
   useEffect(() => {
     api
@@ -694,17 +757,16 @@ function RuntimesSection() {
     save({ ...settings, ...patch });
   }
 
-  function moveEntry(id: string, offset: -1 | 1) {
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    if (!over || active.id === over.id) return;
     const order = normalizeRuntimeEntryOrder(
       settings.runtimeOrder,
       settings.runtimePresets,
     );
-    const from = order.indexOf(id);
-    const to = from + offset;
-    if (from < 0 || to < 0 || to >= order.length) return;
-    const next = [...order];
-    [next[from], next[to]] = [next[to], next[from]];
-    update({ runtimeOrder: next });
+    const from = order.indexOf(String(active.id));
+    const to = order.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    update({ runtimeOrder: arrayMove(order, from, to) });
   }
 
   function addPreset(preset: RuntimePreset) {
@@ -747,51 +809,28 @@ function RuntimesSection() {
         description={t("runtimes.description")}
       />
 
-      <SettingsList className="mt-6">
-        {entries.map((entry, index) => {
-          const moveButtons = (
-            <div className="flex shrink-0 items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                data-testid={`runtime-move-up-${entry.id}`}
-                aria-label={t("runtimes.moveUp")}
-                title={t("runtimes.moveUp")}
-                disabled={index === 0}
-                onClick={() => moveEntry(entry.id, -1)}
-              >
-                <ArrowUp className="size-3.5" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                data-testid={`runtime-move-down-${entry.id}`}
-                aria-label={t("runtimes.moveDown")}
-                title={t("runtimes.moveDown")}
-                disabled={index === entries.length - 1}
-                onClick={() => moveEntry(entry.id, 1)}
-              >
-                <ArrowDown className="size-3.5" />
-              </Button>
-            </div>
-          );
-          if (entry.kind === "preset") {
-            const { preset } = entry;
-            const presetRuntime = byId.get(preset.backend);
-            const PresetIcon = presetRuntime?.icon;
-            const presetSlotKey = runtimeSlotDisplay(
-              entry.id,
-              settings,
-              shortcuts,
-            );
-            return (
-              <div
-                key={entry.id}
-                data-testid={`runtime-settings-row-${entry.id}`}
-                className="flex items-center gap-3 px-4 py-3"
-              >
+      <DndContext
+        sensors={dragSensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={entries.map((entry) => entry.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <SettingsList className="mt-6">
+            {entries.map((entry) => {
+              if (entry.kind === "preset") {
+                const { preset } = entry;
+                const presetRuntime = byId.get(preset.backend);
+                const PresetIcon = presetRuntime?.icon;
+                const presetSlotKey = runtimeSlotDisplay(
+                  entry.id,
+                  settings,
+                  shortcuts,
+                );
+                return (
+                  <SortableRuntimeRow key={entry.id} id={entry.id}>
                 <div
                   style={{
                     ...runtimeThemeStyle(preset.backend),
@@ -824,36 +863,31 @@ function RuntimesSection() {
                     {presetRuntime?.label ?? preset.backend}
                   </p>
                 </div>
-                {moveButtons}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  data-testid={`runtime-preset-delete-${entry.id}`}
-                  aria-label={t("runtimes.presets.delete")}
-                  title={t("runtimes.presets.delete")}
-                  onClick={() => deletePreset(entry.id)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </div>
-            );
-          }
-          const id = entry.id;
-          const runtime = byId.get(id);
-          if (!runtime) return null;
-          const Icon = runtime.icon;
-          const enabled = isBackendEnabled(id, settings);
-          const installed = isInstalled(id);
-          // Read off the section's own state so the chip moves with the row the
-          // instant it's reordered, not a save round-trip later.
-          const slotKey = runtimeSlotDisplay(id, settings, shortcuts);
-          return (
-            <div
-              key={id}
-              data-testid={`runtime-settings-row-${id}`}
-              className="flex items-center gap-3 px-4 py-3"
-            >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      data-testid={`runtime-preset-delete-${entry.id}`}
+                      aria-label={t("runtimes.presets.delete")}
+                      title={t("runtimes.presets.delete")}
+                      onClick={() => deletePreset(entry.id)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </SortableRuntimeRow>
+                );
+              }
+              const id = entry.id;
+              const runtime = byId.get(id);
+              if (!runtime) return null;
+              const Icon = runtime.icon;
+              const enabled = isBackendEnabled(id, settings);
+              const installed = isInstalled(id);
+              // Read off the section's own state so the chip moves with the
+              // row the instant it's reordered, not a save round-trip later.
+              const slotKey = runtimeSlotDisplay(id, settings, shortcuts);
+              return (
+                <SortableRuntimeRow key={id} id={id}>
               <div
                 style={{
                   ...runtimeThemeStyle(id),
@@ -899,21 +933,24 @@ function RuntimesSection() {
                   {RUNTIME_COMMANDS[id]}
                 </p>
               </div>
-              {moveButtons}
-              <Switch
-                id={`runtime-enabled-${id}`}
-                data-testid={`runtime-enabled-${id}`}
-                checked={enabled}
-                disabled={id === "pi"}
-                aria-label={t("runtimes.enabled", { runtime: runtime.label })}
-                onCheckedChange={(value) =>
-                  update(runtimeEnabledPatch(id, value))
-                }
-              />
-            </div>
-          );
-        })}
-      </SettingsList>
+                  <Switch
+                    id={`runtime-enabled-${id}`}
+                    data-testid={`runtime-enabled-${id}`}
+                    checked={enabled}
+                    disabled={id === "pi"}
+                    aria-label={t("runtimes.enabled", {
+                      runtime: runtime.label,
+                    })}
+                    onCheckedChange={(value) =>
+                      update(runtimeEnabledPatch(id, value))
+                    }
+                  />
+                </SortableRuntimeRow>
+              );
+            })}
+          </SettingsList>
+        </SortableContext>
+      </DndContext>
 
       <div className="mt-8">
         <h3 className="text-sm font-semibold">{t("runtimes.presets.title")}</h3>

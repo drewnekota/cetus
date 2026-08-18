@@ -106,10 +106,9 @@ export const settings = {
     "runtimes.builtIn": "Always available",
     "runtimes.installed": "Installed",
     "runtimes.notInstalled": "Not installed",
-    "runtimes.moveUp": "Move up",
+    "runtimes.dragToReorder": "Drag to reorder",
     "runtimes.shortcutHint":
       "Keyboard shortcut for this position — reordering moves it",
-    "runtimes.moveDown": "Move down",
     "runtimes.enabled": "Enable {runtime}",
     "runtimes.preset": "Preset",
     "runtimes.presets.title": "Presets",
@@ -668,9 +667,8 @@ export const settings = {
     "runtimes.builtIn": "始终可用",
     "runtimes.installed": "已安装",
     "runtimes.notInstalled": "未安装",
-    "runtimes.moveUp": "上移",
+    "runtimes.dragToReorder": "拖拽排序",
     "runtimes.shortcutHint": "该位置的快捷键——调整顺序会跟着变",
-    "runtimes.moveDown": "下移",
     "runtimes.enabled": "启用 {runtime}",
     "runtimes.behavior.title": "Runtime 行为",
     "runtimes.behavior.description":

@@ -589,6 +589,21 @@ export function BackendPicker({
   const current = BACKENDS.find((b) => b.id === shown) ?? BACKENDS[0];
   const TriggerIcon = current.icon;
 
+  // Presets are separate rows from their runtime: when the current selection
+  // exactly matches a preset's fixed tuning, the checkmark belongs on the
+  // preset row, not on the runtime it happens to run.
+  const shownTuning = conversationId
+    ? { model: cliModel, effort: cliEffort }
+    : { model: pendingModel ?? "", effort: pendingEffort ?? "" };
+  const matchedPreset = availableEntries.find(
+    (entry) =>
+      entry.kind === "preset" &&
+      entry.preset.backend === shown &&
+      entry.preset.model === shownTuning.model &&
+      entry.preset.effort === shownTuning.effort,
+  );
+  const selectValue = matchedPreset ? matchedPreset.id : shown;
+
   /** Preset-style switch: set the runtime and its fixed tuning without
    *  reading or writing the runtime's sticky tuning. */
   function applySwitchTarget(target: RuntimeSwitchTarget) {
@@ -652,7 +667,7 @@ export function BackendPicker({
 
   return (
     <>
-      <Select value={shown} onValueChange={select} disabled={disabled}>
+      <Select value={selectValue} onValueChange={select} disabled={disabled}>
         <SelectTrigger
           data-testid="runtime-picker-trigger"
           size="sm"
