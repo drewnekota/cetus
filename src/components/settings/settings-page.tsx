@@ -43,8 +43,13 @@ import {
 } from "lucide-react";
 import {
   BACKENDS,
+  CLI_EFFORTS,
+  CLI_MODELS,
+  backendSupportsTuning,
+  runtimePresetLabel,
   useRuntimeCatalog,
   useRuntimeSlots,
+  type TunableBackendId,
 } from "@/components/chat/backend-picker";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -140,6 +145,7 @@ import {
   type QuickSessionMode,
   type QuickSettings,
   type CliAgentSettings,
+  type RuntimePreset,
   type TranscriptState,
   type VoiceAsrEngine,
   type VoiceGesture,
@@ -149,8 +155,9 @@ import { cn } from "@/lib/utils";
 import {
   DEFAULT_CLI_AGENT_SETTINGS,
   isBackendEnabled,
-  normalizeRuntimeOrder,
+  normalizeRuntimeEntryOrder,
   OPEN_RUNTIME_SETTINGS_EVENT,
+  runtimeEntries,
   runtimeSlotDisplay,
 } from "@/lib/runtime-settings";
 import { HotkeyRecorder } from "./hotkey-recorder";
@@ -687,9 +694,12 @@ function RuntimesSection() {
     save({ ...settings, ...patch });
   }
 
-  function moveRuntime(backend: BackendId, offset: -1 | 1) {
-    const order = normalizeRuntimeOrder(settings.runtimeOrder);
-    const from = order.indexOf(backend);
+  function moveEntry(id: string, offset: -1 | 1) {
+    const order = normalizeRuntimeEntryOrder(
+      settings.runtimeOrder,
+      settings.runtimePresets,
+    );
+    const from = order.indexOf(id);
     const to = from + offset;
     if (from < 0 || to < 0 || to >= order.length) return;
     const next = [...order];
@@ -697,7 +707,31 @@ function RuntimesSection() {
     update({ runtimeOrder: next });
   }
 
-  const order = normalizeRuntimeOrder(settings.runtimeOrder);
+  function addPreset(preset: RuntimePreset) {
+    save({
+      ...settings,
+      runtimePresets: [...settings.runtimePresets, preset],
+      runtimeOrder: [
+        ...normalizeRuntimeEntryOrder(
+          settings.runtimeOrder,
+          settings.runtimePresets,
+        ),
+        preset.id,
+      ],
+    });
+  }
+
+  function deletePreset(id: string) {
+    save({
+      ...settings,
+      runtimePresets: settings.runtimePresets.filter(
+        (preset) => preset.id !== id,
+      ),
+      runtimeOrder: settings.runtimeOrder.filter((entry) => entry !== id),
+    });
+  }
+
+  const entries = runtimeEntries(settings);
   const byId = new Map(BACKENDS.map((backend) => [backend.id, backend]));
   const isInstalled = (id: BackendId) => {
     if (id === "pi") return true;
@@ -714,7 +748,98 @@ function RuntimesSection() {
       />
 
       <SettingsList className="mt-6">
-        {order.map((id, index) => {
+        {entries.map((entry, index) => {
+          const moveButtons = (
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                data-testid={`runtime-move-up-${entry.id}`}
+                aria-label={t("runtimes.moveUp")}
+                title={t("runtimes.moveUp")}
+                disabled={index === 0}
+                onClick={() => moveEntry(entry.id, -1)}
+              >
+                <ArrowUp className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                data-testid={`runtime-move-down-${entry.id}`}
+                aria-label={t("runtimes.moveDown")}
+                title={t("runtimes.moveDown")}
+                disabled={index === entries.length - 1}
+                onClick={() => moveEntry(entry.id, 1)}
+              >
+                <ArrowDown className="size-3.5" />
+              </Button>
+            </div>
+          );
+          if (entry.kind === "preset") {
+            const { preset } = entry;
+            const presetRuntime = byId.get(preset.backend);
+            const PresetIcon = presetRuntime?.icon;
+            const presetSlotKey = runtimeSlotDisplay(
+              entry.id,
+              settings,
+              shortcuts,
+            );
+            return (
+              <div
+                key={entry.id}
+                data-testid={`runtime-settings-row-${entry.id}`}
+                className="flex items-center gap-3 px-4 py-3"
+              >
+                <div
+                  style={{
+                    ...runtimeThemeStyle(preset.backend),
+                    color: "var(--runtime-color)",
+                    backgroundColor:
+                      "color-mix(in oklab, var(--runtime-color) 10%, transparent)",
+                  }}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-lg"
+                >
+                  {PresetIcon && <PresetIcon className="size-4" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">
+                      {runtimePresetLabel(preset)}
+                    </span>
+                    {presetSlotKey && (
+                      <span
+                        className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                        title={t("runtimes.shortcutHint")}
+                      >
+                        {presetSlotKey}
+                      </span>
+                    )}
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                      {t("runtimes.preset")}
+                    </span>
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {presetRuntime?.label ?? preset.backend}
+                  </p>
+                </div>
+                {moveButtons}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  data-testid={`runtime-preset-delete-${entry.id}`}
+                  aria-label={t("runtimes.presets.delete")}
+                  title={t("runtimes.presets.delete")}
+                  onClick={() => deletePreset(entry.id)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            );
+          }
+          const id = entry.id;
           const runtime = byId.get(id);
           if (!runtime) return null;
           const Icon = runtime.icon;
@@ -774,32 +899,7 @@ function RuntimesSection() {
                   {RUNTIME_COMMANDS[id]}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  data-testid={`runtime-move-up-${id}`}
-                  aria-label={t("runtimes.moveUp")}
-                  title={t("runtimes.moveUp")}
-                  disabled={index === 0}
-                  onClick={() => moveRuntime(id, -1)}
-                >
-                  <ArrowUp className="size-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  data-testid={`runtime-move-down-${id}`}
-                  aria-label={t("runtimes.moveDown")}
-                  title={t("runtimes.moveDown")}
-                  disabled={index === order.length - 1}
-                  onClick={() => moveRuntime(id, 1)}
-                >
-                  <ArrowDown className="size-3.5" />
-                </Button>
-              </div>
+              {moveButtons}
               <Switch
                 id={`runtime-enabled-${id}`}
                 data-testid={`runtime-enabled-${id}`}
@@ -814,6 +914,14 @@ function RuntimesSection() {
           );
         })}
       </SettingsList>
+
+      <div className="mt-8">
+        <h3 className="text-sm font-semibold">{t("runtimes.presets.title")}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t("runtimes.presets.description")}
+        </p>
+        <AddPresetForm onAdd={addPreset} />
+      </div>
 
       <div className="mt-8">
         <h3 className="text-sm font-semibold">{t("runtimes.behavior.title")}</h3>
@@ -838,6 +946,100 @@ function RuntimesSection() {
         </div>
       </div>
     </section>
+  );
+}
+
+/** Composer for a new runtime preset: pick a tunable runtime plus the fixed
+ *  model/effort it should always launch with. Local state only — nothing is
+ *  saved until Add. */
+function AddPresetForm({ onAdd }: { onAdd: (preset: RuntimePreset) => void }) {
+  const { t } = useTranslation("settings");
+  const [backend, setBackend] = useState<TunableBackendId>("claude-code");
+  const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
+  const tunableBackends = BACKENDS.filter((runtime) =>
+    backendSupportsTuning(runtime.id),
+  );
+
+  function selectBackend(next: string) {
+    setBackend(next as TunableBackendId);
+    // Catalogs differ per runtime; a stale id would silently mean "Default".
+    setModel("");
+    setEffort("");
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      <Select value={backend} onValueChange={selectBackend}>
+        <SelectTrigger
+          size="sm"
+          className="w-40 text-xs"
+          aria-label={t("runtimes.presets.runtime")}
+          data-testid="runtime-preset-backend"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {tunableBackends.map((runtime) => (
+            <SelectItem key={runtime.id} value={runtime.id} className="text-xs">
+              <runtime.icon className="size-4" />
+              {runtime.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={model || "__default"} onValueChange={(v) => setModel(v === "__default" ? "" : v)}>
+        <SelectTrigger
+          size="sm"
+          className="w-44 text-xs"
+          aria-label={t("runtimes.presets.model")}
+          data-testid="runtime-preset-model"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {CLI_MODELS[backend].map((m) => (
+            <SelectItem key={m.id || "__default"} value={m.id || "__default"} className="text-xs">
+              {m.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={effort || "__default"} onValueChange={(v) => setEffort(v === "__default" ? "" : v)}>
+        <SelectTrigger
+          size="sm"
+          className="w-32 text-xs"
+          aria-label={t("runtimes.presets.reasoning")}
+          data-testid="runtime-preset-effort"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {CLI_EFFORTS[backend].map((e) => (
+            <SelectItem key={e.id || "__default"} value={e.id || "__default"} className="text-xs">
+              {e.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        data-testid="runtime-preset-add"
+        onClick={() =>
+          onAdd({
+            id: `preset-${crypto.randomUUID()}`,
+            backend,
+            model,
+            effort,
+          })
+        }
+      >
+        <Plus className="size-3.5" />
+        {t("runtimes.presets.add")}
+      </Button>
+    </div>
   );
 }
 
@@ -2090,13 +2292,14 @@ function KeyboardShortcutsSection() {
       id as (typeof RUNTIME_SLOT_SHORTCUT_IDS)[number],
     );
     if (slot < 0) return null;
-    const backend = runtimeSlots[slot];
-    if (!backend) return t("keyboard.runtimeSlot.empty");
+    const entry = runtimeSlots[slot];
+    if (!entry) return t("keyboard.runtimeSlot.empty");
     const label =
-      BACKENDS.find((runtime) => runtime.id === backend)?.label ?? backend;
-    return backend === "pi"
-      ? t("keyboard.runtimeSlot.pinned", { runtime: label })
-      : t("keyboard.runtimeSlot.current", { runtime: label });
+      entry.kind === "preset"
+        ? runtimePresetLabel(entry.preset)
+        : (BACKENDS.find((runtime) => runtime.id === entry.id)?.label ??
+          entry.id);
+    return t("keyboard.runtimeSlot.current", { runtime: label });
   };
 
   const conflictById = useMemo(() => {

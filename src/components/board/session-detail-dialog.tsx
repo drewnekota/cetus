@@ -5,7 +5,10 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChatPane } from "@/components/chat/chat-pane";
-import { useRuntimeShortcuts } from "@/components/chat/backend-picker";
+import {
+  useRuntimeShortcuts,
+  type RuntimeSwitchTarget,
+} from "@/components/chat/backend-picker";
 import type {
   ComposerAttachment,
   ComposerRuntimeSelection,
@@ -99,13 +102,12 @@ export function SessionDetailDialog({
   // its own token machinery; the docked Composer's BackendPicker applies each
   // token once against the conversation's backend.
   const backendSwitchToken = useRef(0);
-  const [backendSwitch, setBackendSwitch] = useState<{
-    token: number;
-    backend: BackendId;
-  } | null>(null);
-  const requestBackendSwitch = useCallback((backend: BackendId) => {
+  const [backendSwitch, setBackendSwitch] = useState<
+    ({ token: number } & RuntimeSwitchTarget) | null
+  >(null);
+  const requestBackendSwitch = useCallback((target: RuntimeSwitchTarget) => {
     backendSwitchToken.current += 1;
-    setBackendSwitch({ token: backendSwitchToken.current, backend });
+    setBackendSwitch({ token: backendSwitchToken.current, ...target });
   }, []);
   useRuntimeShortcuts(requestBackendSwitch, open);
   const hasChatEntry = useChatStore((s) =>

@@ -7,7 +7,7 @@ import {
   shortcutDisplay,
   type ShortcutMap,
 } from "./keyboard-shortcuts";
-import type { BackendId, CliAgentSettings } from "./types";
+import type { BackendId, CliAgentSettings, RuntimePreset } from "./types";
 
 export const DEFAULT_CLI_AGENT_SETTINGS: CliAgentSettings = {
   bypassApprovals: true,
@@ -19,6 +19,7 @@ export const DEFAULT_CLI_AGENT_SETTINGS: CliAgentSettings = {
   kimiEnabled: true,
   dshEnabled: true,
   runtimeOrder: ["pi", "claude-code", "codex", "opencode", "grok", "kimi", "dsh"],
+  runtimePresets: [],
 };
 
 export const OPEN_RUNTIME_SETTINGS_EVENT = "cetus-open-runtime-settings";
@@ -87,9 +88,51 @@ export function normalizeRuntimeOrder(order: readonly string[]): BackendId[] {
   return normalized;
 }
 
+/** One row in the unified runtime/preset order: either a plain runtime or a
+ *  user-defined preset (a runtime pinned to one model/effort combination). */
+export type RuntimeEntry =
+  | { kind: "backend"; id: BackendId }
+  | { kind: "preset"; id: string; preset: RuntimePreset };
+
+/** The full picker order — runtime ids and preset ids interleaved, deduped,
+ *  with anything missing appended (mirrors the Rust normalization). */
+export function normalizeRuntimeEntryOrder(
+  order: readonly string[],
+  presets: readonly RuntimePreset[],
+): string[] {
+  const known = DEFAULT_CLI_AGENT_SETTINGS.runtimeOrder;
+  const presetIds = presets.map((preset) => preset.id);
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const id of [...order, ...known, ...presetIds]) {
+    if ((known.includes(id) || presetIds.includes(id)) && !seen.has(id)) {
+      seen.add(id);
+      normalized.push(id);
+    }
+  }
+  return normalized;
+}
+
+/** The ordered rows for pickers and the Runtimes settings page. */
+export function runtimeEntries(settings: CliAgentSettings): RuntimeEntry[] {
+  const presetsById = new Map(
+    settings.runtimePresets.map((preset) => [preset.id, preset]),
+  );
+  return normalizeRuntimeEntryOrder(
+    settings.runtimeOrder,
+    settings.runtimePresets,
+  ).map((id) => {
+    const preset = presetsById.get(id);
+    return preset
+      ? { kind: "preset", id, preset }
+      : { kind: "backend", id: id as BackendId };
+  });
+}
+
 export function useRuntimePreferences(): {
   settings: CliAgentSettings;
   order: BackendId[];
+  entries: RuntimeEntry[];
   enabledBackendIds: ReadonlySet<BackendId>;
 } {
   const settings = useCliAgentSettings();
@@ -98,6 +141,7 @@ export function useRuntimePreferences(): {
     return {
       settings,
       order,
+      entries: runtimeEntries(settings),
       enabledBackendIds: new Set(
         order.filter((id) => isBackendEnabled(id, settings)),
       ),
@@ -109,29 +153,33 @@ export function useEnabledBackendIds(): ReadonlySet<BackendId> {
   return useRuntimePreferences().enabledBackendIds;
 }
 
-/** The runtimes ⌃1…⌃6 address. Cetus is pinned to the first slot — it's the one
- *  runtime that can't be switched off, so it always keeps a key. The rest fill
- *  ⌃2 upward in the configured order, and disabling one closes its gap, so the
- *  keys always match what's in the picker. Pure so the Runtimes settings page
- *  can label its rows from its own optimistic state. */
-export function runtimeSlots(settings: CliAgentSettings): BackendId[] {
-  return (["pi"] as BackendId[])
-    .concat(
-      normalizeRuntimeOrder(settings.runtimeOrder).filter(
-        (id) => id !== "pi" && isBackendEnabled(id, settings),
+/** The rows ⌃1…⌃9 address: the *enabled* runtimes and presets in the unified
+ *  order set in Settings › Runtimes — whoever is on top gets ⌃1. Disabling a
+ *  runtime closes its gap (and hides its presets), so the keys always match
+ *  what's in the picker. Pure so the Runtimes settings page can label its rows
+ *  from its own optimistic state. */
+export function runtimeSlots(settings: CliAgentSettings): RuntimeEntry[] {
+  return runtimeEntries(settings)
+    .filter((entry) =>
+      isBackendEnabled(
+        entry.kind === "backend" ? entry.id : entry.preset.backend,
+        settings,
       ),
     )
     .slice(0, RUNTIME_SLOT_SHORTCUT_IDS.length);
 }
 
-/** The accelerator that selects `backend`, or null when it's past the last
- *  slot. Display-ready (e.g. "⌃2"). */
+/** The accelerator that selects the row `entryId` (a runtime or preset id),
+ *  or null when it's past the last slot. Display-ready (e.g. "⌃2"). */
 export function runtimeSlotDisplay(
-  backend: BackendId,
+  entryId: string,
   settings: CliAgentSettings,
   shortcuts: ShortcutMap,
 ): string | null {
-  const id = RUNTIME_SLOT_SHORTCUT_IDS[runtimeSlots(settings).indexOf(backend)];
+  const slot = runtimeSlots(settings).findIndex(
+    (entry) => entry.id === entryId,
+  );
+  const id = slot >= 0 ? RUNTIME_SLOT_SHORTCUT_IDS[slot] : undefined;
   const display = id ? shortcutDisplay(shortcuts[id]) : null;
   return !display || display === "Unassigned" ? null : display;
 }

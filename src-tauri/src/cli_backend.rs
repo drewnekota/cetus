@@ -39,7 +39,24 @@ pub struct CliAgentSettings {
     pub grok_enabled: bool,
     pub kimi_enabled: bool,
     pub dsh_enabled: bool,
+    /// Picker order over runtime ids and preset ids, interleaved. Unknown ids
+    /// are discarded; runtimes and presets missing from the list are appended.
     pub runtime_order: Vec<String>,
+    /// User-defined runtime presets: a runtime pinned to one model/effort
+    /// combination. Selecting a preset never mutates it.
+    pub runtime_presets: Vec<RuntimePreset>,
+}
+
+/// One saved runtime + model/effort combination, shown alongside plain
+/// runtimes in pickers. `id` is an opaque unique key referenced from
+/// `runtime_order`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RuntimePreset {
+    pub id: String,
+    pub backend: String,
+    pub model: String,
+    pub effort: String,
 }
 
 impl Default for CliAgentSettings {
@@ -62,6 +79,7 @@ impl Default for CliAgentSettings {
                 "kimi".into(),
                 "dsh".into(),
             ],
+            runtime_presets: Vec::new(),
         }
     }
 }
@@ -89,14 +107,29 @@ pub fn load_settings(store: &Store) -> CliAgentSettings {
 }
 
 fn normalize_runtime_order(settings: &mut CliAgentSettings) {
-    let mut normalized = Vec::with_capacity(RUNTIME_IDS.len());
+    // Presets must reference a real (non-pi) runtime and carry a usable id;
+    // anything else is dropped before the order references it.
+    settings.runtime_presets.retain(|preset| {
+        !preset.id.is_empty()
+            && preset.backend != "pi"
+            && RUNTIME_IDS.contains(&preset.backend.as_str())
+    });
+    let preset_ids: Vec<&str> = settings
+        .runtime_presets
+        .iter()
+        .map(|preset| preset.id.as_str())
+        .collect();
+    let mut normalized = Vec::with_capacity(RUNTIME_IDS.len() + preset_ids.len());
     for id in settings
         .runtime_order
         .iter()
         .map(String::as_str)
         .chain(RUNTIME_IDS)
+        .chain(preset_ids.iter().copied())
     {
-        if RUNTIME_IDS.contains(&id) && !normalized.iter().any(|saved| saved == id) {
+        if (RUNTIME_IDS.contains(&id) || preset_ids.contains(&id))
+            && !normalized.iter().any(|saved| saved == id)
+        {
             normalized.push(id.to_string());
         }
     }
@@ -1764,6 +1797,64 @@ mod tests {
                 "grok",
                 "dsh"
             ]
+        );
+    }
+
+    #[test]
+    fn runtime_order_keeps_presets_interleaved_and_drops_invalid_ones() {
+        let mut settings = CliAgentSettings {
+            runtime_order: vec![
+                "preset-a".into(),
+                "pi".into(),
+                "preset-gone".into(),
+                "claude-code".into(),
+            ],
+            runtime_presets: vec![
+                RuntimePreset {
+                    id: "preset-a".into(),
+                    backend: "claude-code".into(),
+                    model: "fable".into(),
+                    effort: "medium".into(),
+                },
+                // Unlisted preset: appended to the tail of the order.
+                RuntimePreset {
+                    id: "preset-b".into(),
+                    backend: "codex".into(),
+                    model: "gpt-5.5".into(),
+                    effort: "high".into(),
+                },
+                // Invalid backend: dropped entirely.
+                RuntimePreset {
+                    id: "preset-bad".into(),
+                    backend: "pi".into(),
+                    model: String::new(),
+                    effort: String::new(),
+                },
+            ],
+            ..Default::default()
+        };
+        normalize_runtime_order(&mut settings);
+        assert_eq!(
+            settings.runtime_order,
+            [
+                "preset-a",
+                "pi",
+                "claude-code",
+                "codex",
+                "opencode",
+                "grok",
+                "kimi",
+                "dsh",
+                "preset-b"
+            ]
+        );
+        assert_eq!(
+            settings
+                .runtime_presets
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            ["preset-a", "preset-b"]
         );
     }
 

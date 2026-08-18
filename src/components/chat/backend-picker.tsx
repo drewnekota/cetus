@@ -3,7 +3,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Settings2 } from "lucide-react";
 import { api } from "@/lib/tauri";
 import { useChatStore } from "@/lib/chat-store";
-import type { BackendId, CliDefaults, CliRateLimitInfo } from "@/lib/types";
+import type {
+  BackendId,
+  CliDefaults,
+  CliRateLimitInfo,
+  RuntimePreset,
+} from "@/lib/types";
 import {
   CetusIcon,
   ClaudeCodeIcon,
@@ -39,6 +44,7 @@ import {
   runtimeSlotDisplay,
   runtimeSlots,
   useRuntimePreferences,
+  type RuntimeEntry,
 } from "@/lib/runtime-settings";
 import {
   matchesShortcut,
@@ -59,7 +65,7 @@ export const BACKENDS: { id: BackendId; label: string; icon: AppIcon }[] = [
 ];
 
 export function useRuntimeCatalog() {
-  const { order, enabledBackendIds } = useRuntimePreferences();
+  const { order, entries, enabledBackendIds } = useRuntimePreferences();
   const orderedBackends = useMemo(() => {
     const byId = new Map(BACKENDS.map((backend) => [backend.id, backend]));
     return order.flatMap((id) => {
@@ -67,7 +73,7 @@ export function useRuntimeCatalog() {
       return backend ? [backend] : [];
     });
   }, [order]);
-  return { orderedBackends, enabledBackendIds };
+  return { orderedBackends, entries, enabledBackendIds };
 }
 
 export type TunableBackendId = "claude-code" | "codex" | "grok" | "dsh";
@@ -99,19 +105,38 @@ export function nextBackend(
   return choices[(i + 1 + choices.length) % choices.length].id;
 }
 
-/** Live view of [`runtimeSlots`] — what ⌃1…⌃6 currently address. */
-export function useRuntimeSlots(): BackendId[] {
+/** What a positional runtime shortcut applies: a runtime, plus the fixed
+ *  model/effort when the slot addressed a preset. `model`/`effort` undefined
+ *  means "keep the runtime's own sticky tuning". */
+export interface RuntimeSwitchTarget {
+  backend: BackendId;
+  model?: string;
+  effort?: string;
+}
+
+export function runtimeSwitchTarget(entry: RuntimeEntry): RuntimeSwitchTarget {
+  return entry.kind === "backend"
+    ? { backend: entry.id }
+    : {
+        backend: entry.preset.backend,
+        model: entry.preset.model,
+        effort: entry.preset.effort,
+      };
+}
+
+/** Live view of [`runtimeSlots`] — what ⌃1…⌃9 currently address. */
+export function useRuntimeSlots(): RuntimeEntry[] {
   const { settings } = useRuntimePreferences();
   return useMemo(() => runtimeSlots(settings), [settings]);
 }
 
-/** The runtime a positional shortcut selects, or null when that slot is past
- *  the end of the enabled list. */
+/** The row a positional shortcut selects, or null when that slot is past the
+ *  end of the enabled list. */
 export function runtimeForShortcut(
   event: KeyboardEvent,
   shortcuts: ShortcutMap,
-  slots: readonly BackendId[],
-): BackendId | null | undefined {
+  slots: readonly RuntimeEntry[],
+): RuntimeEntry | null | undefined {
   const slot = RUNTIME_SLOT_SHORTCUT_IDS.findIndex((id) =>
     matchesShortcut(event, shortcuts[id]),
   );
@@ -127,7 +152,7 @@ export function runtimeForShortcut(
  *  routes through page.tsx's modal-guarded handler, so don't enable this
  *  where that handler is already live. */
 export function useRuntimeShortcuts(
-  onSwitch: (backend: BackendId) => void,
+  onSwitch: (target: RuntimeSwitchTarget) => void,
   enabled: boolean = true,
 ) {
   const shortcuts = useKeyboardShortcuts();
@@ -135,24 +160,23 @@ export function useRuntimeShortcuts(
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
-      const target = runtimeForShortcut(e, shortcuts, slots);
-      if (target === undefined) return;
+      const entry = runtimeForShortcut(e, shortcuts, slots);
+      if (entry === undefined) return;
       e.preventDefault();
-      if (target) onSwitch(target);
+      if (entry) onSwitch(runtimeSwitchTarget(entry));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [enabled, shortcuts, onSwitch, slots]);
 }
 
-/** Right-aligned shortcut hint inside a runtime SelectItem (e.g. "⌃2").
- *  Follows the runtime's position in the enabled order, so reordering in
- *  Settings relabels the menu. Renders nothing when unassigned or out of
- *  slots. */
-export function RuntimeShortcutHint({ backend }: { backend: BackendId }) {
+/** Right-aligned shortcut hint inside a runtime/preset SelectItem (e.g. "⌃2").
+ *  Follows the row's position in the enabled order, so reordering in Settings
+ *  relabels the menu. Renders nothing when unassigned or out of slots. */
+export function RuntimeShortcutHint({ entryId }: { entryId: string }) {
   const shortcuts = useKeyboardShortcuts();
   const { settings } = useRuntimePreferences();
-  const display = runtimeSlotDisplay(backend, settings, shortcuts);
+  const display = runtimeSlotDisplay(entryId, settings, shortcuts);
   if (!display) return null;
   return (
     <span className="ml-auto pl-3 text-[10px] tracking-wide text-muted-foreground/70">
@@ -233,6 +257,28 @@ export const CLI_EFFORTS: Record<
     { id: "max", label: "Max" },
   ],
 };
+
+/** Display label for a preset row, resolved against the static catalogs
+ *  ("Fable · Medium"). Ids missing from the catalog (renamed models, live
+ *  codex ids) fall back to the raw string rather than hiding the row. */
+export function runtimePresetLabel(preset: RuntimePreset): string {
+  const none: { id: string; label: string }[] = [];
+  const models = backendSupportsTuning(preset.backend)
+    ? CLI_MODELS[preset.backend]
+    : none;
+  const efforts = backendSupportsTuning(preset.backend)
+    ? CLI_EFFORTS[preset.backend]
+    : none;
+  const model =
+    models.find((m) => m.id === preset.model)?.label ||
+    preset.model ||
+    "Default";
+  const effort =
+    efforts.find((e) => e.id === preset.effort)?.label ||
+    preset.effort ||
+    "Default";
+  return `${model} · ${effort}`;
+}
 
 /** One fetch of a backend's on-disk defaults per app session, shared by every
  *  tuning menu instance (composer, quick panel, dialogs). */
@@ -456,10 +502,10 @@ export function BackendPicker({
   /** Reports the tuning shown for an existing conversation so the composer can
    *  commit it together with the selected runtime when a message is sent. */
   onTuningChange?: (model: string, effort: string) => void;
-  /** Keyboard runtime-switch request (⌃1/⌃2/⌃3). Token-keyed so each press
+  /** Keyboard runtime-switch request (⌃1…⌃9). Token-keyed so each press
    *  applies exactly once; a stale value from before this picker mounted is
-   *  ignored. */
-  backendSwitch?: { token: number; backend: BackendId } | null;
+   *  ignored. Carries fixed model/effort when the slot addressed a preset. */
+  backendSwitch?: ({ token: number } & RuntimeSwitchTarget) | null;
 }) {
   const { t } = useTranslation("chat");
   const [backend, setBackendState] = useState<BackendId>("pi");
@@ -468,11 +514,12 @@ export function BackendPicker({
   // Account-level quota snapshots (backend id → rate_limit_info), fed by the
   // CLI's rate_limit_event heartbeat. Shown only inside the dropdown.
   const cliRateLimits = useChatStore((s) => s.cliRateLimits);
-  const { orderedBackends, enabledBackendIds } = useRuntimeCatalog();
-  const availableBackends = orderedBackends.filter(
-    (candidate) =>
-      enabledBackendIds.has(candidate.id) ||
-      (conversationId !== null && candidate.id === backend),
+  const { entries, enabledBackendIds } = useRuntimeCatalog();
+  const availableEntries = entries.filter((entry) =>
+    entry.kind === "backend"
+      ? enabledBackendIds.has(entry.id) ||
+        (conversationId !== null && entry.id === backend)
+      : enabledBackendIds.has(entry.preset.backend),
   );
 
   function setBackend(b: BackendId) {
@@ -516,13 +563,19 @@ export function BackendPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, pendingValue, onTuningChange]);
 
-  // Apply a keyboard runtime-switch (⌃1/⌃2/⌃3) exactly once per token. The
+  // Apply a keyboard runtime-switch (⌃1…⌃9) exactly once per token. The
   // ref starts at the mount-time token so a request fired before this picker
   // mounted doesn't replay on it (e.g. after switching conversations).
   const handledSwitchToken = useRef(backendSwitch?.token ?? 0);
   useEffect(() => {
     if (!backendSwitch || backendSwitch.token === handledSwitchToken.current) return;
     handledSwitchToken.current = backendSwitch.token;
+    // A preset slot always applies its fixed tuning — even on the runtime
+    // that's already selected, since the tuning may differ.
+    if (backendSwitch.model !== undefined || backendSwitch.effort !== undefined) {
+      applySwitchTarget(backendSwitch);
+      return;
+    }
     const shownNow = conversationId ? backend : (pendingValue ?? "pi");
     // Same runtime again is a no-op — don't reset the model/effort overrides.
     if (backendSwitch.backend === shownNow) return;
@@ -536,9 +589,32 @@ export function BackendPicker({
   const current = BACKENDS.find((b) => b.id === shown) ?? BACKENDS[0];
   const TriggerIcon = current.icon;
 
+  /** Preset-style switch: set the runtime and its fixed tuning without
+   *  reading or writing the runtime's sticky tuning. */
+  function applySwitchTarget(target: RuntimeSwitchTarget) {
+    if (!BACKENDS.some((x) => x.id === target.backend)) return;
+    const model = target.model ?? "";
+    const effort = target.effort ?? "";
+    setBackend(target.backend);
+    setCliModel(model);
+    setCliEffort(effort);
+    onTuningChange?.(model, effort);
+    if (!conversationId) onPendingTuningChange?.(model, effort);
+  }
+
   function select(id: string) {
     if (id === "__runtime_settings") {
       openRuntimeSettings();
+      return;
+    }
+    // A preset applies its runtime plus its fixed model/effort. It bypasses
+    // the sticky per-runtime tuning entirely — selecting one neither reads nor
+    // writes it, so the preset always means the same thing.
+    const presetEntry = entries.find(
+      (entry) => entry.kind === "preset" && entry.id === id,
+    );
+    if (presetEntry && presetEntry.kind === "preset") {
+      applySwitchTarget(runtimeSwitchTarget(presetEntry));
       return;
     }
     const b = BACKENDS.find((x) => x.id === id);
@@ -587,7 +663,27 @@ export function BackendPicker({
           <span className="truncate">{current.label}</span>
         </SelectTrigger>
         <SelectContent align="start">
-          {availableBackends.map((b) => {
+          {availableEntries.map((entry) => {
+            if (entry.kind === "preset") {
+              const { preset } = entry;
+              const PresetIcon =
+                BACKENDS.find((x) => x.id === preset.backend)?.icon ??
+                CetusIcon;
+              return (
+                <SelectItem
+                  key={entry.id}
+                  value={entry.id}
+                  className="text-xs *:[span]:last:w-full"
+                  data-testid={`runtime-option-${entry.id}`}
+                >
+                  <PresetIcon className="size-4" />
+                  <span className="truncate">{runtimePresetLabel(preset)}</span>
+                  <RuntimeShortcutHint entryId={entry.id} />
+                </SelectItem>
+              );
+            }
+            const b = BACKENDS.find((x) => x.id === entry.id);
+            if (!b) return null;
             const Icon = b.icon;
             const quota = quotaLabel(cliRateLimits[b.id]);
             return (
@@ -613,7 +709,7 @@ export function BackendPicker({
                     {quota.text}
                   </span>
                 )}
-                <RuntimeShortcutHint backend={b.id} />
+                <RuntimeShortcutHint entryId={b.id} />
               </SelectItem>
             );
           })}

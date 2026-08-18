@@ -4,7 +4,10 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Composer, type ComposerAttachment } from "@/components/chat/composer";
-import { useRuntimeShortcuts } from "@/components/chat/backend-picker";
+import {
+  useRuntimeShortcuts,
+  type RuntimeSwitchTarget,
+} from "@/components/chat/backend-picker";
 import { useTranslation } from "@/lib/i18n";
 import type { BackendId, ModelChoice } from "@/lib/types";
 
@@ -60,13 +63,12 @@ export function CreateTaskDialog({
   // token machinery; the Composer's BackendPicker applies each token once and
   // reports the choice back through onPendingBackendChange.
   const backendSwitchToken = useRef(0);
-  const [backendSwitch, setBackendSwitch] = useState<{
-    token: number;
-    backend: BackendId;
-  } | null>(null);
-  const requestBackendSwitch = useCallback((backend: BackendId) => {
+  const [backendSwitch, setBackendSwitch] = useState<
+    ({ token: number } & RuntimeSwitchTarget) | null
+  >(null);
+  const requestBackendSwitch = useCallback((target: RuntimeSwitchTarget) => {
     backendSwitchToken.current += 1;
-    setBackendSwitch({ token: backendSwitchToken.current, backend });
+    setBackendSwitch({ token: backendSwitchToken.current, ...target });
   }, []);
   useRuntimeShortcuts(requestBackendSwitch, open);
 

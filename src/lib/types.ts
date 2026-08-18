@@ -331,8 +331,22 @@ export interface CliAgentSettings {
   grokEnabled: boolean;
   kimiEnabled: boolean;
   dshEnabled: boolean;
-  /** Picker order. Unknown ids are discarded and newly-added runtimes append. */
-  runtimeOrder: BackendId[];
+  /** Picker order over runtime ids and preset ids, interleaved. Unknown ids
+   *  are discarded; missing runtimes and presets append. */
+  runtimeOrder: string[];
+  /** User-defined runtime presets: a runtime pinned to one model/effort
+   *  combination. Selecting a preset never mutates it. */
+  runtimePresets: RuntimePreset[];
+}
+
+/** One saved runtime + model/effort combination, shown alongside plain
+ *  runtimes in pickers. `id` is an opaque unique key referenced from
+ *  `runtimeOrder`. */
+export interface RuntimePreset {
+  id: string;
+  backend: BackendId;
+  model: string;
+  effort: string;
 }
 
 /** What a CLI backend actually runs when no override is set, resolved from

@@ -95,7 +95,9 @@ import {
 import { OPEN_RUNTIME_SETTINGS_EVENT } from "@/lib/runtime-settings";
 import {
   runtimeForShortcut,
+  runtimeSwitchTarget,
   useRuntimeSlots,
+  type RuntimeSwitchTarget,
 } from "@/components/chat/backend-picker";
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
 import { loadBackendChoice, saveBackendChoice } from "@/lib/backend-choice";
@@ -489,17 +491,17 @@ export default function Home() {
     setPendingCliModel(model);
     setPendingCliEffort(effort);
   }, []);
-  // ⌃1/⌃2/⌃3 runtime selection: the request rides a token down to the
+  // ⌃1…⌃9 runtime selection: the request rides a token down to the
   // BackendPicker, which holds it as pending composer state until send, using
-  // the same token pattern as focusToken/quoteRequest.
-  const [backendSwitch, setBackendSwitch] = useState<{
-    token: number;
-    backend: BackendId;
-  } | null>(null);
+  // the same token pattern as focusToken/quoteRequest. Preset slots carry
+  // their fixed model/effort along.
+  const [backendSwitch, setBackendSwitch] = useState<
+    ({ token: number } & RuntimeSwitchTarget) | null
+  >(null);
   const backendSwitchToken = useRef(0);
-  const requestBackendSwitch = useCallback((backend: BackendId) => {
+  const requestBackendSwitch = useCallback((target: RuntimeSwitchTarget) => {
     backendSwitchToken.current += 1;
-    setBackendSwitch({ token: backendSwitchToken.current, backend });
+    setBackendSwitch({ token: backendSwitchToken.current, ...target });
   }, []);
   useEffect(() => {
     setModelChoice(mergeStoredModelChoice);
@@ -1702,16 +1704,16 @@ export default function Home() {
         runtimeForShortcut(e, keyboardShortcuts, runtimeSlotsRef.current) !==
           undefined
       ) {
-        // ⌃1…⌃6 address runtimes by position, so the key set follows Settings ›
-        // Runtimes. An empty slot still swallows the key instead of falling
-        // through to whatever else is bound to it.
+        // ⌃1…⌃9 address runtimes and presets by position, so the key set
+        // follows Settings › Runtimes. An empty slot still swallows the key
+        // instead of falling through to whatever else is bound to it.
         e.preventDefault();
-        const target = runtimeForShortcut(
+        const entry = runtimeForShortcut(
           e,
           keyboardShortcuts,
           runtimeSlotsRef.current,
         );
-        if (target) requestBackendSwitch(target);
+        if (entry) requestBackendSwitch(runtimeSwitchTarget(entry));
       } else if (shortcut("switchChats")) {
         e.preventDefault();
         if (view === "chat") {

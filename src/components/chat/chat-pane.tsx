@@ -15,6 +15,7 @@ import {
   type VirtuosoProps,
 } from "react-virtuoso";
 import { MessageBubble } from "@/components/chat/message-bubble";
+import type { RuntimeSwitchTarget } from "@/components/chat/backend-picker";
 import { MessageListBoundary } from "@/components/chat/message-list-boundary";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
 import { clearHoverOwner } from "@/components/chat/hover-owner";
@@ -125,9 +126,9 @@ interface Props {
   pendingCliEffort?: string;
   onPendingTuningChange?: (model: string, effort: string) => void;
   /** Keyboard runtime-switch request (token-keyed), forwarded to the Composer. */
-  backendSwitch?: { token: number; backend: BackendId } | null;
+  backendSwitch?: ({ token: number } & RuntimeSwitchTarget) | null;
   /** Tab-to-cycle-runtime request, forwarded to the Composer. */
-  onRequestBackendSwitch?: (backend: BackendId) => void;
+  onRequestBackendSwitch?: (target: RuntimeSwitchTarget) => void;
   /** Nudge the reading column toward the sidebar on wide desktop layouts.
    *  The main shell enables this only while the right workspace dock is closed;
    *  embedded/detail chat surfaces keep true geometric centering. */

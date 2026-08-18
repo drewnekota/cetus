@@ -14,8 +14,11 @@ import {
   CliTuningMenu,
   nextBackend,
   RuntimeShortcutHint,
+  runtimePresetLabel,
+  runtimeSwitchTarget,
   useRuntimeCatalog,
   useRuntimeShortcuts,
+  type RuntimeSwitchTarget,
 } from "@/components/chat/backend-picker";
 import { useEnabledBackendIds } from "@/lib/runtime-settings";
 import {
@@ -186,8 +189,22 @@ export function QuickPanel() {
     setModelChoice(mergeStoredModelChoice);
   }, []);
 
+  const { entries } = useRuntimeCatalog();
   const onBackendChange = useCallback(
     (id: string) => {
+      // Preset rows apply their runtime plus fixed model/effort. They bypass
+      // the sticky per-runtime tuning entirely — neither read nor written —
+      // so a preset always means the same thing.
+      const presetEntry = entries.find(
+        (entry) => entry.kind === "preset" && entry.id === id,
+      );
+      if (presetEntry && presetEntry.kind === "preset") {
+        const { preset } = presetEntry;
+        setBackend(preset.backend);
+        setCliModel(preset.model);
+        setCliEffort(preset.effort);
+        return;
+      }
       const b = BACKENDS.find((x) => x.id === id);
       // Same runtime again (e.g. a repeated shortcut) is a no-op so it doesn't
       // reset the model/effort overrides.
@@ -204,7 +221,22 @@ export function QuickPanel() {
         cliEffort: tuning.effort,
       });
     },
-    [backend],
+    [backend, entries],
+  );
+
+  /** Keyboard slot switch: presets carry fixed tuning, runtimes reuse the
+   *  regular picker path. */
+  const onRuntimeSwitch = useCallback(
+    (target: RuntimeSwitchTarget) => {
+      if (target.model !== undefined || target.effort !== undefined) {
+        setBackend(target.backend);
+        setCliModel(target.model ?? "");
+        setCliEffort(target.effort ?? "");
+        return;
+      }
+      onBackendChange(target.backend);
+    },
+    [onBackendChange],
   );
 
   const onCliModelChange = useCallback(
@@ -242,11 +274,16 @@ export function QuickPanel() {
     [replyBackend, replyOpen],
   );
 
-  // ⌃1/⌃2/⌃3 (user-editable) switch the runtime, mirroring the main composer.
+  // ⌃1…⌃9 (user-editable) switch the runtime, mirroring the main composer.
   // This window only receives keys while the panel is up, and the two surfaces
-  // own separate runtime choices — the reply surface re-drafts on switch.
+  // own separate runtime choices — the reply surface re-drafts on switch (and
+  // has no tuning, so a preset slot there just selects its runtime).
+  const onReplyRuntimeSwitch = useCallback(
+    (target: RuntimeSwitchTarget) => onReplyBackendChange(target.backend),
+    [onReplyBackendChange],
+  );
   useRuntimeShortcuts(
-    surface === "reply" ? onReplyBackendChange : onBackendChange,
+    surface === "reply" ? onReplyRuntimeSwitch : onRuntimeSwitch,
   );
 
   const onWorkspaceChange = useCallback((dir: string) => {
@@ -745,7 +782,7 @@ export function QuickPanel() {
             pickingWorkspaceRef.current = active;
           }}
         />
-        <BackendSelect value={backend} onChange={onBackendChange} />
+        <BackendSelect value={backend} onChange={onBackendChange} includePresets />
         {backend === "pi" ? (
           <ModelPicker
             value={modelChoice}
@@ -948,18 +985,23 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-/** Compact coding-agent picker for the launcher's action strip: Cetus (the
- *  built-in harness), Claude Code, or Codex. */
+/** Compact coding-agent picker for the launcher's action strip. With
+ *  `includePresets` the user's runtime presets are interleaved in the list
+ *  (the reply surface has no tuning, so it leaves them out). */
 function BackendSelect({
   value,
   onChange,
+  includePresets,
 }: {
   value: BackendId;
   onChange: (id: string) => void;
+  includePresets?: boolean;
 }) {
-  const { orderedBackends, enabledBackendIds } = useRuntimeCatalog();
-  const availableBackends = orderedBackends.filter(
-    (backend) => enabledBackendIds.has(backend.id),
+  const { entries, enabledBackendIds } = useRuntimeCatalog();
+  const availableEntries = entries.filter((entry) =>
+    entry.kind === "backend"
+      ? enabledBackendIds.has(entry.id)
+      : includePresets && enabledBackendIds.has(entry.preset.backend),
   );
   const current = BACKENDS.find((b) => b.id === value) ?? BACKENDS[0];
   const TriggerIcon = current.icon;
@@ -974,7 +1016,26 @@ function BackendSelect({
         <span className="truncate">{current.label}</span>
       </SelectTrigger>
       <SelectContent align="start">
-        {availableBackends.map((b) => {
+        {availableEntries.map((entry) => {
+          if (entry.kind === "preset") {
+            const { preset } = entry;
+            const PresetIcon =
+              BACKENDS.find((x) => x.id === preset.backend)?.icon ??
+              BACKENDS[0].icon;
+            return (
+              <SelectItem
+                key={entry.id}
+                value={entry.id}
+                className="text-[13px] *:[span]:last:w-full"
+              >
+                <PresetIcon className="size-4" />
+                <span className="truncate">{runtimePresetLabel(preset)}</span>
+                <RuntimeShortcutHint entryId={entry.id} />
+              </SelectItem>
+            );
+          }
+          const b = BACKENDS.find((x) => x.id === entry.id);
+          if (!b) return null;
           const Icon = b.icon;
           return (
             <SelectItem
@@ -984,7 +1045,7 @@ function BackendSelect({
             >
               <Icon className="size-4" />
               <span className="truncate">{b.label}</span>
-              <RuntimeShortcutHint backend={b.id} />
+              <RuntimeShortcutHint entryId={b.id} />
             </SelectItem>
           );
         })}

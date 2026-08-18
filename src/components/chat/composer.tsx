@@ -14,7 +14,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
 import { ModelPicker } from "@/components/chat/model-picker";
-import { BackendPicker, nextBackend } from "@/components/chat/backend-picker";
+import {
+  BackendPicker,
+  nextBackend,
+  type RuntimeSwitchTarget,
+} from "@/components/chat/backend-picker";
 import { useEnabledBackendIds } from "@/lib/runtime-settings";
 import { useChatStore, useCliCommands } from "@/lib/chat-store";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
@@ -259,10 +263,10 @@ interface Props {
   onPendingTuningChange?: (model: string, effort: string) => void;
   /** Keyboard runtime-switch request (token-keyed), applied by the
    *  BackendPicker exactly once per token. */
-  backendSwitch?: { token: number; backend: BackendId } | null;
+  backendSwitch?: ({ token: number } & RuntimeSwitchTarget) | null;
   /** Request cycling to a specific runtime (Tab in the composer). Routes back
    *  through the parent's token machinery so BackendPicker applies it. */
-  onRequestBackendSwitch?: (backend: BackendId) => void;
+  onRequestBackendSwitch?: (target: RuntimeSwitchTarget) => void;
 }
 
 /** Claude Code built-in slash commands that work headless (verified against
@@ -1446,7 +1450,9 @@ export function Composer({
             onRequestBackendSwitch
           ) {
             e.preventDefault();
-            onRequestBackendSwitch(nextBackend(backend, enabledBackendIds));
+            onRequestBackendSwitch({
+              backend: nextBackend(backend, enabledBackendIds),
+            });
             return;
           }
           // Don't intercept Enter while an IME is composing — Chinese / Japanese

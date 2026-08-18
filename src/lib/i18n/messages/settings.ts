@@ -102,7 +102,7 @@ export const settings = {
     "general.description": "Language and app-level basics.",
     "runtimes.title": "Runtimes",
     "runtimes.description":
-      "Choose which coding agents appear in runtime pickers and arrange them in your preferred order. The order also sets their keyboard shortcuts: Cetus keeps the first, the rest follow from the second down.",
+      "Choose which coding agents appear in runtime pickers and arrange them in your preferred order. The order also sets the ⌃1…⌃9 keyboard shortcuts: whoever is on top gets the first key, presets included.",
     "runtimes.builtIn": "Always available",
     "runtimes.installed": "Installed",
     "runtimes.notInstalled": "Not installed",
@@ -111,6 +111,15 @@ export const settings = {
       "Keyboard shortcut for this position — reordering moves it",
     "runtimes.moveDown": "Move down",
     "runtimes.enabled": "Enable {runtime}",
+    "runtimes.preset": "Preset",
+    "runtimes.presets.title": "Presets",
+    "runtimes.presets.description":
+      "Pin a runtime to a fixed model and reasoning effort. Presets appear in runtime pickers alongside the runtimes above and never change what they launch.",
+    "runtimes.presets.add": "Add preset",
+    "runtimes.presets.delete": "Delete preset",
+    "runtimes.presets.runtime": "Runtime",
+    "runtimes.presets.model": "Model",
+    "runtimes.presets.reasoning": "Reasoning",
     "runtimes.behavior.title": "Runtime behavior",
     "runtimes.behavior.description":
       "Shared execution settings for external CLI and ACP runtimes.",
@@ -655,7 +664,7 @@ export const settings = {
     "general.description": "语言和应用级基础设置。",
     "runtimes.title": "Runtime",
     "runtimes.description":
-      "选择哪些编程智能体显示在 Runtime 选择器中，并按你的偏好调整顺序。顺序同时决定快捷键：Cetus 固定占第一个，其余从第二个开始依次排下来。",
+      "选择哪些编程智能体显示在 Runtime 选择器中，并按你的偏好调整顺序。顺序同时决定 ⌃1…⌃9 快捷键：谁排在上面谁拿到靠前的键位，preset 也参与排序。",
     "runtimes.builtIn": "始终可用",
     "runtimes.installed": "已安装",
     "runtimes.notInstalled": "未安装",

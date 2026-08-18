@@ -15,6 +15,7 @@ import {
   RuntimeShortcutHint,
   useRuntimeCatalog,
   useRuntimeShortcuts,
+  type RuntimeSwitchTarget,
 } from "@/components/chat/backend-picker";
 import {
   Select,
@@ -123,12 +124,14 @@ export function AutomationDialog({
     setCliEffort("");
   }, [automation, backend, enabledBackendIds]);
 
-  // ⌃1/⌃2/⌃3 (user-editable) switch the automation's runtime while the dialog
-  // is open — page.tsx's global handler is modal-guarded here.
+  // ⌃1…⌃9 (user-editable) switch the automation's runtime while the dialog
+  // is open — page.tsx's global handler is modal-guarded here. Automations
+  // deliberately don't support presets; a preset slot just selects its
+  // runtime.
   const switchRuntime = useCallback(
-    (b: BackendId) => {
-      if (b === backend) return;
-      setBackend(b);
+    (target: RuntimeSwitchTarget) => {
+      if (target.backend === backend) return;
+      setBackend(target.backend);
       // Model/effort overrides belong to one backend's catalog.
       setCliModel("");
       setCliEffort("");
@@ -484,7 +487,7 @@ export function AutomationDialog({
                     >
                       <Icon className="size-4" />
                       <span className="truncate">{b.label}</span>
-                      <RuntimeShortcutHint backend={b.id} />
+                      <RuntimeShortcutHint entryId={b.id} />
                     </SelectItem>
                   );
                 })}

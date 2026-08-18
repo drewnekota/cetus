@@ -43,6 +43,11 @@ const PROSE_CLASS = cn(
   "[&_.katex-display]:scrollbar-slim [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden",
   // Tighten default prose spacing so chat bubbles don't blow up.
   "prose-p:my-2 prose-pre:my-2 prose-ul:my-2 prose-ol:my-2 prose-headings:my-3",
+  // The prose-p/heading utilities above override the plugin's built-in
+  // first/last-child margin trimming, leaving stray outer margins that stack
+  // on the parent's gap (e.g. extra space under the folded activity line).
+  // Re-trim so the bubble's spacing is owned by the layout gap alone.
+  "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
   "prose-code:rounded prose-code:bg-secondary prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.85em] prose-code:before:content-none prose-code:after:content-none",
   "prose-pre:bg-secondary prose-pre:text-foreground",
   // Tables: prose-sm shrinks th/td to ~12px and prose-code drops another 15%.
