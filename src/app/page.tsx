@@ -92,7 +92,11 @@ import {
   type UpdateDownloadProgress,
   backendSupportsSteer,
 } from "@/lib/types";
-import { OPEN_RUNTIME_SETTINGS_EVENT } from "@/lib/runtime-settings";
+import {
+  OPEN_RUNTIME_SETTINGS_EVENT,
+  matchRuntimePreset,
+  useCliAgentSettings,
+} from "@/lib/runtime-settings";
 import {
   runtimeForShortcut,
   runtimeSwitchTarget,
@@ -513,19 +517,40 @@ export default function Home() {
     }
   }, []);
   // Persist the new-chat runtime choice on every change past hydration (the
-  // same skip-first-run dance as modelChoice below).
+  // same skip-first-run dance as modelChoice below). A selection that matches
+  // a preset is saved as that preset, so it never overwrites the runtime's
+  // own sticky tuning — the plain runtime row keeps its separate choice.
+  const cliAgentSettings = useCliAgentSettings();
   const backendChoiceHydrated = useRef(false);
   useEffect(() => {
     if (!backendChoiceHydrated.current) {
       backendChoiceHydrated.current = true;
       return;
     }
-    saveBackendChoice({
-      backend: pendingBackend,
-      cliModel: pendingCliModel,
-      cliEffort: pendingCliEffort,
-    });
-  }, [pendingBackend, pendingCliModel, pendingCliEffort]);
+    // The settings arriving async also re-run this effect; skip no-op saves
+    // so re-hydrated values aren't misclassified before the preset list loads.
+    const stored = loadBackendChoice();
+    if (
+      stored?.backend === pendingBackend &&
+      stored.cliModel === pendingCliModel &&
+      stored.cliEffort === pendingCliEffort
+    ) {
+      return;
+    }
+    saveBackendChoice(
+      {
+        backend: pendingBackend,
+        cliModel: pendingCliModel,
+        cliEffort: pendingCliEffort,
+      },
+      matchRuntimePreset(
+        cliAgentSettings.runtimePresets,
+        pendingBackend,
+        pendingCliModel,
+        pendingCliEffort,
+      )?.id,
+    );
+  }, [pendingBackend, pendingCliModel, pendingCliEffort, cliAgentSettings]);
   // Persist the active model/reasoning choice on *every* change — manual picker,
   // launcher adopt, and conversation switch alike — so the quick launcher (which
   // reads "cetus:lastModelChoice") always mirrors what the main composer shows.

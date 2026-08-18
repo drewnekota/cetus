@@ -184,6 +184,23 @@ export function runtimeSlotDisplay(
   return !display || display === "Unassigned" ? null : display;
 }
 
+/** The preset whose runtime and fixed tuning exactly match the given
+ *  selection, if any — the same value-match the picker uses to place its
+ *  checkmark on the preset row instead of the plain runtime. */
+export function matchRuntimePreset(
+  presets: readonly RuntimePreset[],
+  backend: BackendId,
+  model: string,
+  effort: string,
+): RuntimePreset | undefined {
+  return presets.find(
+    (preset) =>
+      preset.backend === backend &&
+      preset.model === model &&
+      preset.effort === effort,
+  );
+}
+
 export function openRuntimeSettings() {
   try {
     window.localStorage.setItem("cetus:settingsSection", "runtimes");

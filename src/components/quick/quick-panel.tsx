@@ -203,6 +203,14 @@ export function QuickPanel() {
         setBackend(preset.backend);
         setCliModel(preset.model);
         setCliEffort(preset.effort);
+        saveBackendChoice(
+          {
+            backend: preset.backend,
+            cliModel: preset.model,
+            cliEffort: preset.effort,
+          },
+          preset.id,
+        );
         return;
       }
       const b = BACKENDS.find((x) => x.id === id);
@@ -227,9 +235,24 @@ export function QuickPanel() {
   const onRuntimeSwitch = useCallback(
     (target: RuntimeSwitchTarget) => {
       if (target.model !== undefined || target.effort !== undefined) {
+        const preset = entries.find(
+          (entry) =>
+            entry.kind === "preset" &&
+            entry.preset.backend === target.backend &&
+            entry.preset.model === (target.model ?? "") &&
+            entry.preset.effort === (target.effort ?? ""),
+        );
         setBackend(target.backend);
         setCliModel(target.model ?? "");
         setCliEffort(target.effort ?? "");
+        saveBackendChoice(
+          {
+            backend: target.backend,
+            cliModel: target.model ?? "",
+            cliEffort: target.effort ?? "",
+          },
+          preset && preset.kind === "preset" ? preset.preset.id : undefined,
+        );
         return;
       }
       // Same runtime again (e.g. a repeated shortcut) is a no-op so it doesn't
@@ -237,7 +260,7 @@ export function QuickPanel() {
       if (target.backend === backend) return;
       onBackendChange(target.backend);
     },
-    [backend, onBackendChange],
+    [backend, entries, onBackendChange],
   );
 
   const onCliModelChange = useCallback(

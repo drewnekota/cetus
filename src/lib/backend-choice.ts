@@ -26,6 +26,10 @@ interface CliTuningChoice {
 interface StoredBackendChoice extends Partial<BackendChoice> {
   /** Model/effort are remembered independently for each vendor runtime. */
   cliChoices?: Partial<Record<CliBackendId, CliTuningChoice>>;
+  /** Set when the selection is a preset row: the top-level cliModel/cliEffort
+   * are the preset's fixed tuning, and the runtime's own sticky tuning in
+   * `cliChoices` is deliberately left untouched. */
+  presetId?: string;
 }
 
 export interface BackendChoice {
@@ -62,7 +66,9 @@ export function loadCliTuningChoice(backend: CliBackendId): CliTuningChoice {
   if (perBackend) return perBackend;
 
   // Backward compatibility with the original single-runtime storage shape.
-  if (stored?.backend === backend) {
+  // Not when a preset is selected: the top-level values are the preset's
+  // fixed tuning, not this runtime's own choice.
+  if (stored?.backend === backend && !stored.presetId) {
     return {
       model: typeof stored.cliModel === "string" ? stored.cliModel : "",
       effort: typeof stored.cliEffort === "string" ? stored.cliEffort : "",
@@ -75,6 +81,15 @@ export function loadCliTuningChoice(backend: CliBackendId): CliTuningChoice {
 export function loadBackendChoice(): BackendChoice | null {
   const v = readStoredChoice();
   if (!v?.backend || !BACKEND_IDS.includes(v.backend)) return null;
+  // A preset selection restores its fixed tuning from the top-level fields;
+  // the runtime's own sticky tuning in cliChoices is not what was selected.
+  if (v.presetId && v.backend !== "pi") {
+    return {
+      backend: v.backend,
+      cliModel: typeof v.cliModel === "string" ? v.cliModel : "",
+      cliEffort: typeof v.cliEffort === "string" ? v.cliEffort : "",
+    };
+  }
   const tuning =
     v.backend === "pi"
       ? { model: "", effort: "" }
@@ -82,15 +97,21 @@ export function loadBackendChoice(): BackendChoice | null {
   return { backend: v.backend, cliModel: tuning.model, cliEffort: tuning.effort };
 }
 
-export function saveBackendChoice(choice: BackendChoice) {
+/** Persist the new-chat selection. Pass `presetId` when the selection is a
+ * preset row: the choice is stored as that preset, and the runtime's own
+ * sticky tuning is left alone — a preset always means the same thing and
+ * never leaks into the plain runtime row. */
+export function saveBackendChoice(choice: BackendChoice, presetId?: string) {
   try {
     const previous = readStoredChoice();
     const cliChoices = { ...previous?.cliChoices };
     // Carry the legacy runtime's value forward the first time the v2 shape is
-    // written, even when this save is switching to the other runtime.
+    // written, even when this save is switching to the other runtime. Skip
+    // preset selections: their top-level tuning isn't the runtime's own.
     if (
       previous?.backend &&
       previous.backend !== "pi" &&
+      !previous.presetId &&
       !cliChoices[previous.backend]
     ) {
       cliChoices[previous.backend] = {
@@ -98,28 +119,29 @@ export function saveBackendChoice(choice: BackendChoice) {
         effort: typeof previous.cliEffort === "string" ? previous.cliEffort : "",
       };
     }
-    if (choice.backend !== "pi") {
+    if (choice.backend !== "pi" && !presetId) {
       cliChoices[choice.backend] = {
         model: choice.cliModel,
         effort: choice.cliEffort,
       };
     }
-    localStorage.setItem(KEY, JSON.stringify({ ...choice, cliChoices }));
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        ...choice,
+        ...(presetId ? { presetId } : {}),
+        cliChoices,
+      }),
+    );
   } catch {}
 }
 
-/** Update one runtime's remembered tuning without changing which runtime is
- * selected for the next new conversation. */
+/** Update one runtime's remembered tuning without changing which runtime (or
+ * preset) is selected for the next new conversation. */
 export function saveCliTuningChoice(
   backend: CliBackendId,
   tuning: CliTuningChoice,
 ) {
-  const current = loadBackendChoice();
-  saveBackendChoice({
-    backend: current?.backend ?? "pi",
-    cliModel: current?.cliModel ?? "",
-    cliEffort: current?.cliEffort ?? "",
-  });
   try {
     const stored = readStoredChoice();
     localStorage.setItem(KEY, JSON.stringify({
