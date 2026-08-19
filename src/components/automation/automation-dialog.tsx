@@ -125,11 +125,16 @@ export function AutomationDialog({
   }, [automation, backend, enabledBackendIds]);
 
   // ⌃1…⌃9 (user-editable) switch the automation's runtime while the dialog
-  // is open — page.tsx's global handler is modal-guarded here. Automations
-  // deliberately don't support presets; a preset slot just selects its
-  // runtime.
+  // is open — page.tsx's global handler is modal-guarded here. A preset slot
+  // applies its fixed model/effort, same as in the composer pickers.
   const switchRuntime = useCallback(
     (target: RuntimeSwitchTarget) => {
+      if (target.model !== undefined || target.effort !== undefined) {
+        setBackend(target.backend);
+        setCliModel(target.model ?? "");
+        setCliEffort(target.effort ?? "");
+        return;
+      }
       if (target.backend === backend) return;
       setBackend(target.backend);
       // Model/effort overrides belong to one backend's catalog.

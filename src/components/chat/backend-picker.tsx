@@ -124,6 +124,38 @@ export function runtimeSwitchTarget(entry: RuntimeEntry): RuntimeSwitchTarget {
       };
 }
 
+/** The next row in the picker order — runtimes and presets alike — wrapping
+ *  around, so Tab walks exactly the rows the dropdown (and ⌃1…⌃9) shows.
+ *  The current row is the preset whose fixed tuning matches the shown
+ *  selection, else the plain runtime row; a preset target carries its fixed
+ *  model/effort, a runtime target keeps the runtime's own sticky tuning. */
+export function nextRuntimeTarget(
+  entries: readonly RuntimeEntry[],
+  enabled: ReadonlySet<BackendId>,
+  current: { backend: BackendId; model?: string; effort?: string },
+): RuntimeSwitchTarget {
+  const rows = entries.filter((entry) =>
+    entry.kind === "backend"
+      ? enabled.has(entry.id)
+      : enabled.has(entry.preset.backend),
+  );
+  if (rows.length === 0) return { backend: current.backend };
+  const presetIdx = rows.findIndex(
+    (entry) =>
+      entry.kind === "preset" &&
+      entry.preset.backend === current.backend &&
+      entry.preset.model === (current.model ?? "") &&
+      entry.preset.effort === (current.effort ?? ""),
+  );
+  const idx =
+    presetIdx >= 0
+      ? presetIdx
+      : rows.findIndex(
+          (entry) => entry.kind === "backend" && entry.id === current.backend,
+        );
+  return runtimeSwitchTarget(rows[(idx + 1 + rows.length) % rows.length]);
+}
+
 /** Live view of [`runtimeSlots`] — what ⌃1…⌃9 currently address. */
 export function useRuntimeSlots(): RuntimeEntry[] {
   const { settings } = useRuntimePreferences();
@@ -578,7 +610,20 @@ export function BackendPicker({
     }
     const shownNow = conversationId ? backend : (pendingValue ?? "pi");
     // Same runtime again is a no-op — don't reset the model/effort overrides.
-    if (backendSwitch.backend === shownNow) return;
+    // Unless the current selection sits on a preset row: switching from a
+    // preset to its plain runtime row must land there (sticky tuning) instead
+    // of silently keeping the preset's fixed tuning.
+    const tuningNow = conversationId
+      ? { model: cliModel, effort: cliEffort }
+      : { model: pendingModel ?? "", effort: pendingEffort ?? "" };
+    const onPresetRow = entries.some(
+      (entry) =>
+        entry.kind === "preset" &&
+        entry.preset.backend === shownNow &&
+        entry.preset.model === tuningNow.model &&
+        entry.preset.effort === tuningNow.effort,
+    );
+    if (backendSwitch.backend === shownNow && !onPresetRow) return;
     select(backendSwitch.backend);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backendSwitch]);

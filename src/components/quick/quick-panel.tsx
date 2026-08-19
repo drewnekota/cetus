@@ -13,6 +13,7 @@ import {
   backendSupportsTuning,
   CliTuningMenu,
   nextBackend,
+  nextRuntimeTarget,
   RuntimeShortcutHint,
   runtimePresetLabel,
   runtimeSwitchTarget,
@@ -256,11 +257,20 @@ export function QuickPanel() {
         return;
       }
       // Same runtime again (e.g. a repeated shortcut) is a no-op so it doesn't
-      // reset the model/effort overrides.
-      if (target.backend === backend) return;
+      // reset the model/effort overrides — unless the current selection sits
+      // on a preset row: switching from a preset to its plain runtime row must
+      // land there (sticky tuning) instead of keeping the preset's tuning.
+      const onPresetRow = entries.some(
+        (entry) =>
+          entry.kind === "preset" &&
+          entry.preset.backend === backend &&
+          entry.preset.model === cliModel &&
+          entry.preset.effort === cliEffort,
+      );
+      if (target.backend === backend && !onPresetRow) return;
       onBackendChange(target.backend);
     },
-    [backend, entries, onBackendChange],
+    [backend, cliModel, cliEffort, entries, onBackendChange],
   );
 
   const onCliModelChange = useCallback(
@@ -629,12 +639,18 @@ export function QuickPanel() {
       api.quickDismiss().catch(() => {});
       return;
     }
-    // Tab cycles the runtime (Cetus → Claude Code → Codex), matching the main
-    // composer and the task dialog. Bare Tab only — a modifier keeps its
-    // default meaning rather than being repurposed here.
+    // Tab cycles the runtime rows — runtimes and presets in the picker order —
+    // matching the main composer and the task dialog. Bare Tab only — a
+    // modifier keeps its default meaning rather than being repurposed here.
     if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
-      onBackendChange(nextBackend(backend, enabledBackendIds));
+      onRuntimeSwitch(
+        nextRuntimeTarget(entries, enabledBackendIds, {
+          backend,
+          model: cliModel,
+          effort: cliEffort,
+        }),
+      );
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {

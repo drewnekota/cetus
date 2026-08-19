@@ -724,6 +724,16 @@ pub async fn clear_interrupted(state: State<'_, AppState>, id: String) -> CmdRes
     state.store.clear_interrupted(&id).map_err(err)
 }
 
+/// Claim the one-shot auto-resume for an interrupted conversation (see
+/// `Store::claim_auto_resume`). The frontend's boot sweep calls this per
+/// interrupted row; `true` means "go ahead and send the continuation",
+/// `false` means this interruption already used its automatic retry and the
+/// manual Resume banner stays.
+#[tauri::command]
+pub async fn claim_auto_resume(state: State<'_, AppState>, id: String) -> CmdResult<bool> {
+    state.store.claim_auto_resume(&id).map_err(err)
+}
+
 #[tauri::command]
 pub async fn archive_conversation(
     state: State<'_, AppState>,

@@ -381,9 +381,12 @@ function CompactionBar({ reason }: { reason: string | null }) {
 
 /** Offer to pick an interrupted turn back up. Shown when the conversation's
  *  persisted run_state is "interrupted" — its last turn died mid-run (app
- *  quit, update restart, or crash) instead of settling. Resume continues the
- *  original task via the conversation's resumed session; dismiss just clears
- *  the marker. */
+ *  quit, update restart, or crash) instead of settling. The boot sweep
+ *  normally auto-resumes an interrupted run once, so reaching this banner
+ *  means that automatic retry was already spent (the resumed run got cut
+ *  down again) — the user decides whether to try once more. Resume continues
+ *  the original task via the conversation's resumed session; dismiss just
+ *  clears the marker. */
 function InterruptedBar({
   onResume,
   onDismiss,

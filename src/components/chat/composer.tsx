@@ -16,10 +16,10 @@ import { Button } from "@/components/ui/button";
 import { ModelPicker } from "@/components/chat/model-picker";
 import {
   BackendPicker,
-  nextBackend,
+  nextRuntimeTarget,
+  useRuntimeCatalog,
   type RuntimeSwitchTarget,
 } from "@/components/chat/backend-picker";
-import { useEnabledBackendIds } from "@/lib/runtime-settings";
 import { useChatStore, useCliCommands } from "@/lib/chat-store";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { SlashMenu, type SlashItem } from "@/components/chat/slash-menu";
@@ -470,7 +470,7 @@ export function Composer({
   // model picker) hide when a CLI backend serves this conversation — the CLIs
   // run their own default models, so the picker would be a no-op there.
   const [backend, setBackend] = useState<BackendId>("pi");
-  const enabledBackendIds = useEnabledBackendIds();
+  const { entries: runtimeEntries, enabledBackendIds } = useRuntimeCatalog();
   // Existing-conversation runtime is loaded asynchronously. Until it arrives,
   // omit runtime intent from a very fast send so the persisted backend remains
   // authoritative instead of accidentally treating the initial `pi` state as
@@ -1435,11 +1435,12 @@ export function Composer({
               return;
             }
           }
-          // Tab cycles the runtime (Cetus → Claude Code → Codex), matching the
-          // quick launcher and the task dialog. The slash menu above already
-          // consumed Tab when open, so here it's free to repurpose. Only a bare
-          // Tab, though — Ctrl/Cmd+Tab must fall through to the window handler
-          // (Ctrl+Tab = switch to previous view) instead of being swallowed here.
+          // Tab cycles the runtime rows — runtimes and presets in the picker
+          // order — matching the quick launcher and the task dialog. The slash
+          // menu above already consumed Tab when open, so here it's free to
+          // repurpose. Only a bare Tab, though — Ctrl/Cmd+Tab must fall through
+          // to the window handler (Ctrl+Tab = switch to previous view) instead
+          // of being swallowed here.
           if (
             e.key === "Tab" &&
             !e.shiftKey &&
@@ -1450,9 +1451,13 @@ export function Composer({
             onRequestBackendSwitch
           ) {
             e.preventDefault();
-            onRequestBackendSwitch({
-              backend: nextBackend(backend, enabledBackendIds),
-            });
+            onRequestBackendSwitch(
+              nextRuntimeTarget(runtimeEntries, enabledBackendIds, {
+                backend,
+                model: conversationId ? cliTuning.model : pendingCliModel,
+                effort: conversationId ? cliTuning.effort : pendingCliEffort,
+              }),
+            );
             return;
           }
           // Don't intercept Enter while an IME is composing — Chinese / Japanese

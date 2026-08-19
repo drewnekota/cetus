@@ -384,6 +384,13 @@ interface WorkspaceDockState {
 type WorkspaceDocksState = Record<WorkspaceLayout, WorkspaceDockState>;
 type WorkspaceDocksByChatState = Record<string, WorkspaceDocksState>;
 
+/** Continuation sent to pick an interrupted run back up (auto-resume sweep
+ *  and the banner's Resume button). Deliberately not a bare "continue": the
+ *  cut-down turn may have already produced side effects (files written,
+ *  messages sent), so the agent is told to check before redoing work. */
+const INTERRUPTED_RESUME_PROMPT =
+  "The previous run was interrupted by an app restart. Review the conversation and the current workspace state, then continue the original task from where it left off. Don't redo work that has already completed.";
+
 const NEW_CHAT_WORKSPACE_KEY = "__new_chat__";
 
 function createInitialWorkspaceDocks(): WorkspaceDocksState {
@@ -1482,6 +1489,34 @@ export default function Home() {
     setLoadingChatId(null);
     setActiveId(null);
   }, [activeId, conversations, conversationsLoaded]);
+
+  // Auto-resume sweep: once the authoritative list is in, every conversation
+  // whose last run was cut down mid-turn (quit / update restart / crash — the
+  // boot sweep marked it "interrupted") picks itself back up. The claim is a
+  // one-shot per interruption, persisted on the row: a run that gets cut down
+  // again before settling loses the claim and falls back to the manual Resume
+  // banner, so a run that crashes the app can't restart itself forever.
+  const autoResumeSweptRef = useRef(false);
+  useEffect(() => {
+    if (!conversationsLoaded || autoResumeSweptRef.current) return;
+    autoResumeSweptRef.current = true;
+    for (const c of conversationsRef.current) {
+      if (c.runState !== "interrupted") continue;
+      const id = c.id;
+      api
+        .claimAutoResume(id)
+        .then((claimed) => {
+          if (!claimed) return;
+          setLocalRunState(id, "running");
+          const store = chatStore.getState();
+          store.ensure(id);
+          store.userSent(id, INTERRUPTED_RESUME_PROMPT);
+          return api.sendPrompt(id, INTERRUPTED_RESUME_PROMPT);
+        })
+        .catch(console.error);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationsLoaded]);
 
   const refreshAutomations = useCallback(async () => {
     const list = await api.listAutomations();
@@ -2636,10 +2671,7 @@ export default function Home() {
   function onResumeInterrupted() {
     if (!activeId) return;
     setLocalRunState(activeId, "running");
-    onSend(
-      "The previous run was interrupted by an app restart. Review the conversation and the current workspace state, then continue the original task from where it left off. Don't redo work that has already completed.",
-      [],
-    ).catch(console.error);
+    onSend(INTERRUPTED_RESUME_PROMPT, []).catch(console.error);
   }
 
   /** Dismiss the interrupted-run banner without resuming. */

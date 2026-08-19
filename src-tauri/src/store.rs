@@ -426,6 +426,17 @@ impl Store {
             "run_state",
             "TEXT NOT NULL DEFAULT 'idle'",
         )?;
+        // One-shot auto-resume budget for interrupted runs: 1 = the current
+        // interruption was already auto-resumed once, so a repeat interruption
+        // falls back to the manual Resume banner instead of looping (a run
+        // that crashes the app must not restart itself forever). Cleared when
+        // a turn settles (idle/aborted) or the banner is dismissed. Additive.
+        ensure_column(
+            &conn,
+            "conversations",
+            "auto_resumed",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         // Coding-agent backend for automations (pi | claude-code | codex) and
         // the CLI model override their fired conversations inherit. Additive.
         ensure_column(
@@ -706,11 +717,31 @@ impl Store {
     /// sidebar and reset the auto-archive idle clock.
     pub fn set_run_state(&self, id: &str, state: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
+        // A settled turn (idle/aborted) refunds the one-shot auto-resume
+        // budget: the next interruption is a fresh incident, not a repeat of
+        // the one that already got its automatic retry.
         conn.execute(
-            "UPDATE conversations SET run_state = ?1 WHERE id = ?2",
+            "UPDATE conversations SET run_state = ?1,
+                    auto_resumed = CASE WHEN ?1 IN ('idle', 'aborted') THEN 0 ELSE auto_resumed END
+             WHERE id = ?2",
             params![state, id],
         )?;
         Ok(())
+    }
+
+    /// Claim the one-shot auto-resume for an interrupted conversation.
+    /// Atomic: only the caller that flips `auto_resumed` 0 → 1 while the row
+    /// is still "interrupted" gets `true`; a conversation whose auto-resume
+    /// already ran (and got interrupted again before settling) gets `false`
+    /// and falls back to the manual Resume banner.
+    pub fn claim_auto_resume(&self, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE conversations SET auto_resumed = 1
+             WHERE id = ?1 AND run_state = 'interrupted' AND auto_resumed = 0",
+            params![id],
+        )?;
+        Ok(n > 0)
     }
 
     /// Demote every "running" row to "interrupted". Called on app exit (the
@@ -732,7 +763,7 @@ impl Store {
     pub fn clear_interrupted(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE conversations SET run_state = 'idle' WHERE id = ?1 AND run_state = 'interrupted'",
+            "UPDATE conversations SET run_state = 'idle', auto_resumed = 0 WHERE id = ?1 AND run_state = 'interrupted'",
             params![id],
         )?;
         Ok(())
@@ -2080,6 +2111,64 @@ mod tests {
         store.set_run_state("c1", "aborted").unwrap();
         store.clear_interrupted("c1").unwrap();
         assert_eq!(store.get("c1").unwrap().unwrap().run_state, "aborted");
+
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn auto_resume_claim_is_one_shot_per_interruption() {
+        let (store, path) = temp_store();
+        let conv = Conversation {
+            id: "c1".into(),
+            title: String::new(),
+            session_file: String::new(),
+            workspace_dir: "/tmp".into(),
+            model: Default::default(),
+            created_at: 1,
+            updated_at: 1,
+            archived_at: None,
+            unread_at: None,
+            source_automation_id: None,
+            parallel_group_id: None,
+            solution_index: None,
+            review_state: "none".into(),
+            backend: "claude-code".into(),
+            cli_model: String::new(),
+            cli_effort: String::new(),
+            run_state: "idle".to_string(),
+        };
+        store.insert(&conv).unwrap();
+
+        // Nothing to claim while the row isn't interrupted.
+        assert!(!store.claim_auto_resume("c1").unwrap());
+
+        // First interruption: the claim succeeds exactly once.
+        store.set_run_state("c1", "running").unwrap();
+        store.mark_running_interrupted().unwrap();
+        assert!(store.claim_auto_resume("c1").unwrap());
+        assert!(!store.claim_auto_resume("c1").unwrap());
+
+        // The resumed run gets cut down again before settling → no second
+        // automatic retry (banner territory).
+        store.set_run_state("c1", "running").unwrap();
+        store.mark_running_interrupted().unwrap();
+        assert!(!store.claim_auto_resume("c1").unwrap());
+
+        // A settled turn (idle) refunds the budget for the next incident…
+        store.set_run_state("c1", "running").unwrap();
+        store.set_run_state("c1", "idle").unwrap();
+        store.set_run_state("c1", "running").unwrap();
+        store.mark_running_interrupted().unwrap();
+        assert!(store.claim_auto_resume("c1").unwrap());
+
+        // …and so does dismissing the banner.
+        store.set_run_state("c1", "running").unwrap();
+        store.mark_running_interrupted().unwrap();
+        store.clear_interrupted("c1").unwrap();
+        store.set_run_state("c1", "running").unwrap();
+        store.mark_running_interrupted().unwrap();
+        assert!(store.claim_auto_resume("c1").unwrap());
 
         drop(store);
         let _ = std::fs::remove_file(&path);

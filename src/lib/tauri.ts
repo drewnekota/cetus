@@ -278,6 +278,10 @@ export const api = {
   abort: (id: string) => invoke<void>("abort", { id }),
   /** Dismiss a conversation's interrupted-run banner without resuming. */
   clearInterrupted: (id: string) => invoke<void>("clear_interrupted", { id }),
+  /** Claim the one-shot auto-resume for an interrupted conversation. True →
+   *  send the continuation; false → this interruption already used its
+   *  automatic retry, keep the manual Resume banner. */
+  claimAutoResume: (id: string) => invoke<boolean>("claim_auto_resume", { id }),
   /** Run a one-shot shell command locally (the composer's `!` bash mode) in
    *  `cwd` (defaults to the workspace). Bypasses the agent; the result is
    *  rendered inline in the chat. Rejects only on spawn failure — a non-zero
