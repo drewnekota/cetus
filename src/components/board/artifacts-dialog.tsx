@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ArtifactView } from "@/components/chat/artifact-view";
+import { ArtifactNavProvider, ArtifactView } from "@/components/chat/artifact-view";
 import { useTranslation } from "@/lib/i18n";
 import { useChatStore } from "@/lib/chat-store";
 import { artifactsFromDetails, type ArtifactDetails } from "@/lib/artifact";
@@ -75,11 +75,13 @@ export function ArtifactsDialog({ convId, title, open, onOpenChange }: Props) {
               {t("artifacts.empty")}
             </p>
           ) : (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-              {artifacts.map((a, i) => (
-                <ArtifactView key={`${a.path}#${i}`} artifact={a} />
-              ))}
-            </div>
+            <ArtifactNavProvider convId={convId}>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                {artifacts.map((a, i) => (
+                  <ArtifactView key={`${a.path}#${i}`} artifact={a} />
+                ))}
+              </div>
+            </ArtifactNavProvider>
           )}
         </div>
       </DialogContent>

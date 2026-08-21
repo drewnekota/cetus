@@ -15,6 +15,7 @@ import {
   type VirtuosoProps,
 } from "react-virtuoso";
 import { MessageBubble } from "@/components/chat/message-bubble";
+import { ArtifactNavProvider } from "@/components/chat/artifact-view";
 import type { RuntimeSwitchTarget } from "@/components/chat/backend-picker";
 import { MessageListBoundary } from "@/components/chat/message-list-boundary";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
@@ -301,18 +302,20 @@ export function ChatPane({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <MessageListBoundary key={convId ?? "new"}>
-        <MessageList
-          convId={convId}
-          workspaceDir={workspaceDir}
-          isStreaming={isStreaming}
-          onRetry={onRetry}
-          onForkMessage={onForkMessage}
-          retrying={retrying}
-          onQuote={addQuote}
-          opticalCenter={opticalCenter}
-        />
-      </MessageListBoundary>
+      <ArtifactNavProvider convId={convId}>
+        <MessageListBoundary key={convId ?? "new"}>
+          <MessageList
+            convId={convId}
+            workspaceDir={workspaceDir}
+            isStreaming={isStreaming}
+            onRetry={onRetry}
+            onForkMessage={onForkMessage}
+            retrying={retrying}
+            onQuote={addQuote}
+            opticalCenter={opticalCenter}
+          />
+        </MessageListBoundary>
+      </ArtifactNavProvider>
       <div className="relative z-10 bg-background px-4 pb-3 pt-2">
         <div
           className={`mx-auto max-w-3xl space-y-2 ${

@@ -1,5 +1,13 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { useShallow } from "zustand/react/shallow";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -9,6 +17,8 @@ import "katex/dist/katex.min.css";
 import {
   FileText,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   ExternalLink,
@@ -29,9 +39,11 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   artifactUrl,
+  artifactsFromDetails,
   formatBytes,
   type ArtifactDetails,
 } from "@/lib/artifact";
+import { useChatStore } from "@/lib/chat-store";
 import { cn } from "@/lib/utils";
 import {
   markdownComponents,
@@ -47,6 +59,28 @@ interface Props {
   /** No longer affects layout — preserved so existing callers still compile. */
   variant?: "inline" | "compact";
 }
+
+/** Conversation whose artifacts the preview dialog can page through with the
+ *  arrow buttons / arrow keys. Wrap any surface that renders ArtifactViews
+ *  belonging to a single conversation (chat message list, board artifacts
+ *  grid). Without a provider the dialog shows only the clicked artifact. */
+const ArtifactNavContext = createContext<string | null>(null);
+
+export function ArtifactNavProvider({
+  convId,
+  children,
+}: {
+  convId: string | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <ArtifactNavContext.Provider value={convId}>
+      {children}
+    </ArtifactNavContext.Provider>
+  );
+}
+
+const NO_ARTIFACTS: ArtifactDetails[] = [];
 
 /** Artifact kinds that render meaningful content in the aspect-square
  *  preview tile. Everything else (archives, binaries, audio, …) would just
@@ -141,7 +175,6 @@ export function ArtifactView({ artifact }: Props) {
 
       <ArtifactPreviewDialog
         artifact={artifact}
-        url={url}
         open={open}
         onOpenChange={setOpen}
       />
@@ -391,17 +424,85 @@ function TextThumb({
 
 function ArtifactPreviewDialog({
   artifact,
-  url,
   open,
   onOpenChange,
 }: {
   artifact: ArtifactDetails;
-  url: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useTranslation("chat");
   const { t: tc } = useTranslation("common");
+
+  const convId = useContext(ArtifactNavContext);
+  // Every artifact this conversation has produced, deduped by path so each
+  // file appears once in the nav order. Collected only while the dialog is
+  // open, so the many closed cards in a long chat don't pay for the scan.
+  const sessionArtifacts = useChatStore(
+    useShallow((s) => {
+      if (!open || !convId) return NO_ARTIFACTS;
+      const chat = s.chats[convId];
+      if (!chat) return NO_ARTIFACTS;
+      const seen = new Set<string>();
+      const out: ArtifactDetails[] = [];
+      for (const m of chat.messages) {
+        for (const b of m.blocks) {
+          if (b.kind !== "tool_use" || !b.result) continue;
+          for (const a of artifactsFromDetails(b.result.details)) {
+            if (!seen.has(a.path)) {
+              seen.add(a.path);
+              out.push(a);
+            }
+          }
+        }
+      }
+      return out;
+    }),
+  );
+
+  // Which artifact the dialog currently shows; null = the one that was
+  // clicked. Reset on close so reopening always starts from the clicked card.
+  const [activePath, setActivePath] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) setActivePath(null);
+  }, [open]);
+
+  const currentPath = activePath ?? artifact.path;
+  const index = sessionArtifacts.findIndex((a) => a.path === currentPath);
+  const current = index >= 0 ? sessionArtifacts[index] : artifact;
+  const count = sessionArtifacts.length;
+  const canNavigate = count > 1 && index >= 0;
+  const url = artifactUrl(current.path);
+
+  const step = useCallback(
+    (delta: number) => {
+      if (!canNavigate) return;
+      const next = sessionArtifacts[(index + delta + count) % count];
+      setActivePath(next.path);
+    },
+    [canNavigate, sessionArtifacts, index, count],
+  );
+
+  // Arrow keys page between artifacts. Left alone when a media element or
+  // editable target owns the keys (native <video>/<audio> seek with arrows).
+  useEffect(() => {
+    if (!open || !canNavigate) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.isContentEditable ||
+          /^(INPUT|TEXTAREA|SELECT|VIDEO|AUDIO)$/.test(target.tagName))
+      )
+        return;
+      e.preventDefault();
+      step(e.key === "ArrowLeft" ? -1 : 1);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, canNavigate, step]);
 
   // HTML artifacts render in a sandboxed iframe whose origin differs from the
   // app webview, so the embedded page can't reach us directly. The injected
@@ -430,27 +531,28 @@ function ArtifactPreviewDialog({
         aria-describedby={undefined}
         className="flex h-[calc(100svh-4rem)] w-[calc(100svw-4rem)] max-w-none flex-col gap-0 overflow-hidden bg-background p-0 duration-200 data-[state=open]:slide-in-from-bottom-4 sm:max-w-none"
       >
-        <DialogTitle className="sr-only">{artifact.name}</DialogTitle>
+        <DialogTitle className="sr-only">{current.name}</DialogTitle>
         <header className="flex items-center justify-between gap-4 border-b border-border px-5 py-3">
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">
-              {artifact.caption ?? artifact.name}
+              {current.caption ?? current.name}
             </p>
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              {artifact.caption ? `${artifact.name} · ` : ""}
-              {labelFor(artifact, t)} · {formatBytes(artifact.sizeBytes)}
+              {current.caption ? `${current.name} · ` : ""}
+              {labelFor(current, t)} · {formatBytes(current.sizeBytes)}
+              {canNavigate ? ` · ${index + 1} / ${count}` : ""}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {COPYABLE_KINDS.has(artifact.artifactKind) && (
-              <CopySourceButton path={artifact.path} />
+            {COPYABLE_KINDS.has(current.artifactKind) && (
+              <CopySourceButton path={current.path} />
             )}
             <Button
               type="button"
               size="sm"
               variant="ghost"
               onClick={() =>
-                invoke("open_path", { path: artifact.path }).catch(console.error)
+                invoke("open_path", { path: current.path }).catch(console.error)
               }
               title={t("artifact.openExternal")}
             >
@@ -466,7 +568,7 @@ function ArtifactPreviewDialog({
               size="sm"
               variant="ghost"
               onClick={() =>
-                invoke("save_artifact_copy", { path: artifact.path }).catch(
+                invoke("save_artifact_copy", { path: current.path }).catch(
                   console.error,
                 )
               }
@@ -480,7 +582,7 @@ function ArtifactPreviewDialog({
               size="sm"
               variant="ghost"
               onClick={() =>
-                invoke("reveal_in_finder", { path: artifact.path }).catch(
+                invoke("reveal_in_finder", { path: current.path }).catch(
                   console.error,
                 )
               }
@@ -502,8 +604,34 @@ function ArtifactPreviewDialog({
             </DialogClose>
           </div>
         </header>
-        <div className="min-h-0 flex-1 overflow-auto bg-muted/10">
-          <FullPreview artifact={artifact} url={url} />
+        <div className="relative min-h-0 flex-1">
+          <div className="h-full w-full overflow-auto bg-muted/10">
+            {/* Keyed on path so scroll position / media playback reset when
+                paging to another artifact. */}
+            <FullPreview key={current.path} artifact={current} url={url} />
+          </div>
+          {canNavigate && (
+            <>
+              <button
+                type="button"
+                onClick={() => step(-1)}
+                title={t("artifact.prev")}
+                aria-label={t("artifact.prev")}
+                className="absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full border border-border bg-background/85 p-2 text-foreground/80 shadow-md backdrop-blur-sm transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronLeft className="size-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => step(1)}
+                title={t("artifact.next")}
+                aria-label={t("artifact.next")}
+                className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full border border-border bg-background/85 p-2 text-foreground/80 shadow-md backdrop-blur-sm transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronRight className="size-5" />
+              </button>
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>

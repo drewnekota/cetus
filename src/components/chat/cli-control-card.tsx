@@ -326,7 +326,7 @@ function CodexQuestionCard({
       <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-primary">
         <span className="flex items-center gap-1.5">
           <MessageCircleQuestion className="size-3.5" />
-          {t("cliControl.codexQuestionTitle")}
+          {t("cliControl.agentQuestionTitle")}
         </span>
         {questions.length > 1 && (
           <span className="text-[11px] tabular-nums text-muted-foreground">{step + 1} / {questions.length}</span>
