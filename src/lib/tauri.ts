@@ -212,6 +212,10 @@ export const api = {
    *  can skip chats whose finished run hasn't been read. */
   setConversationUnread: (id: string, unread: boolean) =>
     invoke<void>("set_conversation_unread", { id, unread }),
+  /** Pin/unpin a chat within its workspace group — the sidebar sorts pinned
+   *  chats first. Persisted so pins survive a restart. */
+  setConversationPinned: (id: string, pinned: boolean) =>
+    invoke<void>("set_conversation_pinned", { id, pinned }),
   /** Set the human-in-the-loop review state; returns the updated row. */
   setReviewState: (id: string, state: ReviewState) =>
     invoke<Conversation>("set_review_state", { id, stateValue: state }),

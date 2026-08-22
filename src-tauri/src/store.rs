@@ -34,6 +34,11 @@ pub struct Conversation {
     /// opened, and when it is archived by hand.
     #[serde(default)]
     pub unread_at: Option<i64>,
+    /// Project-scoped pin: when set, the sidebar sorts this chat to the top of
+    /// its workspace group (newest pin first). None = not pinned. Deliberately
+    /// not "activity" — pinning never touches `updated_at`.
+    #[serde(default)]
+    pub pinned_at: Option<i64>,
     /// Set when this conversation was minted by an automation firing — carries
     /// that automation's id so the UI can badge the run. None for user chats.
     pub source_automation_id: Option<String>,
@@ -374,6 +379,9 @@ impl Store {
         // Unread marker for finished runs. Additive; pre-existing rows start
         // NULL (= read), which is the right default for chats that predate it.
         ensure_column(&conn, "conversations", "unread_at", "INTEGER")?;
+        // Project-scoped pin marker: the sidebar sorts pinned chats first within
+        // their workspace group. Additive; pre-existing rows start unpinned.
+        ensure_column(&conn, "conversations", "pinned_at", "INTEGER")?;
         // Parallel-solutions grouping. Additive like source_automation_id so an
         // existing DB keeps its chats instead of being dropped by a schema bump.
         ensure_column(&conn, "conversations", "parallel_group_id", "TEXT")?;
@@ -494,8 +502,8 @@ impl Store {
     pub fn insert(&self, c: &Conversation) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO conversations (id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            "INSERT INTO conversations (id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state, pinned_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 c.id,
                 c.title,
@@ -515,6 +523,7 @@ impl Store {
                 c.cli_model,
                 c.cli_effort,
                 c.run_state,
+                c.pinned_at,
             ],
         )?;
         Ok(())
@@ -523,10 +532,10 @@ impl Store {
     pub fn list(&self, include_archived: bool) -> Result<Vec<Conversation>> {
         let conn = self.read_conn.lock().unwrap();
         let sql = if include_archived {
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state, pinned_at
              FROM conversations WHERE archived_at IS NOT NULL ORDER BY archived_at DESC"
         } else {
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state, pinned_at
              FROM conversations WHERE archived_at IS NULL ORDER BY updated_at DESC"
         };
         let mut stmt = conn.prepare(sql)?;
@@ -541,7 +550,7 @@ impl Store {
     pub fn get(&self, id: &str) -> Result<Option<Conversation>> {
         let conn = self.read_conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state
+            "SELECT id, title, session_file, workspace_dir, ds_model, reasoning, created_at, updated_at, archived_at, unread_at, source_automation_id, parallel_group_id, solution_index, review_state, backend, cli_model, cli_effort, run_state, pinned_at
              FROM conversations WHERE id = ?1",
         )?;
         let row = stmt
@@ -571,6 +580,18 @@ impl Store {
         conn.execute(
             "UPDATE conversations SET unread_at = ?1 WHERE id = ?2",
             params![unread_at, id],
+        )?;
+        Ok(())
+    }
+
+    /// Set/clear the project-scoped pin. Like `set_unread`, deliberately does
+    /// NOT touch `updated_at`: pinning isn't activity, and bumping it would
+    /// reorder the recency sort and reset the auto-archive idle clock.
+    pub fn set_pinned(&self, id: &str, pinned_at: Option<i64>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET pinned_at = ?1 WHERE id = ?2",
+            params![pinned_at, id],
         )?;
         Ok(())
     }
@@ -1925,6 +1946,7 @@ fn row_to_conversation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> 
         cli_model: r.get(15)?,
         cli_effort: r.get(16)?,
         run_state: r.get(17)?,
+        pinned_at: r.get(18)?,
     })
 }
 
@@ -2088,6 +2110,7 @@ mod tests {
             updated_at: 1,
             archived_at: None,
             unread_at: None,
+            pinned_at: None,
             source_automation_id: None,
             parallel_group_id: None,
             solution_index: None,
@@ -2129,6 +2152,7 @@ mod tests {
             updated_at: 1,
             archived_at: None,
             unread_at: None,
+            pinned_at: None,
             source_automation_id: None,
             parallel_group_id: None,
             solution_index: None,
@@ -2187,6 +2211,7 @@ mod tests {
             updated_at: 1,
             archived_at: None,
             unread_at: None,
+            pinned_at: None,
             source_automation_id: None,
             parallel_group_id: None,
             solution_index: None,
@@ -2257,6 +2282,7 @@ mod tests {
             updated_at: 1,
             archived_at: None,
             unread_at: None,
+            pinned_at: None,
             source_automation_id: None,
             parallel_group_id: None,
             solution_index: None,

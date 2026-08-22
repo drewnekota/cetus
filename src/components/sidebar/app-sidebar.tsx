@@ -26,6 +26,8 @@ import {
   Gauge,
   MessageSquare,
   MoreHorizontal,
+  Pin,
+  PinOff,
   PlusCircle,
   RefreshCw,
   Settings as SettingsIcon,
@@ -82,6 +84,10 @@ import { workspaceName } from "@/lib/paths";
 import { formatDateTimeMinute } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/conversation-search";
 import { useConversationAutoSort } from "@/lib/conversation-order";
+import {
+  visibleGroupItems,
+  WORKSPACE_VISIBLE_LIMIT,
+} from "@/lib/collapsed-workspaces";
 import { useChatStore } from "@/lib/chat-store";
 import { api } from "@/lib/tauri";
 import type {
@@ -118,6 +124,8 @@ interface Props {
   workspaceDirs: string[];
   hiddenWorkspaceDirs: string[];
   collapsedWorkspaceDirs: ReadonlySet<string>;
+  /** Workspaces whose chat list is expanded past WORKSPACE_VISIBLE_LIMIT. */
+  expandedWorkspaceDirs: ReadonlySet<string>;
   /** The backend's default workspace dir. Rendered as the standalone "Chat"
    *  section rather than a folder — users shouldn't perceive it as one. */
   defaultWorkspace: string;
@@ -134,7 +142,9 @@ interface Props {
   /** Persist a drag-reordered list of the non-default workspace folders. */
   onReorderWorkspaces: (dirs: string[]) => void;
   onToggleWorkspaceCollapsed: (dir: string) => void;
+  onToggleWorkspaceExpanded: (dir: string) => void;
   onArchive: (c: Conversation) => void;
+  onTogglePin: (c: Conversation) => void;
   onOpenSettings: () => void;
   /** Version of a downloaded-but-not-yet-applied update, or null. When set, a
    *  "Restart to update" button appears above Settings. */
@@ -150,6 +160,7 @@ export const AppSidebar = memo(function AppSidebar({
   workspaceDirs,
   hiddenWorkspaceDirs,
   collapsedWorkspaceDirs,
+  expandedWorkspaceDirs,
   defaultWorkspace,
   view,
   onViewChange,
@@ -163,7 +174,9 @@ export const AppSidebar = memo(function AppSidebar({
   onRemoveWorkspace,
   onReorderWorkspaces,
   onToggleWorkspaceCollapsed,
+  onToggleWorkspaceExpanded,
   onArchive,
+  onTogglePin,
   onOpenSettings,
   updateReadyVersion,
   onRestartToUpdate,
@@ -438,6 +451,8 @@ export const AppSidebar = memo(function AppSidebar({
                 isDefault
                 collapsed={collapsedWorkspaceDirs.has(defaultGroup.dir)}
                 onToggleCollapse={toggleCollapsed}
+                expanded={expandedWorkspaceDirs.has(defaultGroup.dir)}
+                onToggleExpanded={onToggleWorkspaceExpanded}
                 activeId={activeId}
                 streamingIds={streamingIds}
                 unreadCompletedIds={unreadCompletedIds}
@@ -445,6 +460,7 @@ export const AppSidebar = memo(function AppSidebar({
                 onNew={onNew}
                 onSelect={onSelect}
                 onArchive={onArchive}
+                onTogglePin={onTogglePin}
                 onRevealWorkspace={onRevealWorkspace}
                 onArchiveWorkspaceChats={onArchiveWorkspaceChats}
                 onRemoveWorkspace={onRemoveWorkspace}
@@ -458,6 +474,8 @@ export const AppSidebar = memo(function AppSidebar({
                   label={workspaceName(g.dir)}
                   collapsed={collapsedWorkspaceDirs.has(g.dir)}
                   onToggleCollapse={toggleCollapsed}
+                  expanded={expandedWorkspaceDirs.has(g.dir)}
+                  onToggleExpanded={onToggleWorkspaceExpanded}
                   activeId={activeId}
                   streamingIds={streamingIds}
                   unreadCompletedIds={unreadCompletedIds}
@@ -465,6 +483,7 @@ export const AppSidebar = memo(function AppSidebar({
                   onNew={onNew}
                   onSelect={onSelect}
                   onArchive={onArchive}
+                  onTogglePin={onTogglePin}
                   onRevealWorkspace={onRevealWorkspace}
                   onArchiveWorkspaceChats={onArchiveWorkspaceChats}
                   onRemoveWorkspace={onRemoveWorkspace}
@@ -542,6 +561,9 @@ interface WorkspaceGroupViewProps {
   handleProps?: Record<string, unknown>;
   collapsed: boolean;
   onToggleCollapse: (dir: string) => void;
+  /** Whether the group's list shows past WORKSPACE_VISIBLE_LIMIT rows. */
+  expanded: boolean;
+  onToggleExpanded: (dir: string) => void;
   activeId: string | null;
   streamingIds: Set<string>;
   unreadCompletedIds: Set<string>;
@@ -549,6 +571,7 @@ interface WorkspaceGroupViewProps {
   onNew: (workspaceDir?: string) => void;
   onSelect: (id: string) => void;
   onArchive: (c: Conversation) => void;
+  onTogglePin: (c: Conversation) => void;
   onRevealWorkspace: (dir: string) => void;
   onArchiveWorkspaceChats: (dir: string) => void;
   onRemoveWorkspace: (dir: string) => void;
@@ -564,6 +587,8 @@ function WorkspaceGroupView({
   handleProps,
   collapsed,
   onToggleCollapse,
+  expanded,
+  onToggleExpanded,
   activeId,
   streamingIds,
   unreadCompletedIds,
@@ -571,6 +596,7 @@ function WorkspaceGroupView({
   onNew,
   onSelect,
   onArchive,
+  onTogglePin,
   onRevealWorkspace,
   onArchiveWorkspaceChats,
   onRemoveWorkspace,
@@ -677,18 +703,42 @@ function WorkspaceGroupView({
               </div>
             </SidebarMenuItem>
           ) : (
-            group.items.map((c) => (
-              <ConversationRow
-                key={c.id}
-                conversation={c}
-                active={c.id === activeId}
-                streaming={streamingIds.has(c.id)}
-                unreadCompleted={unreadCompletedIds.has(c.id)}
-                onSelect={onSelect}
-                onArchive={onArchive}
-                archiveShortcut={archiveShortcut}
-              />
-            ))
+            <>
+              {visibleGroupItems(group.items, expanded).map((c) => (
+                <ConversationRow
+                  key={c.id}
+                  conversation={c}
+                  active={c.id === activeId}
+                  streaming={streamingIds.has(c.id)}
+                  unreadCompleted={unreadCompletedIds.has(c.id)}
+                  onSelect={onSelect}
+                  onArchive={onArchive}
+                  onTogglePin={onTogglePin}
+                  archiveShortcut={archiveShortcut}
+                />
+              ))}
+              {group.items.length > WORKSPACE_VISIBLE_LIMIT && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    onClick={() => onToggleExpanded(group.dir)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    {expanded ? (
+                      <ChevronDown className="rotate-180" />
+                    ) : (
+                      <ChevronDown />
+                    )}
+                    <span>
+                      {expanded
+                        ? t("chats.showLess")
+                        : t("chats.showMore", {
+                            count: group.items.length - WORKSPACE_VISIBLE_LIMIT,
+                          })}
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+            </>
           )}
         </SidebarMenu>
       )}
@@ -1037,6 +1087,7 @@ const ConversationRow = memo(function ConversationRow({
   unreadCompleted,
   onSelect,
   onArchive,
+  onTogglePin,
   archiveShortcut,
 }: {
   conversation: Conversation;
@@ -1045,6 +1096,7 @@ const ConversationRow = memo(function ConversationRow({
   unreadCompleted: boolean;
   onSelect: (id: string) => void;
   onArchive: (c: Conversation) => void;
+  onTogglePin: (c: Conversation) => void;
   archiveShortcut: string;
 }) {
   const { t } = useTranslation("sidebar");
@@ -1052,6 +1104,7 @@ const ConversationRow = memo(function ConversationRow({
   // the rows — not the whole sidebar tree (see minuteClock above).
   const nowMs = useMinuteNow();
   const archived = !!conversation.archivedAt;
+  const pinned = conversation.pinnedAt != null;
   const title = conversation.title || t("conversation.untitled");
   const relativeTime = formatRelativeTime(conversation.updatedAt, nowMs);
   const backend = normalizedBackend(conversation);
@@ -1121,6 +1174,9 @@ const ConversationRow = memo(function ConversationRow({
                 "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
             )}
           >
+            {pinned && (
+              <Pin className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
             {conversation.sourceAutomationId && (
               <Clock className="size-3.5 shrink-0 text-muted-foreground" />
             )}
@@ -1201,6 +1257,27 @@ const ConversationRow = memo(function ConversationRow({
           </div>
         </TooltipContent>
       </Tooltip>
+      {/* Hover actions, right-aligned over the time slot: [⋯ menu][archive].
+          Both are absolutely-positioned siblings of the row button (see the
+          archive comment above), spaced by the !right offsets. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <SidebarMenuAction
+            showOnHover
+            onClick={(e) => e.stopPropagation()}
+            className="!right-9 !top-1/2 !w-7 !-translate-y-1/2 rounded-sm !text-muted-foreground/60 hover:!bg-transparent hover:!text-muted-foreground data-[state=open]:!text-muted-foreground"
+          >
+            <MoreHorizontal />
+            <span className="sr-only">{t("action.more")}</span>
+          </SidebarMenuAction>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="start" className="w-44">
+          <DropdownMenuItem onSelect={() => onTogglePin(conversation)}>
+            {pinned ? <PinOff /> : <Pin />}
+            <span>{pinned ? t("action.unpin") : t("action.pin")}</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
           <SidebarMenuAction
@@ -1261,5 +1338,18 @@ export function groupByWorkspace(
       );
     }
   }
-  return order.map((dir) => ({ dir, items: map.get(dir)! }));
+  return order.map((dir) => ({ dir, items: pinnedFirst(map.get(dir)!) }));
+}
+
+/** Project-scoped pins float to the top of their group (newest pin first);
+ *  the rest keep their incoming order. Returns the same array when nothing is
+ *  pinned so memoized rows don't churn. */
+function pinnedFirst(items: Conversation[]): Conversation[] {
+  if (!items.some((c) => c.pinnedAt != null)) return items;
+  return [
+    ...items
+      .filter((c) => c.pinnedAt != null)
+      .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)),
+    ...items.filter((c) => c.pinnedAt == null),
+  ];
 }

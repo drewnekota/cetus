@@ -109,8 +109,10 @@ import { composeWithContext } from "@/lib/quick-context";
 import { useConversationAutoSort } from "@/lib/conversation-order";
 import {
   loadCollapsedWorkspaceDirs,
+  loadExpandedWorkspaceDirs,
   nextConversationIdInWorkspace,
   persistCollapsedWorkspaceDirs,
+  persistExpandedWorkspaceDirs,
   visibleConversationIds,
 } from "@/lib/collapsed-workspaces";
 import {
@@ -641,6 +643,19 @@ export default function Home() {
       return next;
     });
   }, []);
+  // Same sharing rationale as collapsed dirs: rows truncated behind a group's
+  // "Show more" are not navigation targets either.
+  const [expandedWorkspaceDirs, setExpandedWorkspaceDirs] = useState(
+    loadExpandedWorkspaceDirs,
+  );
+  const toggleWorkspaceExpanded = useCallback((dir: string) => {
+    setExpandedWorkspaceDirs((current) => {
+      const next = new Set(current);
+      if (!next.delete(dir)) next.add(dir);
+      persistExpandedWorkspaceDirs(next);
+      return next;
+    });
+  }, []);
   const [keyboardShortcuts, setKeyboardShortcuts] = useState(readKeyboardShortcuts);
   useEffect(() => {
     const reload = () => setKeyboardShortcuts(readKeyboardShortcuts());
@@ -820,7 +835,11 @@ export default function Home() {
       defaultWorkspace,
       autoSortConversations,
     );
-    return visibleConversationIds(groups, collapsedWorkspaceDirs);
+    return visibleConversationIds(
+      groups,
+      collapsedWorkspaceDirs,
+      expandedWorkspaceDirs,
+    );
   }, [
     conversations,
     recentWorkspaces,
@@ -829,6 +848,7 @@ export default function Home() {
     defaultWorkspace,
     autoSortConversations,
     collapsedWorkspaceDirs,
+    expandedWorkspaceDirs,
   ]);
   const orderedChatIdsRef = useRef<string[]>([]);
   orderedChatIdsRef.current = orderedChatIds;
@@ -3098,6 +3118,27 @@ export default function Home() {
     [archiveConversation],
   );
 
+  const onTogglePin = useCallback(async (c: Conversation) => {
+    const pinned = c.pinnedAt == null;
+    const pinnedAt = pinned ? Date.now() : null;
+    // Optimistic: the row jumps to / leaves the pinned block immediately; the
+    // persisted marker lands behind it (and is rolled back on failure).
+    setConversations((cs) =>
+      cs.map((x) => (x.id === c.id ? { ...x, pinnedAt } : x)),
+    );
+    try {
+      await api.setConversationPinned(c.id, pinned);
+    } catch (e) {
+      console.error("setConversationPinned failed", e);
+      setConversations((cs) =>
+        cs.map((x) =>
+          x.id === c.id ? { ...x, pinnedAt: c.pinnedAt ?? null } : x,
+        ),
+      );
+      toast.error("Couldn't pin that conversation.");
+    }
+  }, []);
+
   const onRevealWorkspace = useCallback(async (dir: string) => {
     try {
       await api.openPath(dir);
@@ -3493,6 +3534,7 @@ export default function Home() {
           (dir) => !temporaryWorkspaces.includes(dir),
         )}
         collapsedWorkspaceDirs={collapsedWorkspaceDirs}
+        expandedWorkspaceDirs={expandedWorkspaceDirs}
         defaultWorkspace={defaultWorkspace}
         view={view}
         onViewChange={setView}
@@ -3512,7 +3554,9 @@ export default function Home() {
         onRemoveWorkspace={onRemoveWorkspace}
         onReorderWorkspaces={onReorderWorkspaces}
         onToggleWorkspaceCollapsed={toggleWorkspaceCollapsed}
+        onToggleWorkspaceExpanded={toggleWorkspaceExpanded}
         onArchive={onArchive}
+        onTogglePin={onTogglePin}
         onOpenSettings={openSettings}
         updateReadyVersion={updateReadyVersion}
         onRestartToUpdate={onRestartToUpdate}

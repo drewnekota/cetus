@@ -414,6 +414,7 @@ pub async fn new_conversation(
         cli_model: String::new(),
         cli_effort: String::new(),
         run_state: "idle".to_string(),
+        pinned_at: None,
     };
     state.store.insert(&c).map_err(err)?;
     Ok(c)
@@ -489,6 +490,7 @@ pub async fn fork_conversation(
         cli_model: String::new(),
         cli_effort: String::new(),
         run_state: "idle".to_string(),
+        pinned_at: None,
     };
     state.store.insert(&c).map_err(err)?;
 
@@ -574,6 +576,7 @@ async fn fork_cli_conversation(
         cli_model: source.cli_model.clone(),
         cli_effort: source.cli_effort.clone(),
         run_state: "idle".to_string(),
+        pinned_at: None,
     };
     state.store.insert(&c).map_err(err)?;
     state
@@ -713,6 +716,21 @@ pub async fn set_conversation_unread(
     state
         .store
         .set_unread(&id, if unread { Some(now_ms()) } else { None })
+        .map_err(err)
+}
+
+/// Persist a chat's project-scoped pin (the sidebar sorts pinned chats first
+/// within their workspace group). Storage-only, mirroring
+/// `set_conversation_unread`; unknown ids are a no-op.
+#[tauri::command]
+pub async fn set_conversation_pinned(
+    state: State<'_, AppState>,
+    id: String,
+    pinned: bool,
+) -> CmdResult<()> {
+    state
+        .store
+        .set_pinned(&id, if pinned { Some(now_ms()) } else { None })
         .map_err(err)
 }
 

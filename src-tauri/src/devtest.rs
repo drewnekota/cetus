@@ -302,6 +302,7 @@ async fn op_agent_prompt(
         cli_model: String::new(),
         cli_effort: String::new(),
         run_state: "idle".to_string(),
+        pinned_at: None,
     };
     state
         .store

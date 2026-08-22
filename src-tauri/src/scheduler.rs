@@ -311,6 +311,7 @@ async fn fire_cli(
         cli_model: auto.cli_model.clone(),
         cli_effort: auto.cli_effort.clone(),
         run_state: "idle".to_string(),
+        pinned_at: None,
     };
     let dispatched = (|| -> Result<(), String> {
         ctx.store.insert(&conv).map_err(|e| e.to_string())?;
@@ -427,6 +428,7 @@ async fn create_conversation(
         cli_model: String::new(),
         cli_effort: String::new(),
         run_state: "idle".to_string(),
+        pinned_at: None,
     };
     // Register the pi in the shared pool BEFORE the row becomes visible, so a
     // concurrent pi_for() reuses this process rather than spawning a second one

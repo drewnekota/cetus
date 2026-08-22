@@ -12,7 +12,7 @@ describe("visible conversation navigation", () => {
   ];
 
   test("uses the complete sidebar order when every workspace is expanded", () => {
-    expect(visibleConversationIds(groups, new Set())).toEqual([
+    expect(visibleConversationIds(groups, new Set(), new Set())).toEqual([
       "a",
       "b",
       "c",
@@ -23,8 +23,27 @@ describe("visible conversation navigation", () => {
 
   test("omits every chat in a collapsed workspace", () => {
     expect(
-      visibleConversationIds(groups, new Set(["/repo/hidden"])),
+      visibleConversationIds(groups, new Set(["/repo/hidden"]), new Set()),
     ).toEqual(["a", "b", "e"]);
+  });
+
+  test("omits rows truncated behind an unexpanded Show more", () => {
+    const long = [
+      {
+        dir: "/chat",
+        items: ["a", "b", "c", "d", "e", "f", "g"].map((id) => ({ id })),
+      },
+    ];
+    expect(visibleConversationIds(long, new Set(), new Set())).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+    ]);
+    expect(visibleConversationIds(long, new Set(), new Set(["/chat"]))).toEqual(
+      ["a", "b", "c", "d", "e", "f", "g"],
+    );
   });
 });
 

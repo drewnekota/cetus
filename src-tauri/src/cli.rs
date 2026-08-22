@@ -105,9 +105,7 @@ fn run_inner(args: &[String]) -> Result<String, String> {
         | ["meeting"]
         | ["meeting", "help"] => Ok(HELP.to_string()),
         ["context", rest @ ..] => context_cmd(rest),
-        ["meeting", "list"] => {
-            request(&json!({ "op": "meeting.list" })).map(text_field)
-        }
+        ["meeting", "list"] => request(&json!({ "op": "meeting.list" })).map(text_field),
         ["meeting", "list", "--limit", n] => {
             let n: u64 = n.parse().map_err(|_| format!("bad --limit {n:?}"))?;
             request(&json!({ "op": "meeting.list", "limit": n })).map(text_field)

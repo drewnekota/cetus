@@ -96,7 +96,10 @@ pub async fn vision_set_config(
     }
     state
         .store
-        .set_setting(SETTINGS_KEY, &serde_json::to_string(&cfg).map_err(|e| e.to_string())?)
+        .set_setting(
+            SETTINGS_KEY,
+            &serde_json::to_string(&cfg).map_err(|e| e.to_string())?,
+        )
         .map_err(|e| e.to_string())?;
     export_config(&state.app_data_dir, &state.store);
     Ok(())

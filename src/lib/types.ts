@@ -793,6 +793,9 @@ export interface Conversation {
    *  unread dot, persisted so it survives a restart and so auto-archive can skip
    *  chats with unseen output. null once the chat is opened. */
   unreadAt?: number | null;
+  /** When the user pinned this chat within its workspace group — pinned chats
+   *  sort first in the sidebar (newest pin on top). null/absent = unpinned. */
+  pinnedAt?: number | null;
   /** Set when an automation firing minted this conversation (the automation's
    *  id); null for user-started chats. Lets the UI badge automation runs. */
   sourceAutomationId: string | null;

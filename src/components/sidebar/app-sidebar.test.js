@@ -54,4 +54,20 @@ describe("workspace grouping", () => {
   test("an unresolved default workspace produces no group to find", () => {
     expect(groupByWorkspace([], [], [], "")).toEqual([]);
   });
+
+  test("pinned chats float to the top of their group, newest pin first", () => {
+    const chats = [
+      { id: "recent", workspaceDir: DEFAULT, createdAt: 4, pinnedAt: null },
+      { id: "old-pin", workspaceDir: DEFAULT, createdAt: 3, pinnedAt: 100 },
+      { id: "plain", workspaceDir: DEFAULT, createdAt: 2, pinnedAt: null },
+      { id: "new-pin", workspaceDir: DEFAULT, createdAt: 1, pinnedAt: 200 },
+    ];
+    const groups = groupByWorkspace(chats, [], [], DEFAULT);
+    expect(groups[0].items.map((c) => c.id)).toEqual([
+      "new-pin",
+      "old-pin",
+      "recent",
+      "plain",
+    ]);
+  });
 });

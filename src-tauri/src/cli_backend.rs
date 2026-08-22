@@ -1237,7 +1237,9 @@ pub fn dispatch_turn(
             if let Some(o) = &outcome {
                 persist_cli_outcome(&store, &conv_id, o);
             }
-            store.set_run_state(&conv_id, settled_run_state(&outcome)).ok();
+            store
+                .set_run_state(&conv_id, settled_run_state(&outcome))
+                .ok();
             let st = task_handle.state::<AppState>();
             st.end_cli_turn(&conv_id);
             maybe_auto_retry_cli_turn(&task_handle, &conv_id, outcome.as_ref());
@@ -1291,7 +1293,9 @@ pub fn dispatch_turn(
             if let Some(o) = &outcome {
                 persist_cli_outcome(&store, &conv_id, o);
             }
-            store.set_run_state(&conv_id, settled_run_state(&outcome)).ok();
+            store
+                .set_run_state(&conv_id, settled_run_state(&outcome))
+                .ok();
             let st = task_handle.state::<AppState>();
             st.end_cli_turn(&conv_id);
             maybe_auto_retry_cli_turn(&task_handle, &conv_id, outcome.as_ref());
@@ -1353,7 +1357,9 @@ pub fn dispatch_turn(
             if let Some(o) = &outcome {
                 persist_cli_outcome(&store, &conv_id, o);
             }
-            store.set_run_state(&conv_id, settled_run_state(&outcome)).ok();
+            store
+                .set_run_state(&conv_id, settled_run_state(&outcome))
+                .ok();
             let state = task_handle.state::<AppState>();
             state.end_cli_turn(&conv_id);
             maybe_auto_retry_cli_turn(&task_handle, &conv_id, outcome.as_ref());
@@ -1539,8 +1545,7 @@ fn maybe_auto_retry_cli_turn(
         // Stand down if anything else dispatched during the backoff (the
         // generation moved), a turn is running right now, or the conversation
         // is gone / no longer idle (aborted, interrupted-by-restart…).
-        if state.cli_dispatch_generation(&conv_id) != generation
-            || state.cli_turn_active(&conv_id)
+        if state.cli_dispatch_generation(&conv_id) != generation || state.cli_turn_active(&conv_id)
         {
             return;
         }
