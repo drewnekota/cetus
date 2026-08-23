@@ -1168,8 +1168,10 @@ const ConversationRow = memo(function ConversationRow({
             // opens the archive action's own tooltip without nesting triggers.
             className={cn(
               // Keep long titles visibly separated from the absolutely
-              // positioned relative-time / unread indicator.
-              "relative pr-16",
+              // positioned relative-time / unread indicator. The padding also
+              // clears the hover action cluster (⋯ + archive) with a visible
+              // gap, so the ⋯ never reads as part of the title text.
+              "relative pr-20",
               !active &&
                 "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
             )}
@@ -1265,7 +1267,7 @@ const ConversationRow = memo(function ConversationRow({
           <SidebarMenuAction
             showOnHover
             onClick={(e) => e.stopPropagation()}
-            className="!right-9 !top-1/2 !w-7 !-translate-y-1/2 rounded-sm !text-muted-foreground/60 hover:!bg-transparent hover:!text-muted-foreground data-[state=open]:!text-muted-foreground"
+            className="!right-8 !top-1/2 !w-7 !-translate-y-1/2 rounded-sm !text-muted-foreground/80 hover:!bg-transparent hover:!text-muted-foreground data-[state=open]:!text-muted-foreground"
           >
             <MoreHorizontal />
             <span className="sr-only">{t("action.more")}</span>
@@ -1286,7 +1288,7 @@ const ConversationRow = memo(function ConversationRow({
               e.stopPropagation();
               onArchive(conversation);
             }}
-            className="!right-2 !top-1/2 !w-7 !-translate-y-1/2 rounded-sm !text-muted-foreground/60 hover:!bg-transparent hover:!text-muted-foreground"
+            className="!right-1 !top-1/2 !w-7 !-translate-y-1/2 rounded-sm !text-muted-foreground/80 hover:!bg-transparent hover:!text-muted-foreground"
           >
             {archived ? <ArchiveRestore /> : <Archive />}
             <span className="sr-only">

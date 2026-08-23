@@ -13,6 +13,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ModelPicker } from "@/components/chat/model-picker";
 import {
   BackendPicker,
@@ -421,6 +422,7 @@ export function Composer({
   useEffect(() => {
     if (draftKeyRef.current === draftKey) return;
     draftKeyRef.current = draftKey;
+    setPreviewImage(null);
     setText(draftKey ? readDraft(draftKey) : "");
     setQuote(draftKey ? readDraft(quoteKey(draftKey)) : "");
     setAttachments(restoreAttachments(draftKey));
@@ -428,6 +430,7 @@ export function Composer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
     restoreAttachments(draftKey),
   );
+  const [previewImage, setPreviewImage] = useState<ImageAttachment | null>(null);
 
   // Attachment bytes live in IndexedDB across a renderer recovery. Hydrate
   // them asynchronously, but never overwrite a newer in-memory user edit.
@@ -1085,6 +1088,8 @@ export function Composer({
   }, [text]);
 
   function removeAttachment(i: number) {
+    const removed = attachments[i];
+    if (removed?.type === "image" && previewImage === removed) setPreviewImage(null);
     updateAttachments((prev) => {
       const dropped = prev[i];
       if (dropped?.type === "image") URL.revokeObjectURL(dropped.previewUrl);
@@ -1141,6 +1146,7 @@ export function Composer({
       : undefined;
     if (streaming && onQueue) onQueue(outgoing, attachments, runtime);
     else onSend(outgoing, attachments, runtime);
+    setPreviewImage(null);
     closeSlash();
     closeMention();
     // Drop refs to revoke after send completes — onSend may consume async.
@@ -1285,12 +1291,18 @@ export function Composer({
           {attachments.map((a, i) => (
             <div key={i} className="group relative">
               {a.type === "image" ? (
-                <img
-                  src={a.previewUrl}
-                  alt={a.name}
-                  title={a.name}
-                  className="size-14 rounded-md border border-border object-cover"
-                />
+                <button
+                  type="button"
+                  onClick={() => setPreviewImage(a)}
+                  title={t("bubble.expandImage")}
+                  className="fade-layer block cursor-zoom-in rounded-md transition-opacity hover:opacity-90"
+                >
+                  <img
+                    src={a.previewUrl}
+                    alt={a.name}
+                    className="size-14 rounded-md border border-border object-cover"
+                  />
+                </button>
               ) : (
                 <div
                   title={a.name}
@@ -1315,6 +1327,24 @@ export function Composer({
           ))}
         </div>
       )}
+
+      <Dialog open={previewImage !== null} onOpenChange={(open) => !open && setPreviewImage(null)}>
+        <DialogContent
+          className="grid max-h-[90vh] max-w-[90vw] place-items-center border-none bg-transparent p-0 ring-0 sm:max-w-[90vw]"
+          showCloseButton={false}
+        >
+          <DialogTitle className="sr-only">
+            {previewImage?.name ?? t("bubble.attachment")}
+          </DialogTitle>
+          {previewImage && (
+            <img
+              src={previewImage.previewUrl}
+              alt={previewImage.name}
+              className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-xl"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {bashMode && (
         <div className="flex items-center gap-1.5 px-2.5 pt-1.5 text-[11px] font-medium text-primary">
