@@ -14,6 +14,7 @@ import {
   markdownComponents,
   markdownUrlTransform,
   LinkifiedText,
+  healStreamingInline,
   normalizeMath,
   KATEX_OPTIONS,
   REMARK_MATH_OPTIONS,
@@ -227,15 +228,21 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   streaming?: boolean;
 }) {
   const cut = useMemo(() => (streaming ? safeStreamSplit(text) : -1), [text, streaming]);
+  // Only the tail can hold a half-written `**…`: the cut above is a blank-line
+  // block boundary, which emphasis cannot span.
+  const tail = useMemo(() => {
+    const rest = cut > 0 ? text.slice(cut) : text;
+    return streaming ? healStreamingInline(rest) : rest;
+  }, [text, cut, streaming]);
   return (
     <div data-chat-markdown className={PROSE_CLASS}>
       {cut > 0 ? (
         <>
           <RawMarkdown text={text.slice(0, cut)} />
-          <RawMarkdown text={text.slice(cut)} />
+          <RawMarkdown text={tail} />
         </>
       ) : (
-        <RawMarkdown text={text} />
+        <RawMarkdown text={tail} />
       )}
     </div>
   );

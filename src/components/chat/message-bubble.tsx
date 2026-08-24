@@ -1,5 +1,5 @@
 "use client";
-import { ArrowLeftRight, CornerDownRight } from "lucide-react";
+import { ArrowLeftRight, CornerDownRight, RotateCw } from "lucide-react";
 import type { RenderedBlock, RenderedMessage } from "@/lib/types";
 import { useMessage } from "@/lib/chat-store";
 import { BACKENDS } from "./backend-picker";
@@ -7,6 +7,10 @@ import { VisionCard } from "./vision-card";
 import { BashCard } from "./bash-card";
 import { AnswerBlock, MessageActions } from "./message-blocks";
 import { messageHoverProps } from "./hover-owner";
+import {
+  continuationNoticeKind,
+  type ContinuationNoticeKind,
+} from "@/lib/continuation-prompts";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 
@@ -55,6 +59,15 @@ function MessageBubbleView({
 }) {
   const { t } = useTranslation("chat");
   const isUser = message.role === "user";
+  // Continuations Cetus dispatched on the user's behalf (auto-retry after a
+  // transient provider error, resume after an app restart) are user-role rows
+  // in the transcript, but showing them as user bubbles reads like the user
+  // typed them. Render a centered system notice instead.
+  const continuation =
+    isUser && message.blocks.length === 1 && message.blocks[0].kind === "text"
+      ? continuationNoticeKind(message.blocks[0].text)
+      : null;
+  if (continuation) return <ContinuationNotice kind={continuation} />;
   // A user message that leads with a `>` blockquote was composed via "Add to
   // chat": lift the quote back out and show it as a ChatGPT-style header above
   // the bubble instead of raw `> ` lines inside it.
@@ -173,6 +186,26 @@ function splitUserQuote(
 function backendLabel(id: unknown): string | null {
   if (typeof id !== "string" || !id) return null;
   return BACKENDS.find((b) => b.id === id)?.label ?? id;
+}
+
+/** A continuation Cetus dispatched on the user's behalf, rendered as a
+ *  centered divider notice (like the runtime-switch marker) instead of a user
+ *  bubble — the prompt text itself is agent-facing, not something the user
+ *  said. */
+function ContinuationNotice({ kind }: { kind: ContinuationNoticeKind }) {
+  const { t } = useTranslation("chat");
+  const label =
+    kind === "autoRetry" ? t("bubble.autoRetry") : t("bubble.interruptedResume");
+  return (
+    <div className="flex w-full items-center gap-3 py-3" data-testid="continuation-notice">
+      <div className="h-px flex-1 bg-border/60" />
+      <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <RotateCw className="size-3 opacity-70" />
+        {label}
+      </span>
+      <div className="h-px flex-1 bg-border/60" />
+    </div>
+  );
 }
 
 /** The runtime-switch audit marker: a centered divider ("Codex → Claude Code")

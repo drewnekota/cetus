@@ -1,16 +1,94 @@
 // Shared types between Rust backend and React frontend.
 // pi event JSON is forwarded verbatim; we narrow it per event type below.
 
-// DeepSeek-only: cetus ships the V4 tiers Flash and Pro; the per-conversation
-// knob is how hard it thinks (off / high / max). `DsModel` stays a closed union
-// so the model id remains a typed value across the Rust/TS boundary. Persisted
-// per conversation.
+// Built-in tiers: cetus ships the DeepSeek V4 tiers Flash and Pro; the
+// per-conversation knob is how hard it thinks (off / high / max). On top of
+// the built-ins, the user can configure custom OpenAI-compatible providers
+// (Settings -> Models); their models are addressed as "<provider-id>/<model-id>"
+// in the same `model` slot. Reasoning only applies to the built-ins.
 export type DsModel = "flash" | "pro";
-export type ReasoningLevel = "non_think" | "think_high" | "think_max";
+/** "flash" | "pro" | "<custom-provider-id>/<model-id>" */
+export type ModelId = string;
+/** pi's full thinking-level axis. Older cetus persisted only
+ *  "non_think" / "think_high" / "think_max" — `normalizeReasoningLevel`
+ *  maps those aliases forever (the Rust side parses them too). */
+export type ReasoningLevel =
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
+
+/** All levels in pi's escalation order (mirrors the runtime's
+ *  EXTENDED_THINKING_LEVELS; clamping and pickers walk this order). */
+export const REASONING_LEVELS: ReasoningLevel[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+
+/** Accept legacy persisted tokens (localStorage, old automations). */
+export function normalizeReasoningLevel(raw: string): ReasoningLevel {
+  if (raw === "non_think") return "off";
+  if (raw === "think_high") return "high";
+  if (raw === "think_max") return "max";
+  return (REASONING_LEVELS as string[]).includes(raw)
+    ? (raw as ReasoningLevel)
+    : "high";
+}
 
 export interface ModelChoice {
-  model: DsModel;
+  model: ModelId;
   reasoning: ReasoningLevel;
+}
+
+// ---- Custom model providers -------------------------------------------------
+
+/** One model exposed by a custom provider. Mirrors the Rust `CustomModel`
+ *  (src-tauri/src/custom_models.rs). */
+export interface CustomModel {
+  /** Model id at the provider's endpoint (e.g. "gpt-4o"). */
+  id: string;
+  /** Display name; empty = show the id. */
+  name: string;
+  /** Model accepts image input (pi then passes attachments through natively). */
+  vision: boolean;
+  /** Model takes a reasoning-effort knob; `thinkingLevels` selects which
+   *  of pi's seven levels it exposes. */
+  reasoning: boolean;
+  /** Enabled thinking levels → endpoint token ("" = send the level name).
+   *  Levels absent from the map are unavailable for this model. */
+  thinkingLevels: Partial<Record<ReasoningLevel, string>>;
+  /** How the effort reaches the request body: "" = standard reasoning_effort;
+   *  "deepseek" | "openrouter" | "together" = that vendor's field shape. */
+  thinkingFormat: string;
+  /** Context window in tokens; 0 = default. */
+  contextWindow: number;
+  /** Max output tokens; 0 = default. */
+  maxTokens: number;
+}
+
+/** A user-configured OpenAI-compatible provider. Mirrors the Rust
+ *  `CustomProvider`. */
+export interface CustomProvider {
+  /** Stable id ("custom-<slug>"), minted by the backend on first save. */
+  id: string;
+  name: string;
+  baseUrl: string;
+  models: CustomModel[];
+}
+
+/** Provider plus key presence as the settings UI sees it (the raw key never
+ *  crosses IPC unmasked in a list). */
+export interface CustomProviderView extends CustomProvider {
+  hasKey: boolean;
+  maskedKey: string;
 }
 
 // ---- Quick launcher -------------------------------------------------------
@@ -370,7 +448,7 @@ export interface QuickLaunchPayload {
   /** Repo the launched task should run in; null → backend default workspace. */
   workspaceDir: string | null;
   /** Model + reasoning chosen in the launcher's model picker. */
-  model: DsModel;
+  model: ModelId;
   reasoning: ReasoningLevel;
   /** Ambient context the user kept on the panel; null when none/all removed. */
   context: QuickContext | null;
@@ -385,7 +463,7 @@ export interface QuickLaunchPayload {
 
 export const DEFAULT_MODEL_CHOICE: ModelChoice = {
   model: "pro",
-  reasoning: "think_high",
+  reasoning: "high",
 };
 
 // ---- Voice dictation ------------------------------------------------------
@@ -509,27 +587,6 @@ export interface PluginEntry {
   error?: string | null;
 }
 
-// ---- Dreaming (quiet-time memory consolidation) ---------------------------
-
-/** Settings for "dreaming": when you're not chatting with cetus, it reflects on
- *  recent conversations and consolidates durable insights into agent memory.
- *  Mirrors the Rust `DreamSettings` (src-tauri/src/dream.rs). */
-export interface DreamSettings {
-  /** Master switch. When on, cetus consolidates memory while you're not using it. */
-  enabled: boolean;
-  /** Minutes with no cetus chat activity (a "quiet period") before a dream may
-   *  start. Named `idleMinutes` for back-compat; it's a cetus-quiet window, not
-   *  system idle. */
-  idleMinutes: number;
-}
-
-/** Default ON — dreaming runs out of the box (no-op until a DeepSeek key and
- *  some sessions exist). */
-export const DEFAULT_DREAM_SETTINGS: DreamSettings = {
-  enabled: true,
-  idleMinutes: 15,
-};
-
 // ---- Auto-archive ----------------------------------------------------------
 
 /** Unit for the auto-archive idle threshold. */
@@ -572,24 +629,6 @@ export interface SkillEntry {
   createdAt: number;
   updatedAt: number;
 }
-
-/** Settings for skill review: when idle, cetus reviews recent conversations and
- *  proposes reusable skills (as disabled suggestions for you to approve).
- *  Mirrors the Rust `SkillReviewSettings` (src-tauri/src/skill_review.rs). */
-export interface SkillReviewSettings {
-  /** Master switch. When on, cetus proposes skills while you're not using it.
-   *  Proposals never activate without your approval. */
-  enabled: boolean;
-  /** Minutes of no cetus chat activity before a review may start. */
-  idleMinutes: number;
-}
-
-/** Default ON — proposals are non-destructive (they land disabled). No-op until
- *  a DeepSeek key and some sessions exist. */
-export const DEFAULT_SKILL_REVIEW_SETTINGS: SkillReviewSettings = {
-  enabled: true,
-  idleMinutes: 20,
-};
 
 /** The whole skills store: a master switch plus the installed entries. */
 export interface SkillState {
@@ -976,11 +1015,8 @@ export type AppEvent =
   | { type: "automation_deleted"; id: string }
   // An automation fired and minted a conversation.
   | { type: "automation_fired"; automation: Automation; conversation: Conversation }
-  // Agent memory changed out-of-band — the dreaming pass consolidated recent
-  // sessions into new/refined notes. The Memory settings page reloads on this.
-  | { type: "memory_updated" }
-  // Agent skills changed out-of-band — the skill-review pass proposed new skills
-  // from recent sessions. The Skills settings page reloads on this.
+  // Agent skills changed out-of-band (e.g. the agent's manage_skill tool).
+  // The Skills settings page reloads on this.
   | { type: "skills_updated" }
   // MCP servers changed out-of-band — the manage_mcp tool updated the MCP store.
   | { type: "mcp_updated" }

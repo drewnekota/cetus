@@ -6,7 +6,7 @@
  * persists that override and injects it as `DEEPSEEK_BASE_URL` into pi's spawn
  * env (see `provider.rs` / `lib.rs::pi_for`). Here we override the built-in
  * `deepseek` provider's baseUrl so the main agent's model calls go there too;
- * the out-of-band helper calls (titling / dream / skill review / meeting) are
+ * the out-of-band helper calls (titling / meeting minutes) are
  * redirected host-side. Absent or blank → no-op, pi keeps stock api.deepseek.com.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

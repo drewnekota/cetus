@@ -43,6 +43,12 @@ import { ScreenHistoryPage } from "@/components/screen-history/screen-history-pa
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Kbd } from "@/components/ui/kbd";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import {
@@ -71,6 +77,7 @@ import { dispatchNotification, refreshPermission } from "@/lib/notifications";
 import { tt, useLocale, useTranslation } from "@/lib/i18n";
 import { flavorHeadline } from "@/lib/chat-flavor";
 import { buildAttachmentRefs } from "@/lib/attachments";
+import { INTERRUPTED_RESUME_PROMPT } from "@/lib/continuation-prompts";
 import { installWebviewHealthMonitor } from "@/lib/webview-health";
 import {
   DEFAULT_MODEL_CHOICE,
@@ -120,6 +127,7 @@ import {
   KEYBOARD_SHORTCUTS_STORAGE_KEY,
   matchesShortcut,
   readKeyboardShortcuts,
+  shortcutDisplay,
 } from "@/lib/keyboard-shortcuts";
 import {
   HIDDEN_WORKSPACES_STORAGE_KEY,
@@ -386,12 +394,6 @@ interface WorkspaceDockState {
 type WorkspaceDocksState = Record<WorkspaceLayout, WorkspaceDockState>;
 type WorkspaceDocksByChatState = Record<string, WorkspaceDocksState>;
 
-/** Continuation sent to pick an interrupted run back up (auto-resume sweep
- *  and the banner's Resume button). Deliberately not a bare "continue": the
- *  cut-down turn may have already produced side effects (files written,
- *  messages sent), so the agent is told to check before redoing work. */
-const INTERRUPTED_RESUME_PROMPT =
-  "The previous run was interrupted by an app restart. Review the conversation and the current workspace state, then continue the original task from where it left off. Don't redo work that has already completed.";
 
 const NEW_CHAT_WORKSPACE_KEY = "__new_chat__";
 
@@ -1171,12 +1173,16 @@ export default function Home() {
             ) {
               store.piEvent(cid, evt.event);
             }
-            // Account-level quota heartbeat. Only claude-code emits it, and
-            // the snapshot is per runtime (not per conversation) — the
-            // runtime picker reads it back as a quota line.
+            // Account-level quota heartbeat. The snapshot is per runtime (not
+            // per conversation), so the runtime picker reads it back by id.
             if (eventType === "cli_rate_limit") {
-              const info = (evt.event as unknown as { info?: CliRateLimitInfo }).info;
-              if (info) store.setCliRateLimit("claude-code", info);
+              const quotaEvent = evt.event as unknown as {
+                backend?: string;
+                info?: CliRateLimitInfo;
+              };
+              if (quotaEvent.info) {
+                store.setCliRateLimit(quotaEvent.backend ?? "claude-code", quotaEvent.info);
+              }
             }
             if (cid && eventType === "cli_context_usage") {
               const usage = evt.event as unknown as {
@@ -3593,28 +3599,42 @@ export default function Home() {
                   <Inbox className="size-3.5" />
                 </Button>
               )}
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                title={t("workspacePanel.openSide")}
-                aria-label={t("workspacePanel.openSide")}
-                data-testid="workspace-open-side"
-                onClick={() => openWorkspacePanelLayout("side")}
-              >
-                <PanelRight className="size-3.5" />
-              </Button>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                title={t("workspacePanel.openBottom")}
-                aria-label={t("workspacePanel.openBottom")}
-                data-testid="workspace-open-bottom"
-                onClick={() => openWorkspacePanelLayout("bottom")}
-              >
-                <PanelBottom className="size-3.5" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={t("workspacePanel.openSide")}
+                    data-testid="workspace-open-side"
+                    onClick={() => openWorkspacePanelLayout("side")}
+                  >
+                    <PanelRight className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <span>{t("workspacePanel.openSide")}</span>
+                  <Kbd>{shortcutDisplay(keyboardShortcuts.toggleWorkspace)}</Kbd>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={t("workspacePanel.openBottom")}
+                    data-testid="workspace-open-bottom"
+                    onClick={() => openWorkspacePanelLayout("bottom")}
+                  >
+                    <PanelBottom className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <span>{t("workspacePanel.openBottom")}</span>
+                  <Kbd>{shortcutDisplay(keyboardShortcuts.toggleTerminal)}</Kbd>
+                </TooltipContent>
+              </Tooltip>
             </header>
             {view === "automations" ? (
               <AutomationsView

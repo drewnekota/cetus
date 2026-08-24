@@ -1027,7 +1027,7 @@ pub fn order_out(ns_window: *mut c_void) {
 /// that's been unused for a while flashes the bare vibrancy surface (the gray
 /// the sidebar normally rides on, with no DOM painted) until WebKit repaints.
 /// cetus also does real background work (screen capture, automations, the
-/// dreamer), so staying un-napped is wanted regardless. The returned token is
+/// scheduler), so staying un-napped is wanted regardless. The returned token is
 /// intentionally leaked — ending the activity would re-enable App Nap.
 pub fn prevent_app_nap() {
     // NSActivityUserInitiatedAllowingIdleSystemSleep — prevents App Nap (and

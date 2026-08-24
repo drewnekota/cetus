@@ -27,7 +27,6 @@
 //! single malformed entry is dropped (not fatal), and a wholly unparseable file
 //! is preserved as a `.corrupt` sibling before we fall back to empty, so a stray
 //! edit can never silently and irrecoverably erase the store.
-
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -296,90 +295,12 @@ pub async fn clear_memories(state: State<'_, AppState>) -> CmdResult<()> {
     write_state(&path, &s)
 }
 
-// ---- Non-command access (used by the dreaming pass) ------------------------
+// ---- Non-command access (host-side callers without a Tauri State) ----------
 
-/// Read-only snapshot of the store for callers without a Tauri `State` — the
-/// dreaming pass ([`crate::dream`]) needs to see existing notes so it doesn't
-/// re-derive duplicates, and the ids of agent notes it may refine.
+/// Read-only snapshot of the store for callers without a Tauri `State`
+/// (e.g. the dictation biasing pass).
 pub fn snapshot(app_data_dir: &Path) -> MemoryState {
     let path = memory_path(app_data_dir);
     let _guard = file_lock().lock().unwrap();
     read_state(&path)
-}
-
-/// One memory mutation produced by the dreaming consolidation pass.
-pub enum Consolidation {
-    /// A fresh durable note (lands as an `agent`-sourced entry).
-    Add {
-        content: String,
-        category: Option<String>,
-    },
-    /// Refine an existing **agent**-written note in place (user notes are never
-    /// rewritten by the agent). No-op if the id is missing or not agent-sourced.
-    Update { id: String, content: String },
-}
-
-/// Apply a batch of dreaming ops in a single read-modify-write under the file
-/// lock — one atomic write minimizes the documented cross-process lost-update
-/// window with the pi side. Honors the same `MAX_ENTRIES` / `MAX_CONTENT_CHARS`
-/// caps as the user-facing commands. Returns how many ops actually applied.
-pub fn consolidate(app_data_dir: &Path, ops: Vec<Consolidation>) -> CmdResult<usize> {
-    let path = memory_path(app_data_dir);
-    let _guard = file_lock().lock().unwrap();
-    let mut s = read_state(&path);
-    let now = now_ms();
-    let mut applied = 0usize;
-    for op in ops {
-        match op {
-            Consolidation::Add { content, category } => {
-                let content = clamp_content(&content);
-                if content.is_empty() {
-                    continue;
-                }
-                if s.entries.len() >= MAX_ENTRIES {
-                    continue; // full — drop overflow rather than evict
-                }
-                s.entries.push(MemoryEntry {
-                    id: Uuid::new_v4().to_string(),
-                    content,
-                    category: norm_category(category),
-                    source: "agent".to_string(),
-                    enabled: true,
-                    created_at: now,
-                    updated_at: now,
-                });
-                applied += 1;
-            }
-            Consolidation::Update { id, content } => {
-                let content = clamp_content(&content);
-                if content.is_empty() {
-                    continue;
-                }
-                // Only refine agent-authored notes; the user's own are off-limits.
-                if let Some(e) = s
-                    .entries
-                    .iter_mut()
-                    .find(|e| e.id == id && e.source == "agent")
-                {
-                    e.content = content;
-                    e.updated_at = now;
-                    applied += 1;
-                }
-            }
-        }
-    }
-    if applied > 0 {
-        write_state(&path, &s)?;
-    }
-    Ok(applied)
-}
-
-/// Trim and cap a candidate note to the per-entry content limit.
-fn clamp_content(s: &str) -> String {
-    let t = s.trim();
-    if t.chars().count() > MAX_CONTENT_CHARS {
-        t.chars().take(MAX_CONTENT_CHARS).collect()
-    } else {
-        t.to_string()
-    }
 }

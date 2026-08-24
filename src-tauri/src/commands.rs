@@ -477,7 +477,7 @@ pub async fn fork_conversation(
         },
         session_file: fork_session,
         workspace_dir: source.workspace_dir.clone(),
-        model: source.model,
+        model: source.model.clone(),
         created_at: now,
         updated_at: now,
         archived_at: None,
@@ -563,7 +563,7 @@ async fn fork_cli_conversation(
         },
         session_file: fork_resume,
         workspace_dir: source.workspace_dir.clone(),
-        model: source.model,
+        model: source.model.clone(),
         created_at: now,
         updated_at: now,
         archived_at: None,
@@ -1226,9 +1226,11 @@ pub async fn retry_last_turn(state: State<'_, AppState>, id: String) -> CmdResul
     Ok(RetryResponse { text, messages })
 }
 
-/// Fire-and-forget: ask DeepSeek V4 Pro for a concise title and, if the
-/// conversation still carries our placeholder, replace it and notify the
-/// frontend. Silent on any failure — the mechanical fallback already stuck.
+/// Fire-and-forget: ask the utility model (DeepSeek, or the user's first
+/// custom provider — see `custom_models::utility_target`) for a concise title
+/// and, if the conversation still carries our placeholder, replace it and
+/// notify the frontend. Silent on any failure — the mechanical fallback
+/// already stuck.
 fn spawn_auto_title(
     store: Arc<crate::store::Store>,
     handle: tauri::AppHandle,
@@ -1237,12 +1239,11 @@ fn spawn_auto_title(
     fallback: String,
 ) {
     tauri::async_runtime::spawn(async move {
-        let api_key = match secrets::get("deepseek") {
-            Ok(Some(k)) => k,
-            _ => return, // no key → keep the mechanical fallback
+        let target = match crate::custom_models::utility_target(&store) {
+            Some(t) => t,
+            None => return, // no usable endpoint → keep the mechanical fallback
         };
-        let url = crate::provider::deepseek_chat_url(&store);
-        let title = match crate::titling::generate_title(&api_key, &url, &message).await {
+        let title = match crate::titling::generate_title(&target, &message).await {
             Ok(t) => t,
             Err(e) => {
                 tracing::warn!("auto-title failed for {id}: {e}");
@@ -2102,12 +2103,12 @@ pub async fn set_model_choice(
     id: String,
     choice: ModelChoice,
 ) -> CmdResult<Conversation> {
-    state.store.set_model(&id, choice, now_ms()).map_err(err)?;
+    state.store.set_model(&id, &choice, now_ms()).map_err(err)?;
     // If pi is already running for this conv, push the new choice through
     // immediately. If it's cold, the next pi_for() will pick it up from the
     // freshly persisted row.
     if let Some(pi) = state.pi_existing(&id).await {
-        crate::model_bridge::apply_choice(&pi, choice)
+        crate::model_bridge::apply_choice(&pi, &state.store, &choice)
             .await
             .map_err(err)?;
     }

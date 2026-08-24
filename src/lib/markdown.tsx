@@ -49,7 +49,9 @@ export function normalizeMath(text: string): string {
             // structural Markdown. Keep this inside the code-span split so
             // examples in code stay byte-for-byte unchanged.
             .replace(
-              /(\*{1,3})(https?:\/\/[^\s<*]+?)\1(?=\s|$|[.,;:!?)}\]'"])/gi,
+              // The closer must be followed by a break: whitespace, end, or
+              // punctuation — including full-width CJK marks like （ and ，.
+              /(\*{1,3})(https?:\/\/[^\s<*]+?)\1(?=\s|$|\p{P})/giu,
               "$1[$2]($2)$1",
             )
             .replace(/\\\[([\s\S]+?)\\\]/g, (_, body) => `$$${body}$$`)
@@ -201,4 +203,48 @@ export function LinkifiedText({ text }: { text: string }) {
   }
   if (last < text.length) parts.push(text.slice(last));
   return <>{parts}</>;
+}
+
+// A fence opener/closer at the start of a line. Used only for parity: an odd
+// count means the text ends inside a code block, where nothing is emphasis.
+const FENCE_LINE = /^ {0,3}(?:```|~~~)/gm;
+
+/**
+ * Close inline markdown that the stream hasn't finished emitting yet.
+ *
+ * While a reply streams, `**bold**` arrives one chunk at a time, so the tail
+ * spends a beat as an unclosed `**…` — which CommonMark renders as literal
+ * asterisks (and, for a bare URL, lets GFM's autolinker swallow the delimiter
+ * into the href). The text visibly flickers `**` on and off. Feeding the parser
+ * a balanced string instead makes the fragment render as the emphasis it is
+ * about to become. Only ever applied to the streaming tail; a settled message
+ * always renders its exact source (see AssistantMarkdown).
+ */
+export function healStreamingInline(text: string): string {
+  // Inside an open code fence nothing is emphasis, and the fence itself can
+  // only be closed by the model. Leave it alone.
+  if ((text.match(FENCE_LINE)?.length ?? 0) % 2 === 1) return text;
+
+  // Drop complete code spans (and complete fences) so delimiters written as
+  // code don't count. A *dangling* backtick stays behind in `prose`.
+  let prose = text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .filter((_, i) => i % 2 === 0)
+    .join("");
+
+  let suffix = "";
+  const openSpan = prose.lastIndexOf("`");
+  if (openSpan !== -1) {
+    // Everything after the dangling backtick is code-in-progress, not prose.
+    prose = prose.slice(0, openSpan);
+    suffix = "`";
+  }
+
+  if ((prose.match(/\*\*/g)?.length ?? 0) % 2 === 1) {
+    // A `**` with nothing after it yet has no content to embolden; closing it
+    // would render `****`, which is literal. Hide the opener until text lands.
+    if (/\*\*$/.test(text)) return text.slice(0, -2);
+    suffix += "**";
+  }
+  return text + suffix;
 }

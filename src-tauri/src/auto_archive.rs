@@ -43,7 +43,7 @@ const MS_PER_HOUR: i64 = 60 * 60 * 1000;
 const MS_PER_DAY: i64 = 24 * MS_PER_HOUR;
 
 // =============================================================================
-// Settings (persisted in app_settings, mirrors DreamSettings)
+// Settings (persisted in app_settings)
 // =============================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

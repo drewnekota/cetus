@@ -67,9 +67,9 @@ const REASONING: {
   hintKey: string;
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
-  { level: "non_think", labelKey: "reasoning.quick.label", hintKey: "reasoning.quick.hint", icon: Gauge },
-  { level: "think_high", labelKey: "reasoning.think.label", hintKey: "reasoning.think.hint", icon: BrainCircuit },
-  { level: "think_max", labelKey: "reasoning.max.label", hintKey: "reasoning.max.hint", icon: Flame },
+  { level: "off", labelKey: "reasoning.quick.label", hintKey: "reasoning.quick.hint", icon: Gauge },
+  { level: "high", labelKey: "reasoning.think.label", hintKey: "reasoning.think.hint", icon: BrainCircuit },
+  { level: "max", labelKey: "reasoning.max.label", hintKey: "reasoning.max.hint", icon: Flame },
 ];
 
 // Cross-invocation content index. The palette is lazy-mounted (page.tsx renders

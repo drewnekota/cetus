@@ -42,9 +42,6 @@ pub enum AppEvent {
         automation: Box<crate::automation::Automation>,
         conversation: crate::store::Conversation,
     },
-    /// Agent memory changed out-of-band. The Memory settings page reloads the
-    /// store when it sees this.
-    MemoryUpdated,
     /// Agent skills changed out-of-band. The Skills settings page reloads the
     /// store when it sees this.
     SkillsUpdated,

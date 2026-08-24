@@ -266,7 +266,7 @@ async fn call_cetus(
         config,
     )?;
     pi.new_session().await?;
-    crate::model_bridge::apply_choice(&pi, crate::model::ModelChoice::default()).await?;
+    crate::model_bridge::apply_choice(&pi, &state.store, &crate::model::ModelChoice::default()).await?;
     pi.send_prompt(
         prompt,
         vec![json!({

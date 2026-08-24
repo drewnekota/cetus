@@ -6,7 +6,7 @@
 //! changes.
 
 use crate::automation::{Automation, AutomationSchedule};
-use crate::model::{DsModel, ModelChoice, ReasoningLevel};
+use crate::model::{ModelChoice, ModelRef, ReasoningLevel};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -509,7 +509,7 @@ impl Store {
                 c.title,
                 c.session_file,
                 c.workspace_dir,
-                c.model.model.as_str(),
+                c.model.model.to_persist(),
                 c.model.reasoning.as_str(),
                 c.created_at,
                 c.updated_at,
@@ -678,7 +678,7 @@ impl Store {
     }
 
     /// Most recent `updated_at` across non-archived conversations (0 if none).
-    /// Backs the dreamer's "cetus has been quiet" gate cheaply — it uses
+    /// Backs "cetus has been quiet" gates cheaply — callers use
     /// `idx_conv_updated` instead of materializing the whole conversation list
     /// every tick just to take a max.
     pub fn latest_activity_ms(&self) -> Result<i64> {
@@ -712,11 +712,11 @@ impl Store {
         Ok(())
     }
 
-    pub fn set_model(&self, id: &str, choice: ModelChoice, ts: i64) -> Result<()> {
+    pub fn set_model(&self, id: &str, choice: &ModelChoice, ts: i64) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE conversations SET ds_model = ?1, reasoning = ?2, updated_at = ?3 WHERE id = ?4",
-            params![choice.model.as_str(), choice.reasoning.as_str(), ts, id],
+            params![choice.model.to_persist(), choice.reasoning.as_str(), ts, id],
         )?;
         Ok(())
     }
@@ -990,7 +990,7 @@ impl Store {
                 a.name,
                 a.prompt,
                 a.workspace_dir,
-                a.model.model.as_str(),
+                a.model.model.to_persist(),
                 a.model.reasoning.as_str(),
                 serde_json::to_string(&a.schedule)?,
                 a.enabled as i64,
@@ -1026,7 +1026,7 @@ impl Store {
                 a.name,
                 a.prompt,
                 a.workspace_dir,
-                a.model.model.as_str(),
+                a.model.model.to_persist(),
                 a.model.reasoning.as_str(),
                 serde_json::to_string(&a.schedule)?,
                 a.enabled as i64,
@@ -1893,8 +1893,8 @@ fn row_to_automation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
     let model_str: String = r.get(4)?;
     let reasoning_str: String = r.get(5)?;
     let model = ModelChoice {
-        model: DsModel::parse(&model_str).unwrap_or(DsModel::Pro),
-        reasoning: ReasoningLevel::parse(&reasoning_str).unwrap_or(ReasoningLevel::ThinkHigh),
+        model: ModelRef::parse(&model_str).unwrap_or_default(),
+        reasoning: ReasoningLevel::parse(&reasoning_str).unwrap_or(ReasoningLevel::High),
     };
     let schedule_json: String = r.get(6)?;
     let schedule: AutomationSchedule = serde_json::from_str(&schedule_json).map_err(|e| {
@@ -1926,8 +1926,8 @@ fn row_to_automation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
 fn row_to_conversation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> {
     let model_str: String = r.get(4)?;
     let reasoning_str: String = r.get(5)?;
-    let model = DsModel::parse(&model_str).unwrap_or(DsModel::Pro);
-    let reasoning = ReasoningLevel::parse(&reasoning_str).unwrap_or(ReasoningLevel::ThinkHigh);
+    let model = ModelRef::parse(&model_str).unwrap_or_default();
+    let reasoning = ReasoningLevel::parse(&reasoning_str).unwrap_or(ReasoningLevel::High);
     Ok(Conversation {
         id: r.get(0)?,
         title: r.get(1)?,

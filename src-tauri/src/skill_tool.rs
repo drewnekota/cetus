@@ -14,7 +14,7 @@
 //!
 //! A skill the user explicitly asks for is created ENABLED and managed (it shows
 //! in Settings → Skills with a "By agent" badge, toggleable/deletable like any
-//! other). That's distinct from the background review pass ([`crate::skill_review`]),
+//! other).
 //! which proposes DISABLED suggestions. We deliberately do NOT recycle the
 //! requesting conversation's pi (that would abort its in-flight turn); skills are
 //! read at session start, so a new/updated skill loads in the next conversation —

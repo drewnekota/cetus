@@ -6,6 +6,29 @@ import type { NamespaceMessages } from "./types";
 // keyboard-shortcut letters are intentionally left untranslated.
 export const settings = {
   en: {
+    "models.model.reasoningHint": "Turn on Reasoning for models with an effort knob, then enable the levels your endpoint supports. Each level sends its own name by default — type a token to override (e.g. map cetus's levels onto an endpoint that only knows low/medium/high). Pick the effort format your vendor expects; disabled levels are clamped to the nearest enabled one.",
+    "models.model.format": "Format",
+    "models.model.reasoning": "Reasoning",
+    "nav.models": "Models",
+    "models.title": "Models",
+    "models.description": "Add your own OpenAI-compatible model providers — a base URL, an API key, and model ids. Their models then appear in the chat model picker alongside the built-in tiers.",
+    "models.empty": "No custom providers yet.",
+    "models.add": "Add provider",
+    "models.noKey": "No key",
+    "models.footnote": "Background tasks (auto-titles, meeting notes) use DeepSeek when its key is set, otherwise your first custom provider.",
+    "models.name.label": "Name",
+    "models.name.placeholder": "OpenRouter, my vLLM box, …",
+    "models.baseUrl.label": "Base URL",
+    "models.baseUrl.hint": "OpenAI-compatible endpoint, without /chat/completions.",
+    "models.key.label": "API key",
+    "models.key.placeholder": "sk-… (leave empty for local endpoints)",
+    "models.key.keepStored": "•••••••• (stored — type to replace)",
+    "models.models.label": "Models",
+    "models.model.idPlaceholder": "model id",
+    "models.model.namePlaceholder": "display name (optional)",
+    "models.model.vision": "Vision",
+    "models.model.visionHint": "Turn on Vision for models that accept images — attachments are then sent to the model directly instead of being transcribed first.",
+    "models.model.add": "Add model",
     // --- Chrome -----------------------------------------------------------
     "page.title": "Settings",
 
@@ -20,7 +43,6 @@ export const settings = {
     "nav.remote": "Remote access",
     "nav.api-keys": "API Keys",
     "nav.memory": "Memory",
-    "nav.dreaming": "Dreaming",
     "nav.plugins": "Plugins",
     "nav.skills": "Skills",
     "nav.slash-commands": "Slash commands",
@@ -170,7 +192,7 @@ export const settings = {
     "apiKeys.replace": "Replace",
     "apiKeys.deepseekUrl.label": "DeepSeek API URL",
     "apiKeys.deepseekUrl.hint":
-      "Optional. Routes all DeepSeek traffic — the agent plus titling, dream, skill review and meeting minutes — through a custom OpenAI-compatible base URL (proxy or self-host). Blank uses the default api.deepseek.com.",
+      "Optional. Routes all DeepSeek traffic — the agent plus titling and meeting minutes — through a custom OpenAI-compatible base URL (proxy or self-host). Blank uses the default api.deepseek.com.",
 
     // --- Notifications ----------------------------------------------------
     "notifications.title": "Notifications",
@@ -458,22 +480,6 @@ export const settings = {
     "autoArchive.unit.hours": "hours",
     "autoArchive.unit.days": "days",
 
-    // --- Dreaming ---------------------------------------------------------
-    "dreaming.title": "Dreaming",
-    "dreaming.description":
-      "When you're not chatting with Cetus, it reflects on the day's conversations and consolidates durable insights — your preferences, ongoing projects, and decisions — into Memory. Like sleeping on it.",
-    "dreaming.enable.label": "Enable dreaming",
-    "dreaming.enable.description":
-      "On by default. Whenever Cetus goes quiet, it quietly distills what it learned into long-term memory.",
-    "dreaming.quiet.label": "Quiet period",
-    "dreaming.quiet.description":
-      "Minutes with no Cetus chat activity before a dream may start. It still runs while you work in other apps — it just waits for a lull so it never summarizes a conversation you're mid-thread on.",
-    "dreaming.quiet.unit": "min",
-    "dreaming.footnotePrefix":
-      "Heads up: dreaming sends your recent conversation text to DeepSeek to distill notes, so it needs a DeepSeek API key. New notes show up under Memory tagged ",
-    "dreaming.footnoteSuffix":
-      ", where you can review, edit, or delete them.",
-    "dreaming.tagAgent": "Agent",
 
     // --- Memory -----------------------------------------------------------
     "memory.title": "Memory",
@@ -522,8 +528,6 @@ export const settings = {
     "skills.source.imported": "Imported",
     "skills.source.proposed": "Proposed",
     "skills.source.byAgent": "By agent",
-    "skills.review.label": "Propose skills from my work",
-    "skills.review.description": "When idle, Cetus reviews recent chats and suggests reusable skills — added disabled until you approve them.",
     "skills.updatedOn": "Updated {date}",
     "skills.disableAria": "Disable skill",
     "skills.enableAria": "Enable skill",
@@ -637,6 +641,29 @@ export const settings = {
     "skills.discovered.chooseFolder": "Choose folder",
   },
   zh: {
+    "models.model.reasoningHint": "有推理力度参数的模型请打开“推理”，然后勾选端点支持的档位。每个档位默认按档位名发送，也可填 token 覆盖（比如把档位映射到只认 low/medium/high 的端点）。“格式”选你的供应商期望的 effort 字段形态；未启用的档位会自动就近钳制到启用档。",
+    "models.model.format": "格式",
+    "models.model.reasoning": "推理",
+    "nav.models": "模型",
+    "models.title": "模型",
+    "models.description": "添加你自己的 OpenAI 兼容模型供应商——填入 Base URL、API key 和模型 id，即可在会话的模型选择器里和内置档位一起使用。",
+    "models.empty": "还没有自定义供应商。",
+    "models.add": "添加供应商",
+    "models.noKey": "未配 key",
+    "models.footnote": "后台任务（自动标题、会议纪要）在配置了 DeepSeek key 时用 DeepSeek，否则用你的第一个自定义供应商。",
+    "models.name.label": "名称",
+    "models.name.placeholder": "OpenRouter、我的 vLLM 机器……",
+    "models.baseUrl.label": "Base URL",
+    "models.baseUrl.hint": "OpenAI 兼容端点，不带 /chat/completions。",
+    "models.key.label": "API key",
+    "models.key.placeholder": "sk-…（本地端点可留空）",
+    "models.key.keepStored": "••••••••（已保存——输入即替换）",
+    "models.models.label": "模型",
+    "models.model.idPlaceholder": "模型 id",
+    "models.model.namePlaceholder": "显示名（可选）",
+    "models.model.vision": "视觉",
+    "models.model.visionHint": "支持图片输入的模型请打开“视觉”——附件将直接发给模型，而不是先转写成文字。",
+    "models.model.add": "添加模型",
     "page.title": "设置",
 
     "group.general": "通用",
@@ -697,7 +724,6 @@ export const settings = {
     "update.failed": "更新失败，请稍后重试。",
     "nav.api-keys": "API 密钥",
     "nav.memory": "记忆",
-    "nav.dreaming": "梦境整理",
     "nav.plugins": "插件",
     "nav.skills": "技能",
     "nav.slash-commands": "斜杠命令",
@@ -784,7 +810,7 @@ export const settings = {
     "apiKeys.replace": "替换",
     "apiKeys.deepseekUrl.label": "DeepSeek API 地址",
     "apiKeys.deepseekUrl.hint":
-      "可选。将所有 DeepSeek 请求（主 agent，以及标题生成、dream、技能复盘、会议纪要）改走自定义的 OpenAI 兼容地址（代理或自建）。留空则使用默认 api.deepseek.com。",
+      "可选。将所有 DeepSeek 请求（主 agent，以及标题生成、会议纪要）改走自定义的 OpenAI 兼容地址（代理或自建）。留空则使用默认 api.deepseek.com。",
 
     "notifications.title": "通知",
     "notifications.description":
@@ -1047,20 +1073,6 @@ export const settings = {
     "autoArchive.unit.hours": "小时",
     "autoArchive.unit.days": "天",
 
-    "dreaming.title": "梦境整理",
-    "dreaming.description":
-      "当你没在与 Cetus 对话时，它会回顾当天的对话，并把持久的洞见——你的偏好、进行中的项目和决定——整理进记忆。如同睡前沉淀一番。",
-    "dreaming.enable.label": "启用梦境整理",
-    "dreaming.enable.description":
-      "默认开启。每当 Cetus 空闲下来，它就会悄悄把学到的内容提炼进长期记忆。",
-    "dreaming.quiet.label": "静默时长",
-    "dreaming.quiet.description":
-      "Cetus 对话无活动多少分钟后才可能开始一次整理。即便你在其他应用中工作它也会运行——只是会等到空档，以免总结你正在进行的对话。",
-    "dreaming.quiet.unit": "分钟",
-    "dreaming.footnotePrefix":
-      "提示：梦境整理会把你近期的对话文本发送给 DeepSeek 来提炼笔记，因此需要 DeepSeek API 密钥。新笔记会出现在“记忆”中，并标记为 ",
-    "dreaming.footnoteSuffix": "，你可在那里查看、编辑或删除。",
-    "dreaming.tagAgent": "智能体",
 
     "memory.title": "记忆",
     "memory.description":
@@ -1107,8 +1119,6 @@ export const settings = {
     "skills.source.imported": "导入",
     "skills.source.proposed": "推荐",
     "skills.source.byAgent": "AI 创建",
-    "skills.review.label": "从对话中推荐技能",
-    "skills.review.description": "空闲时，Cetus 会回顾近期对话并推荐可复用的技能——默认禁用，需你审核后启用。",
     "skills.updatedOn": "更新于 {date}",
     "skills.disableAria": "停用技能",
     "skills.enableAria": "启用技能",
@@ -1199,6 +1209,29 @@ export const settings = {
     "skills.discovered.chooseFolder": "选择文件夹",
   },
   ja: {
+    "models.model.reasoningHint": "推論の強度パラメーターを持つモデルでは「推論」をオンにし、エンドポイントが対応するレベルを有効にしてください。各レベルは既定でレベル名をそのまま送信し、トークンを入力すると上書きできます。「形式」はベンダーが期待する effort フィールドの形を選択します。無効なレベルは最も近い有効レベルに丸められます。",
+    "models.model.format": "形式",
+    "models.model.reasoning": "推論",
+    "nav.models": "モデル",
+    "models.title": "モデル",
+    "models.description": "OpenAI 互換のモデルプロバイダーを追加できます。Base URL、API キー、モデル ID を設定すると、チャットのモデルピッカーに内蔵モデルと並んで表示されます。",
+    "models.empty": "カスタムプロバイダーはまだありません。",
+    "models.add": "プロバイダーを追加",
+    "models.noKey": "キー未設定",
+    "models.footnote": "バックグラウンドタスク（自動タイトル、会議メモ)は DeepSeek キーがあれば DeepSeek を、なければ最初のカスタムプロバイダーを使います。",
+    "models.name.label": "名前",
+    "models.name.placeholder": "OpenRouter、自前の vLLM など",
+    "models.baseUrl.label": "Base URL",
+    "models.baseUrl.hint": "OpenAI 互換エンドポイント（/chat/completions は不要)。",
+    "models.key.label": "API キー",
+    "models.key.placeholder": "sk-…（ローカルエンドポイントは空欄可）",
+    "models.key.keepStored": "••••••••（保存済み — 入力で置き換え）",
+    "models.models.label": "モデル",
+    "models.model.idPlaceholder": "モデル ID",
+    "models.model.namePlaceholder": "表示名（任意）",
+    "models.model.vision": "ビジョン",
+    "models.model.visionHint": "画像入力に対応するモデルではビジョンをオンにしてください。添付画像が文字起こしされずに直接モデルへ送られます。",
+    "models.model.add": "モデルを追加",
     "page.title": "設定",
 
     "group.general": "一般",
@@ -1217,7 +1250,6 @@ export const settings = {
       "バックグラウンドで更新を確認・インストールします。次回 Cetus 起動時に適用されます。",
     "nav.api-keys": "API キー",
     "nav.memory": "メモリ",
-    "nav.dreaming": "ドリーミング",
     "nav.skills": "スキル",
     "nav.slash-commands": "スラッシュコマンド",
     "nav.connectors": "MCP",
@@ -1256,7 +1288,7 @@ export const settings = {
     "apiKeys.replace": "差し替え",
     "apiKeys.deepseekUrl.label": "DeepSeek API URL",
     "apiKeys.deepseekUrl.hint":
-      "任意。すべての DeepSeek 通信（エージェント本体に加え、タイトル生成・dream・スキルレビュー・議事録）を、カスタムの OpenAI 互換ベース URL（プロキシ／セルフホスト）経由にします。空欄ならデフォルトの api.deepseek.com を使用します。",
+      "任意。すべての DeepSeek 通信（エージェント本体に加え、タイトル生成・議事録）を、カスタムの OpenAI 互換ベース URL（プロキシ／セルフホスト）経由にします。空欄ならデフォルトの api.deepseek.com を使用します。",
 
     "notifications.title": "通知",
     "notifications.description":
@@ -1448,21 +1480,6 @@ export const settings = {
     "archived.restore": "復元",
     "archived.deleteAria": "チャットを削除",
 
-    "dreaming.title": "ドリーミング",
-    "dreaming.description":
-      "Cetus と話していない間、その日の会話を振り返り、持続的な気づき — あなたの好み、進行中のプロジェクト、決定事項 — をメモリにまとめます。一晩寝かせて考えるように。",
-    "dreaming.enable.label": "ドリーミングを有効にする",
-    "dreaming.enable.description":
-      "既定でオン。Cetus が静かになるたびに、学んだことをそっと長期メモリに蒸留します。",
-    "dreaming.quiet.label": "静寂の時間",
-    "dreaming.quiet.description":
-      "ドリーミングが始まるまでに必要な、Cetus でのチャット操作がない時間（分）。他のアプリで作業中も動作しますが、進行中の会話を要約しないよう、合間を待ちます。",
-    "dreaming.quiet.unit": "分",
-    "dreaming.footnotePrefix":
-      "ご注意：ドリーミングは最近の会話テキストを DeepSeek に送ってノートを蒸留するため、DeepSeek の API キーが必要です。新しいノートは「メモリ」に ",
-    "dreaming.footnoteSuffix":
-      " のタグ付きで表示され、確認・編集・削除できます。",
-    "dreaming.tagAgent": "エージェント",
 
     "memory.title": "メモリ",
     "memory.description":
@@ -1509,8 +1526,6 @@ export const settings = {
     "skills.source.imported": "インポート",
     "skills.source.proposed": "提案",
     "skills.source.byAgent": "エージェント作成",
-    "skills.review.label": "会話からスキルを提案",
-    "skills.review.description": "アイドル時に、Cetus が最近の会話を見直して再利用可能なスキルを提案します（承認するまで無効）。",
     "skills.updatedOn": "{date} に更新",
     "skills.disableAria": "スキルを無効化",
     "skills.enableAria": "スキルを有効化",
@@ -1590,6 +1605,29 @@ export const settings = {
     "skills.discovered.chooseFolder": "フォルダを選択",
   },
   ko: {
+    "models.model.reasoningHint": "추론 강도 파라미터가 있는 모델은 '추론'을 켜고 엔드포인트가 지원하는 레벨을 활성화하세요. 각 레벨은 기본적으로 레벨 이름을 그대로 보내며, 토큰을 입력해 재정의할 수 있습니다. '형식'은 공급자가 기대하는 effort 필드 형태를 선택합니다. 비활성 레벨은 가장 가까운 활성 레벨로 조정됩니다.",
+    "models.model.format": "형식",
+    "models.model.reasoning": "추론",
+    "nav.models": "모델",
+    "models.title": "모델",
+    "models.description": "OpenAI 호환 모델 제공자를 직접 추가하세요. Base URL, API 키, 모델 ID를 입력하면 채팅 모델 선택기에 기본 모델과 함께 표시됩니다.",
+    "models.empty": "아직 사용자 지정 제공자가 없습니다.",
+    "models.add": "제공자 추가",
+    "models.noKey": "키 없음",
+    "models.footnote": "백그라운드 작업(자동 제목, 회의 노트)은 DeepSeek 키가 있으면 DeepSeek을, 없으면 첫 번째 사용자 지정 제공자를 사용합니다.",
+    "models.name.label": "이름",
+    "models.name.placeholder": "OpenRouter, 내 vLLM 서버 등",
+    "models.baseUrl.label": "Base URL",
+    "models.baseUrl.hint": "OpenAI 호환 엔드포인트(/chat/completions 제외).",
+    "models.key.label": "API 키",
+    "models.key.placeholder": "sk-… (로컬 엔드포인트는 비워도 됨)",
+    "models.key.keepStored": "•••••••• (저장됨 — 입력하면 교체)",
+    "models.models.label": "모델",
+    "models.model.idPlaceholder": "모델 ID",
+    "models.model.namePlaceholder": "표시 이름(선택)",
+    "models.model.vision": "비전",
+    "models.model.visionHint": "이미지 입력을 지원하는 모델은 비전을 켜세요. 첨부 이미지가 텍스트로 변환되지 않고 모델로 바로 전송됩니다.",
+    "models.model.add": "모델 추가",
     "page.title": "설정",
 
     "group.general": "일반",
@@ -1608,7 +1646,6 @@ export const settings = {
       "백그라운드에서 업데이트를 확인하고 설치합니다. 다음에 Cetus를 열 때 적용됩니다.",
     "nav.api-keys": "API 키",
     "nav.memory": "메모리",
-    "nav.dreaming": "드리밍",
     "nav.skills": "스킬",
     "nav.slash-commands": "슬래시 명령",
     "nav.connectors": "MCP",
@@ -1833,21 +1870,6 @@ export const settings = {
     "archived.restore": "복원",
     "archived.deleteAria": "대화 삭제",
 
-    "dreaming.title": "드리밍",
-    "dreaming.description":
-      "Cetus와 대화하지 않는 동안, Cetus는 하루의 대화를 되돌아보며 지속적인 통찰 — 사용자의 선호, 진행 중인 프로젝트, 결정 — 을 메모리로 정리합니다. 하룻밤 묵혀 생각하는 것처럼요.",
-    "dreaming.enable.label": "드리밍 사용",
-    "dreaming.enable.description":
-      "기본값은 켜짐입니다. Cetus가 조용해질 때마다 배운 것을 조용히 장기 메모리로 추려냅니다.",
-    "dreaming.quiet.label": "정적 기간",
-    "dreaming.quiet.description":
-      "드리밍이 시작되기까지 Cetus 대화 활동이 없어야 하는 시간(분)입니다. 다른 앱에서 작업하는 동안에도 실행되지만, 진행 중인 대화를 요약하지 않도록 잠잠해질 때까지 기다립니다.",
-    "dreaming.quiet.unit": "분",
-    "dreaming.footnotePrefix":
-      "참고: 드리밍은 노트를 추려내기 위해 최근 대화 텍스트를 DeepSeek으로 보내므로 DeepSeek API 키가 필요합니다. 새 노트는 ‘메모리’에 다음 태그로 표시되며 ",
-    "dreaming.footnoteSuffix":
-      ", 거기서 검토, 편집 또는 삭제할 수 있습니다.",
-    "dreaming.tagAgent": "에이전트",
 
     "memory.title": "메모리",
     "memory.description":
@@ -1894,8 +1916,6 @@ export const settings = {
     "skills.source.imported": "가져옴",
     "skills.source.proposed": "제안됨",
     "skills.source.byAgent": "에이전트 생성",
-    "skills.review.label": "대화에서 스킬 제안",
-    "skills.review.description": "유휴 상태일 때 Cetus가 최근 대화를 검토해 재사용 가능한 스킬을 제안합니다(승인 전까지 비활성).",
     "skills.updatedOn": "{date}에 업데이트됨",
     "skills.disableAria": "스킬 비활성화",
     "skills.enableAria": "스킬 활성화",
@@ -1975,6 +1995,29 @@ export const settings = {
     "skills.discovered.chooseFolder": "폴더 선택",
   },
   es: {
+    "models.model.reasoningHint": "Activa Razonamiento en los modelos con parámetro de esfuerzo y habilita los niveles que admite tu endpoint. Cada nivel envía su propio nombre por defecto; escribe un token para sobrescribirlo. En «Formato» elige la forma del campo de esfuerzo que espera tu proveedor; los niveles deshabilitados se ajustan al habilitado más cercano.",
+    "models.model.format": "Formato",
+    "models.model.reasoning": "Razonamiento",
+    "nav.models": "Modelos",
+    "models.title": "Modelos",
+    "models.description": "Añade tus propios proveedores de modelos compatibles con OpenAI: una URL base, una clave API e ids de modelo. Sus modelos aparecerán en el selector del chat junto a los integrados.",
+    "models.empty": "Aún no hay proveedores personalizados.",
+    "models.add": "Añadir proveedor",
+    "models.noKey": "Sin clave",
+    "models.footnote": "Las tareas en segundo plano (títulos automáticos, notas de reuniones) usan DeepSeek si su clave está configurada; si no, tu primer proveedor personalizado.",
+    "models.name.label": "Nombre",
+    "models.name.placeholder": "OpenRouter, mi servidor vLLM…",
+    "models.baseUrl.label": "URL base",
+    "models.baseUrl.hint": "Endpoint compatible con OpenAI, sin /chat/completions.",
+    "models.key.label": "Clave API",
+    "models.key.placeholder": "sk-… (vacío para endpoints locales)",
+    "models.key.keepStored": "•••••••• (guardada — escribe para reemplazar)",
+    "models.models.label": "Modelos",
+    "models.model.idPlaceholder": "id del modelo",
+    "models.model.namePlaceholder": "nombre visible (opcional)",
+    "models.model.vision": "Visión",
+    "models.model.visionHint": "Activa Visión en los modelos que aceptan imágenes: los adjuntos se envían directamente al modelo en lugar de transcribirse antes.",
+    "models.model.add": "Añadir modelo",
     "page.title": "Ajustes",
 
     "group.general": "General",
@@ -1993,7 +2036,6 @@ export const settings = {
       "Busca e instala actualizaciones en segundo plano. Se aplican la próxima vez que abras Cetus.",
     "nav.api-keys": "Claves API",
     "nav.memory": "Memoria",
-    "nav.dreaming": "Soñar",
     "nav.skills": "Habilidades",
     "nav.slash-commands": "Comandos de barra",
     "nav.connectors": "MCP",
@@ -2218,21 +2260,6 @@ export const settings = {
     "archived.restore": "Restaurar",
     "archived.deleteAria": "Eliminar chat",
 
-    "dreaming.title": "Soñar",
-    "dreaming.description":
-      "Cuando no estás chateando con Cetus, este reflexiona sobre las conversaciones del día y consolida ideas duraderas —tus preferencias, proyectos en curso y decisiones— en la Memoria. Como consultarlo con la almohada.",
-    "dreaming.enable.label": "Activar el soñar",
-    "dreaming.enable.description":
-      "Activado por defecto. Cada vez que Cetus se queda en silencio, destila discretamente lo aprendido en la memoria a largo plazo.",
-    "dreaming.quiet.label": "Periodo de inactividad",
-    "dreaming.quiet.description":
-      "Minutos sin actividad de chat en Cetus antes de que pueda iniciarse un sueño. Sigue ejecutándose mientras trabajas en otras apps; solo espera a una pausa para no resumir nunca una conversación que tienes a medias.",
-    "dreaming.quiet.unit": "min",
-    "dreaming.footnotePrefix":
-      "Aviso: el soñar envía el texto de tus conversaciones recientes a DeepSeek para destilar notas, por lo que necesita una clave API de DeepSeek. Las notas nuevas aparecen en Memoria etiquetadas como ",
-    "dreaming.footnoteSuffix":
-      ", donde puedes revisarlas, editarlas o eliminarlas.",
-    "dreaming.tagAgent": "Agente",
 
     "memory.title": "Memoria",
     "memory.description":
@@ -2279,8 +2306,6 @@ export const settings = {
     "skills.source.imported": "Importada",
     "skills.source.proposed": "Propuesta",
     "skills.source.byAgent": "Por el agente",
-    "skills.review.label": "Proponer habilidades a partir de mi trabajo",
-    "skills.review.description": "Cuando está inactivo, Cetus revisa los chats recientes y sugiere habilidades reutilizables (desactivadas hasta que las apruebes).",
     "skills.updatedOn": "Actualizada el {date}",
     "skills.disableAria": "Desactivar habilidad",
     "skills.enableAria": "Activar habilidad",
@@ -2360,6 +2385,29 @@ export const settings = {
     "skills.discovered.chooseFolder": "Elegir carpeta",
   },
   pt: {
+    "models.model.reasoningHint": "Ative Raciocínio nos modelos com parâmetro de esforço e habilite os níveis que seu endpoint aceita. Cada nível envia o próprio nome por padrão; digite um token para sobrescrever. Em “Formato”, escolha a forma do campo de esforço que seu fornecedor espera; níveis desabilitados são ajustados ao habilitado mais próximo.",
+    "models.model.format": "Formato",
+    "models.model.reasoning": "Raciocínio",
+    "nav.models": "Modelos",
+    "models.title": "Modelos",
+    "models.description": "Adicione seus próprios provedores de modelos compatíveis com OpenAI — uma URL base, uma chave de API e ids de modelo. Os modelos aparecem no seletor do chat junto com os integrados.",
+    "models.empty": "Ainda não há provedores personalizados.",
+    "models.add": "Adicionar provedor",
+    "models.noKey": "Sem chave",
+    "models.footnote": "Tarefas em segundo plano (títulos automáticos, notas de reunião) usam o DeepSeek quando sua chave está configurada; caso contrário, o primeiro provedor personalizado.",
+    "models.name.label": "Nome",
+    "models.name.placeholder": "OpenRouter, meu servidor vLLM…",
+    "models.baseUrl.label": "URL base",
+    "models.baseUrl.hint": "Endpoint compatível com OpenAI, sem /chat/completions.",
+    "models.key.label": "Chave de API",
+    "models.key.placeholder": "sk-… (vazio para endpoints locais)",
+    "models.key.keepStored": "•••••••• (salva — digite para substituir)",
+    "models.models.label": "Modelos",
+    "models.model.idPlaceholder": "id do modelo",
+    "models.model.namePlaceholder": "nome de exibição (opcional)",
+    "models.model.vision": "Visão",
+    "models.model.visionHint": "Ative Visão nos modelos que aceitam imagens — os anexos são enviados diretamente ao modelo em vez de transcritos antes.",
+    "models.model.add": "Adicionar modelo",
     "page.title": "Configurações",
 
     "group.general": "Geral",
@@ -2378,7 +2426,6 @@ export const settings = {
       "Verifica e instala atualizações em segundo plano. Aplicadas na próxima vez que você abrir o Cetus.",
     "nav.api-keys": "Chaves de API",
     "nav.memory": "Memória",
-    "nav.dreaming": "Sonhar",
     "nav.skills": "Habilidades",
     "nav.slash-commands": "Comandos de barra",
     "nav.connectors": "MCP",
@@ -2600,21 +2647,6 @@ export const settings = {
     "archived.restore": "Restaurar",
     "archived.deleteAria": "Excluir conversa",
 
-    "dreaming.title": "Sonhar",
-    "dreaming.description":
-      "Quando você não está conversando com o Cetus, ele reflete sobre as conversas do dia e consolida percepções duradouras — suas preferências, projetos em andamento e decisões — na Memória. Como dormir sobre o assunto.",
-    "dreaming.enable.label": "Ativar o sonhar",
-    "dreaming.enable.description":
-      "Ativado por padrão. Sempre que o Cetus fica em silêncio, ele destila discretamente o que aprendeu na memória de longo prazo.",
-    "dreaming.quiet.label": "Período de inatividade",
-    "dreaming.quiet.description":
-      "Minutos sem atividade de conversa no Cetus antes que um sonho possa começar. Ele continua sendo executado enquanto você trabalha em outros apps — só espera uma pausa para nunca resumir uma conversa que você tem em andamento.",
-    "dreaming.quiet.unit": "min",
-    "dreaming.footnotePrefix":
-      "Atenção: o sonhar envia o texto das suas conversas recentes ao DeepSeek para destilar notas, por isso precisa de uma chave de API do DeepSeek. As novas notas aparecem em Memória com a etiqueta ",
-    "dreaming.footnoteSuffix":
-      ", onde você pode revisá-las, editá-las ou excluí-las.",
-    "dreaming.tagAgent": "Agente",
 
     "memory.title": "Memória",
     "memory.description":
@@ -2661,8 +2693,6 @@ export const settings = {
     "skills.source.imported": "Importada",
     "skills.source.proposed": "Proposta",
     "skills.source.byAgent": "Pelo agente",
-    "skills.review.label": "Propor habilidades a partir do meu trabalho",
-    "skills.review.description": "Quando ocioso, o Cetus revisa as conversas recentes e sugere habilidades reutilizáveis (desativadas até você aprovar).",
     "skills.updatedOn": "Atualizada em {date}",
     "skills.disableAria": "Desativar habilidade",
     "skills.enableAria": "Ativar habilidade",
@@ -2742,6 +2772,29 @@ export const settings = {
     "skills.discovered.chooseFolder": "Escolher pasta",
   },
   fr: {
+    "models.model.reasoningHint": "Activez Raisonnement pour les modèles dotés d'un réglage d'effort, puis activez les niveaux pris en charge par votre endpoint. Chaque niveau envoie son propre nom par défaut ; saisissez un token pour le remplacer. « Format » définit la forme du champ d'effort attendue par votre fournisseur ; les niveaux désactivés sont ramenés au niveau activé le plus proche.",
+    "models.model.format": "Format",
+    "models.model.reasoning": "Raisonnement",
+    "nav.models": "Modèles",
+    "models.title": "Modèles",
+    "models.description": "Ajoutez vos propres fournisseurs de modèles compatibles OpenAI : une URL de base, une clé API et des ids de modèles. Ils apparaissent ensuite dans le sélecteur de modèle du chat, aux côtés des modèles intégrés.",
+    "models.empty": "Aucun fournisseur personnalisé pour l'instant.",
+    "models.add": "Ajouter un fournisseur",
+    "models.noKey": "Pas de clé",
+    "models.footnote": "Les tâches d'arrière-plan (titres automatiques, notes de réunion) utilisent DeepSeek si sa clé est configurée, sinon votre premier fournisseur personnalisé.",
+    "models.name.label": "Nom",
+    "models.name.placeholder": "OpenRouter, mon serveur vLLM…",
+    "models.baseUrl.label": "URL de base",
+    "models.baseUrl.hint": "Endpoint compatible OpenAI, sans /chat/completions.",
+    "models.key.label": "Clé API",
+    "models.key.placeholder": "sk-… (vide pour un endpoint local)",
+    "models.key.keepStored": "•••••••• (enregistrée — saisissez pour remplacer)",
+    "models.models.label": "Modèles",
+    "models.model.idPlaceholder": "id du modèle",
+    "models.model.namePlaceholder": "nom affiché (facultatif)",
+    "models.model.vision": "Vision",
+    "models.model.visionHint": "Activez Vision pour les modèles qui acceptent les images : les pièces jointes sont envoyées directement au modèle au lieu d'être transcrites.",
+    "models.model.add": "Ajouter un modèle",
     "page.title": "Réglages",
 
     "group.general": "Général",
@@ -2760,7 +2813,6 @@ export const settings = {
       "Recherche et installe les mises à jour en arrière-plan. Appliquées au prochain lancement de Cetus.",
     "nav.api-keys": "Clés API",
     "nav.memory": "Mémoire",
-    "nav.dreaming": "Rêverie",
     "nav.skills": "Compétences",
     "nav.slash-commands": "Commandes slash",
     "nav.connectors": "MCP",
@@ -2982,21 +3034,6 @@ export const settings = {
     "archived.restore": "Restaurer",
     "archived.deleteAria": "Supprimer la conversation",
 
-    "dreaming.title": "Rêverie",
-    "dreaming.description":
-      "Quand vous ne discutez pas avec Cetus, il réfléchit aux conversations de la journée et consolide des enseignements durables — vos préférences, vos projets en cours et vos décisions — dans la Mémoire. Comme une nuit de réflexion.",
-    "dreaming.enable.label": "Activer la rêverie",
-    "dreaming.enable.description":
-      "Activé par défaut. Chaque fois que Cetus devient inactif, il distille discrètement ce qu'il a appris dans la mémoire à long terme.",
-    "dreaming.quiet.label": "Période d'inactivité",
-    "dreaming.quiet.description":
-      "Minutes sans activité de conversation dans Cetus avant qu'une rêverie puisse démarrer. Elle s'exécute toujours pendant que vous travaillez dans d'autres apps — elle attend simplement une accalmie pour ne jamais résumer une conversation que vous avez en cours.",
-    "dreaming.quiet.unit": "min",
-    "dreaming.footnotePrefix":
-      "Attention : la rêverie envoie le texte de vos conversations récentes à DeepSeek pour distiller des notes, elle nécessite donc une clé API DeepSeek. Les nouvelles notes apparaissent sous Mémoire avec l'étiquette ",
-    "dreaming.footnoteSuffix":
-      ", où vous pouvez les consulter, les modifier ou les supprimer.",
-    "dreaming.tagAgent": "Agent",
 
     "memory.title": "Mémoire",
     "memory.description":
@@ -3043,8 +3080,6 @@ export const settings = {
     "skills.source.imported": "Importée",
     "skills.source.proposed": "Proposée",
     "skills.source.byAgent": "Par l'agent",
-    "skills.review.label": "Proposer des compétences à partir de mon travail",
-    "skills.review.description": "En période d'inactivité, Cetus examine les conversations récentes et suggère des compétences réutilisables (désactivées jusqu'à votre approbation).",
     "skills.updatedOn": "Mise à jour le {date}",
     "skills.disableAria": "Désactiver la compétence",
     "skills.enableAria": "Activer la compétence",
@@ -3124,6 +3159,29 @@ export const settings = {
     "skills.discovered.chooseFolder": "Choisir un dossier",
   },
   de: {
+    "models.model.reasoningHint": "Aktiviere Reasoning bei Modellen mit Effort-Parameter und schalte die Stufen frei, die dein Endpunkt unterstützt. Jede Stufe sendet standardmäßig ihren eigenen Namen; ein eingetragenes Token überschreibt das. Unter „Format“ wählst du die Feldform deines Anbieters; deaktivierte Stufen werden auf die nächste aktive geklemmt.",
+    "models.model.format": "Format",
+    "models.model.reasoning": "Reasoning",
+    "nav.models": "Modelle",
+    "models.title": "Modelle",
+    "models.description": "Füge eigene OpenAI-kompatible Modellanbieter hinzu — Basis-URL, API-Schlüssel und Modell-IDs. Die Modelle erscheinen dann im Modell-Picker des Chats neben den integrierten Stufen.",
+    "models.empty": "Noch keine eigenen Anbieter.",
+    "models.add": "Anbieter hinzufügen",
+    "models.noKey": "Kein Schlüssel",
+    "models.footnote": "Hintergrundaufgaben (automatische Titel, Meeting-Notizen) nutzen DeepSeek, wenn dessen Schlüssel gesetzt ist, sonst deinen ersten eigenen Anbieter.",
+    "models.name.label": "Name",
+    "models.name.placeholder": "OpenRouter, mein vLLM-Server …",
+    "models.baseUrl.label": "Basis-URL",
+    "models.baseUrl.hint": "OpenAI-kompatibler Endpunkt, ohne /chat/completions.",
+    "models.key.label": "API-Schlüssel",
+    "models.key.placeholder": "sk-… (leer für lokale Endpunkte)",
+    "models.key.keepStored": "•••••••• (gespeichert — tippen zum Ersetzen)",
+    "models.models.label": "Modelle",
+    "models.model.idPlaceholder": "Modell-ID",
+    "models.model.namePlaceholder": "Anzeigename (optional)",
+    "models.model.vision": "Vision",
+    "models.model.visionHint": "Aktiviere Vision bei Modellen mit Bildeingabe — Anhänge gehen dann direkt ans Modell statt vorher transkribiert zu werden.",
+    "models.model.add": "Modell hinzufügen",
     "page.title": "Einstellungen",
 
     "group.general": "Allgemein",
@@ -3142,7 +3200,6 @@ export const settings = {
       "Sucht und installiert Updates im Hintergrund. Wird beim nächsten Start von Cetus angewendet.",
     "nav.api-keys": "API-Schlüssel",
     "nav.memory": "Gedächtnis",
-    "nav.dreaming": "Träumen",
     "nav.skills": "Fähigkeiten",
     "nav.slash-commands": "Slash-Befehle",
     "nav.connectors": "MCP",
@@ -3364,21 +3421,6 @@ export const settings = {
     "archived.restore": "Wiederherstellen",
     "archived.deleteAria": "Chat löschen",
 
-    "dreaming.title": "Träumen",
-    "dreaming.description":
-      "Wenn du nicht mit Cetus chattest, reflektiert es über die Gespräche des Tages und konsolidiert dauerhafte Erkenntnisse — deine Vorlieben, laufenden Projekte und Entscheidungen — ins Gedächtnis. Wie eine Nacht darüber schlafen.",
-    "dreaming.enable.label": "Träumen aktivieren",
-    "dreaming.enable.description":
-      "Standardmäßig an. Immer wenn Cetus zur Ruhe kommt, destilliert es still das Gelernte ins Langzeitgedächtnis.",
-    "dreaming.quiet.label": "Ruhephase",
-    "dreaming.quiet.description":
-      "Minuten ohne cetus-Chat-Aktivität, bevor ein Traum beginnen darf. Es läuft auch, während du in anderen Apps arbeitest — es wartet nur auf eine Pause, um nie ein Gespräch zusammenzufassen, in dem du mittendrin bist.",
-    "dreaming.quiet.unit": "Min.",
-    "dreaming.footnotePrefix":
-      "Hinweis: Träumen sendet deinen aktuellen Gesprächstext an DeepSeek, um Notizen zu destillieren, daher wird ein DeepSeek-API-Schlüssel benötigt. Neue Notizen erscheinen unter Gedächtnis mit dem Tag ",
-    "dreaming.footnoteSuffix":
-      ", wo du sie überprüfen, bearbeiten oder löschen kannst.",
-    "dreaming.tagAgent": "Agent",
 
     "memory.title": "Gedächtnis",
     "memory.description":
@@ -3425,8 +3467,6 @@ export const settings = {
     "skills.source.imported": "Importiert",
     "skills.source.proposed": "Vorgeschlagen",
     "skills.source.byAgent": "Vom Agent",
-    "skills.review.label": "Fähigkeiten aus meiner Arbeit vorschlagen",
-    "skills.review.description": "Im Leerlauf prüft Cetus aktuelle Chats und schlägt wiederverwendbare Fähigkeiten vor (deaktiviert, bis du sie freigibst).",
     "skills.updatedOn": "Aktualisiert am {date}",
     "skills.disableAria": "Fähigkeit deaktivieren",
     "skills.enableAria": "Fähigkeit aktivieren",
@@ -3506,6 +3546,29 @@ export const settings = {
     "skills.discovered.chooseFolder": "Ordner wählen",
   },
   it: {
+    "models.model.reasoningHint": "Attiva Ragionamento per i modelli con un parametro di sforzo e abilita i livelli supportati dal tuo endpoint. Ogni livello invia il proprio nome per impostazione predefinita; digita un token per sovrascriverlo. In «Formato» scegli la forma del campo attesa dal fornitore; i livelli disabilitati vengono ricondotti al più vicino abilitato.",
+    "models.model.format": "Formato",
+    "models.model.reasoning": "Ragionamento",
+    "nav.models": "Modelli",
+    "models.title": "Modelli",
+    "models.description": "Aggiungi i tuoi provider di modelli compatibili con OpenAI: una URL base, una chiave API e gli id dei modelli. I modelli compariranno nel selettore della chat accanto a quelli integrati.",
+    "models.empty": "Nessun provider personalizzato per ora.",
+    "models.add": "Aggiungi provider",
+    "models.noKey": "Nessuna chiave",
+    "models.footnote": "Le attività in background (titoli automatici, note delle riunioni) usano DeepSeek se la sua chiave è configurata, altrimenti il primo provider personalizzato.",
+    "models.name.label": "Nome",
+    "models.name.placeholder": "OpenRouter, il mio server vLLM…",
+    "models.baseUrl.label": "URL base",
+    "models.baseUrl.hint": "Endpoint compatibile OpenAI, senza /chat/completions.",
+    "models.key.label": "Chiave API",
+    "models.key.placeholder": "sk-… (vuoto per endpoint locali)",
+    "models.key.keepStored": "•••••••• (salvata — digita per sostituire)",
+    "models.models.label": "Modelli",
+    "models.model.idPlaceholder": "id del modello",
+    "models.model.namePlaceholder": "nome visualizzato (facoltativo)",
+    "models.model.vision": "Visione",
+    "models.model.visionHint": "Attiva Visione per i modelli che accettano immagini: gli allegati vengono inviati direttamente al modello anziché essere prima trascritti.",
+    "models.model.add": "Aggiungi modello",
     "page.title": "Impostazioni",
 
     "group.general": "Generale",
@@ -3524,7 +3587,6 @@ export const settings = {
       "Cerca e installa gli aggiornamenti in background. Applicati al prossimo avvio di Cetus.",
     "nav.api-keys": "Chiavi API",
     "nav.memory": "Memoria",
-    "nav.dreaming": "Sogni",
     "nav.skills": "Competenze",
     "nav.slash-commands": "Comandi slash",
     "nav.connectors": "MCP",
@@ -3746,21 +3808,6 @@ export const settings = {
     "archived.restore": "Ripristina",
     "archived.deleteAria": "Elimina chat",
 
-    "dreaming.title": "Sogni",
-    "dreaming.description":
-      "Quando non stai chattando con Cetus, riflette sulle conversazioni della giornata e consolida intuizioni durevoli — le tue preferenze, i progetti in corso e le decisioni — nella Memoria. Come dormirci sopra.",
-    "dreaming.enable.label": "Abilita i sogni",
-    "dreaming.enable.description":
-      "Attivo per impostazione predefinita. Ogni volta che Cetus resta inattivo, distilla in silenzio ciò che ha imparato nella memoria a lungo termine.",
-    "dreaming.quiet.label": "Periodo di quiete",
-    "dreaming.quiet.description":
-      "Minuti senza attività in chat con Cetus prima che un sogno possa iniziare. Funziona comunque mentre lavori in altre app — aspetta solo una pausa per non riassumere mai una conversazione in cui sei nel mezzo.",
-    "dreaming.quiet.unit": "min",
-    "dreaming.footnotePrefix":
-      "Nota: i sogni inviano il testo della tua conversazione recente a DeepSeek per distillare le note, quindi richiedono una chiave API DeepSeek. Le nuove note compaiono sotto Memoria con l'etichetta ",
-    "dreaming.footnoteSuffix":
-      ", dove puoi rivederle, modificarle o eliminarle.",
-    "dreaming.tagAgent": "Agente",
 
     "memory.title": "Memoria",
     "memory.description":
@@ -3807,8 +3854,6 @@ export const settings = {
     "skills.source.imported": "Importata",
     "skills.source.proposed": "Proposta",
     "skills.source.byAgent": "Dall'agente",
-    "skills.review.label": "Proponi competenze dal mio lavoro",
-    "skills.review.description": "Quando è inattivo, Cetus esamina le chat recenti e suggerisce competenze riutilizzabili (disattivate finché non le approvi).",
     "skills.updatedOn": "Aggiornata il {date}",
     "skills.disableAria": "Disabilita competenza",
     "skills.enableAria": "Abilita competenza",
@@ -3888,6 +3933,29 @@ export const settings = {
     "skills.discovered.chooseFolder": "Scegli cartella",
   },
   ru: {
+    "models.model.reasoningHint": "Включите «Рассуждение» для моделей с параметром усилия и активируйте уровни, которые поддерживает ваш endpoint. Каждый уровень по умолчанию отправляет своё имя; введите токен, чтобы переопределить. В «Формате» выберите форму поля усилия вашего провайдера; отключённые уровни сводятся к ближайшему включённому.",
+    "models.model.format": "Формат",
+    "models.model.reasoning": "Рассуждение",
+    "nav.models": "Модели",
+    "models.title": "Модели",
+    "models.description": "Добавьте собственных провайдеров моделей, совместимых с OpenAI: базовый URL, ключ API и идентификаторы моделей. Модели появятся в списке выбора в чате рядом со встроенными.",
+    "models.empty": "Пользовательских провайдеров пока нет.",
+    "models.add": "Добавить провайдера",
+    "models.noKey": "Нет ключа",
+    "models.footnote": "Фоновые задачи (автозаголовки, заметки встреч) используют DeepSeek, если задан его ключ, иначе — первого пользовательского провайдера.",
+    "models.name.label": "Название",
+    "models.name.placeholder": "OpenRouter, мой сервер vLLM…",
+    "models.baseUrl.label": "Базовый URL",
+    "models.baseUrl.hint": "OpenAI-совместимый endpoint, без /chat/completions.",
+    "models.key.label": "Ключ API",
+    "models.key.placeholder": "sk-… (пусто для локальных endpoint'ов)",
+    "models.key.keepStored": "•••••••• (сохранён — введите, чтобы заменить)",
+    "models.models.label": "Модели",
+    "models.model.idPlaceholder": "id модели",
+    "models.model.namePlaceholder": "отображаемое имя (необязательно)",
+    "models.model.vision": "Зрение",
+    "models.model.visionHint": "Включите «Зрение» для моделей с поддержкой изображений — вложения будут отправляться модели напрямую, без предварительной транскрипции.",
+    "models.model.add": "Добавить модель",
     "page.title": "Настройки",
 
     "group.general": "Основные",
@@ -3906,7 +3974,6 @@ export const settings = {
       "Проверяет и устанавливает обновления в фоне. Применяются при следующем запуске Cetus.",
     "nav.api-keys": "API-ключи",
     "nav.memory": "Память",
-    "nav.dreaming": "Сновидения",
     "nav.skills": "Навыки",
     "nav.slash-commands": "Слэш-команды",
     "nav.connectors": "MCP",
@@ -4128,21 +4195,6 @@ export const settings = {
     "archived.restore": "Восстановить",
     "archived.deleteAria": "Удалить чат",
 
-    "dreaming.title": "Сновидения",
-    "dreaming.description":
-      "Когда вы не общаетесь с Cetus, он размышляет над беседами дня и закрепляет устойчивые выводы — ваши предпочтения, текущие проекты и решения — в Память. Словно переспав с этой мыслью.",
-    "dreaming.enable.label": "Включить сновидения",
-    "dreaming.enable.description":
-      "Включено по умолчанию. Всякий раз, когда Cetus затихает, он тихо перегоняет усвоенное в долговременную память.",
-    "dreaming.quiet.label": "Период тишины",
-    "dreaming.quiet.description":
-      "Минуты без активности в чате Cetus, прежде чем может начаться сновидение. Оно всё равно работает, пока вы заняты в других приложениях — просто ждёт затишья, чтобы никогда не подытоживать беседу, в середине которой вы находитесь.",
-    "dreaming.quiet.unit": "мин",
-    "dreaming.footnotePrefix":
-      "Внимание: сновидения отправляют текст ваших недавних бесед в DeepSeek для перегонки в заметки, поэтому нужен API-ключ DeepSeek. Новые заметки появляются в разделе Память с меткой ",
-    "dreaming.footnoteSuffix":
-      ", где вы можете их просмотреть, отредактировать или удалить.",
-    "dreaming.tagAgent": "Агент",
 
     "memory.title": "Память",
     "memory.description":
@@ -4189,8 +4241,6 @@ export const settings = {
     "skills.source.imported": "Импортирован",
     "skills.source.proposed": "Предложен",
     "skills.source.byAgent": "От агента",
-    "skills.review.label": "Предлагать навыки на основе моей работы",
-    "skills.review.description": "В режиме простоя Cetus просматривает недавние чаты и предлагает повторно используемые навыки (отключены, пока вы их не одобрите).",
     "skills.updatedOn": "Обновлён {date}",
     "skills.disableAria": "Отключить навык",
     "skills.enableAria": "Включить навык",

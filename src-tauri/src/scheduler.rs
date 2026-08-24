@@ -217,12 +217,12 @@ async fn run_and_record(
             let ctx = ctx.clone();
             let auto_id = auto.id.clone();
             let conv_id = conv.id.clone();
-            let model = conv.model;
+            let model = conv.model.clone();
             let prompt = auto.prompt.clone();
             tauri::async_runtime::spawn(async move {
                 let _guard = guard;
                 let sent = async {
-                    crate::model_bridge::apply_choice(&pi, model)
+                    crate::model_bridge::apply_choice(&pi, &ctx.store, &model)
                         .await
                         .map_err(|e| e.to_string())?;
                     pi.send_prompt(&prompt, Vec::new())
@@ -298,7 +298,7 @@ async fn fire_cli(
         title: run_title(&auto.name),
         session_file: String::new(),
         workspace_dir: workspace.to_string_lossy().to_string(),
-        model: auto.model,
+        model: auto.model.clone(),
         created_at: now,
         updated_at: now,
         archived_at: None,
@@ -415,7 +415,7 @@ async fn create_conversation(
         title: run_title(&auto.name),
         session_file,
         workspace_dir: workspace.to_string_lossy().to_string(),
-        model: auto.model,
+        model: auto.model.clone(),
         created_at: now,
         updated_at: now,
         archived_at: None,

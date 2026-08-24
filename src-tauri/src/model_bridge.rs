@@ -15,37 +15,107 @@
 //!
 //! So: check the credential store before we ask, and rewrite pi's message when
 //! the model it can't find is the one we ship.
+//!
+//! Custom providers (Settings → Models) register through the
+//! `custom-models.ts` extension at pi startup; their `Model not found` has a
+//! third meaning — the provider/model was deleted from settings after this
+//! conversation picked it — which gets its own message.
 
-use crate::model::ModelChoice;
+use crate::custom_models;
+use crate::model::{ModelChoice, ModelRef};
 use crate::pi_rpc::PiRpc;
 use crate::secrets;
+use crate::store::Store;
 use anyhow::{bail, Result};
 
-/// Provider id in [`secrets::KNOWN_PROVIDERS`] backing the main agent.
+/// Provider id in [`secrets::KNOWN_PROVIDERS`] backing the built-in models.
 const PROVIDER: &str = "deepseek";
 
-pub async fn apply_choice(pi: &PiRpc, choice: ModelChoice) -> Result<()> {
-    let model_id = choice.model.api_id();
-    if !secrets::has(PROVIDER) {
-        bail!("{}", missing_key_message());
-    }
-    if let Err(e) = pi.set_model(PROVIDER, model_id).await {
-        let raw = e.to_string();
-        if is_model_not_found(&raw, model_id) {
-            // The key is in our store but pi didn't see it — a keychain read
-            // that failed after the cached snapshot, or an env that never
-            // reached the child. Say that, instead of blaming the model id.
-            bail!("{} (pi reported: {raw})", missing_key_message());
+pub async fn apply_choice(pi: &PiRpc, store: &Store, choice: &ModelChoice) -> Result<()> {
+    match &choice.model {
+        ModelRef::Builtin(tier) => {
+            let model_id = tier.api_id();
+            if !secrets::has(PROVIDER) {
+                bail!("{}", missing_key_message());
+            }
+            if let Err(e) = pi.set_model(PROVIDER, model_id).await {
+                let raw = e.to_string();
+                if is_model_not_found(&raw, model_id) {
+                    // The key is in our store but pi didn't see it — a keychain read
+                    // that failed after the cached snapshot, or an env that never
+                    // reached the child. Say that, instead of blaming the model id.
+                    bail!("{} (pi reported: {raw})", missing_key_message());
+                }
+                return Err(e);
+            }
+            // The DeepSeek built-ins' thinkingLevelMap accepts exactly
+            // off/high/max — clamp the seven-level axis onto those.
+            pi.set_thinking_level(choice.reasoning.builtin_pi_level())
+                .await?;
+            Ok(())
         }
-        return Err(e);
+        ModelRef::Custom { provider, model } => {
+            let Some(cfg) = custom_models::find_custom_model(store, provider, model) else {
+                bail!(
+                    "Model {model} is no longer configured. Pick another model, or re-add \
+                     it under Settings → Models."
+                );
+            };
+            if let Err(e) = pi.set_model(provider, model).await {
+                let raw = e.to_string();
+                if is_model_not_found(&raw, model) {
+                    bail!(
+                        "The agent started without the custom provider \"{provider}\". \
+                         Check its base URL and API key under Settings → Models. \
+                         (pi reported: {raw})"
+                    );
+                }
+                return Err(e);
+            }
+            // Reasoning-capable custom models registered a thinkingLevelMap
+            // built from `thinking_levels` (see custom-models.ts): enabled
+            // levels resolve, everything else is null = filtered by pi. Clamp
+            // the conversation's level to the nearest enabled one (same
+            // walk-up-then-down order as pi's clampThinkingLevel) so
+            // set_thinking_level can't fail on a filtered level. Non-reasoning
+            // models take no level at all.
+            if cfg.reasoning {
+                let level = clamp_to_enabled(choice.reasoning, &cfg.thinking_levels);
+                pi.set_thinking_level(level.pi_level()).await?;
+            }
+            Ok(())
+        }
     }
-    pi.set_thinking_level(choice.reasoning.pi_level()).await?;
-    Ok(())
+}
+
+/// Nearest enabled thinking level: the requested one when enabled, else the
+/// closest enabled level above it, else the closest below (pi's own
+/// clampThinkingLevel order). `enabled` is `CustomModel::thinking_levels`,
+/// guaranteed non-empty for reasoning models by the upsert sanitizer.
+fn clamp_to_enabled(
+    requested: crate::model::ReasoningLevel,
+    enabled: &std::collections::BTreeMap<String, String>,
+) -> crate::model::ReasoningLevel {
+    use crate::model::ReasoningLevel;
+    let on = |l: ReasoningLevel| enabled.contains_key(l.pi_level());
+    if on(requested) {
+        return requested;
+    }
+    let idx = ReasoningLevel::ALL
+        .iter()
+        .position(|l| *l == requested)
+        .unwrap_or(0);
+    ReasoningLevel::ALL[idx..]
+        .iter()
+        .chain(ReasoningLevel::ALL[..idx].iter().rev())
+        .copied()
+        .find(|l| on(*l))
+        .unwrap_or(ReasoningLevel::Off)
 }
 
 /// True when pi's `set_model` failure is its credential-filtered "unknown
-/// model" answer for the very model id Cetus ships — i.e. an auth problem
-/// wearing a registry error's clothes.
+/// model" answer for a model id we expected to exist — i.e. an auth/registry
+/// problem wearing a registry error's clothes.
 fn is_model_not_found(error: &str, model_id: &str) -> bool {
     error.contains("Model not found") && error.contains(model_id)
 }
@@ -72,6 +142,22 @@ mod tests {
             "pi set_model failed: Model not found: deepseek/deepseek-v4-pro",
             "deepseek-v4-pro"
         ));
+    }
+
+    #[test]
+    fn clamping_walks_up_then_down_the_level_axis() {
+        use crate::model::ReasoningLevel as L;
+        let enabled: std::collections::BTreeMap<String, String> =
+            [("off", ""), ("low", "low"), ("high", "medium")]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+        // Enabled levels pass through.
+        assert_eq!(clamp_to_enabled(L::Low, &enabled), L::Low);
+        // Disabled walks up first (minimal → low), max walks down (max → high).
+        assert_eq!(clamp_to_enabled(L::Minimal, &enabled), L::Low);
+        assert_eq!(clamp_to_enabled(L::Max, &enabled), L::High);
+        assert_eq!(clamp_to_enabled(L::Medium, &enabled), L::High);
     }
 
     #[test]

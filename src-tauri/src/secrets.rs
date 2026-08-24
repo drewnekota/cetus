@@ -282,13 +282,21 @@ pub fn load_env() -> Vec<(String, String)> {
         // Already logged (and recorded for `store_error`) by `load_cached`.
         Err(_) => return Vec::new(),
     };
-    let env: Vec<(String, String)> = KNOWN_PROVIDERS
+    let mut env: Vec<(String, String)> = KNOWN_PROVIDERS
         .iter()
         .filter_map(|(prov, env_name)| {
             map.get(*prov)
                 .map(|val| (env_name.to_string(), val.clone()))
         })
         .collect();
+    // Custom model providers (Settings → Models) store their keys under
+    // "custom:<provider-id>" and reach the custom-models pi extension through
+    // a per-provider env var; the exported config carries the var *name*.
+    for (id, val) in &map {
+        if let Some(provider_id) = id.strip_prefix(crate::custom_models::SECRET_PREFIX) {
+            env.push((crate::custom_models::key_env_name(provider_id), val.clone()));
+        }
+    }
     // Names only, never values. pi drops any provider it can't authenticate
     // from its model registry, so "which keys did the child actually get"
     // is the first question when an agent fails to start.

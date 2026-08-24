@@ -26,7 +26,7 @@ mod cua;
 mod devtest;
 mod discovery;
 mod doubao;
-mod dream;
+mod custom_models;
 mod focused_text;
 mod host_tunnel;
 #[cfg(target_os = "macos")]
@@ -53,7 +53,6 @@ mod remote;
 mod resources;
 mod scheduler;
 mod secrets;
-mod skill_review;
 mod skill_tool;
 mod skills;
 mod slash_commands;
@@ -634,7 +633,7 @@ impl AppState {
             pi.switch_session(&conv.session_file).await?;
             None
         };
-        model_bridge::apply_choice(&pi, conv.model).await?;
+        model_bridge::apply_choice(&pi, &self.store, &conv.model).await?;
 
         // Install under a SHORT lock, losing a same-id race gracefully: if another
         // caller finished first and its pi is alive, keep theirs and drop ours —
@@ -1307,11 +1306,6 @@ pub fn run() {
             let sched_ctx = app.state::<AppState>().scheduler_ctx();
             tauri::async_runtime::spawn(scheduler::run_scheduler(sched_ctx));
 
-            // Dreaming: while the user is idle, consolidate recent sessions into
-            // agent memory. Resolves AppState from the handle each tick; safe to
-            // spawn now that AppState is managed above.
-            dream::spawn_dreamer(app.handle().clone());
-
             // Auto-archive: opt-in background sweep that archives conversations
             // left untouched past the user's idle threshold. No-op while off.
             auto_archive::spawn_auto_archiver(app.handle().clone());
@@ -1320,10 +1314,6 @@ pub fn run() {
             // tokens so remote connectors (Notion, …) don't silently die ~1h after
             // authorizing. No-op when there are no OAuth connectors.
             mcp_oauth::spawn_token_refresher();
-
-            // Skill review: while the user is idle, distill reusable skills from
-            // recent sessions and land them as disabled proposals for review.
-            skill_review::spawn_skill_reviewer(app.handle().clone());
 
             // Always-on control socket + the `cetus` CLI shim: the supported
             // path for third-party CLI runtimes (claude-code / codex) to read
@@ -1570,6 +1560,17 @@ pub fn run() {
             // recycle needed on change (see vision.rs).
             std::env::set_var("CETUS_VISION_CONFIG", vision::config_path(&app_data_dir));
             vision::export_config(&app_data_dir, &app.state::<AppState>().store);
+
+            // Custom model providers (Settings → Models): publish
+            // `<app_data>/custom-models.json` + its path so the custom-models
+            // pi extension registers each configured provider at spawn.
+            // Registration happens at startup, so changes recycle idle pis
+            // (see custom_models.rs) rather than hot-reloading.
+            std::env::set_var(
+                "CETUS_MODELS_CONFIG",
+                custom_models::config_path(&app_data_dir),
+            );
+            custom_models::export_config(&app_data_dir, &app.state::<AppState>().store);
 
             // Publish the agent-control enable flag so the browser-use /
             // computer-use extensions register their tools only when on.
@@ -1838,12 +1839,11 @@ pub fn run() {
         provider::set_deepseek_base_url_cmd,
         locale::get_ui_locale,
         locale::set_ui_locale,
-        dream::get_dream_settings,
-        dream::set_dream_settings,
+        custom_models::list_custom_providers,
+        custom_models::upsert_custom_provider,
+        custom_models::delete_custom_provider,
         auto_archive::get_auto_archive_settings,
         auto_archive::set_auto_archive_settings,
-        skill_review::get_skill_review_settings,
-        skill_review::set_skill_review_settings,
         skills::list_skills,
         skills::set_skills_enabled,
         skills::import_skill,
@@ -2024,12 +2024,11 @@ pub fn run() {
         provider::set_deepseek_base_url_cmd,
         locale::get_ui_locale,
         locale::set_ui_locale,
-        dream::get_dream_settings,
-        dream::set_dream_settings,
+        custom_models::list_custom_providers,
+        custom_models::upsert_custom_provider,
+        custom_models::delete_custom_provider,
         auto_archive::get_auto_archive_settings,
         auto_archive::set_auto_archive_settings,
-        skill_review::get_skill_review_settings,
-        skill_review::set_skill_review_settings,
         skills::list_skills,
         skills::set_skills_enabled,
         skills::import_skill,

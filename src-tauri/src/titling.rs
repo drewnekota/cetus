@@ -9,13 +9,10 @@
 //! The call is deliberately out-of-band: it never touches the conversation's pi
 //! session, so the generated title can't leak into the model's message history.
 
+use crate::custom_models::UtilityTarget;
 use anyhow::{anyhow, bail, Result};
 use serde_json::json;
 use std::time::Duration;
-
-/// The model used for conversation titling. cetus ships DeepSeek V4 Pro; we keep
-/// this call in its fast, non-thinking path by omitting `reasoning_effort`.
-const TITLE_MODEL: &str = "deepseek-v4-pro";
 
 /// Volcano Ark (火山方舟) OpenAI-compatible endpoint — used for the fast dictation
 /// cleanup/rewrite pass. Distinct from the DeepSeek titling endpoint above, and
@@ -58,20 +55,12 @@ Title: OAuth Refresh Token Lifecycle";
 /// Longest title we keep; mirrors the mechanical fallback's cap in commands.rs.
 const MAX_TITLE_CHARS: usize = 60;
 
-/// Generate a concise title for `user_message` via DeepSeek V4 Pro. `url` is the
-/// chat-completions endpoint (honors a custom DeepSeek base URL). Returns the
-/// sanitized title, or an error if the request fails or comes back empty.
-pub async fn generate_title(api_key: &str, url: &str, user_message: &str) -> Result<String> {
-    let body = json!({
-        "model": TITLE_MODEL,
-        // V4 always reasons — `low` is the floor; there is no non-thinking
-        // switch (the old "omit reasoning_effort for the fast path" assumption
-        // stopped holding). A title's chain runs a few hundred tokens, so the
-        // previous 64-token cap starved it: finish_reason=length, empty
-        // content, and every title silently failed. Titling is async
-        // background work, so the latency is fine; the budget just has to
-        // fit the chain.
-        "reasoning_effort": "low",
+/// Generate a concise title for `user_message` via the utility model (see
+/// `custom_models::utility_target`). Returns the sanitized title, or an error
+/// if the request fails or comes back empty.
+pub async fn generate_title(target: &UtilityTarget, user_message: &str) -> Result<String> {
+    let mut body = json!({
+        "model": target.model,
         "messages": [
             { "role": "system", "content": TITLE_SYSTEM_PROMPT },
             { "role": "user", "content": user_message },
@@ -80,15 +69,27 @@ pub async fn generate_title(api_key: &str, url: &str, user_message: &str) -> Res
         "max_tokens": 1024,
         "temperature": 0.3,
     });
+    if target.is_deepseek {
+        // V4 always reasons — `low` is the floor; there is no non-thinking
+        // switch (the old "omit reasoning_effort for the fast path" assumption
+        // stopped holding). A title's chain runs a few hundred tokens, so the
+        // previous 64-token cap starved it: finish_reason=length, empty
+        // content, and every title silently failed. Titling is async
+        // background work, so the latency is fine; the budget just has to
+        // fit the chain. Only DeepSeek gets the field — other OpenAI-compatible
+        // endpoints may reject unknown parameters.
+        body["reasoning_effort"] = json!("low");
+    }
 
     let client = reqwest::Client::new();
-    let resp = client
-        .post(url)
-        .bearer_auth(api_key)
+    let mut req = client
+        .post(&target.url)
         .json(&body)
-        .timeout(Duration::from_secs(30))
-        .send()
-        .await?;
+        .timeout(Duration::from_secs(30));
+    if !target.api_key.is_empty() {
+        req = req.bearer_auth(&target.api_key);
+    }
+    let resp = req.send().await?;
 
     if !resp.status().is_success() {
         let status = resp.status();

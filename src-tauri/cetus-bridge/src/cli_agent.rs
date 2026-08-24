@@ -5762,6 +5762,41 @@ fn codex_context_event(params: &Value, transcript_bytes: usize) -> Option<Value>
     }))
 }
 
+/// Adapt app-server's account quota snapshot to the small cross-runtime shape
+/// consumed by Cetus. Codex reports integer percentages while Claude reports a
+/// 0..1 utilization fraction.
+fn codex_rate_limit_event(params: &Value) -> Option<Value> {
+    let snapshot = params
+        .get("rateLimits")
+        .or_else(|| params.get("rate_limits"))?;
+    let window = snapshot.get("primary")?;
+    let used_percent = window
+        .get("usedPercent")
+        .or_else(|| window.get("used_percent"))?
+        .as_f64()?;
+    let status = if used_percent >= 100.0 {
+        "rejected"
+    } else if used_percent >= 80.0 {
+        "allowed_warning"
+    } else {
+        "allowed"
+    };
+    Some(json!({
+        "type": "cli_rate_limit",
+        "backend": "codex",
+        "info": {
+            "status": status,
+            "utilization": used_percent / 100.0,
+            "resetsAt": window
+                .get("resetsAt")
+                .or_else(|| window.get("resets_at")),
+            "rateLimitType": snapshot
+                .get("limitId")
+                .or_else(|| snapshot.get("limit_id")),
+        }
+    }))
+}
+
 const CODEX_PROACTIVE_COMPACT_RATIO: f64 = 0.82;
 const CODEX_TRANSCRIPT_COMPACT_BYTES: usize = 64 * 1024 * 1024;
 
@@ -6531,6 +6566,11 @@ pub fn spawn_codex_session(
                                 emit(sink, vec![event]);
                             }
                         }
+                        "account/rateLimits/updated" => {
+                            if let Some(event) = codex_rate_limit_event(&params) {
+                                emit(sink, vec![event]);
+                            }
+                        }
                         "turn/completed" => {
                             // Whatever suggestions the turn left open died with
                             // it — Codex resolves them on interrupt, but don't
@@ -7112,6 +7152,25 @@ mod tests {
         assert_eq!(event["usedTokens"], json!(64000));
         assert_eq!(event["contextWindow"], json!(258400));
         assert_eq!(event["transcriptBytes"], json!(12_345));
+    }
+
+    #[test]
+    fn codex_rate_limit_snapshot_maps_to_shared_quota_shape() {
+        let event = codex_rate_limit_event(&json!({
+            "rateLimits": {
+                "limitId": "codex",
+                "primary": {
+                    "usedPercent": 84,
+                    "resetsAt": 1_800_000_000
+                }
+            }
+        }))
+        .unwrap();
+        assert_eq!(event["type"], json!("cli_rate_limit"));
+        assert_eq!(event["backend"], json!("codex"));
+        assert_eq!(event["info"]["status"], json!("allowed_warning"));
+        assert_eq!(event["info"]["utilization"], json!(0.84));
+        assert_eq!(event["info"]["resetsAt"], json!(1_800_000_000));
     }
 
     #[test]

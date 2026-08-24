@@ -1016,18 +1016,24 @@ function runtimeTuning(
 ): { model: string; effort: string | null } {
   const backend = normalizedBackend(conversation);
   if (backend === "pi") {
-    const efforts = {
-      non_think: "Quick",
-      think_high: "High",
-      think_max: "Max",
-    } as const;
-    return {
-      model:
-        conversation.model.model === "flash"
-          ? "DeepSeek V4 Flash"
-          : "DeepSeek V4 Pro",
-      effort: efforts[conversation.model.reasoning] ?? null,
+    const efforts: Partial<Record<string, string>> = {
+      off: "Quick",
+      minimal: "Minimal",
+      low: "Low",
+      medium: "Medium",
+      high: "High",
+      xhigh: "XHigh",
+      max: "Max",
     };
+    const m = conversation.model.model;
+    const model =
+      m === "flash"
+        ? "DeepSeek V4 Flash"
+        : m === "pro"
+          ? "DeepSeek V4 Pro"
+          : // Custom "<provider-id>/<model-id>" — show the model id part.
+            m.split("/").slice(1).join("/") || m;
+    return { model, effort: efforts[conversation.model.reasoning] ?? null };
   }
   const model = conversation.cliModel || defaults?.model || "Default";
   const effort = conversation.cliEffort || defaults?.effort || null;
@@ -1167,11 +1173,13 @@ const ConversationRow = memo(function ConversationRow({
             // row button, so moving onto it closes this details tooltip and
             // opens the archive action's own tooltip without nesting triggers.
             className={cn(
-              // Keep long titles visibly separated from the absolutely
-              // positioned relative-time / unread indicator. The padding also
-              // clears the hover action cluster (⋯ + archive) with a visible
-              // gap, so the ⋯ never reads as part of the title text.
-              "relative pr-20",
+              // Clear only the absolutely positioned relative-time / unread
+              // indicator (right-2 + w-7). The hover action cluster (⋯ +
+              // archive) is wider than that, but it sits on a gradient scrim
+              // (below) that fades the title tail out underneath it, so the
+              // title gets the full row width while not hovered and the ⋯
+              // never reads as part of the title text.
+              "relative pr-10",
               !active &&
                 "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
             )}
@@ -1259,15 +1267,25 @@ const ConversationRow = memo(function ConversationRow({
           </div>
         </TooltipContent>
       </Tooltip>
+      {/* Scrim under the hover actions: same accent as the hovered/active row
+          bg, fading leftwards, so a long title disappears into it instead of
+          butting up against the ⋯. Sits between the row button and the action
+          buttons in DOM order so it paints above the title but below the
+          actions. Visibility mirrors the actions' showOnHover conditions
+          (plus dropdown-open, which keeps the actions pinned visible). */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 right-0 w-24 rounded-r-md bg-linear-to-l from-sidebar-accent from-55% to-transparent transition-opacity group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 group-has-[[data-state=open]]/menu-item:opacity-100 md:opacity-0"
+      />
       {/* Hover actions, right-aligned over the time slot: [⋯ menu][archive].
           Both are absolutely-positioned siblings of the row button (see the
-          archive comment above), spaced by the !right offsets. */}
+          archive comment above), spaced flush by the !right offsets. */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <SidebarMenuAction
             showOnHover
             onClick={(e) => e.stopPropagation()}
-            className="!right-8 !top-1/2 !w-7 !-translate-y-1/2 rounded-sm !text-muted-foreground/80 hover:!bg-transparent hover:!text-muted-foreground data-[state=open]:!text-muted-foreground"
+            className="!right-7 !top-1/2 !w-6 !-translate-y-1/2 rounded-sm !text-muted-foreground/80 hover:!bg-transparent hover:!text-muted-foreground data-[state=open]:!text-muted-foreground"
           >
             <MoreHorizontal />
             <span className="sr-only">{t("action.more")}</span>
@@ -1288,7 +1306,7 @@ const ConversationRow = memo(function ConversationRow({
               e.stopPropagation();
               onArchive(conversation);
             }}
-            className="!right-1 !top-1/2 !w-7 !-translate-y-1/2 rounded-sm !text-muted-foreground/80 hover:!bg-transparent hover:!text-muted-foreground"
+            className="!right-1 !top-1/2 !w-6 !-translate-y-1/2 rounded-sm !text-muted-foreground/80 hover:!bg-transparent hover:!text-muted-foreground"
           >
             {archived ? <ArchiveRestore /> : <Archive />}
             <span className="sr-only">

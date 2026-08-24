@@ -19,7 +19,7 @@
 use crate::app_event::AppEvent;
 use crate::automation::{Automation, AutomationSchedule};
 use crate::host_tunnel::{self, str_field};
-use crate::model::{DsModel, ModelChoice, ReasoningLevel};
+use crate::model::{ModelChoice, ModelRef, ReasoningLevel};
 use crate::pi_rpc::PiRpc;
 use crate::store::{now_ms, Store};
 use serde_json::{json, Value};
@@ -276,12 +276,13 @@ fn describe_schedule(s: &AutomationSchedule) -> String {
 
 // ---- request → domain mapping ---------------------------------------------
 
-/// Build a [`ModelChoice`] from optional `model` ("flash"|"pro") and `reasoning`
-/// ("non_think"|"think_high"|"think_max") fields, defaulting to the Pro default.
+/// Build a [`ModelChoice`] from optional `model` ("flash"|"pro"|"<provider>/<id>")
+/// and `reasoning` (a pi level "off"…"max"; legacy "non_think"/"think_high"/
+/// "think_max" parse as aliases) fields, defaulting to the Pro default.
 fn build_model(p: &Value) -> ModelChoice {
     let mut m = ModelChoice::default();
     if let Some(r) = p.get("model").and_then(|v| v.as_str()) {
-        if let Some(model) = DsModel::parse(r) {
+        if let Some(model) = ModelRef::parse(r) {
             m.model = model;
         }
     }

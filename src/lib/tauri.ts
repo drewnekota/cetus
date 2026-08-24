@@ -12,7 +12,8 @@ import type {
   Conversation,
   DiscoverySettings,
   McpImportEntry,
-  DreamSettings,
+  CustomProvider,
+  CustomProviderView,
   ExtensionUIResponseBody,
   McpConnector,
   McpConnectorInput,
@@ -26,7 +27,6 @@ import type {
   PiMessage,
   PluginEntry,
   SkillEntry,
-  SkillReviewSettings,
   SkillState,
   DiscoveredSkill,
   SlashCommand,
@@ -51,6 +51,8 @@ import type {
 } from "./types";
 
 // --- Screen-context collection (Rewind-like) types -------------------------
+
+export type { CustomProvider, CustomProviderView } from "@/lib/types";
 
 /** Mirrors vision.rs VisionConfig (serde camelCase). Empty provider = auto. */
 export interface VisionConfig {
@@ -465,22 +467,20 @@ export const api = {
   revealPlugin: (id: string) => invoke<void>("reveal_plugin", { id }),
   deletePlugin: (id: string) => invoke<void>("delete_plugin", { id }),
 
-  // Dreaming (idle-time memory consolidation) -----------------------------
-  getDreamSettings: () => invoke<DreamSettings>("get_dream_settings"),
-  setDreamSettings: (settings: DreamSettings) =>
-    invoke<void>("set_dream_settings", { settings }),
+  // Custom model providers (Settings -> Models) ----------------------------
+  listCustomProviders: () =>
+    invoke<CustomProviderView[]>("list_custom_providers"),
+  /** apiKey: undefined = keep stored key; "" = delete it; else replace. */
+  upsertCustomProvider: (provider: CustomProvider, apiKey?: string) =>
+    invoke<CustomProvider>("upsert_custom_provider", { provider, apiKey }),
+  deleteCustomProvider: (id: string) =>
+    invoke<void>("delete_custom_provider", { id }),
 
   // Auto-archive (idle-time conversation archiving) -----------------------
   getAutoArchiveSettings: () =>
     invoke<AutoArchiveSettings>("get_auto_archive_settings"),
   setAutoArchiveSettings: (settings: AutoArchiveSettings) =>
     invoke<void>("set_auto_archive_settings", { settings }),
-
-  // Skill review (idle-time self-improvement: propose skills from experience) -
-  getSkillReviewSettings: () =>
-    invoke<SkillReviewSettings>("get_skill_review_settings"),
-  setSkillReviewSettings: (settings: SkillReviewSettings) =>
-    invoke<void>("set_skill_review_settings", { settings }),
 
   // Skills (Agent Skills standard) ----------------------------------------
   /** The whole skills store: master switch + installed entries. */

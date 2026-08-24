@@ -3,7 +3,7 @@
 // callers never touch localStorage directly, so the merge/parse semantics
 // can't drift between windows.
 
-import type { ModelChoice } from "./types";
+import { normalizeReasoningLevel, type ModelChoice } from "./types";
 
 const KEY = "cetus:lastModelChoice";
 
@@ -13,7 +13,12 @@ const KEY = "cetus:lastModelChoice";
 export function mergeStoredModelChoice(current: ModelChoice): ModelChoice {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...current, ...JSON.parse(raw) } as ModelChoice;
+    if (raw) {
+      const stored = { ...current, ...JSON.parse(raw) } as ModelChoice;
+      // Old builds stored non_think/think_high/think_max.
+      stored.reasoning = normalizeReasoningLevel(stored.reasoning);
+      return stored;
+    }
   } catch {}
   return current;
 }

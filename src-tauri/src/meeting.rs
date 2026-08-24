@@ -10,7 +10,7 @@
 //!    Only auto-started sessions are auto-stopped, so a manual session never
 //!    dies under you.
 //! 3. **Post-meeting summary** — when a session ends with enough transcript, a
-//!    one-shot DeepSeek call (same out-of-band pattern as [`crate::dream`])
+//!    one-shot out-of-band LLM call (see [`crate::custom_models::utility_target`])
 //!    distills a title + minutes, stored next to the transcript.
 //!
 //! Capture itself lives in a lazily-`swiftc`-compiled helper
@@ -29,7 +29,7 @@
 //! AAC under `app_data/meetings/<id>/`; with it off no audio touches disk.
 
 use crate::store::{now_ms, Meeting, MeetingSegment, Store};
-use crate::{secrets, AppState};
+use crate::AppState;
 use chrono::{Local, TimeZone};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -149,8 +149,6 @@ const MEETING_WEB_DOMAINS: &[&str] = &[
     "vc.feishu.cn",
     "larksuite.com",
 ];
-
-const SUMMARY_MODEL: &str = "deepseek-v4-pro";
 
 /// PID to terminate on process exit. Negative means a process group created by
 /// `cetus-spawn-disclaim`; positive means a directly spawned helper.
@@ -1042,7 +1040,7 @@ fn spawn_cloud_asr(
     (mic_tx, system_tx, tasks)
 }
 
-/// One-shot DeepSeek minutes pass (out-of-band, mirrors dream::distill).
+/// One-shot out-of-band minutes pass (mirrors titling::generate_title).
 async fn summarize(
     app: &AppHandle,
     store: &Store,
@@ -1074,10 +1072,10 @@ async fn summarize(
         transcript = format!("{head}\n[… transcript truncated …]\n{tail}");
     }
 
-    let api_key = secrets::get("deepseek")?
-        .ok_or_else(|| anyhow::anyhow!("no DeepSeek API key; skipping meeting summary"))?;
+    let target = crate::custom_models::utility_target(store)
+        .ok_or_else(|| anyhow::anyhow!("no LLM endpoint configured; skipping meeting summary"))?;
     let body = json!({
-        "model": SUMMARY_MODEL,
+        "model": target.model,
         "messages": [
             { "role": "system", "content": SUMMARY_SYSTEM_PROMPT },
             { "role": "user", "content": transcript },
@@ -1087,13 +1085,14 @@ async fn summarize(
         "max_tokens": 2048,
         "response_format": { "type": "json_object" },
     });
-    let resp = reqwest::Client::new()
-        .post(crate::provider::deepseek_chat_url(store))
-        .bearer_auth(&api_key)
+    let mut req = reqwest::Client::new()
+        .post(&target.url)
         .json(&body)
-        .timeout(Duration::from_secs(90))
-        .send()
-        .await?;
+        .timeout(Duration::from_secs(90));
+    if !target.api_key.is_empty() {
+        req = req.bearer_auth(&target.api_key);
+    }
+    let resp = req.send().await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
@@ -1104,6 +1103,14 @@ async fn summarize(
         .pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("summary response missing content"))?;
+    // Some OpenAI-compatible endpoints ignore response_format and wrap the
+    // JSON in a markdown fence; strip it before parsing.
+    let content = content
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
     let parsed: Value = serde_json::from_str(content)?;
     let title = parsed
         .get("title")

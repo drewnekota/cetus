@@ -85,8 +85,6 @@ and App. The sections and what each does:\n\
 in the OS keychain.\n\
 - **Memory** (Intelligence): durable notes about the user the agent carries \
 across conversations; user can add/edit/mute/delete.\n\
-- **Dreaming** (Intelligence): when idle, cetus reflects on the day's chats and \
-consolidates insights into Memory.\n\
 - **Skills** (Intelligence): reusable SKILL.md instruction folders the agent can \
 pull in on demand.\n\
 - **MCP** (Intelligence): connect external tools via MCP servers (local command \

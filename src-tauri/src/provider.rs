@@ -9,8 +9,8 @@
 //!   * the **main agent** (the `pi` sidecar) reads `DEEPSEEK_BASE_URL` from its
 //!     spawn env and a tiny extension (`cetus-extensions/deepseek-endpoint.ts`)
 //!     calls `pi.registerProvider("deepseek", { baseUrl })` to override it;
-//!   * the **out-of-band** helper calls (auto-title, dream, skill review,
-//!     meeting minutes) resolve [`deepseek_chat_url`] at call time.
+//!   * the **out-of-band** helper calls (auto-title, meeting minutes)
+//!     resolve [`deepseek_chat_url`] at call time.
 //!
 //! Leaving it blank restores the stock `https://api.deepseek.com` endpoint.
 

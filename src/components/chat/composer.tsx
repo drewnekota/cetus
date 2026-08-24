@@ -47,6 +47,7 @@ import {
 } from "@/lib/draft-store";
 import type { BackendId, CliSlashCommand, ModelChoice } from "@/lib/types";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
+import { toast } from "sonner";
 
 function GitBranchIndicator({
   conversationId,
@@ -308,6 +309,27 @@ const CLAUDE_CLI_COMMANDS: SlashItem[] = [
 const CODEX_CLI_COMMANDS: SlashItem[] = [
   {
     kind: "command",
+    id: "codex:status",
+    name: "status",
+    description: "Show chat ID, model, reasoning, and context usage",
+    prompt: "/status",
+  },
+  {
+    kind: "command",
+    id: "codex:model",
+    name: "model",
+    description: "Choose the model for this chat",
+    prompt: "/model",
+  },
+  {
+    kind: "command",
+    id: "codex:reasoning",
+    name: "reasoning",
+    description: "Choose the reasoning effort for this chat",
+    prompt: "/reasoning",
+  },
+  {
+    kind: "command",
     id: "codex:compact",
     name: "compact",
     description: "Compact the Codex thread and free context",
@@ -549,6 +571,11 @@ export function Composer({
   const [slashStart, setSlashStart] = useState(0);
   const [slashQuery, setSlashQuery] = useState("");
   const [slashActive, setSlashActive] = useState(0);
+  const [cliTuningOpen, setCliTuningOpen] = useState(false);
+  const contextUsage = useChatStore((s) =>
+    conversationId ? s.cliContextUsage[conversationId] : undefined,
+  );
+  const codexRateLimit = useChatStore((s) => s.cliRateLimits.codex);
   // Set when the user dismisses with Esc; cleared on the next edit so the menu
   // stays closed for the current token but a later `/` reopens it.
   const slashSuppress = useRef(false);
@@ -1112,6 +1139,43 @@ export function Composer({
     // Expand any `@goal` token into its full directive before sending. Empty
     // when the user typed only `@goal` with no objective — treated as no message.
     const trimmedText = text.trim();
+    if (backend === "codex" && attachments.length === 0) {
+      if (trimmedText === "/status") {
+        const model = conversationId ? cliTuning.model : (pendingCliModel ?? "");
+        const effort = conversationId ? cliTuning.effort : (pendingCliEffort ?? "");
+        const context = contextUsage?.contextWindow
+          ? `${Math.round((contextUsage.usedTokens / contextUsage.contextWindow) * 100)}% (${contextUsage.usedTokens.toLocaleString()} / ${contextUsage.contextWindow.toLocaleString()} tokens)`
+          : "Not available until the first turn";
+        const quota = codexRateLimit?.utilization !== undefined
+          ? [
+              `${Math.round(codexRateLimit.utilization * 100)}% used`,
+              codexRateLimit.resetsAt
+                ? `resets ${new Date(codexRateLimit.resetsAt * 1000).toLocaleString()}`
+                : null,
+            ].filter(Boolean).join(" · ")
+          : "Not available yet";
+        toast.info("Codex status", {
+          description: (
+            <div className="space-y-0.5">
+              <div className="break-all">Chat: {conversationId ?? "New chat"}</div>
+              <div>Model: {model || "Default"} · Reasoning: {effort || "Default"}</div>
+              <div>Context: {context}</div>
+              <div>Rate limit: {quota}</div>
+            </div>
+          ),
+          duration: 8000,
+        });
+        closeSlash();
+        updateText("");
+        return;
+      }
+      if (trimmedText === "/model" || trimmedText === "/reasoning") {
+        closeSlash();
+        updateText("");
+        setCliTuningOpen(true);
+        return;
+      }
+    }
     let outgoing = expandGoalDirective(trimmedText);
     // Pending quote leads the message as a Markdown blockquote — the bubble
     // renderer splits it back out into the quote header above the bubble.
@@ -1572,6 +1636,8 @@ export function Composer({
             pendingEffort={pendingCliEffort}
             onPendingTuningChange={onPendingTuningChange}
             backendSwitch={backendSwitch}
+            tuningMenuOpen={cliTuningOpen}
+            onTuningMenuOpenChange={setCliTuningOpen}
             onTuningChange={onRuntimeTuningChange}
             onBackendChange={(b) => {
               setBackend(b);

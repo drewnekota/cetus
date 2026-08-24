@@ -1495,6 +1495,10 @@ const CLI_AUTO_RETRY_BACKOFF_SECS: [u64; 3] = [20, 60, 180];
 /// the original message: the session resumes with its full context (or the
 /// transcript replays as a handoff preamble when no session was saved), so the
 /// agent picks the task back up instead of redoing it.
+///
+/// Keep in sync with `CLI_AUTO_RETRY_PROMPT` in src/lib/continuation-prompts.ts
+/// — the chat matches this exact text to render the row as a system notice
+/// instead of a user bubble.
 const CLI_AUTO_RETRY_PROMPT: &str = "The previous turn stopped early due to a transient provider \
      error (rate limited or overloaded). This is an automatic retry: review what has already been \
      done in this conversation, then continue the original task from where it left off. Don't \

@@ -373,6 +373,8 @@ export function CliTuningMenu({
   onEffortChange,
   disabled,
   className,
+  open,
+  onOpenChange,
 }: {
   backend: TunableBackendId;
   model: string;
@@ -381,6 +383,8 @@ export function CliTuningMenu({
   onEffortChange: (effort: string) => void;
   disabled?: boolean;
   className?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   // On-disk defaults (and codex's live model catalog) so "Default" echoes what
   // it actually resolves to; until they load, plain "Default" renders.
@@ -420,7 +424,7 @@ export function CliTuningMenu({
     curEffort.id === "" ? defaultEffortLabel : curEffort.label;
   const label = shownEffort ? `${shownModel} · ${shownEffort}` : shownModel;
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button
           type="button"
@@ -521,6 +525,8 @@ export function BackendPicker({
   onPendingTuningChange,
   onTuningChange,
   backendSwitch,
+  tuningMenuOpen,
+  onTuningMenuOpenChange,
 }: {
   conversationId: string | null;
   disabled?: boolean;
@@ -538,6 +544,10 @@ export function BackendPicker({
    *  applies exactly once; a stale value from before this picker mounted is
    *  ignored. Carries fixed model/effort when the slot addressed a preset. */
   backendSwitch?: ({ token: number } & RuntimeSwitchTarget) | null;
+  /** Lets composer slash commands such as Codex `/model` and `/reasoning`
+   *  open the same native tuning surface as the footer trigger. */
+  tuningMenuOpen?: boolean;
+  onTuningMenuOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useTranslation("chat");
   const [backend, setBackendState] = useState<BackendId>("pi");
@@ -792,6 +802,8 @@ export function BackendPicker({
             onModelChange={selectModel}
             onEffortChange={selectEffort}
             disabled={disabled}
+            open={tuningMenuOpen}
+            onOpenChange={onTuningMenuOpenChange}
           />
         ) : onPendingTuningChange ? (
           <CliTuningMenu
@@ -801,6 +813,8 @@ export function BackendPicker({
             onModelChange={(m) => onPendingTuningChange(m, pendingEffort ?? "")}
             onEffortChange={(e) => onPendingTuningChange(pendingModel ?? "", e)}
             disabled={disabled}
+            open={tuningMenuOpen}
+            onOpenChange={onTuningMenuOpenChange}
           />
         ) : null)}
     </>
