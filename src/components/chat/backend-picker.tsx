@@ -429,12 +429,12 @@ export function CliTuningMenu({
         <button
           type="button"
           className={cn(
-            "inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50",
+            "inline-flex h-7 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50",
             className,
           )}
         >
-          <span className="truncate">{label}</span>
-          <ChevronDown className="size-3 opacity-60" />
+          <span className="min-w-0 truncate">{label}</span>
+          <ChevronDown className="size-3 shrink-0 opacity-60" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-44">
@@ -727,7 +727,7 @@ export function BackendPicker({
           data-testid="runtime-picker-trigger"
           size="sm"
           style={{ ...runtimeThemeStyle(shown), color: "var(--runtime-color)" }}
-          className="h-7 gap-1.5 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted focus-visible:ring-0 data-[size=sm]:h-7"
+          className="h-7 min-w-0 gap-1.5 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted focus-visible:ring-0 data-[size=sm]:h-7"
         >
           <TriggerIcon className="size-3" />
           <span className="truncate">{current.label}</span>

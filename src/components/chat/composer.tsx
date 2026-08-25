@@ -1590,7 +1590,9 @@ export function Composer({
         <div className="px-2 pb-1 text-[11px] text-destructive">{attachError}</div>
       )}
       <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-0.5">
-        <div className="flex items-center gap-1">
+        {/* min-w-0 lets the picker cluster shrink (each trigger truncates) so
+            the send button never overflows the frame in a narrow chat pane. */}
+        <div className="flex min-w-0 items-center gap-1">
           <input
             ref={fileInputRef}
             type="file"
@@ -1677,6 +1679,7 @@ export function Composer({
           <Button
             type="button"
             size="icon-sm"
+            className="shrink-0"
             onClick={submit}
             disabled={disabled || !bashCommand}
             title={t("composer.runBash")}
@@ -1688,6 +1691,7 @@ export function Composer({
             type="button"
             size="icon-sm"
             variant="destructive"
+            className="shrink-0"
             onClick={onAbort}
             title={t("composer.abort")}
           >
@@ -1697,6 +1701,7 @@ export function Composer({
           <Button
             type="button"
             size="icon-sm"
+            className="shrink-0"
             onClick={submit}
             disabled={disabled || (!text.trim() && !quote && attachments.length === 0)}
             title={t("composer.send")}

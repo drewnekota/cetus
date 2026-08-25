@@ -3145,6 +3145,23 @@ export default function Home() {
     }
   }, []);
 
+  const onRename = useCallback(async (c: Conversation, title: string) => {
+    // Optimistic: the row retitles immediately; rolled back on failure.
+    setConversations((cs) =>
+      cs.map((x) => (x.id === c.id ? { ...x, title } : x)),
+    );
+    try {
+      const updated = await api.renameConversation(c.id, title);
+      setConversations((cs) => cs.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (e) {
+      console.error("renameConversation failed", e);
+      setConversations((cs) =>
+        cs.map((x) => (x.id === c.id ? { ...x, title: c.title } : x)),
+      );
+      toast.error("Couldn't rename that conversation.");
+    }
+  }, []);
+
   const onRevealWorkspace = useCallback(async (dir: string) => {
     try {
       await api.openPath(dir);
@@ -3563,6 +3580,7 @@ export default function Home() {
         onToggleWorkspaceExpanded={toggleWorkspaceExpanded}
         onArchive={onArchive}
         onTogglePin={onTogglePin}
+        onRename={onRename}
         onOpenSettings={openSettings}
         updateReadyVersion={updateReadyVersion}
         onRestartToUpdate={onRestartToUpdate}

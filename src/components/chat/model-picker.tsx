@@ -147,12 +147,12 @@ export function ModelPicker({ value, onChange, disabled }: Props) {
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button
           type="button"
-          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+          className="inline-flex h-7 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
         >
-          <span className="max-w-40 truncate">
+          <span className="min-w-0 max-w-40 truncate">
             {showEffort ? `${modelLabel} · ${t(curEffort.labelKey)}` : modelLabel}
           </span>
-          <ChevronDown className="size-3 opacity-60" />
+          <ChevronDown className="size-3 shrink-0 opacity-60" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-44">

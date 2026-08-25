@@ -26,6 +26,7 @@ import {
   Gauge,
   MessageSquare,
   MoreHorizontal,
+  Pencil,
   Pin,
   PinOff,
   PlusCircle,
@@ -145,6 +146,7 @@ interface Props {
   onToggleWorkspaceExpanded: (dir: string) => void;
   onArchive: (c: Conversation) => void;
   onTogglePin: (c: Conversation) => void;
+  onRename: (c: Conversation, title: string) => void;
   onOpenSettings: () => void;
   /** Version of a downloaded-but-not-yet-applied update, or null. When set, a
    *  "Restart to update" button appears above Settings. */
@@ -177,6 +179,7 @@ export const AppSidebar = memo(function AppSidebar({
   onToggleWorkspaceExpanded,
   onArchive,
   onTogglePin,
+  onRename,
   onOpenSettings,
   updateReadyVersion,
   onRestartToUpdate,
@@ -461,6 +464,7 @@ export const AppSidebar = memo(function AppSidebar({
                 onSelect={onSelect}
                 onArchive={onArchive}
                 onTogglePin={onTogglePin}
+                onRename={onRename}
                 onRevealWorkspace={onRevealWorkspace}
                 onArchiveWorkspaceChats={onArchiveWorkspaceChats}
                 onRemoveWorkspace={onRemoveWorkspace}
@@ -484,6 +488,7 @@ export const AppSidebar = memo(function AppSidebar({
                   onSelect={onSelect}
                   onArchive={onArchive}
                   onTogglePin={onTogglePin}
+                  onRename={onRename}
                   onRevealWorkspace={onRevealWorkspace}
                   onArchiveWorkspaceChats={onArchiveWorkspaceChats}
                   onRemoveWorkspace={onRemoveWorkspace}
@@ -572,6 +577,7 @@ interface WorkspaceGroupViewProps {
   onSelect: (id: string) => void;
   onArchive: (c: Conversation) => void;
   onTogglePin: (c: Conversation) => void;
+  onRename: (c: Conversation, title: string) => void;
   onRevealWorkspace: (dir: string) => void;
   onArchiveWorkspaceChats: (dir: string) => void;
   onRemoveWorkspace: (dir: string) => void;
@@ -597,6 +603,7 @@ function WorkspaceGroupView({
   onSelect,
   onArchive,
   onTogglePin,
+  onRename,
   onRevealWorkspace,
   onArchiveWorkspaceChats,
   onRemoveWorkspace,
@@ -714,6 +721,7 @@ function WorkspaceGroupView({
                   onSelect={onSelect}
                   onArchive={onArchive}
                   onTogglePin={onTogglePin}
+                  onRename={onRename}
                   archiveShortcut={archiveShortcut}
                 />
               ))}
@@ -1094,6 +1102,7 @@ const ConversationRow = memo(function ConversationRow({
   onSelect,
   onArchive,
   onTogglePin,
+  onRename,
   archiveShortcut,
 }: {
   conversation: Conversation;
@@ -1103,6 +1112,7 @@ const ConversationRow = memo(function ConversationRow({
   onSelect: (id: string) => void;
   onArchive: (c: Conversation) => void;
   onTogglePin: (c: Conversation) => void;
+  onRename: (c: Conversation, title: string) => void;
   archiveShortcut: string;
 }) {
   const { t } = useTranslation("sidebar");
@@ -1124,6 +1134,28 @@ const ConversationRow = memo(function ConversationRow({
   const quota = runtimeQuota(rateLimit);
   const context = runtimeContext(
     useChatStore((s) => s.cliContextUsage[conversation.id]),
+  );
+  // Inline rename: the title swaps to an input in place. The ref mirrors the
+  // state so the dropdown's onCloseAutoFocus (which fires after the menu item
+  // starts the edit) can skip returning focus to the ⋯ trigger and leave it
+  // on the input instead.
+  const [editing, setEditing] = useState(false);
+  const editingRef = useRef(false);
+  const startRename = useCallback(() => {
+    editingRef.current = true;
+    setEditing(true);
+  }, []);
+  const finishRename = useCallback(
+    (value: string | null) => {
+      // Guarded by the ref: Enter commits, then the input unmounts and its
+      // blur fires again — the second call must be a no-op.
+      if (!editingRef.current) return;
+      editingRef.current = false;
+      setEditing(false);
+      const next = value?.trim();
+      if (next && next !== conversation.title) onRename(conversation, next);
+    },
+    [conversation, onRename],
   );
   const [detailsOpen, setDetailsOpen] = useState(false);
   const onDetailsOpenChange = useCallback(
@@ -1164,7 +1196,11 @@ const ConversationRow = memo(function ConversationRow({
     // minute-clock scoping already removed the per-minute re-render cost, and
     // a long list would need a real virtualizer anyway.
     <SidebarMenuItem>
-      <Tooltip open={detailsOpen} delayDuration={0} onOpenChange={onDetailsOpenChange}>
+      <Tooltip
+        open={detailsOpen && !editing}
+        delayDuration={0}
+        onOpenChange={onDetailsOpenChange}
+      >
         <TooltipTrigger asChild>
           <SidebarMenuButton
             onClick={() => onSelect(conversation.id)}
@@ -1190,7 +1226,27 @@ const ConversationRow = memo(function ConversationRow({
             {conversation.sourceAutomationId && (
               <Clock className="size-3.5 shrink-0 text-muted-foreground" />
             )}
-            <span className="min-w-0 flex-1 truncate">{title}</span>
+            {editing ? (
+              <input
+                autoFocus
+                defaultValue={conversation.title ?? ""}
+                placeholder={t("conversation.untitled")}
+                className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground/50"
+                onFocus={(e) => e.currentTarget.select()}
+                // The input lives inside the row button; keep its clicks and
+                // keystrokes from activating the row (select) or the app's
+                // keyboard shortcuts.
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") finishRename(e.currentTarget.value);
+                  else if (e.key === "Escape") finishRename(null);
+                }}
+                onBlur={(e) => finishRename(e.currentTarget.value)}
+              />
+            ) : (
+              <span className="min-w-0 flex-1 truncate">{title}</span>
+            )}
             <span
               className={cn(
                 "fade-layer absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center font-mono text-[11px] tracking-tight tabular-nums text-muted-foreground/70 transition-opacity",
@@ -1291,10 +1347,23 @@ const ConversationRow = memo(function ConversationRow({
             <span className="sr-only">{t("action.more")}</span>
           </SidebarMenuAction>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="start" className="w-44">
+        <DropdownMenuContent
+          side="right"
+          align="start"
+          className="w-44"
+          // When Rename was picked, Radix would return focus to the ⋯ trigger
+          // as the menu closes — yanking it off the just-mounted title input.
+          onCloseAutoFocus={(e) => {
+            if (editingRef.current) e.preventDefault();
+          }}
+        >
           <DropdownMenuItem onSelect={() => onTogglePin(conversation)}>
             {pinned ? <PinOff /> : <Pin />}
             <span>{pinned ? t("action.unpin") : t("action.pin")}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={startRename}>
+            <Pencil />
+            <span>{t("action.rename")}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

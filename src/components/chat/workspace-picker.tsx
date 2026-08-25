@@ -120,7 +120,7 @@ export function WorkspacePicker({
         <SelectTrigger
           size="sm"
           title={current === defaultWorkspace ? undefined : current}
-          className="h-7 max-w-52 gap-1.5 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:ring-0 data-[size=sm]:h-7"
+          className="h-7 min-w-0 max-w-52 gap-1.5 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:ring-0 data-[size=sm]:h-7"
         >
           {current === defaultWorkspace && current ? (
             <MessageSquare className="size-3" />
