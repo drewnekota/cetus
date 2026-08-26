@@ -407,6 +407,17 @@ pub fn ocr_screen_now(app_data: &Path) -> Option<String> {
     text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
 }
 
+/// Whether the most recent `screencapture` run failed in the way a revoked
+/// Screen Recording grant fails. CGPreflightScreenCaptureAccess keeps
+/// returning true after macOS pauses a previously-approved grant (Sequoia+
+/// re-approval), so callers combine it with this flag to show the grant hint.
+static CAPTURE_TCC_DENIED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub fn screen_capture_tcc_denied() -> bool {
+    CAPTURE_TCC_DENIED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Capture the primary display via native macOS tools and return a bounded JPEG
 /// for the quick launcher's first-paint path. `screencapture` grabs the frame in
 /// ~100ms on current macOS; `sips -Z` keeps the resize/JPEG work in Apple's
@@ -434,17 +445,27 @@ pub fn capture_region_jpeg_native(
         cmd.arg("-R")
             .arg(format!("{:.0},{:.0},{:.0},{:.0}", x, y, w, h));
     }
-    let ok = cmd
-        .arg(&path)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+    let out = cmd.arg(&path).output();
+    let ok = out.as_ref().map(|o| o.status.success()).unwrap_or(false);
     let grab_ms = grab_started.elapsed().as_millis();
     if !ok {
+        let stderr = out
+            .as_ref()
+            .map(|o| String::from_utf8_lossy(&o.stderr).trim().to_string())
+            .unwrap_or_default();
+        // "could not create image" is how screencapture fails when macOS has
+        // revoked/paused the Screen Recording grant — a state in which
+        // CGPreflightScreenCaptureAccess still reports true, so this stderr is
+        // the only trustworthy permission signal.
+        CAPTURE_TCC_DENIED.store(
+            stderr.contains("could not create image") || stderr.contains("declined"),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         let _ = std::fs::remove_file(&path);
-        tracing::info!("capture_region_jpeg_native: screencapture failed after {grab_ms}ms");
+        tracing::info!("capture_region_jpeg_native: screencapture failed after {grab_ms}ms: {stderr}");
         return None;
     }
+    CAPTURE_TCC_DENIED.store(false, std::sync::atomic::Ordering::Relaxed);
     let resize_started = Instant::now();
     let resized = std::process::Command::new("/usr/bin/sips")
         .args(["-Z", &max_edge.to_string()])

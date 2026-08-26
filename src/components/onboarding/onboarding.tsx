@@ -34,6 +34,7 @@ const CLI_STATUS_OFFLINE: CliRuntimeStatus = {
   grok: false,
   kimi: false,
   dsh: false,
+  codexLoggedIn: null,
 };
 
 function cliStatusKey(id: BackendId): keyof CliRuntimeStatus {

@@ -530,6 +530,14 @@ pub fn screen_recording_granted() -> bool {
     }
 }
 
+/// Effective permission for the panels' grant hints: the preflight check keeps
+/// answering true after macOS pauses a previously-approved grant (periodic
+/// re-approval), so fold in whether the last actual capture failed the way a
+/// revoked grant fails.
+fn screen_recording_effective() -> bool {
+    screen_recording_granted() && !crate::capture::screen_capture_tcc_denied()
+}
+
 // ---- Screen capture -------------------------------------------------------
 
 /// Everything a quick-reply turn reads, kept alive for the life of the panel so
@@ -870,7 +878,7 @@ pub async fn present_launcher(
             // Lets the panel tell "permission denied" apart from "shot not loaded
             // yet" — so it only shows the grant-permission hint when truly denied,
             // never as a flash on the first open before the capture lands.
-            "screenshotPermission": screen_recording_granted(),
+            "screenshotPermission": screen_recording_effective(),
             // Ambient context captured pre-focus (may be null). The panel shows
             // it as removable chips and forwards whatever survives on submit. The
             // browser URL arrives later via `quick-open-url`.
@@ -1010,7 +1018,7 @@ pub async fn open_reply(app: &AppHandle) {
         serde_json::json!({
             "openId": open_id,
             "app": context.as_ref().map(|c| c.app.as_str()).unwrap_or(""),
-            "screenshotPermission": screen_recording_granted(),
+            "screenshotPermission": screen_recording_effective(),
             "screenshot": &screenshot,
             "context": &context,
             "axChars": 0,
@@ -1070,8 +1078,8 @@ pub async fn open_reply(app: &AppHandle) {
             )
             .await
         }
-        None if !screen_recording_granted() => Err(anyhow::anyhow!(
-            "Screen Recording permission is required for visual quick reply."
+        None if !screen_recording_effective() => Err(anyhow::anyhow!(
+            "Screen Recording permission is required for visual quick reply. macOS may have paused a previous grant — re-enable Cetus in System Settings → Privacy & Security → Screen Recording."
         )),
         None => Err(anyhow::anyhow!("Could not capture the current screen.")),
     };
@@ -1176,6 +1184,12 @@ pub async fn quick_recapture_screenshot(
 /// Control's ordering of the main window; elsewhere, use Tauri's hide path.
 pub(crate) fn park_quick(app: &AppHandle) {
     let state = app.state::<AppState>();
+    // Mid re-capture the panel is intentionally hidden; the focus loss (and any
+    // outside click landing in that sub-second gap) must not park it and drop
+    // the stash that's being rebuilt.
+    if state.quick.recapturing.load(Ordering::Relaxed) {
+        return;
+    }
     state.quick.shown.store(false, Ordering::Relaxed);
     // The reply capture belongs to the panel that just went away; dropping it
     // keeps a stale screen from being re-sent by a late runtime switch.
@@ -1234,30 +1248,38 @@ pub async fn quick_reply_insert(app: AppHandle, text: String) -> Result<(), Stri
 }
 
 /// Re-run the quick-reply turn against the *same* capture with a different
-/// runtime. Re-capturing here would be wrong — the panel is frontmost by now —
-/// so the turn replays the screenshot and AX text stashed when the panel opened.
+/// runtime. The turn replays the screenshot and AX text stashed when the panel
+/// opened — the panel is frontmost by now, so a naive re-capture would shoot
+/// the panel itself. When the open-time capture failed (no stash), briefly hide
+/// the panel and retry the whole capture instead, so "try another runtime"
+/// after a capture failure is a real retry rather than a guaranteed error.
 /// The choice is persisted, matching how the launcher's runtime picker sticks.
 #[tauri::command]
 pub async fn quick_reply_regenerate(app: AppHandle, backend: String) -> Result<(), String> {
-    let (stash, run) = {
+    let stash = {
         let state = app.state::<AppState>();
-        let stash = state
-            .quick
-            .reply_stash
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| "The captured screen is no longer available.".to_string())?;
+        // Persist the runtime choice before anything can fail — the reply
+        // surface must remember the pick even when this turn errors out.
         let mut settings = load_settings(&state.store);
         if settings.reply_backend != backend {
             settings.reply_backend = backend.clone();
             save_settings(&state.store, &settings).map_err(|e| e.to_string())?;
         }
-        (
-            stash,
-            state.quick.reply_run.fetch_add(1, Ordering::Relaxed) + 1,
-        )
+        let stash = state.quick.reply_stash.lock().unwrap().clone();
+        stash
     };
+    let stash = match stash {
+        Some(stash) => stash,
+        None => recapture_reply_stash(&app, &backend)
+            .await
+            .map_err(|e| e.to_string())?,
+    };
+    let run = app
+        .state::<AppState>()
+        .quick
+        .reply_run
+        .fetch_add(1, Ordering::Relaxed)
+        + 1;
     let result = crate::quick_reply::generate(
         &app,
         stash.open_id,
@@ -1270,6 +1292,99 @@ pub async fn quick_reply_regenerate(app: AppHandle, backend: String) -> Result<(
     .await;
     emit_reply_result(&app, stash.open_id, run, result);
     Ok(())
+}
+
+/// Retry the reply capture after the open-time one failed: hide the panel so it
+/// isn't baked into its own screenshot, re-run the identity + screenshot + AX
+/// probes, re-present, and hand the panel a fresh `quick-reply-open` so the
+/// upcoming turn's open-id matches what it renders. The `recapturing` flag
+/// keeps the gesture listener and the blur-dismiss path from treating the
+/// intentionally-hidden panel as closed.
+async fn recapture_reply_stash(app: &AppHandle, backend: &str) -> anyhow::Result<ReplyStash> {
+    let (recapturing, last_open_ms) = {
+        let state = app.state::<AppState>();
+        (
+            state.quick.recapturing.clone(),
+            state.quick.last_open_ms.clone(),
+        )
+    };
+    recapturing.store(true, Ordering::Relaxed);
+    let win = app.get_webview_window("quick");
+    if let Some(w) = &win {
+        let _ = w.hide();
+    }
+    // Window order-out is async; give the compositor room to actually drop the
+    // panel before shooting (same settle the launcher's re-capture uses).
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    let identity_task = tauri::async_runtime::spawn_blocking(crate::ax::gather_reply_identity);
+    let screenshot_task = tauri::async_runtime::spawn_blocking(capture_screenshot);
+    let (mut context, pid) = identity_task.await.ok().unwrap_or((None, 0));
+    let screenshot = screenshot_task.await.ok().flatten();
+    // Bring the panel back before the (possibly slow) AX walk. Tauri's `show()`
+    // would activate the app; re-present the non-activating panel instead.
+    #[cfg(target_os = "macos")]
+    {
+        let app_for_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(w) = app_for_main.get_webview_window("quick") {
+                if let Ok(ptr) = w.ns_window() {
+                    crate::panel::present(ptr);
+                }
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(w) = &win {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+    recapturing.store(false, Ordering::Relaxed);
+    let Some(screenshot) = screenshot else {
+        if !screen_recording_effective() {
+            anyhow::bail!("Screen Recording permission is required for visual quick reply. macOS may have paused a previous grant — re-enable Cetus in System Settings → Privacy & Security → Screen Recording.");
+        }
+        anyhow::bail!("Could not capture the current screen.");
+    };
+    let bundle = context
+        .as_ref()
+        .map(|c| c.bundle_id.clone())
+        .unwrap_or_default();
+    let details =
+        tauri::async_runtime::spawn_blocking(move || crate::ax::gather_reply_details(pid, &bundle))
+            .await
+            .ok()
+            .unwrap_or_default();
+    if let Some(ctx) = context.as_mut() {
+        ctx.title = details.title;
+        ctx.url = details.url;
+    }
+    let open_id = crate::store::now_ms();
+    last_open_ms.store(open_id, Ordering::Relaxed);
+    let stash = ReplyStash {
+        open_id,
+        screenshot,
+        context,
+        visible_text: details.visible_text,
+    };
+    {
+        let state = app.state::<AppState>();
+        *state.quick.reply_stash.lock().unwrap() = Some(stash.clone());
+    }
+    if let Some(w) = &win {
+        let _ = w.emit(
+            "quick-reply-open",
+            serde_json::json!({
+                "openId": open_id,
+                "app": stash.context.as_ref().map(|c| c.app.as_str()).unwrap_or(""),
+                "screenshotPermission": screen_recording_effective(),
+                "screenshot": &stash.screenshot,
+                "context": &stash.context,
+                "axChars": stash.visible_text.chars().count(),
+                "backend": backend,
+            }),
+        );
+    }
+    Ok(stash)
 }
 
 #[derive(Deserialize)]

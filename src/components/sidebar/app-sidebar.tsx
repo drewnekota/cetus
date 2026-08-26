@@ -1141,6 +1141,7 @@ const ConversationRow = memo(function ConversationRow({
   // on the input instead.
   const [editing, setEditing] = useState(false);
   const editingRef = useRef(false);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
   const startRename = useCallback(() => {
     editingRef.current = true;
     setEditing(true);
@@ -1228,6 +1229,7 @@ const ConversationRow = memo(function ConversationRow({
             )}
             {editing ? (
               <input
+                ref={renameInputRef}
                 autoFocus
                 defaultValue={conversation.title ?? ""}
                 placeholder={t("conversation.untitled")}
@@ -1353,8 +1355,13 @@ const ConversationRow = memo(function ConversationRow({
           className="w-44"
           // When Rename was picked, Radix would return focus to the ⋯ trigger
           // as the menu closes — yanking it off the just-mounted title input.
+          // preventDefault alone leaves focus on <body> (the input's autoFocus
+          // ran while the menu's FocusScope was still mounted), so hand focus
+          // to the input explicitly once the menu has finished closing.
           onCloseAutoFocus={(e) => {
-            if (editingRef.current) e.preventDefault();
+            if (!editingRef.current) return;
+            e.preventDefault();
+            renameInputRef.current?.focus();
           }}
         >
           <DropdownMenuItem onSelect={() => onTogglePin(conversation)}>

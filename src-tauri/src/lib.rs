@@ -24,6 +24,7 @@ mod corrections;
 mod cua;
 #[cfg(feature = "devtest")]
 mod devtest;
+mod diagnostics;
 mod discovery;
 mod doubao;
 mod custom_models;
@@ -791,38 +792,68 @@ fn prune_old_logs(dir: &Path) {
     }
 }
 
-/// GUI apps launched from the Dock/Finder inherit launchd's minimal PATH
-/// (`/usr/bin:/bin:…`), not the user's shell PATH — so bare spawns of user
-/// tools (`claude`, `codex`, `node`, `mcporter`) fail with "No such file or
-/// directory" on a cold GUI launch while working fine when the app is started
-/// from a terminal. Ask the login shell for its PATH once at startup and adopt
-/// it, keeping any entries the current env has that the shell lacks.
+/// GUI apps launched from the Dock/Finder inherit launchd's minimal
+/// environment (`PATH=/usr/bin:/bin:…`, no shell exports), not the user's
+/// shell environment — so bare spawns of user tools (`claude`, `codex`,
+/// `node`, `mcporter`) fail with "No such file or directory", and CLIs whose
+/// credentials live in a `.zshrc` export (`OPENAI_API_KEY` for a custom Codex
+/// provider, `ANTHROPIC_BASE_URL`, proxies) die with missing-variable errors —
+/// while both work fine when the app is started from a terminal. Ask the login
+/// shell for its full environment once at startup: PATH is merged (shell
+/// entries first, keeping any dirs only the current env has), every other
+/// variable is adopted only where the current env has no value — never
+/// overriding what launchd or the user set on this process.
 ///
 /// Windows has no login shell to ask, and spawning a missing `/bin/zsh` from a
 /// GUI process there only risks a console flash — so it's a no-op there.
 #[cfg(target_os = "windows")]
-fn adopt_login_shell_path() {}
+fn adopt_login_shell_env() {}
 
 #[cfg(not(target_os = "windows"))]
-fn adopt_login_shell_path() {
+fn adopt_login_shell_env() {
+    // Per-process/session values that would be nonsense to copy from a
+    // throwaway probe shell into this process.
+    const SKIP: &[&str] = &[
+        "PATH", "PWD", "OLDPWD", "SHLVL", "_", "TERM", "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "TTY",
+    ];
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    // `-i` matters: PATH exports typically live in .zshrc, which only
-    // interactive shells read (`-l` alone gets .zprofile and misses them).
-    // Rc files are free to echo whatever they like, so bracket the value with
-    // a marker instead of trusting raw stdout.
+    // `-i` matters: exports typically live in .zshrc, which only interactive
+    // shells read (`-l` alone gets .zprofile and misses them). Rc files are
+    // free to echo whatever they like, so bracket the payload with markers
+    // instead of trusting raw stdout; `env -0` keeps multiline values intact.
     let output = std::process::Command::new(&shell)
-        .args(["-ilc", "printf '__CETUS_PATH__%s__CETUS_PATH__' \"$PATH\""])
+        .args([
+            "-ilc",
+            "printf '__CETUS_ENV__'; command env -0; printf '__CETUS_ENV__'",
+        ])
         .output();
     let Ok(output) = output else { return };
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let Some(path) = stdout
-        .split("__CETUS_PATH__")
-        .nth(1)
-        .filter(|p| !p.trim().is_empty())
-    else {
+    let Some(payload) = stdout.split("__CETUS_ENV__").nth(1) else {
         return;
     };
-    let mut merged: Vec<&str> = path.split(':').filter(|d| !d.is_empty()).collect();
+    for entry in payload.split('\0') {
+        let Some((key, value)) = entry.split_once('=') else {
+            continue;
+        };
+        if key.is_empty() || SKIP.contains(&key) {
+            continue;
+        }
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, value);
+        }
+    }
+    // PATH gets a merge instead of adopt-if-missing: launchd's minimal PATH is
+    // always present, and child runtimes need the shell's entries in front.
+    let shell_path = payload
+        .split('\0')
+        .find_map(|entry| entry.strip_prefix("PATH="))
+        .unwrap_or_default();
+    if shell_path.trim().is_empty() {
+        return;
+    }
+    let mut merged: Vec<&str> = shell_path.split(':').filter(|d| !d.is_empty()).collect();
     let current = std::env::var("PATH").unwrap_or_default();
     for dir in current.split(':') {
         if !dir.is_empty() && !merged.contains(&dir) {
@@ -836,7 +867,7 @@ fn adopt_login_shell_path() {
 pub fn run() {
     // Must run before anything can spawn a child process (and before threads
     // exist — `set_var` is not thread-safe).
-    adopt_login_shell_path();
+    adopt_login_shell_env();
 
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
@@ -1756,6 +1787,7 @@ pub fn run() {
         cli_backend::set_cli_agent_settings,
         cli_backend::get_cli_defaults,
         cli_backend::get_cli_runtime_status,
+        diagnostics::export_diagnostics,
         cli_backend::get_cli_commands,
         cli_backend::probe_cli_commands,
         cli_backend::cli_control_respond,
@@ -1941,6 +1973,7 @@ pub fn run() {
         cli_backend::set_cli_agent_settings,
         cli_backend::get_cli_defaults,
         cli_backend::get_cli_runtime_status,
+        diagnostics::export_diagnostics,
         cli_backend::get_cli_commands,
         cli_backend::probe_cli_commands,
         cli_backend::cli_control_respond,

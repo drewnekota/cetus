@@ -925,6 +925,15 @@ function RuntimesSection() {
                         : t("runtimes.notInstalled")}
                     </span>
                   ) : null}
+                  {id === "codex" &&
+                    runtimeStatus?.codexLoggedIn === false && (
+                      <span
+                        className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"
+                        title={t("runtimes.codexNotSignedIn.hint")}
+                      >
+                        {t("runtimes.codexNotSignedIn")}
+                      </span>
+                    )}
                 </div>
                 <p className="truncate font-mono text-xs text-muted-foreground">
                   {RUNTIME_COMMANDS[id]}
@@ -1098,6 +1107,19 @@ function GeneralSection() {
   const [pending, setPending] = useState<UpdateMeta | null>(null);
   const [downloadProgress, setDownloadProgress] =
     useState<UpdateDownloadProgress | null>(null);
+  const [diagState, setDiagState] = useState<"idle" | "busy" | "copied">("idle");
+
+  async function copyDiagnostics() {
+    setDiagState("busy");
+    try {
+      const report = await api.exportDiagnostics();
+      await navigator.clipboard.writeText(report);
+      setDiagState("copied");
+      setTimeout(() => setDiagState("idle"), 2000);
+    } catch {
+      setDiagState("idle");
+    }
+  }
 
   useEffect(() => {
     api.getQuickSettings().then(setSettings).catch(() => {});
@@ -1342,6 +1364,25 @@ function GeneralSection() {
             <UpdateProgressBar progress={downloadProgress} />
           </div>
         ) : null}
+        <div className="flex items-center justify-between gap-4 pt-1">
+          <div className="min-w-0 space-y-0.5">
+            <Label className="font-medium">{t("diagnostics.label")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("diagnostics.description")}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            disabled={diagState === "busy"}
+            onClick={copyDiagnostics}
+          >
+            {diagState === "copied"
+              ? t("diagnostics.copied")
+              : t("diagnostics.copy")}
+          </Button>
+        </div>
       </div>
     </section>
   );

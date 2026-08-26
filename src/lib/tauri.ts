@@ -387,7 +387,11 @@ export const api = {
       grok: boolean;
       kimi: boolean;
       dsh: boolean;
+      /** null = codex not installed; false = installed but no credentials. */
+      codexLoggedIn: boolean | null;
     }>("get_cli_runtime_status"),
+  /** Sanitized bug-report text: versions, PATH, runtime auth, log tail. */
+  exportDiagnostics: () => invoke<string>("export_diagnostics"),
   listApiKeysMasked: () => invoke<Record<string, string>>("list_api_keys_masked"),
   revealApiKey: (provider: string) =>
     invoke<string | null>("reveal_api_key", { provider }),

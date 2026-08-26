@@ -128,6 +128,14 @@ export const settings = {
     "runtimes.builtIn": "Always available",
     "runtimes.installed": "Installed",
     "runtimes.notInstalled": "Not installed",
+    "runtimes.codexNotSignedIn": "Not signed in",
+    "runtimes.codexNotSignedIn.hint":
+      "Codex is installed but has no credentials — run `codex login` in a terminal, or sessions will fail with a missing OPENAI_API_KEY error. Signing in to the Codex desktop app is not enough; the CLI keeps its own login.",
+    "diagnostics.label": "Diagnostics",
+    "diagnostics.description":
+      "Copy a sanitized report (versions, PATH, runtime status, recent log) to attach when reporting a bug.",
+    "diagnostics.copy": "Copy report",
+    "diagnostics.copied": "Copied",
     "runtimes.dragToReorder": "Drag to reorder",
     "runtimes.shortcutHint":
       "Keyboard shortcut for this position — reordering moves it",
@@ -694,6 +702,14 @@ export const settings = {
     "runtimes.builtIn": "始终可用",
     "runtimes.installed": "已安装",
     "runtimes.notInstalled": "未安装",
+    "runtimes.codexNotSignedIn": "未登录",
+    "runtimes.codexNotSignedIn.hint":
+      "已安装 Codex 但没有可用凭据——请在终端运行 codex login，否则会话会报缺少 OPENAI_API_KEY 的错误。Codex 桌面应用的登录不共享给 CLI。",
+    "diagnostics.label": "诊断信息",
+    "diagnostics.description":
+      "复制一份脱敏报告（版本、PATH、运行时状态、最近日志），反馈问题时附上。",
+    "diagnostics.copy": "复制报告",
+    "diagnostics.copied": "已复制",
     "runtimes.dragToReorder": "拖拽排序",
     "runtimes.shortcutHint": "该位置的快捷键——调整顺序会跟着变",
     "runtimes.enabled": "启用 {runtime}",

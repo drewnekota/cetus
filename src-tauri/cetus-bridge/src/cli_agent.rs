@@ -2455,7 +2455,11 @@ impl EventTranslator {
         out.extend(self.close_live_blocks());
         out.extend(self.close_all_codex_blocks());
         if let Some(msg) = error {
-            out.extend(self.emit_text(&format!("⚠️ agent error: {msg}")));
+            let text = match agent_error_hint(msg) {
+                Some(hint) => format!("⚠️ agent error: {msg}\n\n💡 {hint}"),
+                None => format!("⚠️ agent error: {msg}"),
+            };
+            out.extend(self.emit_text(&text));
         }
         self.flush_assistant();
         // A steer the model never consumed (the turn's result raced the stdin
@@ -5857,6 +5861,38 @@ async fn start_codex_compaction_request(
 /// prompt) may hold a turn open before Cetus declines it on the user's behalf.
 /// Substantive requests (`request_user_input`, form elicitations) are never
 /// auto-answered — only suggestions Codex can proceed without.
+/// Actionable follow-up appended to an `⚠️ agent error` bubble when the
+/// message matches a known environment problem. These errors are correct but
+/// useless to a non-CLI user ("Missing environment variable: `OPENAI_API_KEY`"
+/// tells them nothing about running `codex login`), so translate the ones we
+/// have seen in the wild into the one command that fixes them.
+fn agent_error_hint(msg: &str) -> Option<&'static str> {
+    let lower = msg.to_ascii_lowercase();
+    if lower.contains("missing environment variable") && lower.contains("openai_api_key") {
+        // Codex resolved auth to API-key mode: either the CLI was never signed
+        // in (`~/.codex/auth.json` missing — the desktop app's login doesn't
+        // count), or config.toml names a provider whose key wasn't in this
+        // process's environment (the host adopts the login shell's env once,
+        // at startup — an export added afterwards needs a relaunch).
+        return Some(
+            "Codex has no credentials here. Run `codex login` in a terminal to sign in. \
+             If ~/.codex/config.toml points at a custom provider instead, make sure its \
+             API key is exported in your shell profile (.zshrc), then restart Cetus so \
+             it picks the variable up.",
+        );
+    }
+    if lower.contains("please run /login")
+        || lower.contains("oauth token has expired")
+        || lower.contains("oauth token revoked")
+    {
+        return Some(
+            "Claude Code isn't signed in. Run `claude` in a terminal and use `/login`, \
+             then retry here.",
+        );
+    }
+    None
+}
+
 #[cfg(not(test))]
 const TOOL_SUGGESTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 #[cfg(test)]
@@ -5909,11 +5945,23 @@ pub fn spawn_codex_session(
                 });
             }
         };
+        // Keep the tail of app-server's stderr around: when startup fails the
+        // JSON-RPC error is often generic ("stream closed") while the real
+        // cause (auth, config parse, panic) only ever hit stderr — which
+        // `tracing::debug!` used to drop on packaged builds.
+        let stderr_tail: Arc<std::sync::Mutex<std::collections::VecDeque<String>>> =
+            Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
         if let Some(stderr) = stderr {
+            let tail = stderr_tail.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     tracing::debug!("codex app-server: {line}");
+                    let mut tail = tail.lock().unwrap();
+                    if tail.len() >= 100 {
+                        tail.pop_front();
+                    }
+                    tail.push_back(line);
                 }
             });
         }
@@ -6001,6 +6049,20 @@ pub fn spawn_codex_session(
         let (thread_id, skill_commands) = match initialized {
             Ok(initialized) => initialized,
             Err(error) => {
+                // Give stderr a beat to drain, then fold its tail into the
+                // error so the UI (and the log file) carry the real cause,
+                // not just the broken-pipe symptom.
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let tail: Vec<String> = {
+                    let tail = stderr_tail.lock().unwrap();
+                    tail.iter().rev().take(12).rev().cloned().collect()
+                };
+                let error = if tail.is_empty() {
+                    error.to_string()
+                } else {
+                    format!("{error}\n[codex stderr]\n{}", tail.join("\n"))
+                };
+                tracing::warn!("codex app-server startup failed: {error}");
                 match rx.recv().await {
                     Some(CodexSessionCommand::StartTurn { sink, outcome, .. }) => {
                         let mut tr = EventTranslator::new(CliBackend::Codex);
@@ -6008,14 +6070,14 @@ pub fn spawn_codex_session(
                             tr = tr.with_artifact_storage(dir, translator_cwd.clone());
                         }
                         emit(&sink, tr.start());
-                        emit(&sink, tr.finish(Some(&error.to_string())));
+                        emit(&sink, tr.finish(Some(&error)));
                         let _ = outcome.send(CliTurnOutcome {
                             resume_id: None,
                             messages: tr.take_messages(),
                             aborted: false,
                             streamed: tr.opened,
                             resume_rejected: opts.resume.is_some(),
-                            error: Some(error.to_string()),
+                            error: Some(error.clone()),
                         });
                     }
                     Some(CodexSessionCommand::Compact { outcome, .. }) => {
@@ -6581,6 +6643,9 @@ pub fn spawn_codex_session(
                             let error = params.pointer("/turn/error/message").and_then(Value::as_str)
                                 .map(str::to_string)
                                 .or_else(|| (status == "failed").then(|| "Codex turn failed".to_string()));
+                            if let Some(error) = &error {
+                                tracing::warn!("codex turn failed: {error}");
+                            }
                             emit(&turn.sink, tr.finish(error.as_deref()));
                             let streamed = tr.opened;
                             let _ = turn.outcome.send(CliTurnOutcome {
@@ -7111,6 +7176,26 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn agent_error_hint_matches_known_auth_failures() {
+        assert!(
+            agent_error_hint("Missing environment variable: `OPENAI_API_KEY`.")
+                .is_some_and(|h| h.contains("codex login"))
+        );
+        assert!(agent_error_hint("Invalid API key · Please run /login")
+            .is_some_and(|h| h.contains("/login")));
+        assert!(agent_error_hint("stream closed unexpectedly").is_none());
+    }
+
+    #[test]
+    fn agent_error_bubble_carries_hint() {
+        let mut tr = EventTranslator::new(CliBackend::Codex);
+        let events = tr.finish(Some("Missing environment variable: `OPENAI_API_KEY`."));
+        let text = serde_json::to_string(&events).unwrap();
+        assert!(text.contains("agent error"), "{events:?}");
+        assert!(text.contains("codex login"), "{events:?}");
     }
 
     #[test]

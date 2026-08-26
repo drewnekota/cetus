@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/drewnekota/cetus" /></a>
+  <a href="https://github.com/drewnekota/cetus/releases"><img alt="下载量" src="https://img.shields.io/github/downloads/drewnekota/cetus/total" /></a>
   <a href="https://github.com/drewnekota/cetus/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/drewnekota/cetus/ci.yml" /></a>
   <a href="https://github.com/drewnekota/cetus/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/drewnekota/cetus" /></a>
   <a href="LICENSE"><img alt="MIT 协议" src="https://img.shields.io/github/license/drewnekota/cetus" /></a>

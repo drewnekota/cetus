@@ -295,7 +295,7 @@ async fn probe_grok_defaults() -> Option<CliDefaults> {
 }
 
 /// Whether the third-party runtimes Cetus can launch are present on PATH.
-/// `adopt_login_shell_path` runs before Tauri is built, so this sees the same
+/// `adopt_login_shell_env` runs before Tauri is built, so this sees the same
 /// PATH later used by the actual Claude Code / Codex child processes.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -306,17 +306,36 @@ pub struct CliRuntimeStatus {
     pub grok: bool,
     pub kimi: bool,
     pub dsh: bool,
+    /// `Some(false)` = the codex binary exists but has no visible credentials
+    /// (no `~/.codex/auth.json`, no `OPENAI_API_KEY` in this process's env), so
+    /// a session would die with "Missing environment variable" — the desktop
+    /// app's own login does not carry over to the CLI. `None` when codex isn't
+    /// installed at all.
+    pub codex_logged_in: Option<bool>,
+}
+
+/// Best-effort: `codex login` persists ChatGPT/API-key auth as
+/// `~/.codex/auth.json`; a custom provider may instead rely on an env var.
+/// This is a presence check, not a validity check — an expired token still
+/// reads as logged in.
+fn codex_logged_in() -> bool {
+    let auth_file = std::env::var("HOME")
+        .map(|home| PathBuf::from(home).join(".codex/auth.json"))
+        .is_ok_and(|path| path.exists());
+    auth_file || std::env::var("OPENAI_API_KEY").is_ok_and(|key| !key.trim().is_empty())
 }
 
 #[tauri::command]
 pub async fn get_cli_runtime_status() -> Result<CliRuntimeStatus, String> {
+    let codex = executable_on_path("codex");
     Ok(CliRuntimeStatus {
         claude_code: executable_on_path("claude"),
-        codex: executable_on_path("codex"),
+        codex,
         opencode: executable_on_path("opencode"),
         grok: executable_on_path("grok"),
         kimi: executable_on_path("kimi"),
         dsh: executable_on_path("dsh"),
+        codex_logged_in: codex.then(codex_logged_in),
     })
 }
 

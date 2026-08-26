@@ -1293,6 +1293,7 @@ function TerminalPanel({
   const terminalRef = useRef<XTermTerminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const readyRef = useRef<Promise<void>>(Promise.resolve());
+  const enqueueWriteRef = useRef<((bytes: Uint8Array) => void) | null>(null);
   const lastRunRequestRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1347,14 +1348,50 @@ function TerminalPanel({
     });
     readyRef.current = ready;
 
+    // Keystrokes must reach the PTY in order, but each invoke is an independent
+    // IPC request with no cross-request ordering guarantee. Keep exactly one
+    // write in flight and coalesce anything typed during the roundtrip into the
+    // next batch — this also holds input typed before the shell finishes
+    // starting instead of dropping it on "session is not running".
+    let pendingInput: Uint8Array[] = [];
+    let writeInFlight = false;
+    const enqueueWrite = (bytes: Uint8Array) => {
+      if (cancelled || bytes.length === 0) return;
+      pendingInput.push(bytes);
+      if (writeInFlight) return;
+      writeInFlight = true;
+      void (async () => {
+        try {
+          await readyRef.current;
+        } catch {
+          // Start failed; the terminal already shows the error.
+        }
+        while (!cancelled && pendingInput.length > 0) {
+          const batch = pendingInput;
+          pendingInput = [];
+          const merged = new Uint8Array(batch.reduce((total, chunk) => total + chunk.length, 0));
+          let offset = 0;
+          for (const chunk of batch) {
+            merged.set(chunk, offset);
+            offset += chunk.length;
+          }
+          try {
+            await api.terminalWrite(sessionId, bytesToBase64(merged));
+          } catch {
+            break;
+          }
+        }
+        writeInFlight = false;
+      })();
+    };
+    enqueueWriteRef.current = enqueueWrite;
+
+    const encoder = new TextEncoder();
     const inputDisposable = terminal.onData((data) => {
-      void api
-        .terminalWrite(sessionId, bytesToBase64(new TextEncoder().encode(data)))
-        .catch(() => {});
+      enqueueWrite(encoder.encode(data));
     });
     const binaryDisposable = terminal.onBinary((data) => {
-      const bytes = Uint8Array.from(data, (char) => char.charCodeAt(0));
-      void api.terminalWrite(sessionId, bytesToBase64(bytes)).catch(() => {});
+      enqueueWrite(Uint8Array.from(data, (char) => char.charCodeAt(0)));
     });
     const resizeObserver = new ResizeObserver(() => {
       if (!host.offsetWidth || !host.offsetHeight) return;
@@ -1375,6 +1412,7 @@ function TerminalPanel({
 
     return () => {
       cancelled = true;
+      enqueueWriteRef.current = null;
       resizeObserver.disconnect();
       themeObserver.disconnect();
       inputDisposable.dispose();
@@ -1406,14 +1444,7 @@ function TerminalPanel({
     if (!runRequest || lastRunRequestRef.current === runRequest.id) return;
     lastRunRequestRef.current = runRequest.id;
     if (!runRequest.autoRun) return;
-    void readyRef.current
-      .then(() =>
-        api.terminalWrite(
-          sessionId,
-          bytesToBase64(new TextEncoder().encode(`${runRequest.command}\r`)),
-        ),
-      )
-      .catch(() => {});
+    enqueueWriteRef.current?.(new TextEncoder().encode(`${runRequest.command}\r`));
   }, [runRequest, sessionId]);
 
   return (
