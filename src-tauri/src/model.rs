@@ -97,8 +97,7 @@ impl Serialize for ModelRef {
 impl<'de> Deserialize<'de> for ModelRef {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        ModelRef::parse(&s)
-            .ok_or_else(|| serde::de::Error::custom(format!("unknown model: {s}")))
+        ModelRef::parse(&s).ok_or_else(|| serde::de::Error::custom(format!("unknown model: {s}")))
     }
 }
 
@@ -216,7 +215,10 @@ mod tests {
 
     #[test]
     fn parses_builtin_and_custom_forms() {
-        assert_eq!(ModelRef::parse("pro"), Some(ModelRef::Builtin(DsModel::Pro)));
+        assert_eq!(
+            ModelRef::parse("pro"),
+            Some(ModelRef::Builtin(DsModel::Pro))
+        );
         assert_eq!(
             ModelRef::parse("custom-openrouter/anthropic/claude-sonnet-4"),
             Some(ModelRef::Custom {

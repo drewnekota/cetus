@@ -1276,6 +1276,49 @@ function parseCsvPreview(text: string): string[][] {
     .map((line) => line.split(delimiter).slice(0, 24));
 }
 
+/* xterm.js keeps a `_keyDownSeen` flag that swallows `input` events arriving
+ * after a keydown it didn't handle. Doubao IME's English mode reports
+ * keyCode 229 for every keystroke (its AI features intercept even English
+ * typing) without ever firing composition events, so past the first character
+ * of a fast burst every keystroke lands in that swallowed path and is lost —
+ * xtermjs/xterm.js#5887, unfixed upstream as of 6.0. Re-emit `insertText`
+ * input events the stock handler declined while no real composition is
+ * active. This reaches into private internals, so every access is guarded:
+ * if an xterm upgrade renames them we degrade to unpatched behavior rather
+ * than crash. */
+function patchImeKeycode229Input(terminal: XTermTerminal) {
+  const core = (terminal as unknown as { _core?: Record<string, unknown> })._core;
+  if (!core) return;
+  const original = core._inputEvent;
+  const cancel = core.cancel;
+  const coreService = core.coreService as
+    | { triggerDataEvent?: (data: string, wasUserInput?: boolean) => void }
+    | undefined;
+  const triggerDataEvent = coreService?.triggerDataEvent?.bind(coreService);
+  if (typeof original !== "function" || typeof cancel !== "function" || !triggerDataEvent) {
+    return;
+  }
+  core._inputEvent = (event: InputEvent) => {
+    if (original.call(core, event)) return true;
+    const composing = (core._compositionHelper as { _isComposing?: boolean } | undefined)
+      ?._isComposing;
+    if (
+      !event.data ||
+      event.inputType !== "insertText" ||
+      event.isComposing ||
+      composing ||
+      core._keyPressHandled ||
+      terminal.options.screenReaderMode
+    ) {
+      return false;
+    }
+    core._unprocessedDeadKey = false;
+    triggerDataEvent(event.data, true);
+    cancel.call(core, event);
+    return true;
+  };
+}
+
 function TerminalPanel({
   sessionId,
   workspaceDir,
@@ -1313,6 +1356,7 @@ function TerminalPanel({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
+    patchImeKeycode229Input(terminal);
     terminalRef.current = terminal;
     fitRef.current = fit;
 

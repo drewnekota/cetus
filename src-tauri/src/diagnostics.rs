@@ -60,7 +60,11 @@ pub async fn export_diagnostics() -> Result<String, String> {
         let auth = home.join(".codex/auth.json");
         push(&format!(
             "~/.codex/auth.json: {}",
-            if auth.exists() { "present" } else { "MISSING (run `codex login`)" }
+            if auth.exists() {
+                "present"
+            } else {
+                "MISSING (run `codex login`)"
+            }
         ));
         push(&format!(
             "OPENAI_API_KEY in app env: {}",
@@ -112,14 +116,12 @@ fn resolve_on_path(bin: &str) -> Option<PathBuf> {
 async fn version_of(path: &PathBuf) -> String {
     let run = Command::new(path).arg("--version").output();
     match tokio::time::timeout(Duration::from_secs(3), run).await {
-        Ok(Ok(output)) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string()
-        }
+        Ok(Ok(output)) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string(),
         Ok(Ok(output)) => format!("--version exited {}", output.status),
         Ok(Err(error)) => format!("failed to run: {error}"),
         Err(_) => "--version timed out".into(),
@@ -143,27 +145,6 @@ fn toml_skeleton(text: &str) -> Vec<String> {
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::toml_skeleton;
-
-    #[test]
-    fn toml_skeleton_redacts_values() {
-        let text = "model = \"gpt-5.3\"\n# comment\n[model_providers.proxy]\nbase_url = \"https://secret.example\"\nenv_key = \"OPENAI_API_KEY\"\n";
-        let lines = toml_skeleton(text);
-        assert_eq!(
-            lines,
-            vec![
-                "model = …",
-                "[model_providers.proxy]",
-                "base_url = …",
-                "env_key = …",
-            ]
-        );
-        assert!(!lines.join("\n").contains("secret"));
-    }
-}
-
 /// Most recently modified file in the log dir, with its last 120 lines.
 fn latest_log() -> Option<(PathBuf, Vec<String>)> {
     let dir = crate::log_dir()?;
@@ -184,4 +165,25 @@ fn latest_log() -> Option<(PathBuf, Vec<String>)> {
         .map(|s| s.to_string())
         .collect();
     Some((newest.path(), tail))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::toml_skeleton;
+
+    #[test]
+    fn toml_skeleton_redacts_values() {
+        let text = "model = \"gpt-5.3\"\n# comment\n[model_providers.proxy]\nbase_url = \"https://secret.example\"\nenv_key = \"OPENAI_API_KEY\"\n";
+        let lines = toml_skeleton(text);
+        assert_eq!(
+            lines,
+            vec![
+                "model = …",
+                "[model_providers.proxy]",
+                "base_url = …",
+                "env_key = …",
+            ]
+        );
+        assert!(!lines.join("\n").contains("secret"));
+    }
 }

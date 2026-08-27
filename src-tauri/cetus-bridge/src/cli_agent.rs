@@ -7150,13 +7150,17 @@ mod tests {
         assert!(is_transient_agent_error("API Error: 529 Overloaded"));
         assert!(is_transient_agent_error("500 Internal Server Error"));
         // Quota exhaustion mentions limits too but holds until reset — no retry.
-        assert!(!is_transient_agent_error("Claude AI usage limit reached|1755400000"));
+        assert!(!is_transient_agent_error(
+            "Claude AI usage limit reached|1755400000"
+        ));
         assert!(!is_transient_agent_error(
             "Your credit balance is too low to access the Anthropic API"
         ));
         // Unclassified failures stay with the user.
         assert!(!is_transient_agent_error("agent reported an error"));
-        assert!(!is_transient_agent_error("Codex app-server exited unexpectedly"));
+        assert!(!is_transient_agent_error(
+            "Codex app-server exited unexpectedly"
+        ));
     }
 
     fn types(events: &[Value]) -> Vec<String> {

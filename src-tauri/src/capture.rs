@@ -462,7 +462,9 @@ pub fn capture_region_jpeg_native(
             std::sync::atomic::Ordering::Relaxed,
         );
         let _ = std::fs::remove_file(&path);
-        tracing::info!("capture_region_jpeg_native: screencapture failed after {grab_ms}ms: {stderr}");
+        tracing::info!(
+            "capture_region_jpeg_native: screencapture failed after {grab_ms}ms: {stderr}"
+        );
         return None;
     }
     CAPTURE_TCC_DENIED.store(false, std::sync::atomic::Ordering::Relaxed);

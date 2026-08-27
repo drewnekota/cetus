@@ -22,11 +22,11 @@
 //! the extension as env vars (`CETUS_CUSTOM_KEY_<ID>`) at pi spawn.
 
 use crate::model::DsModel;
-use std::collections::BTreeMap;
 use crate::secrets;
 use crate::store::Store;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tauri::State;
 
@@ -216,7 +216,10 @@ pub fn utility_target(store: &Store) -> Option<UtilityTarget> {
     };
     Some(UtilityTarget {
         url,
-        api_key: secrets::get(&secret_id(&p.id)).ok().flatten().unwrap_or_default(),
+        api_key: secrets::get(&secret_id(&p.id))
+            .ok()
+            .flatten()
+            .unwrap_or_default(),
         model: p.models[0].id.clone(),
         is_deepseek: false,
     })
@@ -277,7 +280,11 @@ fn mint_id(name: &str, existing: &[CustomProvider]) -> String {
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("-");
-    let slug = if slug.is_empty() { "provider".to_string() } else { slug };
+    let slug = if slug.is_empty() {
+        "provider".to_string()
+    } else {
+        slug
+    };
     let base = format!("{ID_PREFIX}{slug}");
     if !existing.iter().any(|p| p.id == base) {
         return base;
@@ -365,10 +372,7 @@ pub async fn upsert_custom_provider(
 }
 
 #[tauri::command]
-pub async fn delete_custom_provider(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn delete_custom_provider(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let mut providers = load(&state.store);
     providers.retain(|p| p.id != id);
     save(&state.store, &providers).map_err(|e| e.to_string())?;

@@ -22,12 +22,12 @@ mod control;
 mod control;
 mod corrections;
 mod cua;
+mod custom_models;
 #[cfg(feature = "devtest")]
 mod devtest;
 mod diagnostics;
 mod discovery;
 mod doubao;
-mod custom_models;
 mod focused_text;
 mod host_tunnel;
 #[cfg(target_os = "macos")]
@@ -814,8 +814,16 @@ fn adopt_login_shell_env() {
     // Per-process/session values that would be nonsense to copy from a
     // throwaway probe shell into this process.
     const SKIP: &[&str] = &[
-        "PATH", "PWD", "OLDPWD", "SHLVL", "_", "TERM", "TERM_PROGRAM",
-        "TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "TTY",
+        "PATH",
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "_",
+        "TERM",
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "TERM_SESSION_ID",
+        "TTY",
     ];
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     // `-i` matters: exports typically live in .zshrc, which only interactive
