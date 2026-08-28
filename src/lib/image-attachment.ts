@@ -82,7 +82,7 @@ function encodedSize(blob: Blob): number {
   return Math.ceil(blob.size / 3) * 4;
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
+export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {

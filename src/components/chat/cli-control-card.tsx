@@ -22,12 +22,16 @@ import {
   Blocks,
   Check,
   ExternalLink,
+  Image as ImageIcon,
   KeyRound,
   MessageCircleQuestion,
+  Paperclip,
   ShieldQuestion,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/tauri";
+import { blobToBase64, prepareImageAttachment } from "@/lib/image-attachment";
 import { useChatStore, useControlRequests } from "@/lib/chat-store";
 import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -83,6 +87,7 @@ export function CliControlCard({ convId }: { convId: string }) {
       return (
         <CodexQuestionCard
           key={current.requestId}
+          convId={convId}
           request={current}
           onSubmit={(answers) => respond({ answers })}
         />
@@ -102,6 +107,7 @@ export function CliControlCard({ convId }: { convId: string }) {
     return (
       <CodexQuestionCard
         key={current.requestId}
+        convId={convId}
         request={current}
         onSubmit={(answers) => respond({ answers })}
       />
@@ -123,6 +129,7 @@ export function CliControlCard({ convId }: { convId: string }) {
     return (
       <AskQuestionCard
         key={current.requestId}
+        convId={convId}
         request={current}
         onSubmit={(answers) =>
           respond({
@@ -263,12 +270,125 @@ function PluginSuggestionCard({
   );
 }
 
+/** A file pasted into a question card. The answer channel is text-only (the
+ *  tool's `answers` map), so the bytes are persisted to disk immediately and
+ *  the answer carries a `[image: /path]` / `[file: /path]` reference the agent
+ *  can open with its file tools. */
+interface QuestionAttachment {
+  name: string;
+  /** Absolute on-disk path (app-data attachments dir, outside the workspace). */
+  path: string;
+  isImage: boolean;
+}
+
+const MAX_QUESTION_FILE_BYTES = 20 * 1024 * 1024;
+
+/** The text stand-in for a question's attachments, appended to its answer. */
+function attachmentRefs(list: QuestionAttachment[] | undefined): string {
+  return (list ?? [])
+    .map((a) => `[${a.isImage ? "image" : "file"}: ${a.path}]`)
+    .join("\n");
+}
+
+/** Per-question attachment state for a question card, keyed by question id or
+ *  step index. Files are saved to disk as they're added (not at submit) so the
+ *  submit path stays synchronous; `saving` gates submission in the meantime. */
+function useQuestionAttachments(convId: string) {
+  const { t } = useTranslation("chat");
+  const [byKey, setByKey] = useState<Record<string, QuestionAttachment[]>>({});
+  const [saving, setSaving] = useState(0);
+
+  async function saveOne(file: File): Promise<QuestionAttachment> {
+    if (file.type.startsWith("image/")) {
+      const image = await prepareImageAttachment(file);
+      const name = file.name || "pasted.jpg";
+      const path = await api.saveAttachment(convId, name, image.data);
+      return { name, path, isImage: true };
+    }
+    if (file.size > MAX_QUESTION_FILE_BYTES) throw new Error("attachment too large");
+    const name = file.name || "pasted.bin";
+    const path = await api.saveAttachment(convId, name, await blobToBase64(file));
+    return { name, path, isImage: false };
+  }
+
+  async function add(key: string, files: File[]) {
+    setSaving((n) => n + files.length);
+    for (const file of files) {
+      try {
+        const saved = await saveOne(file);
+        setByKey((m) => ({ ...m, [key]: [...(m[key] ?? []), saved] }));
+      } catch (e) {
+        console.error("question attachment failed:", e);
+        toast.error(t("cliControl.attachFailed", { name: file.name || "file" }));
+      } finally {
+        setSaving((n) => n - 1);
+      }
+    }
+  }
+
+  function remove(key: string, index: number) {
+    setByKey((m) => ({ ...m, [key]: (m[key] ?? []).filter((_, i) => i !== index) }));
+  }
+
+  /** Files from a paste event; empty when it's an ordinary text paste. */
+  function pastedFiles(event: React.ClipboardEvent): File[] {
+    const files: File[] = [];
+    for (const item of Array.from(event.clipboardData?.items ?? [])) {
+      if (item.kind === "file") {
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    return files;
+  }
+
+  return { byKey, saving, add, remove, pastedFiles };
+}
+
+function AttachmentChipRow({
+  items,
+  onRemove,
+}: {
+  items: QuestionAttachment[];
+  onRemove: (index: number) => void;
+}) {
+  const { t } = useTranslation("chat");
+  if (!items.length) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {items.map((a, i) => (
+        <span
+          key={a.path}
+          className="flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+        >
+          {a.isImage ? (
+            <ImageIcon className="size-3 shrink-0" />
+          ) : (
+            <Paperclip className="size-3 shrink-0" />
+          )}
+          <span className="min-w-0 truncate">{a.name}</span>
+          <button
+            type="button"
+            aria-label={t("cliControl.removeAttachment")}
+            onClick={() => onRemove(i)}
+            className="shrink-0 rounded p-0.5 transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <X className="size-3" />
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /** Generic Codex request_user_input flow. Answers are keyed by stable question
  *  id and always returned as string arrays, exactly matching app-server v2. */
 function CodexQuestionCard({
+  convId,
   request,
   onSubmit,
 }: {
+  convId: string;
   request: CliControlRequest;
   onSubmit: (answers: Record<string, { answers: string[] }>) => void;
 }) {
@@ -280,15 +400,28 @@ function CodexQuestionCard({
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState("");
+  const attach = useQuestionAttachments(convId);
   const q = questions[step];
   if (!q) return null;
 
   const selected = answers[q.id] ?? [];
+  const attached = attach.byKey[q.id] ?? [];
   const isLast = step === questions.length - 1;
-  const canContinue = selected.length > 0 || other.trim().length > 0;
+  const canContinue =
+    attach.saving === 0 &&
+    (selected.length > 0 || other.trim().length > 0 || attached.length > 0);
 
   function finish(next: Record<string, string[]>) {
-    onSubmit(Object.fromEntries(Object.entries(next).map(([id, value]) => [id, { answers: value }])));
+    // Attachments ride as one extra answer entry carrying their on-disk refs.
+    onSubmit(
+      Object.fromEntries(
+        questions.map((qq) => {
+          const refs = attachmentRefs(attach.byKey[qq.id]);
+          const value = next[qq.id] ?? [];
+          return [qq.id, { answers: refs ? [...value, refs] : value }];
+        }),
+      ),
+    );
   }
 
   function choose(label: string) {
@@ -301,17 +434,20 @@ function CodexQuestionCard({
     }
     const next = { ...answers, [q.id]: [label] };
     setAnswers(next);
-    if (isLast) finish(next);
-    else {
+    // A just-pasted file may still be saving to disk — don't finish under it;
+    // the visible Next/Submit button takes over once the save lands.
+    if (isLast && attach.saving === 0) finish(next);
+    else if (!isLast) {
       setOther("");
       setStep((value) => value + 1);
     }
   }
 
   function advanceWithText() {
+    if (attach.saving > 0) return;
     const value = other.trim();
     const combined = [...(answers[q.id] ?? []), ...(value ? [value] : [])];
-    if (!combined.length) return;
+    if (!combined.length && !attached.length) return;
     const next = { ...answers, [q.id]: combined };
     setAnswers(next);
     if (isLast) finish(next);
@@ -365,6 +501,13 @@ function CodexQuestionCard({
             type={q.isSecret ? "password" : "text"}
             value={other}
             onChange={(event) => setOther(event.target.value)}
+            onPaste={(event) => {
+              if (q.isSecret) return; // never turn a pasted secret into a file on disk
+              const files = attach.pastedFiles(event);
+              if (!files.length) return;
+              event.preventDefault();
+              void attach.add(q.id, files);
+            }}
             onKeyDown={(event) => {
               const composing = event.nativeEvent.isComposing || event.keyCode === 229;
               if (event.key === "Enter" && !composing) advanceWithText();
@@ -377,7 +520,8 @@ function CodexQuestionCard({
           />
         </div>
       )}
-      {(q.isOther || !q.options?.length) && (
+      <AttachmentChipRow items={attached} onRemove={(i) => attach.remove(q.id, i)} />
+      {(q.isOther || !q.options?.length || attached.length > 0 || attach.saving > 0) && (
         <div className="mt-2 flex justify-end">
           <Button size="sm" className="h-7 text-xs" disabled={!canContinue} onClick={advanceWithText}>
             {isLast ? t("cliControl.submit") : t("cliControl.next")}
@@ -393,9 +537,11 @@ function CodexQuestionCard({
  *  click; multi-select toggles + Next. A free-text input covers "Other". The
  *  question body scrolls when a single question has many long options. */
 function AskQuestionCard({
+  convId,
   request,
   onSubmit,
 }: {
+  convId: string;
   request: CliControlRequest;
   onSubmit: (answers: Record<string, string>) => void;
 }) {
@@ -408,17 +554,25 @@ function AskQuestionCard({
   const [picked, setPicked] = useState<Record<number, Set<string>>>({});
   const [other, setOther] = useState<Record<number, string>>({});
   const [step, setStep] = useState(0);
+  const attach = useQuestionAttachments(convId);
 
   function answerFor(i: number, q: CliAskQuestion): string {
     const free = (other[i] ?? "").trim();
     const sel = [...(picked[i] ?? [])];
-    if (free) return sel.length && q.multiSelect ? [...sel, free].join(", ") : free;
-    return sel.join(", ");
+    const refs = attachmentRefs(attach.byKey[String(i)]);
+    const text = free
+      ? sel.length && q.multiSelect
+        ? [...sel, free].join(", ")
+        : free
+      : sel.join(", ");
+    return [text, refs].filter(Boolean).join("\n");
   }
 
   const q = questions[step];
   const isLast = step === questions.length - 1;
-  const stepAnswered = q ? answerFor(step, q).length > 0 : false;
+  const attached = attach.byKey[String(step)] ?? [];
+  const stepAnswered =
+    attach.saving === 0 && (q ? answerFor(step, q).length > 0 : false);
 
   function submit() {
     const answers: Record<string, string> = {};
@@ -446,9 +600,16 @@ function AskQuestionCard({
       }
       return { ...p, [i]: cur };
     });
-    // Single-select with no pending free text → jump ahead instantly, matching
-    // the native one-click flow (submits directly on the final question).
-    if (!q.multiSelect && !(other[i] ?? "").trim()) {
+    // Single-select with no pending free text or attachments → jump ahead
+    // instantly, matching the native one-click flow (submits directly on the
+    // final question). With attachments (or one mid-save) the explicit button
+    // takes over so their refs always make it into the answer.
+    if (
+      !q.multiSelect &&
+      !(other[i] ?? "").trim() &&
+      !(attach.byKey[String(i)] ?? []).length &&
+      attach.saving === 0
+    ) {
       if (isLast) {
         const answers: Record<string, string> = {};
         questions.forEach((qq, idx) => {
@@ -527,6 +688,12 @@ function AskQuestionCard({
           type="text"
           value={other[step] ?? ""}
           onChange={(e) => setOther((m) => ({ ...m, [step]: e.target.value }))}
+          onPaste={(e) => {
+            const files = attach.pastedFiles(e);
+            if (!files.length) return;
+            e.preventDefault();
+            void attach.add(String(step), files);
+          }}
           onKeyDown={(e) => {
             // Don't submit while an IME is composing — CJK users press Enter to
             // commit a candidate. `isComposing` is the spec; `keyCode === 229`
@@ -536,6 +703,10 @@ function AskQuestionCard({
           }}
           placeholder={t("cliControl.otherPlaceholder")}
           className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/60 focus-visible:border-primary/60"
+        />
+        <AttachmentChipRow
+          items={attached}
+          onRemove={(i) => attach.remove(String(step), i)}
         />
       </div>
       <div className="mt-2 flex items-center justify-end gap-2">

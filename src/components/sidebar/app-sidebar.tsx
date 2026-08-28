@@ -1158,6 +1158,9 @@ const ConversationRow = memo(function ConversationRow({
     },
     [conversation, onRename],
   );
+  // Right-clicking the row opens the same ⋯ dropdown, so the menu is
+  // controlled: the row's onContextMenu sets it open, Radix closes it.
+  const [menuOpen, setMenuOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const onDetailsOpenChange = useCallback(
     (open: boolean) => {
@@ -1196,9 +1199,20 @@ const ConversationRow = memo(function ConversationRow({
     // detection, blanking visible rows); the blur is gone now, but the
     // minute-clock scoping already removed the per-minute re-render cost, and
     // a long list would need a real virtualizer anyway.
-    <SidebarMenuItem>
+    <SidebarMenuItem
+      // Right-click anywhere on the row acts as the ⋯ more button: suppress
+      // the native context menu and pop the row's dropdown instead. While the
+      // inline rename input is up, leave the native menu (cut/copy/paste)
+      // alone.
+      onContextMenu={(e) => {
+        if (editing) return;
+        e.preventDefault();
+        setDetailsOpen(false);
+        setMenuOpen(true);
+      }}
+    >
       <Tooltip
-        open={detailsOpen && !editing}
+        open={detailsOpen && !editing && !menuOpen}
         delayDuration={0}
         onOpenChange={onDetailsOpenChange}
       >
@@ -1338,7 +1352,7 @@ const ConversationRow = memo(function ConversationRow({
       {/* Hover actions, right-aligned over the time slot: [⋯ menu][archive].
           Both are absolutely-positioned siblings of the row button (see the
           archive comment above), spaced flush by the !right offsets. */}
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <SidebarMenuAction
             showOnHover
