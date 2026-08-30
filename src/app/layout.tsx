@@ -11,7 +11,11 @@ import { fontVariables } from "./fonts";
 // system appearance, when following it) doesn't flash the wrong colors. Mirrors
 // `theme-prefs.ts`; defaults to following the system. <html> carries
 // suppressHydrationWarning since this script mutates its class pre-hydration.
-const THEME_INIT = `(function(){try{var p=localStorage.getItem("cetus.theme")||"system";var d=p==="dark"||(p!=="light"&&(!window.matchMedia||window.matchMedia("(prefers-color-scheme: dark)").matches));document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light";document.documentElement.dataset.theme=d?"dark":"light";}catch(e){}})();`;
+// The second half applies the saved skin's seed colors for that mode (mirrors
+// `skin-prefs.ts` — the seed→var map and the on-accent luminance rule must
+// stay in sync with it). The leading block applies the "UI font size" ramp
+// (mirrors TYPE_RAMP in `type-scale-prefs.ts`).
+const THEME_INIT = `(function(){try{var fs=Number(localStorage.getItem("cetus.fontSize"));if(fs>=12&&fs<=16&&fs!==14){var r=fs/14,ramp={"--text-2xs":11,"--text-xs":12,"--text-md":13,"--text-sm":14,"--text-base":15,"--text-lg":18,"--text-xl":20,"--text-2xl":24};for(var tk in ramp)document.documentElement.style.setProperty(tk,Math.round(ramp[tk]*r)+"px");}}catch(e){}try{var p=localStorage.getItem("cetus.theme")||"system";var d=p==="dark"||(p!=="light"&&(!window.matchMedia||window.matchMedia("(prefers-color-scheme: dark)").matches));var h=document.documentElement;h.classList.toggle("dark",d);h.style.colorScheme=d?"dark":"light";h.dataset.theme=d?"dark":"light";var raw=localStorage.getItem("cetus.skin");if(!raw)return;var v=JSON.parse(raw)[d?"dark":"light"];if(!v)return;var m={surface:"--surface",ink:"--ink",accent:"--brand",diffAdded:"--diff-added",diffRemoved:"--diff-removed",skill:"--skill"};var hex=/^#[0-9a-fA-F]{6}$/;for(var k in m){if(hex.test(v[k]||""))h.style.setProperty(m[k],v[k]);}if(typeof v.contrast==="number")h.style.setProperty("--contrast",String(Math.min(100,Math.max(0,v.contrast))));if(hex.test(v.accent||"")){var c=function(i){var t=parseInt(v.accent.slice(i,i+2),16)/255;return t<=0.04045?t/12.92:Math.pow((t+0.055)/1.055,2.4)};var L=c(1)*0.2126+c(3)*0.7152+c(5)*0.0722;h.style.setProperty("--on-accent",L>0.179?"#000000":"#ffffff");}}catch(e){}})();`;
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { WindowRouter } from "@/components/window-router";
 import { I18nProvider } from "@/lib/i18n";

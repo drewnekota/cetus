@@ -168,7 +168,7 @@ export function VoiceHud() {
         {learnedTerms.length > 0 ? (
           <>
             <BookPlus className="size-3.5 shrink-0 text-emerald-300" />
-            <span className="truncate text-[11px] font-medium tracking-[0.01em] text-white">
+            <span className="truncate text-xs font-medium tracking-[0.01em] text-white">
               {t("dictation.dictionaryAdded", {
                 term: learnedTerms.join(", "),
               })}

@@ -690,7 +690,7 @@ export function QuickPanel() {
       // there is no HTML5 `drop` to listen for).
       data-file-drop-target
       className={cn(
-        "flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-[11px] dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]",
+        "flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-md [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-xs dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]",
         // Drop affordance: overrides the panel's own hairline ring in both
         // themes so the launcher reads as "release here".
         isDragging && "ring-2 ring-inset ring-primary dark:ring-2 dark:ring-primary",
@@ -731,7 +731,7 @@ export function QuickPanel() {
                 ) : (
                   <div className="flex h-14 max-w-44 items-center gap-2 rounded-md border border-black/[0.06] bg-black/[0.03] px-2.5 dark:border-white/[0.08] dark:bg-white/[0.04]">
                     <File className="size-4 shrink-0" />
-                    <div className="min-w-0"><div className="truncate text-xs">{attachment.name}</div><div className="text-[10px] opacity-60">{formatBytes(attachment.sizeBytes)}</div></div>
+                    <div className="min-w-0"><div className="truncate text-xs">{attachment.name}</div><div className="text-2xs opacity-60">{formatBytes(attachment.sizeBytes)}</div></div>
                   </div>
                 )}
                 <button type="button" onClick={() => setAttachments((items) => items.filter((_, i) => i !== index))} aria-label={t("attachment.remove", { name: attachment.name })} className="fade-layer absolute -top-1.5 -right-1.5 inline-flex size-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 ring-1 ring-white/20 transition-opacity hover:bg-black/90 group-hover/shot:opacity-100"><X className="size-3" /></button>
@@ -797,7 +797,7 @@ export function QuickPanel() {
       </div>
 
       {/* Thin, muted action strip — subordinate to the input. */}
-      <div className="flex items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-[13px] text-muted-foreground dark:border-white/[0.06]">
+      <div className="flex items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-md text-muted-foreground dark:border-white/[0.06]">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { pickingWorkspaceRef.current = false; if (e.target.files?.length) void addFiles(e.target.files); e.target.value = ""; }} />
         <button type="button" onClick={() => { pickingWorkspaceRef.current = true; fileInputRef.current?.click(); }} title={t("attachment.add")} aria-label={t("attachment.add")} className="inline-flex size-8 items-center justify-center rounded-md hover:bg-black/5 hover:text-foreground dark:hover:bg-white/[0.08]"><Paperclip className="size-3.5" /></button>
         <Segmented
@@ -841,7 +841,7 @@ export function QuickPanel() {
             effort={cliEffort}
             onModelChange={onCliModelChange}
             onEffortChange={onCliEffortChange}
-            className="h-8 text-[13px] hover:bg-black/5 dark:hover:bg-white/[0.08]"
+            className="h-8 text-md hover:bg-black/5 dark:hover:bg-white/[0.08]"
           />
         ) : null}
         <span className="ml-auto flex items-center gap-1.5 pr-1">
@@ -859,7 +859,7 @@ export function QuickPanel() {
           {t("footer.dismiss")}
         </span>
       </div>
-      {attachError && <div className="absolute bottom-12 left-4 text-[11px] text-destructive">{attachError}</div>}
+      {attachError && <div className="absolute bottom-12 left-4 text-xs text-destructive">{attachError}</div>}
     </div>
   );
 }
@@ -922,7 +922,7 @@ function QuickReplySurface({
       tabIndex={-1}
       autoFocus
       onKeyDown={onKeyDown}
-      className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground outline-none dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-[11px] dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]"
+      className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground outline-none dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-xs dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]"
     >
       {!result && !streaming ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
@@ -996,7 +996,7 @@ function QuickReplySurface({
 
       {/* Same action strip as the launcher, minus everything a one-shot turn
           doesn't have: just the runtime, which doubles as the re-draft control. */}
-      <div className="flex shrink-0 items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-[13px] text-muted-foreground dark:border-white/[0.06] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-[13px] [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5">
+      <div className="flex shrink-0 items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-md text-muted-foreground dark:border-white/[0.06] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-md [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5">
         <BackendSelect value={backend} onChange={onBackendChange} />
         <span className="min-w-0 truncate text-muted-foreground/70">
           {result?.output ? t("reply.drafted") : status}
@@ -1069,7 +1069,7 @@ function BackendSelect({
       <SelectTrigger
         size="sm"
         style={{ ...runtimeThemeStyle(value), color: "var(--runtime-color)" }}
-        className="gap-1.5 border-0 bg-transparent px-2 text-[13px] shadow-none focus-visible:ring-0"
+        className="gap-1.5 border-0 bg-transparent px-2 text-md shadow-none focus-visible:ring-0"
       >
         <TriggerIcon className="size-3.5" />
         <span className="truncate">{current.label}</span>
@@ -1085,7 +1085,7 @@ function BackendSelect({
               <SelectItem
                 key={entry.id}
                 value={entry.id}
-                className="text-[13px] *:[span]:last:w-full"
+                className="text-md *:[span]:last:w-full"
               >
                 <PresetIcon className="size-4" />
                 <span className="truncate">{runtimePresetLabel(preset)}</span>
@@ -1100,7 +1100,7 @@ function BackendSelect({
             <SelectItem
               key={b.id}
               value={b.id}
-              className="text-[13px] *:[span]:last:w-full"
+              className="text-md *:[span]:last:w-full"
             >
               <Icon className="size-4" />
               <span className="truncate">{b.label}</span>

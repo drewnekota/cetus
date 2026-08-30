@@ -40,7 +40,7 @@ export function BashCard({ command, details }: Props) {
         ) : (
           <span
             className={cn(
-              "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
+              "shrink-0 rounded px-1.5 py-0.5 text-2xs font-medium",
               failed
                 ? "bg-destructive/10 text-destructive"
                 : "bg-success/10 text-success dark:text-success",

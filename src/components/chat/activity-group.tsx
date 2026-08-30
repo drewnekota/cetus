@@ -134,7 +134,7 @@ export function ActivityGroup({
               </span>
             )}
             {current && (
-              <span className="min-w-0 truncate font-mono text-[11px]">· {current}</span>
+              <span className="min-w-0 truncate font-mono text-xs">· {current}</span>
             )}
           </>
         ) : (

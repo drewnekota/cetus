@@ -374,7 +374,7 @@ export function ChatPane({
 
 function CompactionBar({ reason }: { reason: string | null }) {
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/5 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+    <div className="flex items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/5 px-2.5 py-1.5 text-xs text-muted-foreground">
       <Spinner className="size-3 text-sky-600" />
       <span className="font-medium text-foreground">Compacting context…</span>
       {reason ? <span className="truncate">{reason}</span> : null}
@@ -398,7 +398,7 @@ function InterruptedBar({
   onDismiss?: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+    <div className="flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/5 px-2.5 py-1.5 text-xs text-muted-foreground">
       <span className="font-medium text-foreground">Run interrupted</span>
       <span className="min-w-0 truncate">
         The last run was cut short by a restart.
@@ -465,7 +465,7 @@ function BackgroundAgentsBar({
         borderColor: "color-mix(in oklab, var(--runtime-color) 30%, transparent)",
         backgroundColor: "color-mix(in oklab, var(--runtime-color) 6%, transparent)",
       }}
-      className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] text-muted-foreground"
+      className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs text-muted-foreground"
     >
       <Bot className="size-3.5 shrink-0 text-[var(--runtime-color)]" />
       <Spinner className="size-3 text-[var(--runtime-color)]" />
@@ -1736,7 +1736,7 @@ function QueuedMessageRow({
 
   return (
     <div className="group flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/40 px-2.5 py-1.5 text-xs">
-      <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className="shrink-0 text-2xs font-medium uppercase tracking-wider text-muted-foreground">
         {t("pane.queued")}
       </span>
       <span className="min-w-0 flex-1 truncate text-foreground/80">{label}</span>
@@ -1794,7 +1794,7 @@ function ThinkingPlaceholder() {
   return (
     <div className="flex w-full justify-start py-3">
       <div className="flex max-w-[88%] flex-col gap-2 items-start">
-        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
           {t("pane.assistant")}
         </div>
         <div className="flex items-baseline gap-2 text-sm">

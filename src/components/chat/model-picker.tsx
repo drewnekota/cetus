@@ -158,7 +158,7 @@ export function ModelPicker({ value, onChange, disabled }: Props) {
       <DropdownMenuContent align="start" className="min-w-44">
         {showEffort && (
           <>
-            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Reasoning
             </DropdownMenuLabel>
             {efforts.map((e) => (
@@ -187,7 +187,7 @@ export function ModelPicker({ value, onChange, disabled }: Props) {
             {modelLabel}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="min-w-44">
-            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Model
             </DropdownMenuLabel>
             {MODELS.map((m) => {
@@ -217,7 +217,7 @@ export function ModelPicker({ value, onChange, disabled }: Props) {
             {custom.length > 0 && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t("model.custom")}
                 </DropdownMenuLabel>
                 {custom.map((c) => (

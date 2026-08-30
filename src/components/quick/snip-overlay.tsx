@@ -108,7 +108,7 @@ export function SnipOverlay() {
             boxShadow: "0 0 0 100000px rgba(0, 0, 0, 0.35)",
           }}
         >
-          <div className="absolute right-0 top-full mt-1.5 rounded bg-black/75 px-1.5 py-0.5 font-mono text-[11px] leading-none text-white/90">
+          <div className="absolute right-0 top-full mt-1.5 rounded bg-black/75 px-1.5 py-0.5 font-mono text-xs leading-none text-white/90">
             {Math.round(sel.width)} × {Math.round(sel.height)}
           </div>
         </div>

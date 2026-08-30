@@ -460,7 +460,7 @@ export function BrowserView({ state, onStateChange, onAnnotate, visible = true }
               onFocus={() => setSuggestionsOpen(suggestions.length > 0)}
               onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 120)}
               onKeyDown={onAddressKeyDown}
-              className="h-7 pl-8 pr-2 text-[13px]"
+              className="h-7 pl-8 pr-2 text-md"
               spellCheck={false}
               autoComplete="off"
               data-testid="browser-address"

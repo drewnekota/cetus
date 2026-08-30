@@ -4,6 +4,7 @@
 // <html> (globals.css swaps the design-token vars off that class).
 
 import { api } from "@/lib/tauri";
+import { applySkin, getSkinPreference } from "@/lib/skin-prefs";
 
 export type ThemePreference = "system" | "light" | "dark";
 
@@ -92,6 +93,8 @@ export function applyTheme(pref: ThemePreference) {
     document.documentElement.classList.toggle("dark", dark);
     document.documentElement.style.colorScheme = dark ? "dark" : "light";
     document.documentElement.dataset.theme = dark ? "dark" : "light";
+    // The skin's seed colors are per variant, so they swap with the mode.
+    applySkin(getSkinPreference(), dark ? "dark" : "light");
   });
   forceThemeRepaint();
   // Match the native window vibrancy (app-wide on macOS) to the theme. The raw

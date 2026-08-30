@@ -350,7 +350,7 @@ function NewTabMenuItem({
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <Kbd className="h-3.5 px-0.5 text-[9px]">{shortcut}</Kbd>
+      <Kbd className="h-3.5 px-0.5 text-2xs">{shortcut}</Kbd>
     </button>
   );
 }
@@ -632,8 +632,8 @@ function FilesPanel({
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] overflow-hidden">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-        <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{workspaceDir}</p>
-        {isRemote && <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">SSH</span>}
+        <p className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{workspaceDir}</p>
+        {isRemote && <span className="rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">SSH</span>}
         <Button type="button" size="icon-xs" variant="ghost" onClick={refreshLoaded} aria-label={t("workspacePanel.refresh")}>
           {rootState?.loading ? <Spinner className="size-3.5" /> : <RefreshCw className="size-3.5" />}
         </Button>
@@ -673,7 +673,7 @@ function FilesPanel({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className={cn(actionError ? "border-b border-destructive/20 bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive" : "h-0")}>
+      <div className={cn(actionError ? "border-b border-destructive/20 bg-destructive/10 px-3 py-1.5 text-xs text-destructive" : "h-0")}>
         {actionError}
       </div>
       <div className="grid min-h-0 grid-cols-[minmax(210px,36%)_1fr] overflow-hidden">
@@ -704,7 +704,7 @@ function FilesPanel({
             ))
           )}
           {(searchResults ? searchTruncated : rootState?.truncated) && (
-            <p className="px-3 py-2 text-[10px] text-amber-600 dark:text-amber-400">{t("workspacePanel.moreFiles")}</p>
+            <p className="px-3 py-2 text-2xs text-amber-600 dark:text-amber-400">{t("workspacePanel.moreFiles")}</p>
           )}
         </div>
         <FilePreview file={selected?.isDir ? null : selected} workspaceDir={workspaceDir} isRemote={isRemote} />
@@ -782,13 +782,13 @@ function FileTreeRow({
         {entry.isSymlink && <Link2 className="-ml-2 mt-2 size-2.5 shrink-0 text-muted-foreground" />}
         <span className="min-w-0 flex-1 truncate">{entry.name}</span>
         {entry.gitStatus && entry.gitStatus !== "ignored" && <GitStatusBadge status={entry.gitStatus} />}
-        {!entry.isDir && entry.sizeBytes != null && <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">{formatBytes(entry.sizeBytes)}</span>}
+        {!entry.isDir && entry.sizeBytes != null && <span className="shrink-0 tabular-nums text-2xs text-muted-foreground">{formatBytes(entry.sizeBytes)}</span>}
       </button>
       {expanded && state?.error && (
-        <p className="py-1 pr-2 text-[10px] text-destructive" style={{ paddingLeft: `${36 + (depth + 1) * 14}px` }}>{state.error}</p>
+        <p className="py-1 pr-2 text-2xs text-destructive" style={{ paddingLeft: `${36 + (depth + 1) * 14}px` }}>{state.error}</p>
       )}
       {expanded && state?.truncated && (
-        <p className="py-1 pr-2 text-[10px] text-amber-600 dark:text-amber-400" style={{ paddingLeft: `${36 + (depth + 1) * 14}px` }}>{t("workspacePanel.firstEntries")}</p>
+        <p className="py-1 pr-2 text-2xs text-amber-600 dark:text-amber-400" style={{ paddingLeft: `${36 + (depth + 1) * 14}px` }}>{t("workspacePanel.firstEntries")}</p>
       )}
     </div>
   );
@@ -796,7 +796,7 @@ function FileTreeRow({
 
 function GitStatusBadge({ status }: { status: NonNullable<WorkspaceFileEntry["gitStatus"]> }) {
   const labels: Record<string, string> = { modified: "M", added: "A", deleted: "D", renamed: "R", untracked: "U", conflict: "!" };
-  return <span className={cn("w-3 shrink-0 text-center text-[10px] font-semibold", status === "conflict" || status === "deleted" ? "text-red-500" : status === "untracked" || status === "added" ? "text-emerald-500" : "text-amber-500")}>{labels[status] ?? ""}</span>;
+  return <span className={cn("w-3 shrink-0 text-center text-2xs font-semibold", status === "conflict" || status === "deleted" ? "text-red-500" : status === "untracked" || status === "added" ? "text-emerald-500" : "text-amber-500")}>{labels[status] ?? ""}</span>;
 }
 
 function FilePreview({
@@ -857,7 +857,7 @@ function FilePreview({
           <p className="truncate text-xs font-medium" title={file.path}>
             {file.name}
           </p>
-          <p className="truncate font-mono text-[10px] text-muted-foreground">
+          <p className="truncate font-mono text-2xs text-muted-foreground">
             {file.relativePath}
           </p>
         </div>
@@ -866,7 +866,7 @@ function FilePreview({
             <button
               type="button"
               data-active={mode === "preview" ? "true" : "false"}
-              className="h-5 rounded-sm px-1.5 text-[10px] text-muted-foreground data-[active=true]:bg-muted data-[active=true]:text-foreground"
+              className="h-5 rounded-sm px-1.5 text-2xs text-muted-foreground data-[active=true]:bg-muted data-[active=true]:text-foreground"
               onClick={() =>
                 setModeByPath((current) => ({ ...current, [file.path]: "preview" }))
               }
@@ -876,7 +876,7 @@ function FilePreview({
             <button
               type="button"
               data-active={mode === "source" ? "true" : "false"}
-              className="h-5 rounded-sm px-1.5 text-[10px] text-muted-foreground data-[active=true]:bg-muted data-[active=true]:text-foreground"
+              className="h-5 rounded-sm px-1.5 text-2xs text-muted-foreground data-[active=true]:bg-muted data-[active=true]:text-foreground"
               onClick={() =>
                 setModeByPath((current) => ({ ...current, [file.path]: "source" }))
               }
@@ -886,7 +886,7 @@ function FilePreview({
           </div>
         )}
         {textTruncated != null && (
-          <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-700 dark:text-amber-300">
+          <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-2xs text-amber-700 dark:text-amber-300">
             {t("workspacePanel.previewTruncated", { size: formatBytes(textTruncated) })}
           </span>
         )}
@@ -1449,9 +1449,10 @@ function TerminalPanel({
     const themeObserver = new MutationObserver(() => {
       terminal.options.theme = terminalTheme();
     });
+    // `class` flips light/dark; `style` carries the skin's inline seed vars.
     themeObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["class"],
+      attributeFilter: ["class", "style"],
     });
 
     return () => {
@@ -1494,7 +1495,7 @@ function TerminalPanel({
   return (
     <div
       ref={hostRef}
-      className="h-full w-full bg-[#fcfcfd] px-2 py-1 dark:bg-[#0f0f11]"
+      className="h-full w-full bg-background px-2 py-1"
       onClick={() => terminalRef.current?.focus()}
     />
   );
@@ -1512,20 +1513,22 @@ interface TerminalExitEvent {
 }
 
 function terminalTheme(): ITheme {
-  const dark = document.documentElement.classList.contains("dark");
-  return dark
-    ? {
-        background: "#0f0f11",
-        foreground: "#e3e4e6",
-        cursor: "#e3e4e6",
-        selectionBackground: "#3f3c70",
-      }
-    : {
-        background: "#fcfcfd",
-        foreground: "#1b1b1b",
-        cursor: "#1b1b1b",
-        selectionBackground: "#dcd9fa",
-      };
+  // Read the live seed tokens so a custom skin (Settings → Appearance) carries
+  // into the terminal instead of the stock surface/ink hexes. xterm needs
+  // concrete colors, not var() references.
+  const root = document.documentElement;
+  const dark = root.classList.contains("dark");
+  const css = getComputedStyle(root);
+  const seed = (name: string, fallback: string) =>
+    css.getPropertyValue(name).trim() || fallback;
+  const background = seed("--surface", dark ? "#0f0f11" : "#fcfcfd");
+  const foreground = seed("--ink", dark ? "#e3e4e6" : "#1b1b1b");
+  return {
+    background,
+    foreground,
+    cursor: foreground,
+    selectionBackground: dark ? "#3f3c70" : "#dcd9fa",
+  };
 }
 
 function base64ToBytes(value: string): Uint8Array {

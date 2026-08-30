@@ -151,13 +151,13 @@ export const BoardView = memo(function BoardView({
                 >
                   {t(col.labelKey)}
                 </span>
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   {items.length}
                 </span>
               </header>
               <div className="flex-1 space-y-1.5 overflow-y-auto pr-0.5">
                 {items.length === 0 ? (
-                  <div className="rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-[11px] text-muted-foreground">
+                  <div className="rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-xs text-muted-foreground">
                     {t("column.empty")}
                   </div>
                 ) : (
@@ -246,7 +246,7 @@ const Card = memo(function Card({
         <span className="line-clamp-2">{conversation.title || t("card.untitled")}</span>
       </div>
       {conversation.reviewState === "approved" && (
-        <div className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-medium text-success dark:text-success">
+        <div className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-2xs font-medium text-success dark:text-success">
           <Check className="size-3" />
           {t("card.reviewed")}
         </div>
@@ -254,12 +254,12 @@ const Card = memo(function Card({
       <LastReplyPreview convId={conversation.id} />
       {pendingReview && (
         <div className="mt-2 rounded-md border border-info/30 bg-info/5 px-2 py-1.5">
-          <div className="flex items-center gap-1 text-[11px] font-medium text-info dark:text-info">
+          <div className="flex items-center gap-1 text-xs font-medium text-info dark:text-info">
             <MessageCircleQuestion className="size-3.5 shrink-0" />
             {t("card.needsYourReview")}
           </div>
           {review?.summary && (
-            <p className="mt-1 line-clamp-3 text-[11px] leading-snug text-muted-foreground">
+            <p className="mt-1 line-clamp-3 text-xs leading-snug text-muted-foreground">
               {review.summary}
             </p>
           )}
@@ -268,7 +268,7 @@ const Card = memo(function Card({
               {review.questions.map((q, i) => (
                 <li
                   key={i}
-                  className="flex gap-1 text-[11px] leading-snug text-muted-foreground"
+                  className="flex gap-1 text-xs leading-snug text-muted-foreground"
                 >
                   <span className="text-info">•</span>
                   <span className="line-clamp-2">{q}</span>
@@ -305,7 +305,7 @@ const Card = memo(function Card({
           </div>
         </div>
       )}
-      <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
+      <div className="mt-1.5 flex items-center justify-between text-xs text-muted-foreground">
         <span className="inline-flex min-w-0 items-center gap-1">
           {conversation.workspaceDir === defaultWorkspace ? (
             <MessageSquare className="size-3 shrink-0" />
@@ -335,7 +335,7 @@ const Card = memo(function Card({
         >
           <Images className="size-3.5" />
           {t("card.viewArtifacts")}
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-2xs font-medium tabular-nums text-muted-foreground">
             {artifactCount}
           </span>
         </Button>
@@ -399,7 +399,7 @@ function LastReplyPreview({ convId }: { convId: string }) {
   });
   if (!preview) return null;
   return (
-    <div className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+    <div className="mt-1.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
       {preview}
     </div>
   );

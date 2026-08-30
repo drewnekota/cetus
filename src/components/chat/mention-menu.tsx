@@ -47,7 +47,7 @@ export function MentionMenu({ items, activeIndex, onSelect, onHover }: Props) {
       className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-lg"
       role="listbox"
     >
-      <div className="px-2 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="px-2 pb-1 pt-1.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
         {t("mention.title")}
       </div>
       {items.map((item, idx) => {

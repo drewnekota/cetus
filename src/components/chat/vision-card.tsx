@@ -23,7 +23,7 @@ export function VisionCard({ text, details }: Props) {
         {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         <Eye className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="font-mono text-xs font-medium">vision_describe</span>
-        <span className="ml-auto text-[11px] text-muted-foreground">
+        <span className="ml-auto text-xs text-muted-foreground">
           {t(meta.count === 1 ? "vision.image" : "vision.image_plural", { count: meta.count })} · {meta.model}
         </span>
       </button>

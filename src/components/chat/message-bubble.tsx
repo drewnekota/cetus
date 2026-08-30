@@ -119,12 +119,12 @@ function MessageBubbleView({
         )}
       >
         {!isUser && (
-          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
             {t("pane.assistant")}
           </div>
         )}
         {quoteSplit && (
-          <div className="flex max-w-full items-start gap-1.5 px-1 text-[13px] leading-relaxed text-muted-foreground">
+          <div className="flex max-w-full items-start gap-1.5 px-1 text-md leading-relaxed text-muted-foreground">
             <CornerDownRight className="mt-1 size-3.5 shrink-0 opacity-70" />
             <span className="line-clamp-2 min-w-0 whitespace-pre-wrap break-words">
               {quoteSplit.quote}
@@ -199,7 +199,7 @@ function ContinuationNotice({ kind }: { kind: ContinuationNoticeKind }) {
   return (
     <div className="flex w-full items-center gap-3 py-3" data-testid="continuation-notice">
       <div className="h-px flex-1 bg-border/60" />
-      <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <RotateCw className="size-3 opacity-70" />
         {label}
       </span>
@@ -220,7 +220,7 @@ function RuntimeSwitchDivider({ text, details }: { text: string; details?: unkno
   return (
     <div className="flex w-full items-center gap-3 py-3" data-testid="runtime-switch">
       <div className="h-px flex-1 bg-border/60" />
-      <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <ArrowLeftRight className="size-3 opacity-70" />
         {t("bubble.runtimeSwitch")} {label}
       </span>

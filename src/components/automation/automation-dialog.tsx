@@ -402,7 +402,7 @@ export function AutomationDialog({
                       </button>
                     ))}
                   </div>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     {weekdays.length === 0
                       ? t("daily.everyDay")
                       : t("daily.selectedDays")}
@@ -430,7 +430,7 @@ export function AutomationDialog({
                     placeholder={t("cron.placeholder")}
                     className="h-8 font-mono"
                   />
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     {cronHelpParts.flatMap((part, i) =>
                       i === 0
                         ? [part]
@@ -517,7 +517,7 @@ export function AutomationDialog({
           {error ? (
             <span className="text-xs text-destructive">{error}</span>
           ) : (
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {t("footer.hint")}
             </span>
           )}

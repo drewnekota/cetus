@@ -283,9 +283,28 @@ export const settings = {
     "appearance.theme.label": "Theme",
     "appearance.theme.description":
       "Follow the system appearance, or lock to light or dark.",
+    "appearance.fontSize.label": "Font size",
+    "appearance.fontSize.description":
+      "Base size for interface text; chat text and labels scale with it. Independent of ⌘+/⌘− window zoom.",
+    "appearance.fontSize.default": "{size} px (default)",
+    "appearance.fontSize.option": "{size} px",
     "appearance.permaLayers.label": "Smooth hover rendering",
     "appearance.permaLayers.description":
       "Keeps hover fades on dedicated compositing layers so rows don't twitch at fractional zoom. Uses extra graphics memory; turn off to compare.",
+    "appearance.skin.label": "Skin",
+    "appearance.skin.description":
+      "Pick a template, then fine-tune the handful of colors everything else derives from. Light and dark are set separately.",
+    "appearance.skin.customized": "customized",
+    "appearance.skin.variant.light": "Light",
+    "appearance.skin.variant.dark": "Dark",
+    "appearance.skin.reset": "Reset to {preset}",
+    "appearance.skin.seed.surface": "Surface",
+    "appearance.skin.seed.ink": "Ink",
+    "appearance.skin.seed.accent": "Accent",
+    "appearance.skin.seed.diffAdded": "Diff added",
+    "appearance.skin.seed.diffRemoved": "Diff removed",
+    "appearance.skin.seed.skill": "Skill",
+    "appearance.skin.seed.contrast": "Contrast",
 
     // --- Keyboard shortcuts ----------------------------------------------
     "keyboard.title": "Keyboard shortcuts",
@@ -898,8 +917,27 @@ export const settings = {
     "appearance.description": "设置 Cetus 各处使用的主题，更改即时生效。",
     "appearance.theme.label": "主题",
     "appearance.theme.description": "跟随系统外观，或锁定为浅色或深色。",
+    "appearance.fontSize.label": "字体大小",
+    "appearance.fontSize.description":
+      "界面文字的基准字号，对话正文和标签随之缩放。与 ⌘+/⌘− 窗口缩放相互独立。",
+    "appearance.fontSize.default": "{size} px（默认）",
+    "appearance.fontSize.option": "{size} px",
     "appearance.permaLayers.label": "平滑悬停渲染",
     "appearance.permaLayers.description": "为悬停淡入淡出保留专用合成层，避免分数缩放下的行抖动。会占用更多图形内存；可关闭以对比。",
+    "appearance.skin.label": "皮肤",
+    "appearance.skin.description":
+      "先选一个模板，再微调这几个种子颜色，其余颜色都由它们推导。浅色和深色分别设置。",
+    "appearance.skin.customized": "已自定义",
+    "appearance.skin.variant.light": "浅色",
+    "appearance.skin.variant.dark": "深色",
+    "appearance.skin.reset": "重置为 {preset}",
+    "appearance.skin.seed.surface": "背景",
+    "appearance.skin.seed.ink": "文字",
+    "appearance.skin.seed.accent": "强调色",
+    "appearance.skin.seed.diffAdded": "Diff 新增",
+    "appearance.skin.seed.diffRemoved": "Diff 删除",
+    "appearance.skin.seed.skill": "技能",
+    "appearance.skin.seed.contrast": "对比度",
 
     "keyboard.title": "键盘快捷键",
     "keyboard.description":

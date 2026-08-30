@@ -84,7 +84,7 @@ export function HotkeyRecorder({
           parts.map((p, i) => (
             <kbd
               key={i}
-              className="rounded bg-background px-1.5 py-0.5 font-sans text-[11px] leading-none shadow-sm"
+              className="rounded bg-background px-1.5 py-0.5 font-sans text-xs leading-none shadow-sm"
             >
               {p}
             </kbd>

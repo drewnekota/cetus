@@ -91,6 +91,14 @@ import {
   setPermaLayersEnabled,
 } from "@/lib/layer-prefs";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
+import { SkinSection } from "@/components/settings/skin-section";
+import {
+  DEFAULT_UI_FONT_SIZE,
+  UI_FONT_SIZES,
+  getUiFontSize,
+  setUiFontSize,
+  type UiFontSize,
+} from "@/lib/type-scale-prefs";
 import {
   LOCALE_NATIVE_NAMES,
   LOCALES,
@@ -444,7 +452,7 @@ export const SettingsPage = memo(function SettingsPage({
         <nav className="scrollbar-slim w-52 shrink-0 overflow-y-auto border-r border-border bg-muted/20 p-2">
           {SECTION_GROUPS.map((group) => (
             <div key={group.labelKey} className="mb-3 last:mb-0">
-              <div className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground">
+              <div className="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground">
                 {t(group.labelKey)}
               </div>
               {group.sections.map((s) => {
@@ -456,7 +464,7 @@ export const SettingsPage = memo(function SettingsPage({
                     type="button"
                     onClick={() => setSection(s.id)}
                     className={cn(
-                      "flex w-full items-center rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors motion-reduce:transition-none",
+                      "flex w-full items-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors motion-reduce:transition-none",
                       active
                         ? "bg-accent text-accent-foreground"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -603,9 +611,9 @@ function RemoteSection() {
                 </div>
                 <div className="rounded-lg border border-border bg-background p-3">
                   <p className="truncate font-mono text-xs text-foreground/80">{remote.accessUrl}</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("remote.scanHint")}</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("remote.phoneRequirement")}</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-500">{t("remote.proxyHint")}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t("remote.scanHint")}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t("remote.phoneRequirement")}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-600 dark:text-amber-500">{t("remote.proxyHint")}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={copyUrl}><Copy className="size-3.5" />{t("remote.copy")}</Button>
@@ -846,13 +854,13 @@ function RuntimesSection() {
                     </span>
                     {presetSlotKey && (
                       <span
-                        className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                        className="rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground"
                         title={t("runtimes.shortcutHint")}
                       >
                         {presetSlotKey}
                       </span>
                     )}
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-2xs text-muted-foreground">
                       {t("runtimes.preset")}
                     </span>
                   </div>
@@ -901,20 +909,20 @@ function RuntimesSection() {
                   <span className="text-sm font-medium">{runtime.label}</span>
                   {slotKey && (
                     <span
-                      className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                      className="rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground"
                       title={t("runtimes.shortcutHint")}
                     >
                       {slotKey}
                     </span>
                   )}
                   {id === "pi" ? (
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-2xs text-muted-foreground">
                       {t("runtimes.builtIn")}
                     </span>
                   ) : installed !== null ? (
                     <span
                       className={cn(
-                        "rounded-full px-2 py-0.5 text-[10px]",
+                        "rounded-full px-2 py-0.5 text-2xs",
                         installed
                           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                           : "bg-muted text-muted-foreground",
@@ -928,7 +936,7 @@ function RuntimesSection() {
                   {id === "codex" &&
                     runtimeStatus?.codexLoggedIn === false && (
                       <span
-                        className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"
+                        className="rounded-full bg-amber-500/10 px-2 py-0.5 text-2xs text-amber-600 dark:text-amber-400"
                         title={t("runtimes.codexNotSignedIn.hint")}
                       >
                         {t("runtimes.codexNotSignedIn")}
@@ -2281,12 +2289,14 @@ function LauncherSection() {
 function AppearanceSection() {
   const [theme, setThemeState] = useState<ThemePreference>(DEFAULT_THEME);
   const [permaLayers, setPermaLayers] = useState(true);
+  const [fontSize, setFontSize] = useState<UiFontSize>(DEFAULT_UI_FONT_SIZE);
   const { t } = useTranslation("settings");
 
   // Reflect the persisted choice once we're in the browser (localStorage).
   useEffect(() => {
     setThemeState(getThemePreference());
     setPermaLayers(getPermaLayersEnabled());
+    setFontSize(getUiFontSize());
   }, []);
 
   function chooseTheme(pref: ThemePreference) {
@@ -2328,6 +2338,36 @@ function AppearanceSection() {
 
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0 space-y-0.5">
+            <Label className="font-medium">{t("appearance.fontSize.label")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("appearance.fontSize.description")}
+            </p>
+          </div>
+          <Select
+            value={String(fontSize)}
+            onValueChange={(v) => {
+              const n = Number(v) as UiFontSize;
+              setUiFontSize(n); // persists + rewrites the ramp on <html> live
+              setFontSize(n);
+            }}
+          >
+            <SelectTrigger className="w-52 shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {UI_FONT_SIZES.map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  {n === DEFAULT_UI_FONT_SIZE
+                    ? t("appearance.fontSize.default", { size: n })
+                    : t("appearance.fontSize.option", { size: n })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 space-y-0.5">
             <Label htmlFor="perma-layers" className="font-medium">
               {t("appearance.permaLayers.label")}
             </Label>
@@ -2344,6 +2384,8 @@ function AppearanceSection() {
             }}
           />
         </div>
+
+        <SkinSection />
       </div>
 
     </section>
@@ -3292,7 +3334,7 @@ function MeetingTranscriptPanel({
                 className={cn("flex", mine ? "justify-end" : "justify-start")}
               >
                 <div className={cn("max-w-[86%]", mine && "text-right")}>
-                  <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                  <div className="mb-1 flex items-center gap-1.5 px-1 text-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     {mine ? t("transcript.you") : t("transcript.them")}
                     <span className="font-normal normal-case tracking-normal opacity-70">
                       {new Date(segment.ts).toLocaleTimeString(undefined, {
@@ -3303,7 +3345,7 @@ function MeetingTranscriptPanel({
                   </div>
                   <p
                     className={cn(
-                      "rounded-2xl px-3 py-2 text-left text-[13px] leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
+                      "rounded-2xl px-3 py-2 text-left text-md leading-relaxed shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
                       mine
                         ? "rounded-br-md bg-[#ddefd7] text-[#173819] dark:bg-emerald-900/50 dark:text-emerald-50"
                         : "rounded-bl-md bg-white text-foreground dark:bg-white/[0.08]",
@@ -3329,7 +3371,7 @@ function MeetingTranscriptPanel({
                 >
                   <p
                     className={cn(
-                      "max-w-[86%] rounded-2xl px-3 py-2 text-left text-[13px] leading-relaxed italic opacity-60",
+                      "max-w-[86%] rounded-2xl px-3 py-2 text-left text-md leading-relaxed italic opacity-60",
                       mine
                         ? "rounded-br-md bg-[#ddefd7] text-[#173819] dark:bg-emerald-900/50 dark:text-emerald-50"
                         : "rounded-bl-md bg-white text-foreground dark:bg-white/[0.08]",
@@ -4195,7 +4237,7 @@ function ModelsSection({ open }: { open: boolean }) {
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <span className="truncate">{p.name}</span>
                     {!p.hasKey && (
-                      <span className="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-[11px] text-warning">
+                      <span className="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-xs text-warning">
                         {t("models.noKey")}
                       </span>
                     )}
@@ -4792,7 +4834,7 @@ function MemoryRow({
       <div className="flex min-w-0 items-start gap-3">
         <div className="min-w-0 flex-1 space-y-1">
           <p className="break-words text-sm leading-snug">{entry.content}</p>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <span
               className={cn(
                 "rounded px-1.5 py-0.5 font-medium",
@@ -5210,7 +5252,7 @@ function DiscoveredSkillGroup({
       <div className="flex min-w-0 items-baseline gap-2">
         <h5 className="shrink-0 text-xs font-medium text-foreground">{title}</h5>
         {root && (
-          <span className="truncate font-mono text-[11px] text-muted-foreground">
+          <span className="truncate font-mono text-xs text-muted-foreground">
             {root}
           </span>
         )}
@@ -5270,7 +5312,7 @@ function DiscoveredSkillRow({
               {skill.description}
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <span className="rounded bg-muted px-1.5 py-0.5 font-medium">
               {skill.scope === "repo"
                 ? t("skills.discovered.repoBadge")
@@ -5304,7 +5346,7 @@ function DiscoveredSkillRow({
 
       {expanded && (
         <div className="border-t border-border bg-muted/20 px-4 py-3">
-          <div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <div className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
             <FileText className="size-3" />
             <span className="truncate font-mono">{skill.path}</span>
           </div>
@@ -5369,7 +5411,7 @@ function SkillRow({
               {entry.description}
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <span
               className={cn(
                 "rounded px-1.5 py-0.5 font-medium",
@@ -5637,7 +5679,7 @@ function SlashCommandRow({
               {command.description}
             </p>
           )}
-          <p className="line-clamp-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-muted-foreground/80">
+          <p className="line-clamp-2 whitespace-pre-wrap break-words font-mono text-xs leading-snug text-muted-foreground/80">
             {command.prompt}
           </p>
         </div>
@@ -6087,7 +6129,7 @@ function ConnectorRow({
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <p className="truncate text-sm font-medium">{connector.name}</p>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+            <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
               {connector.transport === "http" ? "HTTP" : "stdio"}
             </span>
           </div>
@@ -6650,7 +6692,7 @@ function ConnectorEditor({
                   />
                 </div>
               </div>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {t("connectors.oauth.saveHint")}
               </p>
             </div>
@@ -6822,7 +6864,7 @@ function PluginsSection({ open }: { open: boolean }) {
         <div className="mt-2 grid gap-2 md:grid-cols-2">
           {surfaceRows.map(([name, desc]) => (
             <div key={name} className="min-w-0">
-              <p className="font-mono text-[11px] font-medium">{name}</p>
+              <p className="font-mono text-xs font-medium">{name}</p>
               <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
                 {desc}
               </p>
@@ -6880,7 +6922,7 @@ function PluginsSection({ open }: { open: boolean }) {
               </div>
 
               <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-2">
-                <p className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                <p className="min-w-0 truncate font-mono text-xs text-muted-foreground">
                   {plugin.id}
                 </p>
                 <div className="flex max-w-full flex-wrap items-center justify-end gap-1">

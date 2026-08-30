@@ -58,7 +58,7 @@ export function ViewToggle({ view, onChange, hints }: Props) {
             {hint && (
               <kbd
                 className={cn(
-                  "font-sans text-[10px] leading-none tabular-nums",
+                  "font-sans text-2xs leading-none tabular-nums",
                   active ? "text-primary-foreground/65" : "text-muted-foreground/60",
                 )}
               >

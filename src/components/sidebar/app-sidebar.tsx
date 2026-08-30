@@ -284,15 +284,13 @@ export const AppSidebar = memo(function AppSidebar({
         // every repaint (and it compounded with a long conversation list into
         // scroll jank).
         "bg-sidebar",
-        // Trim the row scale a notch below shadcn's defaults: 13px text (vs
-        // 14px) and 14px icons (vs 16px). Scoped to this sidebar via descendant
-        // selectors + `!` so they win over the menu-button base styles without
-        // forking the shared primitive.
-        "[&_[data-slot=sidebar-menu-button]]:text-[13px]! [&_[data-slot=sidebar-menu-button]_svg]:size-3.5!",
+        // Rows keep shadcn's 14px text + 16px icons (same scale as the Codex
+        // desktop sidebar), so the row ⋯ dropdown — also 14px / 16px — reads as
+        // the same size as the row it came from.
         // The row archive action is a shared primitive that ships a 20px box +
-        // 16px glyph — oversized next to the trimmed 14px row icons. Shrink both,
-        // scoped to this sidebar so the primitive stays untouched elsewhere.
-        "[&_[data-slot=sidebar-menu-action]]:w-3.5! [&_[data-slot=sidebar-menu-action]_svg]:size-3!",
+        // 16px glyph; trim it a notch so the hover cluster stays lighter than
+        // the row's own leading icon. Scoped to this sidebar.
+        "[&_[data-slot=sidebar-menu-action]]:w-4! [&_[data-slot=sidebar-menu-action]_svg]:size-3.5!",
       )}
     >
       <SidebarHeader className="gap-2">
@@ -390,7 +388,7 @@ export const AppSidebar = memo(function AppSidebar({
                   isActive={workspaceFilter === null}
                 >
                   <span className="truncate">{t("workspace.all")}</span>
-                  <span className="ml-auto text-[11px] text-muted-foreground">
+                  <span className="ml-auto text-xs text-muted-foreground">
                     {conversations.length}
                   </span>
                 </SidebarMenuButton>
@@ -805,7 +803,7 @@ function WorkspaceFilterButton({
       <span className="truncate">{label}</span>
       <span
         className={cn(
-          "ml-auto text-[11px]",
+          "ml-auto text-xs",
           active ? "text-sidebar-accent-foreground/80" : "text-muted-foreground",
         )}
       >
@@ -1265,7 +1263,7 @@ const ConversationRow = memo(function ConversationRow({
             )}
             <span
               className={cn(
-                "fade-layer absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center font-mono text-[11px] tracking-tight tabular-nums text-muted-foreground/70 transition-opacity",
+                "fade-layer absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center font-mono text-xs tracking-tight tabular-nums text-muted-foreground/70 transition-opacity",
                 "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
                 active && "text-sidebar-accent-foreground/70",
               )}
@@ -1298,13 +1296,13 @@ const ConversationRow = memo(function ConversationRow({
             />
             <span className="truncate font-medium">{runtimeLabel(backend)}</span>
             {streaming && (
-              <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-background/70">
+              <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-background/70">
                 <span className="size-1.5 animate-pulse rounded-full bg-current" />
                 {t("conversation.inProgress")}
               </span>
             )}
           </div>
-          <div className="flex flex-col gap-1 text-[11px] text-background/70">
+          <div className="flex flex-col gap-1 text-xs text-background/70">
             <div className="flex min-w-0 items-center gap-1.5">
               <Cpu className="size-3 shrink-0 opacity-60" />
               <span className="truncate">
@@ -1334,7 +1332,7 @@ const ConversationRow = memo(function ConversationRow({
               </div>
             )}
           </div>
-          <div className="border-t border-background/15 pt-1.5 text-[10px] tabular-nums text-background/50">
+          <div className="border-t border-background/15 pt-1.5 text-2xs tabular-nums text-background/50">
             {formatDateTimeMinute(conversation.createdAt)}
           </div>
         </TooltipContent>
@@ -1366,7 +1364,7 @@ const ConversationRow = memo(function ConversationRow({
         <DropdownMenuContent
           side="right"
           align="start"
-          className="w-44"
+          className="w-40"
           // When Rename was picked, Radix would return focus to the ⋯ trigger
           // as the menu closes — yanking it off the just-mounted title input.
           // preventDefault alone leaves focus on <body> (the input's autoFocus

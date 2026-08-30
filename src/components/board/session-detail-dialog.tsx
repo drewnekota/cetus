@@ -304,7 +304,7 @@ export function SessionDetailDialog({
             <div className="truncate text-sm font-medium">
               {conversation?.title || t("session.untitled")}
             </div>
-            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
               {conversation && (
                 <>
                   {conversation.workspaceDir === defaultWorkspace ? (
@@ -350,7 +350,7 @@ export function SessionDetailDialog({
               >
                 <Inbox className="mr-1 size-3.5" />
                 {t("session.artifacts")}
-                <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">
+                <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-2xs tabular-nums">
                   {artifactCount}
                 </span>
               </Button>

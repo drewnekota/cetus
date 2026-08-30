@@ -198,7 +198,7 @@ function AutomationCard({
             {a.prompt}
           </p>
 
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-medium text-foreground/80">
               {describeSchedule(a.schedule)}
             </span>
@@ -227,7 +227,7 @@ function AutomationCard({
             </span>
           </div>
 
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 text-[11px]">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 text-xs">
             <span className="text-muted-foreground">
               {a.runCount > 0
                 ? t(a.runCount === 1 ? "card.runs" : "card.runs_plural", {

@@ -273,7 +273,7 @@ function RuntimeCard({
         {ready === null ? (
           <Spinner className="mt-1 size-3.5 text-muted-foreground" />
         ) : (
-          <span className={cn("flex items-center gap-1 text-[11px] font-medium", ready ? "text-success" : "text-muted-foreground")}>
+          <span className={cn("flex items-center gap-1 text-xs font-medium", ready ? "text-success" : "text-muted-foreground")}>
             {ready && <Check className="size-3" />}
             {ready ? readyLabel : missingLabel}
           </span>

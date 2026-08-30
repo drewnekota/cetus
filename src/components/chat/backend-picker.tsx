@@ -211,7 +211,7 @@ export function RuntimeShortcutHint({ entryId }: { entryId: string }) {
   const display = runtimeSlotDisplay(entryId, settings, shortcuts);
   if (!display) return null;
   return (
-    <span className="ml-auto pl-3 text-[10px] tracking-wide text-muted-foreground/70">
+    <span className="ml-auto pl-3 text-2xs tracking-wide text-muted-foreground/70">
       {display}
     </span>
   );
@@ -438,7 +438,7 @@ export function CliTuningMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-44">
-        <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Reasoning
         </DropdownMenuLabel>
         {efforts.map((e) => (
@@ -457,7 +457,7 @@ export function CliTuningMenu({
             {modelRowLabel(curModel)}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="min-w-44">
-            <DropdownMenuLabel className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Model
             </DropdownMenuLabel>
             {models.map((m) => (
@@ -770,7 +770,7 @@ export function BackendPicker({
                 {quota && (
                   <span
                     className={cn(
-                      "ml-1 whitespace-nowrap text-[10px]",
+                      "ml-1 whitespace-nowrap text-2xs",
                       quota.warn
                         ? "text-amber-600 dark:text-amber-500"
                         : "text-muted-foreground/70",

@@ -213,7 +213,7 @@ export function ResourcesPopover({
             >
               <div>
                 <div className="flex items-baseline justify-between">
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     {t("resources.cpu")}
                   </span>
                   <span className="text-xs font-medium tabular-nums">
@@ -229,7 +229,7 @@ export function ResourcesPopover({
               {snap.gpuUtilization != null && (
                 <div>
                   <div className="flex items-baseline justify-between">
-                    <span className="text-[11px] text-muted-foreground">
+                    <span className="text-xs text-muted-foreground">
                       {t("resources.gpu")}
                     </span>
                     <span className="text-xs font-medium tabular-nums">
@@ -245,7 +245,7 @@ export function ResourcesPopover({
               )}
             </div>
             <div className="mt-2" title={t("resources.memHint")}>
-              <div className="flex items-baseline justify-between text-[11px]">
+              <div className="flex items-baseline justify-between text-xs">
                 <span className="text-muted-foreground">
                   {t("resources.memory")}
                 </span>
@@ -316,7 +316,7 @@ export function ResourcesPopover({
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{r.label}</span>
                     {(r.conversationTitle || r.processCount > 1) && (
-                      <span className="block truncate text-[11px] text-muted-foreground">
+                      <span className="block truncate text-xs text-muted-foreground">
                         {[
                           r.conversationTitle,
                           r.processCount > 1

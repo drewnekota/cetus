@@ -235,18 +235,18 @@ function PluginSuggestionCard({
       </div>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="text-sm font-semibold text-foreground">{name}</span>
-        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="rounded bg-muted px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
           {meta.tool_type || t("cliControl.pluginBadge")}
         </span>
         {installHost && (
-          <span className="text-[11px] text-muted-foreground/70">{installHost}</span>
+          <span className="text-xs text-muted-foreground/70">{installHost}</span>
         )}
       </div>
       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
         {reason || t("cliControl.pluginFallbackReason")}
       </p>
       {installOpened && (
-        <p className="mt-2 rounded-md border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] leading-relaxed text-foreground/80">
+        <p className="mt-2 rounded-md border border-primary/20 bg-primary/5 px-2 py-1.5 text-xs leading-relaxed text-foreground/80">
           {t("cliControl.pluginFinishHint")}
         </p>
       )}
@@ -359,7 +359,7 @@ function AttachmentChipRow({
       {items.map((a, i) => (
         <span
           key={a.path}
-          className="flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+          className="flex max-w-full items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-0.5 text-xs text-muted-foreground"
         >
           {a.isImage ? (
             <ImageIcon className="size-3 shrink-0" />
@@ -465,12 +465,12 @@ function CodexQuestionCard({
           {t("cliControl.agentQuestionTitle")}
         </span>
         {questions.length > 1 && (
-          <span className="text-[11px] tabular-nums text-muted-foreground">{step + 1} / {questions.length}</span>
+          <span className="text-xs tabular-nums text-muted-foreground">{step + 1} / {questions.length}</span>
         )}
       </div>
       <div className="flex items-baseline gap-2">
         {q.header && (
-          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
             {q.header}
           </span>
         )}
@@ -489,7 +489,7 @@ function CodexQuestionCard({
               )}
             >
               <span className="font-medium">{option.label}</span>
-              {option.description && <span className="mt-0.5 block text-[11px] text-muted-foreground">{option.description}</span>}
+              {option.description && <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>}
             </button>
           ))}
         </div>
@@ -632,7 +632,7 @@ function AskQuestionCard({
           {t("cliControl.questionTitle")}
         </span>
         {questions.length > 1 && (
-          <span className="text-[11px] tabular-nums text-muted-foreground">
+          <span className="text-xs tabular-nums text-muted-foreground">
             {step + 1} / {questions.length}
           </span>
         )}
@@ -640,7 +640,7 @@ function AskQuestionCard({
       <div className="max-h-[min(50vh,22rem)] space-y-1.5 overflow-y-auto">
         <div className="flex items-baseline gap-2">
           {q.header && (
-            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
               {q.header}
             </span>
           )}
@@ -675,7 +675,7 @@ function AskQuestionCard({
                 <span className="min-w-0">
                   <span className="font-medium">{o.label}</span>
                   {o.description && (
-                    <span className="block truncate text-[11px] text-muted-foreground">
+                    <span className="block truncate text-xs text-muted-foreground">
                       {o.description}
                     </span>
                   )}
@@ -752,7 +752,7 @@ function ApprovalCard({
         {t("cliControl.approvalTitle", { tool: request.toolName })}
       </div>
       {preview && (
-        <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/60 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-foreground/90">
+        <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/60 px-2 py-1.5 font-mono text-xs leading-relaxed text-foreground/90">
           {preview}
         </pre>
       )}

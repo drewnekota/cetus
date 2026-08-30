@@ -1375,7 +1375,7 @@ export function Composer({
                   <FileIcon className="size-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
                     <div className="truncate text-xs font-medium">{a.name}</div>
-                    <div className="text-[10px] text-muted-foreground">{formatBytes(a.sizeBytes)}</div>
+                    <div className="text-2xs text-muted-foreground">{formatBytes(a.sizeBytes)}</div>
                   </div>
                 </div>
               )}
@@ -1411,7 +1411,7 @@ export function Composer({
       </Dialog>
 
       {bashMode && (
-        <div className="flex items-center gap-1.5 px-2.5 pt-1.5 text-[11px] font-medium text-primary">
+        <div className="flex items-center gap-1.5 px-2.5 pt-1.5 text-xs font-medium text-primary">
           <Terminal className="size-3" />
           <span>{t("composer.bashHint")}</span>
         </div>
@@ -1583,11 +1583,11 @@ export function Composer({
         disabled={disabled}
         className={cn(
           "min-h-14 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent",
-          variant === "hero" ? "px-3 py-3 text-base" : "px-2.5 py-2 text-sm",
+          variant === "hero" ? "px-3 py-3 text-base" : "px-2.5 py-2 text-base",
         )}
       />
       {attachError && (
-        <div className="px-2 pb-1 text-[11px] text-destructive">{attachError}</div>
+        <div className="px-2 pb-1 text-xs text-destructive">{attachError}</div>
       )}
       <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-0.5">
         {/* min-w-0 lets the picker cluster shrink (each trigger truncates) so

@@ -186,7 +186,7 @@ export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = fa
     return (
       <div className="flex w-full justify-start py-3">
         <div className="flex max-w-[88%] flex-col gap-2 items-start">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
             {t("pane.assistant")}
           </div>
           <span className="animate-shimmer-text text-sm font-medium">
@@ -207,7 +207,7 @@ export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = fa
           {...messageHoverProps}
           className="flex min-w-0 w-full flex-col gap-2 items-start"
         >
-          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
             {t("pane.assistant")}
           </div>
           <div className="flex min-w-0 w-full max-w-full flex-col gap-2">

@@ -121,7 +121,7 @@ export function SlashMenu({
                       }}
                       title={t("slash.newCommand")}
                       aria-label={t("slash.newCommand")}
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground motion-reduce:transition-none"
+                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground motion-reduce:transition-none"
                     >
                       <Plus className="size-3" />
                       {t("slash.newCommand")}
@@ -164,13 +164,13 @@ export function SlashMenu({
                       <span className="truncate font-sans">{item.name}</span>
                     </span>
                     {scope && (
-                      <span className="shrink-0 rounded bg-muted-foreground/10 px-1 py-px font-sans text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                      <span className="shrink-0 rounded bg-muted-foreground/10 px-1 py-px font-sans text-2xs font-medium uppercase tracking-wide text-muted-foreground">
                         {scope}
                       </span>
                     )}
                   </span>
                   {text && (
-                    <span className="mt-0.5 line-clamp-1 block text-[11px] text-muted-foreground">
+                    <span className="mt-0.5 line-clamp-1 block text-xs text-muted-foreground">
                       {text}
                     </span>
                   )}
@@ -214,7 +214,7 @@ export function SlashMenu({
 function Heading({ label, action }: { label: string; action?: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-2 px-3 pb-1 pt-2">
-      <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+      <span className="text-2xs font-medium text-muted-foreground">{label}</span>
       {action}
     </div>
   );

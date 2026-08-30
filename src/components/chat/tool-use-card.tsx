@@ -269,7 +269,7 @@ function EditDiffView({
   return (
     <div className="overflow-hidden rounded bg-background/60">
       {path && (
-        <div className="flex items-center gap-1.5 border-b border-border/40 bg-muted/40 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-1.5 border-b border-border/40 bg-muted/40 px-2 py-1 font-mono text-2xs text-muted-foreground">
           <FileDiff className="h-3 w-3 shrink-0" />
           <span className="min-w-0 truncate" title={path}>
             {path}
@@ -282,11 +282,11 @@ function EditDiffView({
         {diffs.map((d, i) => (
           <div key={i}>
             {edits.length > 1 && (
-              <div className="border-y border-border/30 bg-muted/30 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+              <div className="border-y border-border/30 bg-muted/30 px-2 py-0.5 font-mono text-2xs text-muted-foreground">
                 {i + 1} / {edits.length}
               </div>
             )}
-            <pre className="px-2 py-1 font-mono text-[11px] leading-relaxed">
+            <pre className="px-2 py-1 font-mono text-xs leading-relaxed">
               {d.map((line, j) => (
                 <div
                   key={j}
@@ -483,9 +483,9 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
           {block.name || <span className="italic text-muted-foreground">{t("tool.calling")}</span>}
         </span>
         {preview && (
-          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{preview}</span>
+          <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{preview}</span>
         )}
-        <span className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+        <span className="ml-auto flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
           {isError ? (
             <AlertCircle className="h-3 w-3 text-warning" />
           ) : isRunning ? (
@@ -500,12 +500,12 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
       {steps.length > 0 && (
         <div className="ml-[3.25rem] space-y-0.5 pb-1 pr-2">
           {hiddenSteps > 0 && (
-            <div className="text-[10px] text-muted-foreground/70">
+            <div className="text-2xs text-muted-foreground/70">
               {t("tool.earlierSteps", { count: hiddenSteps })}
             </div>
           )}
           {visibleSteps.map((s, i) => (
-            <div key={hiddenSteps + i} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <div key={hiddenSteps + i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
               {s.done ? (
                 <Check className="h-2.5 w-2.5 shrink-0 text-success/80" />
               ) : isRunning ? (
@@ -525,18 +525,18 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
               path and paging/size args surface as a header on the result. */}
           {block.args != null && !isFileTool && (
             <section>
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <div className="mb-1 text-2xs uppercase tracking-wide text-muted-foreground">
                 {editInfo !== null ? t("tool.diff") : cmd !== null ? t("tool.command") : t("tool.args")}
               </div>
               {editInfo !== null && editDiffs !== null && editStat !== null ? (
                 <EditDiffView path={editInfo.path} edits={editInfo.edits} diffs={editDiffs} stat={editStat} />
               ) : cmd !== null ? (
-                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 px-2 py-1.5 font-mono text-[11px] leading-relaxed">
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background/60 px-2 py-1.5 font-mono text-xs leading-relaxed">
                   <span className="select-none text-muted-foreground">$ </span>
                   {cmd}
                 </pre>
               ) : (
-                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-background/60 px-2 py-1.5 font-mono text-[11px]">
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-background/60 px-2 py-1.5 font-mono text-xs">
                   {stringifyArgs(block.args)}
                 </pre>
               )}
@@ -544,9 +544,9 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
           )}
           {block.result && (
             <section>
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t("tool.result")}</div>
+              <div className="mb-1 text-2xs uppercase tracking-wide text-muted-foreground">{t("tool.result")}</div>
               {filePath !== null && (
-                <div className="mb-1 flex items-center gap-1.5 rounded bg-background/60 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                <div className="mb-1 flex items-center gap-1.5 rounded bg-background/60 px-2 py-1 font-mono text-2xs text-muted-foreground">
                   <FileText className="h-3 w-3 shrink-0" />
                   <span className="min-w-0 truncate" title={filePath}>
                     {filePath}
@@ -559,7 +559,7 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
               {highlighted !== null ? (
                 <pre
                   className={cn(
-                    "max-h-72 overflow-auto rounded bg-background/60 px-2 py-1.5 font-mono text-[11px] leading-relaxed",
+                    "max-h-72 overflow-auto rounded bg-background/60 px-2 py-1.5 font-mono text-xs leading-relaxed",
                     HLJS_THEME_CLASS,
                   )}
                 >
@@ -568,7 +568,7 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
               ) : (
                 <pre
                   className={cn(
-                    "max-h-72 overflow-auto whitespace-pre-wrap rounded bg-background/60 px-2 py-1.5 font-mono text-[11px]",
+                    "max-h-72 overflow-auto whitespace-pre-wrap rounded bg-background/60 px-2 py-1.5 font-mono text-xs",
                     isError && "text-warning dark:text-warning",
                   )}
                 >
@@ -576,7 +576,7 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
                 </pre>
               )}
               {outputInfo?.truncated && (
-                <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                <div className="mt-1 flex items-center justify-between gap-2 text-2xs text-muted-foreground">
                   <span>{t("tool.outputTruncated", { size: formatBytes(outputInfo.totalBytes) })}</span>
                   {outputInfo.path && (
                     <button

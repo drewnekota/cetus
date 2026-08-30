@@ -316,7 +316,7 @@ export function MeetingHud() {
         <div className="mb-4 flex min-h-0 w-[400px] flex-1 flex-col overflow-hidden rounded-xl border border-white/10 bg-black/95 shadow-[0_4px_12px_rgba(0,0,0,0.5)]">
           <div className="flex shrink-0 items-center gap-1.5 px-3.5 pb-1 pt-2.5">
             <span className="size-1.5 rounded-full bg-destructive" />
-            <span className="text-[10px] font-medium uppercase tracking-wide text-white/50">
+            <span className="text-2xs font-medium uppercase tracking-wide text-white/50">
               {tt("meeting", "transcript.live")}
             </span>
             <button

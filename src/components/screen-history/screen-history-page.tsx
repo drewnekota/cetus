@@ -373,7 +373,7 @@ function FrameCard({ frame, onOpen }: { frame: Screenshot; onOpen: () => void })
           // Pixels pruned by tiered retention — the searchable text remains.
           <div className="flex size-full flex-col items-center justify-center gap-1.5 p-3 text-muted-foreground">
             <FileText className="size-5" />
-            <span className="text-[10px]">{t("textOnly")}</span>
+            <span className="text-2xs">{t("textOnly")}</span>
           </div>
         )}
       </div>
@@ -385,7 +385,7 @@ function FrameCard({ frame, onOpen }: { frame: Screenshot; onOpen: () => void })
           </span>
         </div>
         {snippet && (
-          <p className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+          <p className="line-clamp-2 text-xs leading-snug text-muted-foreground">
             {snippet}
           </p>
         )}
@@ -409,10 +409,10 @@ function AxCard({ entry, onOpen }: { entry: AmbientEntry; onOpen: () => void }) 
       className="group flex flex-col overflow-hidden rounded-lg border border-border bg-card text-left transition-colors hover:border-foreground/30"
     >
       <div className="relative aspect-[16/10] overflow-hidden bg-muted/60 p-2.5">
-        <p className="line-clamp-[7] break-words text-[11px] leading-snug text-muted-foreground">
+        <p className="line-clamp-[7] break-words text-xs leading-snug text-muted-foreground">
           {excerpt || title}
         </p>
-        <span className="absolute right-1.5 top-1.5 rounded border border-border bg-background/85 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="absolute right-1.5 top-1.5 rounded border border-border bg-background/85 px-1 py-px text-2xs font-medium uppercase tracking-wide text-muted-foreground">
           {t("axBadge")}
         </span>
       </div>
@@ -426,7 +426,7 @@ function AxCard({ entry, onOpen }: { entry: AmbientEntry; onOpen: () => void }) 
           </span>
         </div>
         {title && (
-          <p className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+          <p className="line-clamp-2 text-xs leading-snug text-muted-foreground">
             {title}
           </p>
         )}
@@ -555,7 +555,7 @@ function AxLightbox({ entry, onClose }: { entry: AmbientEntry; onClose: () => vo
               <span className="truncate font-medium">
                 {entry.appName || t("unknownAppFull")}
               </span>
-              <span className="shrink-0 rounded border border-border bg-muted px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="shrink-0 rounded border border-border bg-muted px-1 py-px text-2xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t("axBadge")}
               </span>
             </div>

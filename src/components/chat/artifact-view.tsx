@@ -113,10 +113,10 @@ export function ArtifactView({ artifact }: Props) {
 
   const meta = (
     <>
-      <p className="truncate text-[13px] font-semibold text-foreground">
+      <p className="truncate text-md font-semibold text-foreground">
         {artifact.caption ?? artifact.name}
       </p>
-      <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+      <p className="mt-0.5 truncate text-xs text-muted-foreground">
         {artifact.caption ? `${artifact.name} · ` : ""}
         {kindLabel} · {formatBytes(artifact.sizeBytes)}
       </p>
@@ -226,7 +226,7 @@ function Thumbnail({
           path={artifact.path}
           fallbackIcon={FileText}
           render={(text) => (
-            <div className="prose prose-sm dark:prose-invert h-full w-full max-w-none overflow-hidden bg-card p-4 text-[12px] leading-[1.55] [&>*]:my-1.5 [&>:first-child]:mt-0 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-[13px] [&_h3]:font-semibold [&_pre]:text-[10px]">
+            <div className="prose prose-sm dark:prose-invert h-full w-full max-w-none overflow-hidden bg-card p-4 text-xs leading-[1.55] [&>*]:my-1.5 [&>:first-child]:mt-0 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-md [&_h3]:font-semibold [&_pre]:text-2xs">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly]}
                 rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
@@ -245,7 +245,7 @@ function Thumbnail({
           path={artifact.path}
           fallbackIcon={FileText}
           render={(text) => (
-            <pre className="h-full w-full overflow-hidden whitespace-pre-wrap bg-card p-4 text-left font-mono text-[10px] leading-[1.6] text-foreground/80">
+            <pre className="h-full w-full overflow-hidden whitespace-pre-wrap bg-card p-4 text-left font-mono text-2xs leading-[1.6] text-foreground/80">
               {text}
             </pre>
           )}
@@ -396,7 +396,7 @@ function IconThumb({
     <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-muted/30">
       <Icon className="size-10 text-muted-foreground/40" />
       {label && (
-        <span className="text-[10px] font-medium tracking-wide text-muted-foreground">
+        <span className="text-2xs font-medium tracking-wide text-muted-foreground">
           {label}
         </span>
       )}
@@ -537,7 +537,7 @@ function ArtifactPreviewDialog({
             <p className="truncate text-sm font-medium">
               {current.caption ?? current.name}
             </p>
-            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
               {current.caption ? `${current.name} · ` : ""}
               {labelFor(current, t)} · {formatBytes(current.sizeBytes)}
               {canNavigate ? ` · ${index + 1} / ${count}` : ""}

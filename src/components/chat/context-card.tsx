@@ -30,7 +30,7 @@ export function ContextCard({ inner, isUser }: { inner: string; isUser: boolean 
       {open && (
         <pre
           className={cn(
-            "mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-[11px] leading-relaxed",
+            "mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-xs leading-relaxed",
             isUser
               ? "bg-primary/10 text-foreground/75"
               : "bg-muted/50 text-muted-foreground",

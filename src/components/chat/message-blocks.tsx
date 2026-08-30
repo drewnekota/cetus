@@ -35,7 +35,9 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 
 const PROSE_CLASS = cn(
-  "prose prose-sm dark:prose-invert max-w-none",
+  // prose-sm pins the container to 14px; the `!` lets the app's chat-body
+  // token (text-base, 15px) win. Everything prose sizes in em follows it.
+  "prose prose-sm dark:prose-invert max-w-none text-base!",
   // The prose box itself must never become the horizontal scroller: doing so
   // puts a bar under an otherwise ordinary reply whenever any one descendant
   // is slightly too wide. Wide content gets its own scroller below instead.
@@ -53,7 +55,7 @@ const PROSE_CLASS = cn(
   "prose-pre:bg-secondary prose-pre:text-foreground",
   // Tables: prose-sm shrinks th/td to ~12px and prose-code drops another 15%.
   // Keep cell text at the bubble's base size and stop nested code from shrinking further.
-  "prose-th:text-sm prose-th:py-2 prose-td:text-sm prose-td:py-2",
+  "prose-th:text-base prose-th:py-2 prose-td:text-base prose-td:py-2",
   "[&_td_code]:text-[0.95em] [&_th_code]:text-[0.95em]",
 );
 
@@ -111,7 +113,7 @@ function CopyablePre({
         // gain, and solid keeps the label readable over scrolled code.
         // `fade-layer` because the hover opacity transition would otherwise
         // make WebKit promote/demote the button and nudge the icon a subpixel.
-        className="not-prose fade-layer absolute right-1.5 top-1.5 flex h-6 items-center gap-1 rounded-md border border-border/60 bg-background px-1.5 text-[11px] text-muted-foreground opacity-70 shadow-sm transition-[color,background-color,opacity] hover:bg-background hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="not-prose fade-layer absolute right-1.5 top-1.5 flex h-6 items-center gap-1 rounded-md border border-border/60 bg-background px-1.5 text-xs text-muted-foreground opacity-70 shadow-sm transition-[color,background-color,opacity] hover:bg-background hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
         <span>{label}</span>
@@ -305,7 +307,7 @@ export function TextBlock({
 }) {
   const throttled = useThrottledText(text, streaming ?? false);
   return (
-    <div className="min-w-0 max-w-full break-words text-sm leading-relaxed">
+    <div className="min-w-0 max-w-full break-words text-base leading-relaxed">
       {isUser ? (
         // User messages are plain text; markdown rendering is for assistant
         // output where the model emits **bold** / code / lists. We still linkify
@@ -392,7 +394,7 @@ export const AnswerBlock = memo(function AnswerBlock({
         <FileText className="size-4 shrink-0 opacity-70" />
         <span className="min-w-0">
           <span className="block truncate text-xs font-medium">{block.name}</span>
-          <span className="block text-[10px] opacity-70">{formatBytes(block.sizeBytes)}</span>
+          <span className="block text-2xs opacity-70">{formatBytes(block.sizeBytes)}</span>
         </span>
       </button>
     );
@@ -460,7 +462,7 @@ export function MessageActions({
           type="button"
           onClick={copy}
           title={copied ? t("bubble.copied") : t("bubble.copy")}
-          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
           {copied ? t("bubble.copied") : t("bubble.copy")}
@@ -471,7 +473,7 @@ export function MessageActions({
           type="button"
           onClick={onFork}
           title={t("bubble.fork")}
-          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <GitFork className="size-3" />
           {t("bubble.fork")}
@@ -489,7 +491,7 @@ function MessageTimestamp({ ts }: { ts: number }) {
   return (
     <span
       title={formatFullDateTime(ts)}
-      className="cursor-default px-1 text-[11px] tabular-nums text-muted-foreground/70 transition-colors hover:text-foreground"
+      className="cursor-default px-1 text-xs tabular-nums text-muted-foreground/70 transition-colors hover:text-foreground"
     >
       {formatTimeHM(ts)}
     </span>

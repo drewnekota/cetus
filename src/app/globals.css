@@ -65,6 +65,33 @@
     monospace;
 }
 
+/* Not `inline`: the utilities must reference `var(--text-*)` so the "UI font
+   size" setting can override the ramp on <html> at runtime. */
+@theme {
+  /* Type ramp, in px (Codex desktop's scale, shifted one notch up so the
+     default fits a 16" display at 100%): 2xs 11 for badges/kbd, xs 12 for
+     meta, md 13 for dense chrome, sm 14 for UI text, base 15 for chat body.
+     Line-heights are unitless so the ramp scales cleanly. The "UI font size"
+     setting overrides these on <html> — keep type-scale-prefs.ts TYPE_RAMP
+     and the pre-paint script in layout.tsx in sync. */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.4;
+  --text-xs: 12px;
+  --text-xs--line-height: 1.35;
+  --text-md: 13px;
+  --text-md--line-height: 1.4;
+  --text-sm: 14px;
+  --text-sm--line-height: 1.43;
+  --text-base: 15px;
+  --text-base--line-height: 1.5;
+  --text-lg: 18px;
+  --text-lg--line-height: 1.5;
+  --text-xl: 20px;
+  --text-xl--line-height: 1.4;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 1.33;
+}
+
 /* ── Linear theme ──────────────────────────────────────────────────────────
    The entire app is built from six brand colors only (the Codex "linear"
    preset): a surface, an ink (text), a brand accent, and three semantic colors
@@ -78,6 +105,15 @@
   --diff-added: #52a450;
   --diff-removed: #c94446;
   --skill: #8160d8;
+  /* Skin contrast (0–100, 50 = stock). `--k` scales every ink-into-surface
+     mix below, so one number moves borders, hover lifts and muted surfaces
+     together. Overridden per-skin as an inline property on <html>. */
+  --contrast: 50;
+  --k: calc(var(--contrast) / 50);
+  /* Text on the brand accent. The skin engine flips this to black when a
+     custom accent is light enough (WCAG luminance); stock accents take the
+     stylesheet default. */
+  --on-accent: var(--surface);
 
   --background: var(--surface);
   --foreground: var(--ink);
@@ -86,24 +122,24 @@
   --popover: var(--surface);
   --popover-foreground: var(--ink);
   --primary: var(--brand);
-  --primary-foreground: var(--surface);
-  --secondary: color-mix(in oklab, var(--ink) 5%, var(--surface));
+  --primary-foreground: var(--on-accent);
+  --secondary: color-mix(in oklab, var(--ink) calc(5% * var(--k)), var(--surface));
   --secondary-foreground: var(--ink);
-  --muted: color-mix(in oklab, var(--ink) 5%, var(--surface));
-  --muted-foreground: color-mix(in oklab, var(--ink) 52%, var(--surface));
-  --accent: color-mix(in oklab, var(--ink) 6%, var(--surface));
+  --muted: color-mix(in oklab, var(--ink) calc(5% * var(--k)), var(--surface));
+  --muted-foreground: color-mix(in oklab, var(--ink) calc(52% + (var(--contrast) - 50) * 0.2%), var(--surface));
+  --accent: color-mix(in oklab, var(--ink) calc(6% * var(--k)), var(--surface));
   --accent-foreground: var(--ink);
   --destructive: var(--diff-removed);
   --destructive-foreground: var(--surface);
-  --border: color-mix(in oklab, var(--ink) 9%, var(--surface));
-  --input: color-mix(in oklab, var(--ink) 12%, var(--surface));
+  --border: color-mix(in oklab, var(--ink) calc(9% * var(--k)), var(--surface));
+  --input: color-mix(in oklab, var(--ink) calc(12% * var(--k)), var(--surface));
   --ring: var(--brand);
   --radius: 0.625rem;
 
   --success: var(--diff-added);
   --success-foreground: var(--surface);
   --warning: var(--brand);
-  --warning-foreground: var(--surface);
+  --warning-foreground: var(--on-accent);
   --info: var(--skill);
   --info-foreground: var(--surface);
   --skill-foreground: var(--surface);
@@ -114,15 +150,15 @@
   --chart-4: var(--diff-removed);
   --chart-5: color-mix(in oklab, var(--ink) 40%, var(--surface));
 
-  --sidebar: #f8f8f9;
+  --sidebar: color-mix(in oklab, var(--ink) calc(2% * var(--k)), var(--surface));
   --sidebar-foreground: var(--ink);
   --sidebar-primary: var(--brand);
-  --sidebar-primary-foreground: var(--surface);
+  --sidebar-primary-foreground: var(--on-accent);
   /* Hover + selected row: a faint neutral lift off the surface (subtle,
      Linear-style selection — no bold block). */
-  --sidebar-accent: color-mix(in oklab, var(--ink) 7%, var(--surface));
+  --sidebar-accent: color-mix(in oklab, var(--ink) calc(7% * var(--k)), var(--surface));
   --sidebar-accent-foreground: var(--ink);
-  --sidebar-border: color-mix(in oklab, var(--ink) 9%, var(--surface));
+  --sidebar-border: color-mix(in oklab, var(--ink) calc(9% * var(--k)), var(--surface));
   --sidebar-ring: var(--brand);
 }
 
@@ -133,31 +169,33 @@
   --diff-added: #69c967;
   --diff-removed: #ff7e78;
   --skill: #c2a1ff;
+  --contrast: 50;
+  --on-accent: var(--ink);
 
   --background: var(--surface);
   --foreground: var(--ink);
-  --card: color-mix(in oklab, var(--ink) 7%, var(--surface));
+  --card: color-mix(in oklab, var(--ink) calc(7% * var(--k)), var(--surface));
   --card-foreground: var(--ink);
-  --popover: color-mix(in oklab, var(--ink) 7%, var(--surface));
+  --popover: color-mix(in oklab, var(--ink) calc(7% * var(--k)), var(--surface));
   --popover-foreground: var(--ink);
   --primary: var(--brand);
-  --primary-foreground: var(--ink);
-  --secondary: color-mix(in oklab, var(--ink) 13%, var(--surface));
+  --primary-foreground: var(--on-accent);
+  --secondary: color-mix(in oklab, var(--ink) calc(13% * var(--k)), var(--surface));
   --secondary-foreground: var(--ink);
-  --muted: color-mix(in oklab, var(--ink) 13%, var(--surface));
-  --muted-foreground: color-mix(in oklab, var(--ink) 56%, var(--surface));
-  --accent: color-mix(in oklab, var(--ink) 14%, var(--surface));
+  --muted: color-mix(in oklab, var(--ink) calc(13% * var(--k)), var(--surface));
+  --muted-foreground: color-mix(in oklab, var(--ink) calc(56% + (var(--contrast) - 50) * 0.2%), var(--surface));
+  --accent: color-mix(in oklab, var(--ink) calc(14% * var(--k)), var(--surface));
   --accent-foreground: var(--ink);
   --destructive: var(--diff-removed);
   --destructive-foreground: var(--surface);
-  --border: color-mix(in oklab, var(--ink) 11%, var(--surface));
-  --input: color-mix(in oklab, var(--ink) 18%, var(--surface));
+  --border: color-mix(in oklab, var(--ink) calc(11% * var(--k)), var(--surface));
+  --input: color-mix(in oklab, var(--ink) calc(18% * var(--k)), var(--surface));
   --ring: var(--brand);
 
   --success: var(--diff-added);
   --success-foreground: var(--surface);
   --warning: var(--brand);
-  --warning-foreground: var(--ink);
+  --warning-foreground: var(--on-accent);
   --info: var(--skill);
   --info-foreground: var(--surface);
   --skill-foreground: var(--surface);
@@ -168,14 +206,14 @@
   --chart-4: var(--diff-removed);
   --chart-5: color-mix(in oklab, var(--ink) 45%, var(--surface));
 
-  --sidebar: color-mix(in oklab, var(--ink) 4%, var(--surface));
+  --sidebar: color-mix(in oklab, var(--ink) calc(4% * var(--k)), var(--surface));
   --sidebar-foreground: var(--ink);
   --sidebar-primary: var(--brand);
-  --sidebar-primary-foreground: var(--ink);
+  --sidebar-primary-foreground: var(--on-accent);
   /* Hover + selected row: a light neutral lift clearly above the dark surface. */
-  --sidebar-accent: color-mix(in oklab, var(--ink) 17%, var(--surface));
+  --sidebar-accent: color-mix(in oklab, var(--ink) calc(17% * var(--k)), var(--surface));
   --sidebar-accent-foreground: var(--ink);
-  --sidebar-border: color-mix(in oklab, var(--ink) 11%, var(--surface));
+  --sidebar-border: color-mix(in oklab, var(--ink) calc(11% * var(--k)), var(--surface));
   --sidebar-ring: var(--brand);
 }
 
