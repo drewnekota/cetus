@@ -1264,7 +1264,7 @@ const ConversationRow = memo(function ConversationRow({
             <span
               className={cn(
                 "fade-layer absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center font-mono text-xs tracking-tight tabular-nums text-muted-foreground/70 transition-opacity",
-                "group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0",
+                "group-has-[:focus-visible]/menu-item:opacity-0 group-hover/menu-item:opacity-0",
                 active && "text-sidebar-accent-foreground/70",
               )}
             >
@@ -1342,10 +1342,13 @@ const ConversationRow = memo(function ConversationRow({
           butting up against the ⋯. Sits between the row button and the action
           buttons in DOM order so it paints above the title but below the
           actions. Visibility mirrors the actions' showOnHover conditions
-          (plus dropdown-open, which keeps the actions pinned visible). */}
+          (plus dropdown-open, which keeps the actions pinned visible). Keyed
+          off `:has(:focus-visible)`, not `:focus-within`, for the same reason
+          as ROW_ACCENT_CLASS: dismissing the ⋯ menu by mouse returns focus to
+          the trigger, and focus-within would leave this scrim stuck on. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-y-0 right-0 w-24 rounded-r-md bg-linear-to-l from-sidebar-accent from-55% to-transparent transition-opacity group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 group-has-[[data-state=open]]/menu-item:opacity-100 md:opacity-0"
+        className="pointer-events-none absolute inset-y-0 right-0 w-24 rounded-r-md bg-linear-to-l from-sidebar-accent from-55% to-transparent transition-opacity group-has-[:focus-visible]/menu-item:opacity-100 group-hover/menu-item:opacity-100 group-has-[[data-state=open]]/menu-item:opacity-100 md:opacity-0"
       />
       {/* Hover actions, right-aligned over the time slot: [⋯ menu][archive].
           Both are absolutely-positioned siblings of the row button (see the

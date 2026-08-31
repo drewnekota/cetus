@@ -25,6 +25,67 @@ export const TYPE_RAMP: Record<string, number> = {
   "--text-2xl": 24,
 };
 
+// ── Line height ─────────────────────────────────────────────────────────────
+// One multiplier applied to every token's unitless line-height (the
+// `--text-*--line-height` vars the `text-*` utilities read). Same persistence
+// and pre-paint model as the font size above.
+
+export const LINE_HEIGHT_STORAGE_KEY = "cetus.lineHeight";
+
+export const DEFAULT_UI_LINE_HEIGHT = 1;
+/** Multipliers over the ramp's authored line-heights. */
+export const UI_LINE_HEIGHTS = [0.9, 1, 1.1, 1.2] as const;
+export type UiLineHeight = (typeof UI_LINE_HEIGHTS)[number];
+
+/** Token → unitless line-height at the default multiplier. Mirrors globals.css. */
+export const LINE_HEIGHT_RAMP: Record<string, number> = {
+  "--text-2xs--line-height": 1.4,
+  "--text-xs--line-height": 1.35,
+  "--text-md--line-height": 1.4,
+  "--text-sm--line-height": 1.43,
+  "--text-base--line-height": 1.5,
+  "--text-lg--line-height": 1.5,
+  "--text-xl--line-height": 1.4,
+  "--text-2xl--line-height": 1.33,
+};
+
+export function isUiLineHeight(n: number): n is UiLineHeight {
+  return (UI_LINE_HEIGHTS as readonly number[]).includes(n);
+}
+
+export function getUiLineHeight(): UiLineHeight {
+  if (typeof window === "undefined") return DEFAULT_UI_LINE_HEIGHT;
+  try {
+    const n = Number(localStorage.getItem(LINE_HEIGHT_STORAGE_KEY));
+    return isUiLineHeight(n) ? n : DEFAULT_UI_LINE_HEIGHT;
+  } catch {
+    return DEFAULT_UI_LINE_HEIGHT;
+  }
+}
+
+export function setUiLineHeight(factor: UiLineHeight) {
+  try {
+    if (factor === DEFAULT_UI_LINE_HEIGHT) {
+      localStorage.removeItem(LINE_HEIGHT_STORAGE_KEY);
+    } else {
+      localStorage.setItem(LINE_HEIGHT_STORAGE_KEY, String(factor));
+    }
+  } catch {
+    // Private mode / quota: still apply for this session.
+  }
+  applyUiLineHeight(factor);
+}
+
+/** Writes (or clears, at the default factor) the scaled line-heights onto <html>. */
+export function applyUiLineHeight(factor: UiLineHeight) {
+  if (typeof document === "undefined") return;
+  const html = document.documentElement;
+  for (const [token, lh] of Object.entries(LINE_HEIGHT_RAMP)) {
+    if (factor === 1) html.style.removeProperty(token);
+    else html.style.setProperty(token, (lh * factor).toFixed(3));
+  }
+}
+
 export function isUiFontSize(n: number): n is UiFontSize {
   return (UI_FONT_SIZES as readonly number[]).includes(n);
 }

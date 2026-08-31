@@ -94,10 +94,15 @@ import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import { SkinSection } from "@/components/settings/skin-section";
 import {
   DEFAULT_UI_FONT_SIZE,
+  DEFAULT_UI_LINE_HEIGHT,
   UI_FONT_SIZES,
+  UI_LINE_HEIGHTS,
   getUiFontSize,
+  getUiLineHeight,
   setUiFontSize,
+  setUiLineHeight,
   type UiFontSize,
+  type UiLineHeight,
 } from "@/lib/type-scale-prefs";
 import {
   LOCALE_NATIVE_NAMES,
@@ -2286,10 +2291,20 @@ function LauncherSection() {
 // Appearance (theme)
 // =============================================================================
 
+const LINE_HEIGHT_LABEL_KEYS = {
+  0.9: "appearance.lineHeight.compact",
+  1: "appearance.lineHeight.default",
+  1.1: "appearance.lineHeight.relaxed",
+  1.2: "appearance.lineHeight.loose",
+} as const satisfies Record<UiLineHeight, string>;
+
 function AppearanceSection() {
   const [theme, setThemeState] = useState<ThemePreference>(DEFAULT_THEME);
   const [permaLayers, setPermaLayers] = useState(true);
   const [fontSize, setFontSize] = useState<UiFontSize>(DEFAULT_UI_FONT_SIZE);
+  const [lineHeight, setLineHeight] = useState<UiLineHeight>(
+    DEFAULT_UI_LINE_HEIGHT,
+  );
   const { t } = useTranslation("settings");
 
   // Reflect the persisted choice once we're in the browser (localStorage).
@@ -2297,6 +2312,7 @@ function AppearanceSection() {
     setThemeState(getThemePreference());
     setPermaLayers(getPermaLayersEnabled());
     setFontSize(getUiFontSize());
+    setLineHeight(getUiLineHeight());
   }, []);
 
   function chooseTheme(pref: ThemePreference) {
@@ -2360,6 +2376,34 @@ function AppearanceSection() {
                   {n === DEFAULT_UI_FONT_SIZE
                     ? t("appearance.fontSize.default", { size: n })
                     : t("appearance.fontSize.option", { size: n })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 space-y-0.5">
+            <Label className="font-medium">{t("appearance.lineHeight.label")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("appearance.lineHeight.description")}
+            </p>
+          </div>
+          <Select
+            value={String(lineHeight)}
+            onValueChange={(v) => {
+              const n = Number(v) as UiLineHeight;
+              setUiLineHeight(n); // persists + rewrites the line-heights on <html> live
+              setLineHeight(n);
+            }}
+          >
+            <SelectTrigger className="w-52 shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {UI_LINE_HEIGHTS.map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  {t(LINE_HEIGHT_LABEL_KEYS[n])}
                 </SelectItem>
               ))}
             </SelectContent>

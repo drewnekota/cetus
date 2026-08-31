@@ -12,9 +12,12 @@ import {
 } from "@/lib/layer-prefs";
 import { SKIN_STORAGE_KEY } from "@/lib/skin-prefs";
 import {
+  LINE_HEIGHT_STORAGE_KEY,
   TYPE_SCALE_STORAGE_KEY,
   applyUiFontSize,
+  applyUiLineHeight,
   getUiFontSize,
+  getUiLineHeight,
 } from "@/lib/type-scale-prefs";
 
 /** Keeps the main window's `.dark` class in sync with the saved theme after the
@@ -27,6 +30,7 @@ export function ThemeWatcher() {
   useEffect(() => {
     applyTheme(getThemePreference());
     applyUiFontSize(getUiFontSize());
+    applyUiLineHeight(getUiLineHeight());
     // Same lifecycle as the theme: apply the persisted compositing-layer A/B
     // choice on mount and follow cross-window changes below. Logged (console
     // forwards into the log files) so the periodic "webview memory" series
@@ -55,6 +59,9 @@ export function ThemeWatcher() {
       }
       if (e.key === null || e.key === TYPE_SCALE_STORAGE_KEY) {
         applyUiFontSize(getUiFontSize());
+      }
+      if (e.key === null || e.key === LINE_HEIGHT_STORAGE_KEY) {
+        applyUiLineHeight(getUiLineHeight());
       }
     };
     mq.addEventListener("change", onSystem);

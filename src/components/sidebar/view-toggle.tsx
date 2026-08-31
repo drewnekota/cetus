@@ -48,7 +48,10 @@ export function ViewToggle({ view, onChange, hints }: Props) {
             onClick={() => onChange(it.id)}
             title={`${label} (${hint})`}
             className={cn(
-              "inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
+              // items-baseline, not items-center: the label and the smaller kbd hint
+              // are both bare text, and the eye reads side-by-side text by baseline.
+              // Centering their (different-height) line boxes lifts the hint ~1px.
+              "inline-flex flex-1 items-baseline justify-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
               active
                 ? "bg-[var(--brand)] text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground",

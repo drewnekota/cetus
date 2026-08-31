@@ -271,6 +271,8 @@ interface Props {
   onRequestBackendSwitch?: (target: RuntimeSwitchTarget) => void;
 }
 
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /** Claude Code built-in slash commands that work headless (verified against
  *  CLI 2.1.199: handled locally, zero model tokens; /status, /model etc. are
  *  TUI-only and refuse in -p mode). Offered in the slash menu for claude-code
@@ -707,14 +709,35 @@ export function Composer({
 
   const slashItems = useMemo(() => {
     const q = slashQuery.toLowerCase();
-    const match = (it: SlashItem) =>
-      it.name.toLowerCase().includes(q) || it.description.toLowerCase().includes(q);
+    // Rank rather than just filter: a query like "usage" must surface
+    // `/usage-credits` above `/context` ("Show current context usage") and a
+    // figma skill whose blurb happens to contain "Usage —". Lower is better;
+    // 0 = no match. Ties keep the caller's (catalog) order.
+    const rank = (it: SlashItem): number => {
+      if (!q) return 1;
+      const name = it.name.toLowerCase();
+      if (name === q) return 1;
+      if (name.startsWith(q)) return 2;
+      // Namespaced names (`figma:figma-use`) and hyphenated words: a segment
+      // start beats an arbitrary substring.
+      const segIdx = name.search(new RegExp(`(^|[-_:/.])${escapeRegExp(q)}`));
+      if (segIdx >= 0) return 3;
+      if (name.includes(q)) return 4;
+      if (it.description.toLowerCase().includes(q)) return 5;
+      return 0;
+    };
+    const match = (it: SlashItem) => rank(it) > 0;
+    const byRank = (list: SlashItem[]): SlashItem[] =>
+      list
+        .map((it, i) => ({ it, i, r: rank(it) }))
+        .sort((a, b) => a.r - b.r || a.i - b.i)
+        .map((x) => x.it);
     // The menu labels one heading per run of a kind, and a runtime catalog
     // arrives alphabetically interleaved (a skill can be row 0). Partition here
-    // so the panel always reads Commands → Skills, order stable within each.
+    // so the panel always reads Commands → Skills, ranked within each.
     const byKind = (list: SlashItem[]): SlashItem[] => [
-      ...list.filter((it) => it.kind === "command"),
-      ...list.filter((it) => it.kind === "skill"),
+      ...byRank(list.filter((it) => it.kind === "command")),
+      ...byRank(list.filter((it) => it.kind === "skill")),
     ];
     // CLI runtimes own their skill catalogs. Claude reports built-ins + skills
     // in its initialize ack; Codex reports skills via app-server skills/list.
