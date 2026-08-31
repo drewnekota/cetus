@@ -1304,14 +1304,84 @@ pub async fn default_workspace(state: State<'_, AppState>) -> CmdResult<String> 
 }
 
 /// Open a native folder picker. Returns the chosen path or None if cancelled.
+///
+/// On macOS this deliberately bypasses tauri-plugin-dialog/rfd: the open panel
+/// is out-of-process (openAndSavePanelService), and when that service fails to
+/// launch — seen on updater-relaunched "anon" instances, where AppKit logs
+/// "Unable to display open panel: Connection interrupted" — rfd's completion
+/// path unwraps a nil URL and the panic takes down the whole app (2026-08-31,
+/// "click Add folder → app quits"). Here every failure, nil, or Obj-C
+/// exception is just a cancel.
 #[tauri::command]
 pub async fn pick_workspace_dir(app: tauri::AppHandle) -> CmdResult<Option<String>> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog().file().pick_folder(move |path| {
-        let _ = tx.send(path.and_then(|p| p.into_path().ok()));
-    });
-    let result = rx.await.map_err(err)?;
-    Ok(result.map(|p| p.to_string_lossy().to_string()))
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app.run_on_main_thread(move || {
+            let _ = tx.send(pick_folder_native());
+        })
+        .map_err(err)?;
+        let result = rx.await.map_err(err)?;
+        Ok(result.map(|p| p.to_string_lossy().to_string()))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app.dialog().file().pick_folder(move |path| {
+            let _ = tx.send(path.and_then(|p| p.into_path().ok()));
+        });
+        let result = rx.await.map_err(err)?;
+        Ok(result.map(|p| p.to_string_lossy().to_string()))
+    }
+}
+
+/// NSOpenPanel folder picker that cannot crash the process. Must run on the
+/// main thread. `runModal` (app-modal, not a sheet) keeps the flow synchronous:
+/// no completion-handler race with a dying panel service, and it works the same
+/// from the quick panel where there is no key window to sheet onto.
+#[cfg(target_os = "macos")]
+fn pick_folder_native() -> Option<PathBuf> {
+    use objc2::runtime::{AnyClass, AnyObject, Bool};
+    use objc2::msg_send;
+    let caught = objc2::exception::catch(core::panic::AssertUnwindSafe(|| unsafe {
+        let cls = AnyClass::get(c"NSOpenPanel")?;
+        let panel: *mut AnyObject = msg_send![cls, openPanel];
+        if panel.is_null() {
+            return None;
+        }
+        let _: () = msg_send![panel, setCanChooseDirectories: Bool::YES];
+        let _: () = msg_send![panel, setCanChooseFiles: Bool::NO];
+        let _: () = msg_send![panel, setAllowsMultipleSelection: Bool::NO];
+        let _: () = msg_send![panel, setCanCreateDirectories: Bool::YES];
+        // NSModalResponseOK == 1; anything else (cancel, abort, or the panel
+        // service never coming up) means "no folder".
+        let response: isize = msg_send![panel, runModal];
+        if response != 1 {
+            return None;
+        }
+        let url: *mut AnyObject = msg_send![panel, URL];
+        if url.is_null() {
+            return None;
+        }
+        let path_ns: *mut AnyObject = msg_send![url, path];
+        if path_ns.is_null() {
+            return None;
+        }
+        let cstr: *const std::os::raw::c_char = msg_send![path_ns, UTF8String];
+        if cstr.is_null() {
+            return None;
+        }
+        Some(PathBuf::from(
+            std::ffi::CStr::from_ptr(cstr).to_string_lossy().to_string(),
+        ))
+    }));
+    match caught {
+        Ok(path) => path,
+        Err(e) => {
+            tracing::warn!("pick_folder_native: open panel raised an exception: {e:?}");
+            None
+        }
+    }
 }
 
 /// Save a copy of an artifact somewhere the user picks.

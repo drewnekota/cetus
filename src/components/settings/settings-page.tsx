@@ -1306,7 +1306,7 @@ function GeneralSection() {
           checked={settings.autoUpdate}
           onCheckedChange={(v) => update({ autoUpdate: v })}
         />
-        <div className="flex items-center justify-between gap-4 pt-1">
+        <div className="flex items-center justify-between gap-4 py-3">
           <div className="min-w-0 space-y-0.5">
             <div className="flex items-center gap-2">
               <Label className="font-medium">{t("update.check.label")}</Label>
@@ -1377,7 +1377,7 @@ function GeneralSection() {
             <UpdateProgressBar progress={downloadProgress} />
           </div>
         ) : null}
-        <div className="flex items-center justify-between gap-4 pt-1">
+        <div className="flex items-center justify-between gap-4 py-3">
           <div className="min-w-0 space-y-0.5">
             <Label className="font-medium">{t("diagnostics.label")}</Label>
             <p className="text-xs text-muted-foreground">

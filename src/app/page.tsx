@@ -77,7 +77,10 @@ import { dispatchNotification, refreshPermission } from "@/lib/notifications";
 import { tt, useLocale, useTranslation } from "@/lib/i18n";
 import { flavorHeadline } from "@/lib/chat-flavor";
 import { buildAttachmentRefs } from "@/lib/attachments";
-import { INTERRUPTED_RESUME_PROMPT } from "@/lib/continuation-prompts";
+import {
+  INTERRUPTED_RESUME_PROMPT,
+  renderStartsMidConversation,
+} from "@/lib/continuation-prompts";
 import { installWebviewHealthMonitor } from "@/lib/webview-health";
 import {
   DEFAULT_MODEL_CHOICE,
@@ -1531,12 +1534,27 @@ export default function Home() {
       const id = c.id;
       api
         .claimAutoResume(id)
-        .then((claimed) => {
+        .then(async (claimed) => {
           if (!claimed) return;
           setLocalRunState(id, "running");
-          const store = chatStore.getState();
-          store.ensure(id);
-          store.userSent(id, INTERRUPTED_RESUME_PROMPT);
+          chatStore.getState().ensure(id);
+          // Seeding the resume prompt into an empty store entry would strand
+          // the transcript: every open path treats "has live messages" as
+          // authoritative and skips cache hydration, and the write-through
+          // persister would then overwrite the IDB cache with just this tail.
+          // Hydrate the cached render first so the prompt appends to history.
+          if ((chatStore.getState().chats[id]?.messages.length ?? 0) === 0) {
+            const cached = await loadCachedMessages(id);
+            const store = chatStore.getState();
+            if (
+              (store.chats[id]?.messages.length ?? 0) === 0 &&
+              cached &&
+              cached.length > 0
+            ) {
+              store.hydrate(id, cached);
+            }
+          }
+          chatStore.getState().userSent(id, INTERRUPTED_RESUME_PROMPT);
           return api.sendPrompt(id, INTERRUPTED_RESUME_PROMPT);
         })
         .catch(console.error);
@@ -1568,22 +1586,33 @@ export default function Home() {
       setActiveId(lastId);
       const cached = await loadCachedMessages(lastId);
       if (cancelled) return;
-      let cachedLacksUser = false;
-      if (cached && cached.length > 0) {
-        chatStore.getState().hydrate(lastId, cached);
-        cachedLacksUser = !cached.some((m) => m.role === "user");
-      }
       const row = conversationsRef.current.find((c) => c.id === lastId);
       if (row) {
         setModelChoice(row.model);
         setWorkspaceDir(row.workspaceDir);
+      }
+      // The auto-resume sweep may have seeded this conversation (resume prompt
+      // + streaming turn) while the cache read was in flight. It hydrates the
+      // cache itself before seeding, so hydrating here would only clobber the
+      // live rows.
+      if ((chatStore.getState().chats[lastId]?.messages.length ?? 0) > 0) return;
+      // "Unfaithful" covers both legacy automation renders that dropped the
+      // user prompt entirely and caches that a pre-fix auto-resume sweep
+      // overwrote with just the resume-prompt tail — both are repaired from
+      // pi history below.
+      let cachedUnfaithful = false;
+      if (cached && cached.length > 0) {
+        chatStore.getState().hydrate(lastId, cached);
+        cachedUnfaithful =
+          !cached.some((m) => m.role === "user") ||
+          renderStartsMidConversation(cached);
       }
       // A reload does not stop a running pi; it only remounts this webview.
       // During a turn, get_messages cannot reply until the run completes, so
       // calling switchConversation here can time out and falsely kick the UI
       // back to a new chat. If IDB has a faithful render, keep it and let the
       // existing app-event stream continue updating this conversation.
-      if (cached && cached.length > 0 && !cachedLacksUser) return;
+      if (cached && cached.length > 0 && !cachedUnfaithful) return;
       // Attach pi and pull the canonical conversation row for model/workspace.
       // We deliberately DON'T `reset` from pi's history when the cache is
       // faithful: that history is lossy for image turns, so IDB is the better
@@ -1596,7 +1625,7 @@ export default function Home() {
           setModelChoice(conversation.model);
           setWorkspaceDir(conversation.workspaceDir);
           if (
-            (!cached || cached.length === 0 || cachedLacksUser) &&
+            (!cached || cached.length === 0 || cachedUnfaithful) &&
             messages?.some((m) => m.role === "user")
           ) {
             chatStore.getState().reset(lastId, messages);
@@ -2304,7 +2333,7 @@ export default function Home() {
         return;
       }
       let cacheHit = false;
-      let cachedLacksUser = false;
+      let cachedUnfaithful = false;
       let cachedLen = 0;
       if (!hasLiveState) {
         // Optimistic: hydrate from IDB cache before the backend roundtrip so
@@ -2317,12 +2346,16 @@ export default function Home() {
           cacheHit = true;
           cachedLen = cached.length;
           // Caches written before automation runs rendered their prompt are
-          // assistant-only. Such a render is strictly less faithful than pi
-          // history, so flag it to fall back below.
-          cachedLacksUser = !cached.some((m) => m.role === "user");
+          // assistant-only, and caches a pre-fix auto-resume sweep overwrote
+          // start at the resume prompt instead of the real opening prompt.
+          // Both are strictly less faithful than pi history, so flag them to
+          // fall back below.
+          cachedUnfaithful =
+            !cached.some((m) => m.role === "user") ||
+            renderStartsMidConversation(cached);
         }
       }
-      if (cacheHit && !cachedLacksUser) {
+      if (cacheHit && !cachedUnfaithful) {
         const row = conversationsRef.current.find((c) => c.id === id);
         if (row) {
           setModelChoice(row.model);
@@ -2362,7 +2395,7 @@ export default function Home() {
       const cacheTooThin = cacheHit && piTurnCount > cachedLen;
       const repairFromHistory =
         !!messages?.some((m) => m.role === "user") &&
-        ((cacheHit && (cachedLacksUser || cacheTooThin)) || liveNeedsRepair);
+        ((cacheHit && (cachedUnfaithful || cacheTooThin)) || liveNeedsRepair);
       if ((!hasLiveState && !cacheHit) || repairFromHistory) {
         chatStore.getState().reset(conversation.id, messages);
       }
@@ -2962,13 +2995,15 @@ export default function Home() {
       const cached = await loadCachedMessages(id);
       if (cancelled) return;
       let cacheHit = false;
-      let cachedLacksUser = false;
+      let cachedUnfaithful = false;
       if (cached && cached.length > 0) {
         chatStore.getState().hydrate(id, cached);
         cacheHit = true;
-        cachedLacksUser = !cached.some((m) => m.role === "user");
+        cachedUnfaithful =
+          !cached.some((m) => m.role === "user") ||
+          renderStartsMidConversation(cached);
       }
-      if (cacheHit && !cachedLacksUser) {
+      if (cacheHit && !cachedUnfaithful) {
         setDetailLoading(false);
         return;
       }
@@ -2976,11 +3011,12 @@ export default function Home() {
         const { messages } = await api.switchConversation(id);
         if (cancelled) return;
         // Keep the faithful cache render if we had one; pi history is the
-        // lossy fallback (see onSelect / cold-start hydration). Exception: a
-        // legacy automation cache that dropped the leading user prompt is
-        // repaired from pi history, which still carries it.
+        // lossy fallback (see onSelect / cold-start hydration). Exceptions
+        // repaired from pi history: a legacy automation cache that dropped the
+        // leading user prompt, and a cache a pre-fix auto-resume sweep
+        // overwrote with just the resume-prompt tail.
         const repairFromHistory =
-          cacheHit && cachedLacksUser && !!messages?.some((m) => m.role === "user");
+          cacheHit && cachedUnfaithful && !!messages?.some((m) => m.role === "user");
         if (!cacheHit || repairFromHistory) chatStore.getState().reset(id, messages);
       } finally {
         if (!cancelled) setDetailLoading(false);

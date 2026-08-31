@@ -465,29 +465,46 @@ html.no-perma-layers [data-message-hover-target] > [data-message-actions] {
 
 [data-chat-composer][data-streaming="true"] {
   --composer-runner: var(--runtime-color, var(--primary));
+  /* Confine the ring pseudo's negative z-index to this element so it sits
+     between the composer's own background and its content. */
+  isolation: isolate;
 }
 
-[data-chat-composer][data-streaming="true"]::after {
+/* No mask here, deliberately: the ring used to be cut out of the conic with
+   the two-layer mask-composite xor/exclude trick, but WebKit intermittently
+   drops mask-composite when it rebuilds the animated composited layer — the
+   raw conic cone then flashes across the whole composer. Instead the pseudo
+   repaints the frame bottom-up with plain opaque background layers: the
+   spinning conic, the runtime border line over it, and a card-colored cover
+   hiding the cone's interior. Nothing left for the compositor to lose. */
+[data-chat-composer][data-streaming="true"]::before {
   content: "";
   position: absolute;
   inset: -2px;
-  z-index: 20;
+  z-index: -1;
   pointer-events: none;
-  padding: 2px;
-  border-radius: inherit;
-  background: conic-gradient(
-    from var(--composer-border-angle),
-    transparent 0% 48%,
-    color-mix(in oklab, var(--composer-runner) 35%, transparent) 62%,
-    var(--composer-runner) 80%,
-    color-mix(in oklab, var(--composer-runner) 45%, transparent) 92%,
-    transparent 100%
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
+  /* Box geometry mirrors the composer: 2px transparent border = the glow
+     ring overhang; the 1px padding gap = the composer's own border line. */
+  border: 2px solid transparent;
+  padding: 1px;
+  /* The composer is rounded-2xl; grow the radius by the overhang so the
+     ring stays concentric with the frame. */
+  border-radius: calc(var(--radius-2xl, 1rem) + 2px);
+  background:
+    linear-gradient(var(--card) 0 0) content-box,
+    linear-gradient(
+        color-mix(in oklab, var(--composer-runner) 60%, var(--card)) 0 0
+      )
+      padding-box,
+    conic-gradient(
+        from var(--composer-border-angle),
+        transparent 0% 48%,
+        color-mix(in oklab, var(--composer-runner) 35%, transparent) 62%,
+        var(--composer-runner) 80%,
+        color-mix(in oklab, var(--composer-runner) 45%, transparent) 92%,
+        transparent 100%
+      )
+      border-box;
   /* No filter here, deliberately: a drop-shadow on a layer whose background
      is animated re-runs the whole blur every animation frame (steady GPU
      work — the ring is small, but the filter forces a separate raster pass
@@ -497,7 +514,7 @@ html.no-perma-layers [data-message-hover-target] > [data-message-actions] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-chat-composer][data-streaming="true"]::after {
+  [data-chat-composer][data-streaming="true"]::before {
     animation: none;
   }
 }

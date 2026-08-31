@@ -23,6 +23,21 @@ export const INTERRUPTED_RESUME_PROMPT =
 
 export type ContinuationNoticeKind = "autoRetry" | "interruptedResume";
 
+/** True when a cached/live render starts mid-conversation: its first user row
+ *  is a Cetus-dispatched continuation rather than a real prompt. Such a render
+ *  was seeded after the conversation already had history (the pre-fix
+ *  auto-resume sweep wrote caches this way), so it is strictly less faithful
+ *  than pi history and should be repaired from it. */
+export function renderStartsMidConversation(
+  messages: readonly { role: string; blocks: readonly { kind: string; text?: string }[] }[],
+): boolean {
+  const firstUser = messages.find((m) => m.role === "user");
+  if (!firstUser || firstUser.blocks.length !== 1) return false;
+  const block = firstUser.blocks[0];
+  if (block.kind !== "text" || typeof block.text !== "string") return false;
+  return continuationNoticeKind(block.text) !== null;
+}
+
 /** Classify a user message's text as one of the known system continuations,
  *  or null for an ordinary user message. */
 export function continuationNoticeKind(text: string): ContinuationNoticeKind | null {
