@@ -45,7 +45,16 @@ import {
   type QuickReplyResultPayload,
   type QuickScreenshot,
   type QuickSessionMode,
+  type SmartRouteTarget,
 } from "@/lib/types";
+import {
+  buildRouteCandidates,
+  useSmartRoute,
+  useSmartRoutingFeatureEnabled,
+  type RouteCandidate,
+} from "@/lib/smart-route";
+import { SmartRouteControl } from "@/components/chat/route-chip";
+import { loadRecentWorkspaces } from "@/lib/recent-workspaces";
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import {
@@ -119,6 +128,11 @@ export function QuickPanel() {
   const [submitting, setSubmitting] = useState(false);
   // Whether any non-archived chat exists — gates the "Last" session option.
   const [hasLastChat, setHasLastChat] = useState(true);
+  // Smart routing (experimental): roster + workspaces the router picks from,
+  // refreshed on every panel open (the panel stays mounted while parked).
+  const [routeCandidates, setRouteCandidates] = useState<RouteCandidate[]>([]);
+  const [routeWorkspaces, setRouteWorkspaces] = useState<string[]>([]);
+  const [routeOverride, setRouteOverride] = useState<SmartRouteTarget | null>(null);
   const [surface, setSurface] = useState<"launcher" | "reply">("launcher");
   const [replyOpen, setReplyOpen] = useState<QuickReplyOpenPayload | null>(null);
   const [replyResult, setReplyResult] = useState<QuickReplyResultPayload | null>(null);
@@ -176,7 +190,9 @@ export function QuickPanel() {
       const hasLast = cs.length > 0;
       setHasLastChat(hasLast);
       if (!hasLast) setSessionMode("new");
+      setRouteCandidates(buildRouteCandidates(cs));
     }).catch(() => {});
+    setRouteWorkspaces(loadRecentWorkspaces());
     try {
       const saved = localStorage.getItem("cetus:quickWorkspace");
       if (saved) setWorkspaceDir(saved);
@@ -189,6 +205,48 @@ export function QuickPanel() {
     }
     setModelChoice(mergeStoredModelChoice);
   }, []);
+
+  // Re-snapshot the routing roster each time the panel opens — conversations
+  // and workspaces changed while it sat parked.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    const refresh = () => {
+      api
+        .listConversations(false)
+        .then((cs) => {
+          if (!cancelled) setRouteCandidates(buildRouteCandidates(cs));
+        })
+        .catch(() => {});
+      setRouteWorkspaces(loadRecentWorkspaces());
+      setRouteOverride(null);
+    };
+    void listen("quick-open", refresh).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  const smartRoutingFeatureOn = useSmartRoutingFeatureEnabled();
+  const { decision: routeDecision } = useSmartRoute({
+    text,
+    enabled: smartRoutingFeatureOn && surface === "launcher",
+    candidates: routeCandidates,
+    workspaces: routeWorkspaces,
+    defaultWorkspace,
+    model: modelChoice.model,
+  });
+  // Manual pick sticks for this draft; an emptied draft re-arms auto-routing.
+  useEffect(() => {
+    if (!text.trim()) setRouteOverride(null);
+  }, [text]);
+  const effectiveRoute = smartRoutingFeatureOn
+    ? (routeOverride ?? routeDecision)
+    : null;
 
   const { entries } = useRuntimeCatalog();
   const onBackendChange = useCallback(
@@ -520,6 +578,15 @@ export function QuickPanel() {
         backend,
         cliModel: backend === "pi" ? "" : cliModel,
         cliEffort: backend === "pi" ? "" : cliEffort,
+        // Smart-routing decision (chip). Overrides sessionMode/workspaceDir in
+        // the main window's handler when present.
+        route: effectiveRoute
+          ? {
+              action: effectiveRoute.action,
+              sessionId: effectiveRoute.sessionId,
+              workspaceDir: effectiveRoute.workspaceDir,
+            }
+          : null,
       });
       // quick_submit hides the window for us; clear for the next open so a
       // with-screenshot submit doesn't leave a stale thumbnail that flashes
@@ -530,12 +597,13 @@ export function QuickPanel() {
       setScreenshotDenied(false);
       setIncludeScreenshot(false);
       setContext(null);
+      setRouteOverride(null);
     } catch {
       // Keep the panel up so the user can retry.
       setSubmitting(false);
       submittingRef.current = false;
     }
-  }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, backend, cliModel, cliEffort]);
+  }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, backend, cliModel, cliEffort, effectiveRoute]);
 
   const insertReply = useCallback(async () => {
     const value = replyDraft.trim();
@@ -555,14 +623,25 @@ export function QuickPanel() {
     }
   }, [replyDraft, insertingReply, replyResult]);
 
-  const addFiles = useCallback(async (files: FileList | File[]) => {
+  /** Append absolute paths to the draft so the agent opens them off disk. */
+  const insertPathRefs = useCallback((paths: string[]) => {
+    setText((value) => {
+      const head = value.replace(/\s+$/, "");
+      return (head ? `${head}\n` : "") + paths.join("\n") + " ";
+    });
+  }, []);
+
+  const addFiles = useCallback(async (files: FileList | File[], pathHints?: Map<string, string>) => {
     setAttachError(null);
     const next: QuickAttachment[] = [];
+    const referenced: string[] = [];
     for (const file of Array.from(files)) {
       const isImage = file.type.startsWith("image/");
       const limit = MAX_ATTACHMENT_BYTES;
+      const realPath = pathHints?.get(file.name);
       if (!isImage && file.size > limit) {
-        setAttachError(t("attachment.tooLarge", { name: file.name, limit: limit / 1024 / 1024 }));
+        if (realPath) referenced.push(realPath);
+        else setAttachError(t("attachment.tooLarge", { name: file.name, limit: limit / 1024 / 1024 }));
         continue;
       }
       try {
@@ -574,11 +653,16 @@ export function QuickPanel() {
           next.push({ type: "file", data, mimeType: file.type || "application/octet-stream", name: file.name || t("attachment.unnamed"), sizeBytes: file.size });
         }
       } catch (error) {
-        setAttachError(String(error));
+        // WebKit hands us unreadable `File`s for pasted folders and
+        // not-yet-downloaded iCloud items (NotFoundError on read). When the
+        // pasteboard carried a real path, reference it in the draft instead.
+        if (realPath) referenced.push(realPath);
+        else setAttachError(String(error));
       }
     }
     if (next.length) setAttachments((current) => [...current, ...next]);
-  }, [t]);
+    if (referenced.length) insertPathRefs(referenced);
+  }, [t, insertPathRefs]);
 
   /** Files dropped on the launcher, routed here by FileDropHost. Drops carry
    *  paths, so read them into `File`s and reuse the paste pipeline; a folder or
@@ -586,16 +670,11 @@ export function QuickPanel() {
    *  off disk. */
   const addPaths = useCallback(
     async (paths: string[]) => {
-      const { files, referenced } = await readDroppedFiles(paths, MAX_ATTACHMENT_BYTES);
-      if (files.length) await addFiles(files);
-      if (referenced.length) {
-        setText((value) => {
-          const head = value.replace(/\s+$/, "");
-          return (head ? `${head}\n` : "") + referenced.join("\n") + " ";
-        });
-      }
+      const { files, hints, referenced } = await readDroppedFiles(paths, MAX_ATTACHMENT_BYTES);
+      if (files.length) await addFiles(files, hints);
+      if (referenced.length) insertPathRefs(referenced);
     },
-    [addFiles],
+    [addFiles, insertPathRefs],
   );
 
   useEffect(() => {
@@ -623,7 +702,19 @@ export function QuickPanel() {
       .filter((file): file is File => file !== null);
     if (!files.length) return;
     e.preventDefault();
-    void addFiles(files);
+    // A Finder copy carries the real paths on the pasteboard; resolve them so
+    // folders/unreadable iCloud items degrade to a path reference in the draft.
+    void api
+      .readClipboardFilePaths()
+      .then((paths) => {
+        const hints = new Map<string, string>();
+        for (const p of paths) {
+          const base = p.split("/").pop();
+          if (base) hints.set(base, p);
+        }
+        return addFiles(files, hints);
+      })
+      .catch(() => addFiles(files));
     const pastedText = e.clipboardData.getData("text/plain");
     if (pastedText) {
       const el = taRef.current;
@@ -822,6 +913,17 @@ export function QuickPanel() {
             pickingWorkspaceRef.current = active;
           }}
         />
+        {smartRoutingFeatureOn && (
+          <SmartRouteControl
+            decision={routeDecision}
+            override={routeOverride}
+            onOverride={setRouteOverride}
+            candidates={routeCandidates}
+            workspaces={routeWorkspaces}
+            defaultWorkspace={defaultWorkspace}
+            fallbackWorkspaceDir={workspaceDir}
+          />
+        )}
         <BackendSelect
           value={backend}
           onChange={onBackendChange}

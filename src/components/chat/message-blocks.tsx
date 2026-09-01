@@ -15,7 +15,9 @@ import {
   markdownUrlTransform,
   LinkifiedText,
   healStreamingInline,
+  normalizeCodexCitations,
   normalizeMath,
+  stripDanglingCodexCitation,
   KATEX_OPTIONS,
   REMARK_MATH_OPTIONS,
 } from "@/lib/markdown";
@@ -175,7 +177,7 @@ const RawMarkdown = memo(function RawMarkdown({ text }: { text: string }) {
       components={assistantMarkdownComponents}
       urlTransform={markdownUrlTransform}
     >
-      {normalizeMath(text)}
+      {normalizeMath(normalizeCodexCitations(text))}
     </ReactMarkdown>
   );
 });
@@ -234,7 +236,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   // block boundary, which emphasis cannot span.
   const tail = useMemo(() => {
     const rest = cut > 0 ? text.slice(cut) : text;
-    return streaming ? healStreamingInline(rest) : rest;
+    return streaming ? healStreamingInline(stripDanglingCodexCitation(rest)) : rest;
   }, [text, cut, streaming]);
   return (
     <div data-chat-markdown className={PROSE_CLASS}>

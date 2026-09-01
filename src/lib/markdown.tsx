@@ -60,6 +60,56 @@ export function normalizeMath(text: string): string {
     .join("");
 }
 
+// Codex desktop cites files with a remark directive — `:codex-file-citation
+// {path="/abs/path" purpose="source"}` — that plain markdown renders as literal
+// text. Only the opening token is fixed; attributes never contain braces.
+const CODEX_CITATION_RE = /:codex-file-citation\{([^{}]*)\}/g;
+const CODEX_CITATION_OPEN = ":codex-file-citation{";
+
+/**
+ * Rewrite Codex file-citation directives into ordinary markdown file links so
+ * the existing link pipeline (open_path for local paths) picks them up. The
+ * label is the basename; for files Cetus itself stashed under an attachments
+ * dir, the anti-collision `<8-hex>-` prefix is dropped to restore the name the
+ * user attached. Code spans/fences are left byte-for-byte untouched.
+ */
+export function normalizeCodexCitations(text: string): string {
+  if (!text.includes(CODEX_CITATION_OPEN)) return text;
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(CODEX_CITATION_RE, (whole, attrs: string) => {
+            const path = /path="([^"]*)"/.exec(attrs)?.[1];
+            if (!path) return "";
+            let name = path.split(/[\\/]/).pop() || path;
+            if (/[\\/]attachments[\\/]/.test(path))
+              name = name.replace(/^[0-9a-f]{8}-/, "");
+            // Angle-bracket destinations tolerate spaces/CJK but not <, >, or
+            // a raw backslash-escapable sequence; label brackets would end the
+            // link text early.
+            const label = name.replace(/([[\]])/g, "\\$1");
+            const dest = path.replace(/</g, "%3C").replace(/>/g, "%3E");
+            return `[${label}](<${dest}>)`;
+          }),
+    )
+    .join("");
+}
+
+/** Hide a citation directive the stream hasn't finished emitting: either an
+ *  opened-but-unclosed attribute block, or a partially streamed opener at the
+ *  very end of the text. Streaming-tail only — settled text renders in full. */
+export function stripDanglingCodexCitation(text: string): string {
+  const open = text.lastIndexOf(CODEX_CITATION_OPEN);
+  if (open !== -1 && !text.includes("}", open)) return text.slice(0, open);
+  for (let n = CODEX_CITATION_OPEN.length - 1; n >= 2; n--) {
+    if (text.endsWith(CODEX_CITATION_OPEN.slice(0, n)))
+      return text.slice(0, text.length - n);
+  }
+  return text;
+}
+
 /**
  * Open a link in the default browser instead of letting the WKWebView navigate.
  *

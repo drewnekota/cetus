@@ -1413,6 +1413,10 @@ pub struct QuickSubmit {
     pub cli_model: String,
     #[serde(default)]
     pub cli_effort: String,
+    /// Smart-routing decision made in the launcher (experimental). Opaque to
+    /// the backend — forwarded verbatim; the main window resolves it.
+    #[serde(default)]
+    pub route: Option<serde_json::Value>,
 }
 
 /// Hand the captured prompt to the main window, bring it forward, hide the
@@ -1435,6 +1439,7 @@ pub async fn quick_submit(app: AppHandle, payload: QuickSubmit) -> Result<(), St
             "backend": payload.backend,
             "cliModel": payload.cli_model,
             "cliEffort": payload.cli_effort,
+            "route": payload.route,
         }),
     );
     // Routes through `focus_main` so a parked (warm off-screen) main window is

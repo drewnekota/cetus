@@ -228,8 +228,15 @@ export const AppSidebar = memo(function AppSidebar({
       },
     [groups, defaultWorkspace],
   );
+  // Global pinned chats surface as their own section above everything; the
+  // group exists only while something is pinned (see groupByWorkspace).
+  const pinnedGroup = useMemo(
+    () => groups.find((g) => g.dir === PINNED_GROUP_DIR) ?? null,
+    [groups],
+  );
   const folderGroups = useMemo(
-    () => groups.filter((g) => g.dir !== defaultWorkspace),
+    () =>
+      groups.filter((g) => g.dir !== defaultWorkspace && g.dir !== PINNED_GROUP_DIR),
     [groups, defaultWorkspace],
   );
   const sortableIds = useMemo(() => folderGroups.map((g) => g.dir), [folderGroups]);
@@ -443,6 +450,25 @@ export const AppSidebar = memo(function AppSidebar({
             onDragCancel={() => setActiveDragDir(null)}
             onDragEnd={handleDragEnd}
           >
+            {/* Global "Pinned" section — only exists while something is
+                pinned, and always sits above every workspace group. */}
+            {pinnedGroup && (
+              <SidebarGroup>
+                <PinnedGroupView
+                  items={pinnedGroup.items}
+                  expanded={expandedWorkspaceDirs.has(PINNED_GROUP_DIR)}
+                  onToggleExpanded={onToggleWorkspaceExpanded}
+                  activeId={activeId}
+                  streamingIds={streamingIds}
+                  unreadCompletedIds={unreadCompletedIds}
+                  archiveShortcut={shortcutLabels.archiveChat}
+                  onSelect={onSelect}
+                  onArchive={onArchive}
+                  onTogglePin={onTogglePin}
+                  onRename={onRename}
+                />
+              </SidebarGroup>
+            )}
             {/* "Chat" (the default workspace) is pinned first, outside the
                 sortable list — it reads as a plain section, not a folder. */}
             <SidebarGroup>
@@ -553,6 +579,79 @@ const ROW_ACTION_CLASS =
   "fade-layer flex size-4 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-hidden transition-opacity " +
   "hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring " +
   "group-hover/project-row:opacity-100 group-has-[[data-state=open]]/project-row:opacity-100 group-has-[:focus-visible]/project-row:opacity-100";
+
+/** The global "Pinned" section: a plain label (no collapse, no folder actions)
+ *  over the pinned chats, newest pin first. Rendered inside a <SidebarGroup>
+ *  by the caller, and only when something is pinned. */
+function PinnedGroupView({
+  items,
+  expanded,
+  onToggleExpanded,
+  activeId,
+  streamingIds,
+  unreadCompletedIds,
+  archiveShortcut,
+  onSelect,
+  onArchive,
+  onTogglePin,
+  onRename,
+}: {
+  items: Conversation[];
+  expanded: boolean;
+  onToggleExpanded: (dir: string) => void;
+  activeId: string | null;
+  streamingIds: Set<string>;
+  unreadCompletedIds: Set<string>;
+  archiveShortcut: string;
+  onSelect: (id: string) => void;
+  onArchive: (c: Conversation) => void;
+  onTogglePin: (c: Conversation) => void;
+  onRename: (c: Conversation, title: string) => void;
+}) {
+  const { t } = useTranslation("sidebar");
+  return (
+    <>
+      <SidebarGroupLabel className="select-none">
+        <Pin className="mr-1.5 !size-3" />
+        <span className="truncate">{t("section.pinned")}</span>
+      </SidebarGroupLabel>
+      <SidebarMenu>
+        {visibleGroupItems(items, expanded).map((c) => (
+          <ConversationRow
+            key={c.id}
+            conversation={c}
+            active={c.id === activeId}
+            streaming={streamingIds.has(c.id)}
+            unreadCompleted={unreadCompletedIds.has(c.id)}
+            onSelect={onSelect}
+            onArchive={onArchive}
+            onTogglePin={onTogglePin}
+            onRename={onRename}
+            archiveShortcut={archiveShortcut}
+            inPinnedGroup
+          />
+        ))}
+        {items.length > WORKSPACE_VISIBLE_LIMIT && (
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              onClick={() => onToggleExpanded(PINNED_GROUP_DIR)}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              {expanded ? <ChevronDown className="rotate-180" /> : <ChevronDown />}
+              <span>
+                {expanded
+                  ? t("chats.showLess")
+                  : t("chats.showMore", {
+                      count: items.length - WORKSPACE_VISIBLE_LIMIT,
+                    })}
+              </span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )}
+      </SidebarMenu>
+    </>
+  );
+}
 
 interface WorkspaceGroupViewProps {
   group: { dir: string; items: Conversation[] };
@@ -1102,6 +1201,7 @@ const ConversationRow = memo(function ConversationRow({
   onTogglePin,
   onRename,
   archiveShortcut,
+  inPinnedGroup,
 }: {
   conversation: Conversation;
   active: boolean;
@@ -1112,6 +1212,9 @@ const ConversationRow = memo(function ConversationRow({
   onTogglePin: (c: Conversation) => void;
   onRename: (c: Conversation, title: string) => void;
   archiveShortcut: string;
+  /** Rendered inside the global "Pinned" section: swap the redundant pin glyph
+   *  for a chat glyph (the section label already says "pinned"). */
+  inPinnedGroup?: boolean;
 }) {
   const { t } = useTranslation("sidebar");
   // Read the minute clock here rather than as a prop, so a tick re-renders only
@@ -1233,8 +1336,12 @@ const ConversationRow = memo(function ConversationRow({
                 "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
             )}
           >
-            {pinned && (
-              <Pin className="size-3.5 shrink-0 text-muted-foreground" />
+            {inPinnedGroup ? (
+              <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
+            ) : (
+              pinned && (
+                <Pin className="size-3.5 shrink-0 text-muted-foreground" />
+              )
             )}
             {conversation.sourceAutomationId && (
               <Clock className="size-3.5 shrink-0 text-muted-foreground" />
@@ -1414,9 +1521,14 @@ const ConversationRow = memo(function ConversationRow({
   );
 });
 
-/** Sidebar display order: the default "Chat" section first, then folders in
- *  the user's (drag-reorderable) workspace order, chats within each group in
- *  list order. Exported so keyboard chat-switching walks this same order. */
+/** Sentinel dir for the global "Pinned" section. NUL can't appear in a real
+ *  filesystem path, so it never collides with a workspace dir. */
+export const PINNED_GROUP_DIR = "\u0000pinned";
+
+/** Sidebar display order: the global "Pinned" section first (present only when
+ *  something is pinned), then the default "Chat" section, then folders in the
+ *  user's (drag-reorderable) workspace order, chats within each group in list
+ *  order. Exported so keyboard chat-switching walks this same order. */
 export function groupByWorkspace(
   items: Conversation[],
   workspaceDirs: string[],
@@ -1449,18 +1561,22 @@ export function groupByWorkspace(
       );
     }
   }
-  return order.map((dir) => ({ dir, items: pinnedFirst(map.get(dir)!) }));
-}
-
-/** Project-scoped pins float to the top of their group (newest pin first);
- *  the rest keep their incoming order. Returns the same array when nothing is
- *  pinned so memoized rows don't churn. */
-function pinnedFirst(items: Conversation[]): Conversation[] {
-  if (!items.some((c) => c.pinnedAt != null)) return items;
-  return [
-    ...items
-      .filter((c) => c.pinnedAt != null)
-      .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0)),
-    ...items.filter((c) => c.pinnedAt == null),
-  ];
+  // Pins are global: pinned chats move out of their workspace group into one
+  // "Pinned" section on top (newest pin first), which exists only while
+  // something is pinned.
+  const pinned = items
+    .filter((c) => c.pinnedAt != null)
+    .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
+  const groups = order.map((dir) => {
+    const groupItems = map.get(dir)!;
+    return {
+      dir,
+      items: groupItems.some((c) => c.pinnedAt != null)
+        ? groupItems.filter((c) => c.pinnedAt == null)
+        : groupItems,
+    };
+  });
+  return pinned.length > 0
+    ? [{ dir: PINNED_GROUP_DIR, items: pinned }, ...groups]
+    : groups;
 }

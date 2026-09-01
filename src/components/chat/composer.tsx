@@ -45,7 +45,18 @@ import {
   writeDraft,
   writeDraftAttachments,
 } from "@/lib/draft-store";
-import type { BackendId, CliSlashCommand, ModelChoice } from "@/lib/types";
+import type {
+  BackendId,
+  CliSlashCommand,
+  ModelChoice,
+  SmartRouteTarget,
+} from "@/lib/types";
+import {
+  useSmartRoute,
+  useSmartRoutingFeatureEnabled,
+  type RouteCandidate,
+} from "@/lib/smart-route";
+import { SmartRouteControl } from "@/components/chat/route-chip";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import { toast } from "sonner";
 
@@ -221,7 +232,15 @@ interface Props {
     text: string,
     attachments: ComposerAttachment[],
     runtime?: ComposerRuntimeSelection,
+    /** Smart-routing destination accepted at send time (entry composers with
+     *  `smartRoute` wired and the global toggle on); null/omitted → classic
+     *  create-or-active-conversation behavior. */
+    route?: SmartRouteTarget | null,
   ) => void;
+  /** Wiring for smart routing (experimental): the recent-conversation roster
+   *  and workspace list the router chooses from. Only entry composers (hero,
+   *  new-task dialog) pass this; docked composers never route. */
+  smartRoute?: { candidates: RouteCandidate[]; workspaces: string[] };
   /** Called instead of onSend when the agent is mid-run: the message is parked
    *  in a follow-up queue (shown above the composer) and delivered when the run
    *  ends, unless the user promotes it to a steer. Omit to fall back to onSend
@@ -374,6 +393,7 @@ export function Composer({
   defaultWorkspace,
   onWorkspaceChange,
   onSend,
+  smartRoute,
   onQueue,
   onSendFirstQueued,
   onBash,
@@ -550,6 +570,30 @@ export function Composer({
   // message. Gated on a wired onBash handler — otherwise `!` is just text.
   const bashMode = !!onBash && text.startsWith("!");
   const bashCommand = bashMode ? text.slice(1).trim() : "";
+
+  // ---- Smart routing (experimental) ---------------------------------------
+  // Entry composers only (smartRoute wired + no live conversation). Gated by
+  // the Settings → General switch (shared across surfaces/windows); the
+  // model's suggestion shows as a chip the user can override before sending.
+  const smartRoutingFeatureOn = useSmartRoutingFeatureEnabled();
+  const smartRouteActive = !!smartRoute && !conversationId && smartRoutingFeatureOn;
+  const [routeOverride, setRouteOverride] = useState<SmartRouteTarget | null>(null);
+  const { decision: routeDecision } = useSmartRoute({
+    text,
+    enabled: smartRouteActive && !bashMode && !streaming,
+    candidates: smartRoute?.candidates ?? [],
+    workspaces: smartRoute?.workspaces ?? [],
+    defaultWorkspace,
+    model: modelChoice.model,
+  });
+  // A manual override sticks for this draft only; clearing the draft (send or
+  // delete) re-arms auto-routing for the next message.
+  useEffect(() => {
+    if (!text.trim()) setRouteOverride(null);
+  }, [text]);
+  const effectiveRoute = smartRouteActive
+    ? (routeOverride ?? routeDecision)
+    : null;
 
   // ---- Slash menu (commands + skills) -------------------------------------
   // Native commands the conversation's CLI session reported on boot.
@@ -1073,7 +1117,13 @@ export function Composer({
           });
         }
       } catch (e) {
-        setAttachError(String(e));
+        // WebKit hands us unreadable `File`s for pasted folders and
+        // not-yet-downloaded iCloud items (NotFoundError on read). When the
+        // pasteboard carried a real path, reference it in the draft instead of
+        // erroring — the agent reads it off disk, same as a dropped folder.
+        const realPath = pathHints?.get(f.name);
+        if (realPath) referenced.push(realPath);
+        else setAttachError(String(e));
       }
     }
     if (next.length) updateAttachments((prev) => [...prev, ...next]);
@@ -1232,7 +1282,7 @@ export function Composer({
         }
       : undefined;
     if (streaming && onQueue) onQueue(outgoing, attachments, runtime);
-    else onSend(outgoing, attachments, runtime);
+    else onSend(outgoing, attachments, runtime, effectiveRoute);
     setPreviewImage(null);
     closeSlash();
     closeMention();
@@ -1694,6 +1744,18 @@ export function Composer({
                 )}
               />
             </Button>
+          )}
+          {smartRouteActive && (
+            <SmartRouteControl
+              decision={routeDecision}
+              override={routeOverride}
+              onOverride={setRouteOverride}
+              candidates={smartRoute?.candidates ?? []}
+              workspaces={smartRoute?.workspaces ?? []}
+              defaultWorkspace={defaultWorkspace}
+              fallbackWorkspaceDir={workspaceDir}
+              disabled={disabled}
+            />
           )}
         </div>
         {bashMode ? (

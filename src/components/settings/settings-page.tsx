@@ -117,6 +117,10 @@ import {
   useConversationAutoSort,
 } from "@/lib/conversation-order";
 import {
+  setSmartRoutingFeatureEnabled,
+  useSmartRoutingFeatureEnabled,
+} from "@/lib/smart-route";
+import {
   api,
   onAppEvent,
   onMeetingCaption,
@@ -1112,6 +1116,7 @@ function GeneralSection() {
   const { t: tc } = useTranslation("common");
   const { preference: localePref, setPreference: setLocalePref } = useLocale();
   const autoSortConversations = useConversationAutoSort();
+  const smartRoutingFeature = useSmartRoutingFeatureEnabled();
   const [settings, setSettings] = useState<QuickSettings>(DEFAULT_QUICK_SETTINGS);
   const [appVersion, setAppVersion] = useState("");
   const [checkState, setCheckState] = useState<
@@ -1291,6 +1296,13 @@ function GeneralSection() {
           description={t("general.autoSortConversations.description")}
           checked={autoSortConversations}
           onCheckedChange={setConversationAutoSort}
+        />
+        <ToggleRow
+          id="smart-routing"
+          label={t("general.smartRouting.label")}
+          description={t("general.smartRouting.description")}
+          checked={smartRoutingFeature}
+          onCheckedChange={setSmartRoutingFeatureEnabled}
         />
         <ToggleRow
           id="launch-on-startup"

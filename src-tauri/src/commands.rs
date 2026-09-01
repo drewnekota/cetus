@@ -1270,6 +1270,75 @@ fn spawn_auto_title(
     });
 }
 
+/// One-shot, non-streaming completion against the utility model (see
+/// `custom_models::utility_target`) for small frontend features — currently
+/// smart routing in the entry composers. `json` asks the endpoint for a JSON
+/// object response; `model_override` swaps the DeepSeek model (e.g. flash for
+/// latency) and is ignored for custom providers, whose configured model stays
+/// authoritative.
+#[tauri::command]
+pub async fn utility_complete(
+    state: State<'_, AppState>,
+    system: String,
+    user: String,
+    max_tokens: Option<u32>,
+    json: Option<bool>,
+    model_override: Option<String>,
+) -> CmdResult<String> {
+    let mut target = crate::custom_models::utility_target(&state.store)
+        .ok_or_else(|| "no utility model configured".to_string())?;
+    if target.is_deepseek {
+        if let Some(model) = model_override.filter(|m| !m.is_empty()) {
+            target.model = model;
+        }
+    }
+    let mut body = serde_json::json!({
+        "model": target.model,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user },
+        ],
+        "stream": false,
+        "max_tokens": max_tokens.unwrap_or(1024),
+        "temperature": 0.2,
+    });
+    if json.unwrap_or(false) {
+        // Same precedent as meeting.rs — some OpenAI-compatible endpoints
+        // ignore this, so callers still strip code fences before parsing.
+        body["response_format"] = serde_json::json!({ "type": "json_object" });
+    }
+    if target.is_deepseek {
+        body["reasoning_effort"] = serde_json::json!("low");
+    }
+    let client = reqwest::Client::new();
+    let mut req = client
+        .post(&target.url)
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(20));
+    if !target.api_key.is_empty() {
+        req = req.bearer_auth(&target.api_key);
+    }
+    let resp = req.send().await.map_err(err)?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("utility completion failed: {status} {text}"));
+    }
+    // DeepSeek's `reasoning_content` can carry raw control characters that
+    // break serde mid-string (see titling.rs) — scrub before parsing.
+    let text = resp.text().await.map_err(err)?;
+    let text: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(err)?;
+    value
+        .pointer("/choices/0/message/content")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("utility completion missing content: {value}"))
+}
+
 #[tauri::command]
 pub async fn abort(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     // A running CLI turn (claude-code / codex) has a kill switch; firing it is
