@@ -9,8 +9,7 @@ import {
   type RuntimeSwitchTarget,
 } from "@/components/chat/backend-picker";
 import { useTranslation } from "@/lib/i18n";
-import type { BackendId, ModelChoice, SmartRouteTarget } from "@/lib/types";
-import type { RouteCandidate } from "@/lib/smart-route";
+import type { BackendId, ModelChoice } from "@/lib/types";
 
 interface Props {
   open: boolean;
@@ -33,10 +32,7 @@ interface Props {
   onSubmit: (
     text: string,
     attachments: ComposerAttachment[],
-    route?: SmartRouteTarget | null,
   ) => void | Promise<void>;
-  /** Smart-routing wiring, passed through to the embedded Composer. */
-  smartRoute?: { candidates: RouteCandidate[]; workspaces: string[] };
 }
 
 /** Linear-style quick-create task dialog. Compact centered modal; opens with
@@ -58,7 +54,6 @@ export function CreateTaskDialog({
   pendingCliEffort,
   onPendingTuningChange,
   onSubmit,
-  smartRoute,
 }: Props) {
   const { t } = useTranslation("board");
   const [createMore, setCreateMore] = useState(false);
@@ -85,16 +80,11 @@ export function CreateTaskDialog({
   }, [open]);
 
   const handleSend = useCallback(
-    (
-      text: string,
-      attachments: ComposerAttachment[],
-      _runtime?: unknown,
-      route?: SmartRouteTarget | null,
-    ) => {
+    (text: string, attachments: ComposerAttachment[]) => {
       // Fire-and-forget: the parent mints the conversation and streams the run
       // in the background (the kanban card shows the live dot). The Composer has
       // already cleared its own text/attachments by the time this returns.
-      void onSubmit(text, attachments, route);
+      void onSubmit(text, attachments);
       if (createMore) setFocusToken((v) => v + 1);
       else onOpenChange(false);
     },
@@ -150,7 +140,6 @@ export function CreateTaskDialog({
             defaultWorkspace={defaultWorkspace}
             onWorkspaceChange={onWorkspaceChange}
             onSend={handleSend}
-            smartRoute={smartRoute}
             onAbort={() => {}}
             pendingBackend={pendingBackend}
             onPendingBackendChange={onPendingBackendChange}

@@ -45,16 +45,7 @@ import {
   type QuickReplyResultPayload,
   type QuickScreenshot,
   type QuickSessionMode,
-  type SmartRouteTarget,
 } from "@/lib/types";
-import {
-  buildRouteCandidates,
-  useSmartRoute,
-  useSmartRoutingFeatureEnabled,
-  type RouteCandidate,
-} from "@/lib/smart-route";
-import { SmartRouteControl } from "@/components/chat/route-chip";
-import { loadRecentWorkspaces } from "@/lib/recent-workspaces";
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import {
@@ -128,11 +119,6 @@ export function QuickPanel() {
   const [submitting, setSubmitting] = useState(false);
   // Whether any non-archived chat exists — gates the "Last" session option.
   const [hasLastChat, setHasLastChat] = useState(true);
-  // Smart routing (experimental): roster + workspaces the router picks from,
-  // refreshed on every panel open (the panel stays mounted while parked).
-  const [routeCandidates, setRouteCandidates] = useState<RouteCandidate[]>([]);
-  const [routeWorkspaces, setRouteWorkspaces] = useState<string[]>([]);
-  const [routeOverride, setRouteOverride] = useState<SmartRouteTarget | null>(null);
   const [surface, setSurface] = useState<"launcher" | "reply">("launcher");
   const [replyOpen, setReplyOpen] = useState<QuickReplyOpenPayload | null>(null);
   const [replyResult, setReplyResult] = useState<QuickReplyResultPayload | null>(null);
@@ -190,9 +176,7 @@ export function QuickPanel() {
       const hasLast = cs.length > 0;
       setHasLastChat(hasLast);
       if (!hasLast) setSessionMode("new");
-      setRouteCandidates(buildRouteCandidates(cs));
     }).catch(() => {});
-    setRouteWorkspaces(loadRecentWorkspaces());
     try {
       const saved = localStorage.getItem("cetus:quickWorkspace");
       if (saved) setWorkspaceDir(saved);
@@ -205,48 +189,6 @@ export function QuickPanel() {
     }
     setModelChoice(mergeStoredModelChoice);
   }, []);
-
-  // Re-snapshot the routing roster each time the panel opens — conversations
-  // and workspaces changed while it sat parked.
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    const refresh = () => {
-      api
-        .listConversations(false)
-        .then((cs) => {
-          if (!cancelled) setRouteCandidates(buildRouteCandidates(cs));
-        })
-        .catch(() => {});
-      setRouteWorkspaces(loadRecentWorkspaces());
-      setRouteOverride(null);
-    };
-    void listen("quick-open", refresh).then((u) => {
-      if (cancelled) u();
-      else unlisten = u;
-    });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
-  const smartRoutingFeatureOn = useSmartRoutingFeatureEnabled();
-  const { decision: routeDecision } = useSmartRoute({
-    text,
-    enabled: smartRoutingFeatureOn && surface === "launcher",
-    candidates: routeCandidates,
-    workspaces: routeWorkspaces,
-    defaultWorkspace,
-    model: modelChoice.model,
-  });
-  // Manual pick sticks for this draft; an emptied draft re-arms auto-routing.
-  useEffect(() => {
-    if (!text.trim()) setRouteOverride(null);
-  }, [text]);
-  const effectiveRoute = smartRoutingFeatureOn
-    ? (routeOverride ?? routeDecision)
-    : null;
 
   const { entries } = useRuntimeCatalog();
   const onBackendChange = useCallback(
@@ -578,15 +520,6 @@ export function QuickPanel() {
         backend,
         cliModel: backend === "pi" ? "" : cliModel,
         cliEffort: backend === "pi" ? "" : cliEffort,
-        // Smart-routing decision (chip). Overrides sessionMode/workspaceDir in
-        // the main window's handler when present.
-        route: effectiveRoute
-          ? {
-              action: effectiveRoute.action,
-              sessionId: effectiveRoute.sessionId,
-              workspaceDir: effectiveRoute.workspaceDir,
-            }
-          : null,
       });
       // quick_submit hides the window for us; clear for the next open so a
       // with-screenshot submit doesn't leave a stale thumbnail that flashes
@@ -597,13 +530,12 @@ export function QuickPanel() {
       setScreenshotDenied(false);
       setIncludeScreenshot(false);
       setContext(null);
-      setRouteOverride(null);
     } catch {
       // Keep the panel up so the user can retry.
       setSubmitting(false);
       submittingRef.current = false;
     }
-  }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, backend, cliModel, cliEffort, effectiveRoute]);
+  }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, backend, cliModel, cliEffort]);
 
   const insertReply = useCallback(async () => {
     const value = replyDraft.trim();
@@ -913,17 +845,6 @@ export function QuickPanel() {
             pickingWorkspaceRef.current = active;
           }}
         />
-        {smartRoutingFeatureOn && (
-          <SmartRouteControl
-            decision={routeDecision}
-            override={routeOverride}
-            onOverride={setRouteOverride}
-            candidates={routeCandidates}
-            workspaces={routeWorkspaces}
-            defaultWorkspace={defaultWorkspace}
-            fallbackWorkspaceDir={workspaceDir}
-          />
-        )}
         <BackendSelect
           value={backend}
           onChange={onBackendChange}

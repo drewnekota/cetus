@@ -605,22 +605,6 @@ export const api = {
   }) => invoke<void>("post_notification", p),
   quickSubmit: (payload: QuickLaunchPayload) =>
     invoke<void>("quick_submit", { payload }),
-  /** One-shot completion on the utility model (smart routing etc.). Returns
-   *  the raw assistant text; callers parse/validate. */
-  utilityComplete: (p: {
-    system: string;
-    user: string;
-    maxTokens?: number;
-    json?: boolean;
-    modelOverride?: string | null;
-  }) =>
-    invoke<string>("utility_complete", {
-      system: p.system,
-      user: p.user,
-      maxTokens: p.maxTokens ?? null,
-      json: p.json ?? false,
-      modelOverride: p.modelOverride ?? null,
-    }),
   accessibilityTrusted: () => invoke<boolean>("accessibility_trusted"),
   requestAccessibility: () => invoke<boolean>("request_accessibility"),
   openAccessibilitySettings: () =>

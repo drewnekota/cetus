@@ -71,10 +71,7 @@ import {
   loadLastActive,
   pruneMessageCache,
   saveLastActive,
-  loadCachedPreviews,
-  type ConvPreview,
 } from "@/lib/chat-store";
-import { buildRouteCandidates } from "@/lib/smart-route";
 import { useZoom } from "@/hooks/use-zoom";
 import { dispatchNotification, refreshPermission } from "@/lib/notifications";
 import { tt, useLocale, useTranslation } from "@/lib/i18n";
@@ -101,7 +98,6 @@ import {
   type PiMessage,
   type QuickLaunchPayload,
   type RunState,
-  type SmartRouteTarget,
   type BackendId,
   type UpdateDownloadProgress,
   backendSupportsSteer,
@@ -596,34 +592,6 @@ export default function Home() {
   // Roster the entry composers hand to the router: recent conversations plus
   // their cached last-reply previews (board card cache — best-effort). Reloaded
   // only when the top-of-list ids actually change, not on every updated_at bump.
-  const [routePreviews, setRoutePreviews] = useState<Record<string, ConvPreview>>({});
-  const routeCandidates = useMemo(
-    () => buildRouteCandidates(conversations, routePreviews),
-    [conversations, routePreviews],
-  );
-  const routeCandidateIdsKey = useMemo(
-    () => routeCandidates.map((c) => c.id).join("\n"),
-    [routeCandidates],
-  );
-  useEffect(() => {
-    if (!routeCandidateIdsKey) return;
-    let cancelled = false;
-    void loadCachedPreviews(routeCandidateIdsKey.split("\n")).then((previews) => {
-      if (!cancelled) setRoutePreviews(previews);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [routeCandidateIdsKey]);
-  const routeWorkspaces = useMemo(
-    () => [...recentWorkspaces, ...temporaryWorkspaces],
-    [recentWorkspaces, temporaryWorkspaces],
-  );
-  const smartRouteConfig = useMemo(
-    () => ({ candidates: routeCandidates, workspaces: routeWorkspaces }),
-    [routeCandidates, routeWorkspaces],
-  );
-
   // Once the last active chat in a temporary workspace is archived, remove the
   // empty folder from the sidebar naturally.
   useEffect(() => {
@@ -2667,33 +2635,11 @@ export default function Home() {
     text: string,
     attachments: ComposerAttachment[] = [],
     runtime?: ComposerRuntimeSelection,
-    route?: SmartRouteTarget | null,
   ) {
     let id = activeId;
     let createdBackend: BackendId = "pi";
-    // Smart routing (hero only — routes never ride along once a conversation
-    // is active). Continue → jump into the routed conversation and keep its
-    // own backend; the hero's pending runtime selection applies to fresh
-    // conversations only.
-    let routedContinue = false;
-    if (!id && route?.action === "continue" && route.sessionId) {
-      const target = conversationsRef.current.find((c) => c.id === route.sessionId);
-      if (target) {
-        try {
-          await onSelect(target.id);
-          id = target.id;
-          routedContinue = true;
-        } catch (e) {
-          console.error("[smart-route] open routed conversation failed", e);
-        }
-      }
-    }
     if (!id) {
-      const c = await api.newConversation(
-        (route?.action === "new" ? route.workspaceDir : null) ??
-          workspaceDir ??
-          undefined,
-      );
+      const c = await api.newConversation(workspaceDir ?? undefined);
       id = c.id;
       createdBackend = (c.backend as BackendId | undefined) ?? "pi";
       // Insert the freshly-minted row locally instead of refetching the whole
@@ -2705,7 +2651,7 @@ export default function Home() {
       api.setModelChoice(id, modelChoice).catch(console.error);
     }
     const convId = id;
-    if (runtime && !routedContinue) {
+    if (runtime) {
       try {
         await applyRuntimeSelection(convId, runtime, createdBackend);
       } catch (e) {
@@ -2880,33 +2826,15 @@ export default function Home() {
     setModelChoice(launchedModel);
 
     let target: string | null = null;
-    // Smart routing (experimental) overrides the launcher's new/last toggle
-    // when a decision rode along. An unknown routed id (deleted since the
-    // panel cached its roster) falls through to a fresh conversation.
-    const route = p.route ?? null;
-    if (route?.action === "continue" && route.sessionId) {
-      const known =
-        conversations.some((c) => c.id === route.sessionId) ||
-        !!(await api.getConversation(route.sessionId).catch(() => null));
-      if (known) {
-        target = route.sessionId;
-        if (target !== activeId) await onSelect(target);
-      }
-    }
-    if (!target && !route && p.sessionMode === "last") {
+    if (p.sessionMode === "last") {
       // The open conversation, else the most-recently-updated one.
       target = activeId ?? conversations[0]?.id ?? null;
       if (target && target !== activeId) await onSelect(target);
     }
     if (!target) {
-      // Honor the routed repo, else the repo chosen in the launcher. A null
-      // workspaceDir means the launcher's visible "Chat" default, not the
-      // main window's current repo.
-      const c = await api.newConversation(
-        (route?.action === "new" ? route.workspaceDir : null) ??
-          p.workspaceDir ??
-          undefined,
-      );
+      // A null workspaceDir means the launcher's visible "Chat" default, not
+      // the main window's current repo.
+      const c = await api.newConversation(p.workspaceDir ?? undefined);
       target = c.id;
       // Coding-agent runtime chosen in the launcher (Cetus / Claude Code /
       // Codex). Applied to fresh conversations only — reusing "last" keeps
@@ -3006,23 +2934,8 @@ export default function Home() {
   async function onCreateTask(
     text: string,
     attachments: ComposerAttachment[],
-    route?: SmartRouteTarget | null,
   ) {
-    // Smart routing: "continue" delivers the message into the routed
-    // conversation (its card bumps on the kanban) instead of minting a task.
-    if (
-      route?.action === "continue" &&
-      route.sessionId &&
-      conversationsRef.current.some((c) => c.id === route.sessionId)
-    ) {
-      await deliverQueued(route.sessionId, text, attachments);
-      return;
-    }
-    const c = await api.newConversation(
-      (route?.action === "new" ? route.workspaceDir : null) ??
-        workspaceDir ??
-        undefined,
-    );
+    const c = await api.newConversation(workspaceDir ?? undefined);
     const id = c.id;
     // Runtime chosen in the dialog — the shared pending state (same one the chat
     // hero + quick launcher use). Applied before the first prompt goes out so it
@@ -3649,7 +3562,6 @@ export default function Home() {
         pendingCliEffort={pendingCliEffort}
         onPendingTuningChange={onPendingTuningChange}
         onSubmit={onCreateTask}
-        smartRoute={smartRouteConfig}
       />
       <AutomationDialog
         open={automationDialogOpen}
@@ -3889,7 +3801,6 @@ export default function Home() {
                     defaultWorkspace={defaultWorkspace}
                     onWorkspaceChange={onWorkspaceChange}
                     onSend={onSend}
-                    smartRoute={smartRouteConfig}
                     onBash={onBash}
                     onAbort={onAbort}
                     pendingBackend={pendingBackend}

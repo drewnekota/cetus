@@ -459,18 +459,6 @@ export interface QuickLaunchPayload {
   cliModel: string;
   /** CLI backends' reasoning-effort override ("" = the CLI's default). */
   cliEffort: string;
-  /** Smart-routing decision made in the launcher (experimental); overrides
-   *  `sessionMode`/`workspaceDir` when present. Null/absent → classic flow. */
-  route?: SmartRouteTarget | null;
-}
-
-/** Where a smart-routed message should land: an existing conversation
- *  (`continue` + sessionId) or a fresh one (`new` + workspaceDir; null dir →
- *  keep the surface's current workspace selection). */
-export interface SmartRouteTarget {
-  action: "continue" | "new";
-  sessionId: string | null;
-  workspaceDir: string | null;
 }
 
 export const DEFAULT_MODEL_CHOICE: ModelChoice = {

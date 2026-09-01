@@ -152,9 +152,6 @@ export const settings = {
     "runtimes.behavior.title": "Runtime behavior",
     "runtimes.behavior.description":
       "Shared execution settings for external CLI and ACP runtimes.",
-    "general.smartRouting.label": "Smart routing (experimental)",
-    "general.smartRouting.description":
-      "As you type in a new chat, task, or launcher input, suggest whether to continue a recent chat or start a new one in the right folder.",
     "general.autoSortConversations.label": "Move active chats to the top",
     "general.autoSortConversations.description":
       "Reorder chats when they receive new messages. Turn this off to keep chats in creation order, with newly created chats at the top.",
@@ -745,9 +742,6 @@ export const settings = {
     "runtimes.behavior.title": "Runtime 行为",
     "runtimes.behavior.description":
       "适用于外部 CLI 与 ACP Runtime 的共享执行设置。",
-    "general.smartRouting.label": "智能路由（实验性）",
-    "general.smartRouting.description":
-      "在新对话、新任务或快捷启动器中输入时，自动判断是续接最近的会话，还是在合适的文件夹中新建会话。输入框上的 \u2728 按钮可随时开关。",
     "general.autoSortConversations.label": "有新消息时将对话移到顶部",
     "general.autoSortConversations.description":
       "对话收到新消息时自动重新排序。关闭后按创建顺序固定排列，新建的对话位于顶部。",
@@ -1315,9 +1309,6 @@ export const settings = {
     "nav.general": "一般",
     "general.title": "一般",
     "general.description": "言語とアプリの基本設定。",
-    "general.smartRouting.label": "スマートルーティング（実験的）",
-    "general.smartRouting.description":
-      "新しいチャット・タスク・ランチャーで入力中に、最近のチャットを続けるか、適切なフォルダで新規作成するかを提案します。入力欄の \u2728 ボタンで素早く切り替えられます。",
     "general.autoSortConversations.label": "更新されたチャットを上に移動",
     "general.autoSortConversations.description":
       "新しいメッセージが届くとチャットを並べ替えます。オフにすると作成順を維持し、新しいチャットが上に表示されます。",
@@ -1714,9 +1705,6 @@ export const settings = {
     "nav.general": "일반",
     "general.title": "일반",
     "general.description": "언어 및 앱 기본 설정.",
-    "general.smartRouting.label": "스마트 라우팅(실험적)",
-    "general.smartRouting.description":
-      "새 채팅, 작업, 런처 입력 중에 최근 채팅을 이어갈지, 알맞은 폴더에서 새로 시작할지 제안합니다.",
     "general.autoSortConversations.label": "활성 채팅을 맨 위로 이동",
     "general.autoSortConversations.description":
       "새 메시지가 오면 채팅 순서를 변경합니다. 끄면 생성 순서를 유지하고 새 채팅이 맨 위에 표시됩니다.",
@@ -2107,9 +2095,6 @@ export const settings = {
     "nav.general": "General",
     "general.title": "General",
     "general.description": "Idioma y ajustes básicos de la aplicación.",
-    "general.smartRouting.label": "Enrutamiento inteligente (experimental)",
-    "general.smartRouting.description":
-      "Mientras escribes en un chat, tarea o lanzador nuevo, sugiere continuar un chat reciente o crear uno nuevo en la carpeta adecuada.",
     "general.autoSortConversations.label": "Mover chats activos arriba",
     "general.autoSortConversations.description":
       "Reordena los chats al recibir mensajes nuevos. Desactívalo para mantener el orden de creación, con los chats nuevos arriba.",
@@ -2500,9 +2485,6 @@ export const settings = {
     "nav.general": "Geral",
     "general.title": "Geral",
     "general.description": "Idioma e configurações básicas do aplicativo.",
-    "general.smartRouting.label": "Roteamento inteligente (experimental)",
-    "general.smartRouting.description":
-      "Enquanto você digita em um novo chat, tarefa ou no lançador, sugere continuar um chat recente ou criar um novo na pasta certa.",
     "general.autoSortConversations.label": "Mover chats ativos para o topo",
     "general.autoSortConversations.description":
       "Reordena os chats ao receber novas mensagens. Desative para manter a ordem de criação, com os novos chats no topo.",
@@ -2890,9 +2872,6 @@ export const settings = {
     "nav.general": "Général",
     "general.title": "Général",
     "general.description": "Langue et réglages de base de l'application.",
-    "general.smartRouting.label": "Routage intelligent (expérimental)",
-    "general.smartRouting.description":
-      "Pendant la saisie d'un nouveau chat, d'une tâche ou dans le lanceur, propose de poursuivre une discussion récente ou d'en créer une dans le bon dossier.",
     "general.autoSortConversations.label": "Remonter les discussions actives",
     "general.autoSortConversations.description":
       "Réorganise les discussions à l'arrivée de nouveaux messages. Désactivez cette option pour conserver l'ordre de création, avec les nouvelles discussions en haut.",
@@ -3280,9 +3259,6 @@ export const settings = {
     "nav.general": "Allgemein",
     "general.title": "Allgemein",
     "general.description": "Sprache und grundlegende App-Einstellungen.",
-    "general.smartRouting.label": "Intelligentes Routing (experimentell)",
-    "general.smartRouting.description":
-      "Schlägt beim Tippen in einem neuen Chat, einer Aufgabe oder im Launcher vor, einen kürzlichen Chat fortzusetzen oder einen neuen im passenden Ordner zu starten.",
     "general.autoSortConversations.label": "Aktive Chats nach oben verschieben",
     "general.autoSortConversations.description":
       "Sortiert Chats bei neuen Nachrichten neu. Deaktivieren, um die Erstellungsreihenfolge mit neuen Chats oben beizubehalten.",
@@ -3670,9 +3646,6 @@ export const settings = {
     "nav.general": "Generale",
     "general.title": "Generale",
     "general.description": "Lingua e impostazioni di base dell'app.",
-    "general.smartRouting.label": "Instradamento intelligente (sperimentale)",
-    "general.smartRouting.description":
-      "Mentre scrivi in una nuova chat, attività o nel launcher, suggerisce se continuare una chat recente o crearne una nuova nella cartella giusta.",
     "general.autoSortConversations.label": "Sposta in alto le chat attive",
     "general.autoSortConversations.description":
       "Riordina le chat quando arrivano nuovi messaggi. Disattiva per mantenere l'ordine di creazione, con le nuove chat in alto.",
@@ -4060,9 +4033,6 @@ export const settings = {
     "nav.general": "Основные",
     "general.title": "Основные",
     "general.description": "Язык и основные параметры приложения.",
-    "general.smartRouting.label": "Умная маршрутизация (экспериментально)",
-    "general.smartRouting.description":
-      "Пока вы печатаете в новом чате, задаче или лаунчере, предлагает продолжить недавний чат или создать новый в подходящей папке.",
     "general.autoSortConversations.label": "Перемещать активные чаты вверх",
     "general.autoSortConversations.description":
       "Меняет порядок чатов при новых сообщениях. Отключите, чтобы сохранить порядок создания с новыми чатами сверху.",
