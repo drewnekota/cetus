@@ -361,6 +361,14 @@ function findCatalogModel(
   });
 }
 
+/** Whether a persisted model override is a pinned full id that can fall
+ *  behind the live catalog. Only Claude reports versioned full ids
+ *  ("claude-fable-5-1[1m]"); bare aliases and other runtimes' ids are never
+ *  rewritten. */
+function isStaleCandidate(backend: TunableBackendId, model: string): boolean {
+  return backend === "claude-code" && model.startsWith("claude-");
+}
+
 /** Combined model + reasoning-effort menu for a CLI backend, styled after
  *  the native codex picker: one compact trigger ("Fable · Max"), a flat list
  *  of reasoning levels on top, and the model catalog in a submenu. "" always
@@ -371,6 +379,7 @@ export function CliTuningMenu({
   effort,
   onModelChange,
   onEffortChange,
+  onModelMigrate,
   disabled,
   className,
   open,
@@ -381,6 +390,12 @@ export function CliTuningMenu({
   effort: string;
   onModelChange: (model: string) => void;
   onEffortChange: (effort: string) => void;
+  /** Receives the live catalog id when the persisted `model` is a stale full
+   *  id of the same family (see the migration effect). Omit to disable the
+   *  migration — e.g. while a preset's fixed tuning is what's selected, since
+   *  rewriting it would move the selection off the preset row and leak the
+   *  preset's model into the runtime's own sticky choice. */
+  onModelMigrate?: (model: string) => void;
   disabled?: boolean;
   className?: string;
   open?: boolean;
@@ -409,12 +424,19 @@ export function CliTuningMenu({
   // The family match above keeps the new row visually checked while the stale
   // id is what actually spawns — migrate the stored override to the catalog id
   // so the checkmark and the running session agree.
+  //
+  // Only full ids can go stale. Floating aliases ("opus", "fable") always
+  // resolve to the current release inside the CLI, and the family match would
+  // otherwise "migrate" them to a different catalog row ("opus" → "opus[1m]"),
+  // changing what they mean.
   const liveModels = defaults?.models;
   useEffect(() => {
-    if (!liveModels || !model) return;
+    if (!onModelMigrate || !liveModels || !isStaleCandidate(backend, model)) {
+      return;
+    }
     const match = findCatalogModel(model, liveModels);
-    if (match && match.id !== model) onModelChange(match.id);
-  }, [liveModels, model, onModelChange]);
+    if (match && match.id !== model) onModelMigrate(match.id);
+  }, [backend, liveModels, model, onModelMigrate]);
   const curEffort = efforts.find((e) => e.id === effort) ?? efforts[0];
   // Claude Code reports its account-specific resolved default through the
   // initialize handshake. "Recommended" remains only as a compatibility
@@ -812,6 +834,7 @@ export function BackendPicker({
             effort={cliEffort}
             onModelChange={selectModel}
             onEffortChange={selectEffort}
+            onModelMigrate={matchedPreset ? undefined : selectModel}
             disabled={disabled}
             open={tuningMenuOpen}
             onOpenChange={onTuningMenuOpenChange}
@@ -823,6 +846,11 @@ export function BackendPicker({
             effort={pendingEffort ?? ""}
             onModelChange={(m) => onPendingTuningChange(m, pendingEffort ?? "")}
             onEffortChange={(e) => onPendingTuningChange(pendingModel ?? "", e)}
+            onModelMigrate={
+              matchedPreset
+                ? undefined
+                : (m) => onPendingTuningChange(m, pendingEffort ?? "")
+            }
             disabled={disabled}
             open={tuningMenuOpen}
             onOpenChange={onTuningMenuOpenChange}
