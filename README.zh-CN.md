@@ -32,6 +32,12 @@
 
 ![Cetus 操作演示 —— 唤起 agent、创建自动化任务并切换 runtime](docs/cetus-demo.gif)
 
+## 保持关注
+
+⭐️ 给 Cetus 点个 Star，第一时间收到新版本发布通知，也能让更多人发现它。
+
+<p align="center"><a href="https://github.com/drewnekota/cetus"><img src="docs/star-us.gif" width="720" alt="在 GitHub 上为 Cetus 仓库点 Star" /></a></p>
+
 ## Cetus 为你的 agent 补上的四件事
 
 ### Quick Launcher：一个快捷键，随时叫出 agent

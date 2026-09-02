@@ -1,0 +1,131 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1200px;height:640px;overflow:hidden;background:#fff;font-family:-apple-system,"SF Pro Text","Segoe UI",Helvetica,Arial,sans-serif;color:#1f2328;font-size:14px}
+#stage{width:1200px;height:640px;position:relative;transform-origin:0 0;will-change:transform}
+.top{height:64px;background:#f6f8fa;border-bottom:1px solid #d1d9e0;display:flex;align-items:center;padding:0 24px;gap:12px}
+.oct{width:32px;height:32px}
+.crumb{font-size:16px;display:flex;align-items:center;gap:6px}
+.crumb b{font-weight:600}
+.crumb .sep{color:#59636e}
+.ava{width:24px;height:24px;border-radius:6px;overflow:hidden;border:1px solid #d1d9e0}
+.ava img{width:100%;height:100%;display:block}
+.search{margin-left:auto;width:320px;height:32px;border:1px solid #d1d9e0;border-radius:6px;background:#fff;color:#59636e;display:flex;align-items:center;padding:0 10px;gap:8px;font-size:13px}
+.search kbd{margin-left:auto;border:1px solid #d1d9e0;border-radius:4px;padding:0 5px;font-size:11px;color:#59636e}
+.icons{display:flex;gap:8px}
+.icons span{width:32px;height:32px;border:1px solid #d1d9e0;border-radius:6px;background:#fff}
+.me{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#7c6cf0,#c9a4ff)}
+.tabs{height:48px;background:#f6f8fa;border-bottom:1px solid #d1d9e0;display:flex;align-items:stretch;padding:0 24px;gap:8px}
+.tab{display:flex;align-items:center;padding:0 8px;gap:6px;color:#1f2328;font-size:14px;position:relative}
+.tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:#fd8c73;border-radius:2px}
+.tab i{width:16px;height:16px;border-radius:3px;background:#59636e;opacity:.55;display:inline-block}
+.tab em{font-style:normal;background:#e6e9ed;border-radius:99px;padding:0 6px;font-size:12px;line-height:18px}
+.body{padding:24px 32px 0;display:grid;grid-template-columns:1fr 296px;gap:32px}
+.repohead{display:flex;align-items:center;gap:10px;grid-column:1/3}
+.repohead h1{font-size:20px;font-weight:600;display:flex;align-items:center;gap:8px}
+.pub{font-size:12px;color:#59636e;border:1px solid #d1d9e0;border-radius:99px;padding:1px 7px;font-weight:500}
+.actions{margin-left:auto;display:flex;gap:8px}
+.btn{height:32px;border:1px solid #d1d9e0;border-radius:6px;background:#f6f8fa;display:flex;align-items:center;font-size:14px;font-weight:500;overflow:hidden}
+.btn .main{display:flex;align-items:center;gap:6px;padding:0 12px;height:100%}
+.btn .cnt{background:#e6e9ed;border-radius:99px;padding:0 7px;font-size:12px;line-height:18px;font-weight:500}
+.btn .dd{width:28px;height:100%;border-left:1px solid #d1d9e0;display:flex;align-items:center;justify-content:center;color:#59636e;font-size:10px}
+.btn svg{width:16px;height:16px;fill:#59636e}
+#star.pressed{background:#eaeef2}
+#star.starred svg{fill:#e3b341}
+.bar{display:flex;align-items:center;gap:8px;margin-top:20px}
+.pill{height:32px;border:1px solid #d1d9e0;border-radius:6px;background:#f6f8fa;display:flex;align-items:center;padding:0 12px;font-size:14px;font-weight:500;gap:6px}
+.pill.green{background:#1f883d;color:#fff;border-color:#1a7f37}
+.pill.ghost{background:#fff;color:#59636e;font-weight:400;flex:1;justify-content:flex-start}
+.list{border:1px solid #d1d9e0;border-radius:6px;margin-top:16px;overflow:hidden}
+.row{display:flex;align-items:center;height:40px;padding:0 16px;border-top:1px solid #d1d9e0;font-size:14px;gap:16px}
+.row:first-child{border-top:0;background:#f6f8fa;height:52px}
+.row .n{width:170px;display:flex;align-items:center;gap:8px}
+.row .n i{width:16px;height:14px;background:#54aeff;border-radius:2px;display:inline-block;opacity:.85}
+.row .n i.f{background:#59636e;opacity:.55;height:16px}
+.row .m{flex:1;color:#59636e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .t{color:#59636e;font-size:13px;width:110px;text-align:right}
+.cmt{display:flex;align-items:center;gap:8px}
+.about h3{font-size:16px;font-weight:600;margin-bottom:12px}
+.about p{font-size:16px;line-height:1.5;margin-bottom:14px}
+.topics{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.topics span{background:#ddf4ff;color:#0969da;border-radius:99px;padding:0 10px;font-size:12px;line-height:22px;font-weight:500}
+.meta{display:flex;flex-direction:column;gap:10px;font-size:14px;color:#59636e}
+.meta div{display:flex;align-items:center;gap:8px}
+.meta i{width:16px;height:16px;border-radius:3px;background:#59636e;opacity:.45;display:inline-block}
+#cursor{position:absolute;width:38px;height:56px;left:0;top:0;z-index:9;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35));transform-origin:0 0;pointer-events:none}
+#hint{position:absolute;z-index:8;pointer-events:none;background:#1f2328;color:#fff;border-radius:6px;padding:8px 12px;font-size:16px;font-weight:600;opacity:0;white-space:nowrap}
+#hint::after{content:"";position:absolute;left:50%;bottom:-5px;width:10px;height:10px;background:#1f2328;transform:translateX(-50%) rotate(45deg)}
+</style></head><body>
+<div id="stage">
+ <div class="top">
+  <svg class="oct" viewBox="0 0 16 16"><path fill="#1f2328" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+  <div class="crumb"><span class="ava"><img src="logo.png"></span><span>drewnekota</span><span class="sep">/</span><b>cetus</b></div>
+  <div class="search">🔍&nbsp; Type <kbd style="margin:0 2px">/</kbd> to search <kbd>⌘K</kbd></div>
+  <div class="icons"><span></span><span></span><span></span></div><div class="me"></div>
+ </div>
+ <div class="tabs">
+  <div class="tab on"><i></i>Code</div><div class="tab"><i></i>Issues <em>4</em></div><div class="tab"><i></i>Pull requests</div><div class="tab"><i></i>Actions</div><div class="tab"><i></i>Projects</div><div class="tab"><i></i>Security</div><div class="tab"><i></i>Insights</div>
+ </div>
+ <div class="body">
+  <div class="repohead">
+   <span class="ava"><img src="logo.png"></span><h1>cetus <span class="pub">Public</span></h1>
+   <div class="actions">
+    <div class="btn"><span class="main"><svg viewBox="0 0 16 16"><path d="M8 2c1.981 0 3.671.992 4.933 2.078 1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14c-1.981 0-3.671-.992-4.933-2.078C1.797 10.83.88 9.576.43 8.898a1.62 1.62 0 0 1 0-1.798c.45-.677 1.367-1.931 2.637-3.022C4.33 2.992 6.019 2 8 2ZM8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg>Watch <span class="cnt">3</span></span><span class="dd">▼</span></div>
+    <div class="btn"><span class="main"><svg viewBox="0 0 16 16"><path d="M5 5.372v.878c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-.878a2.25 2.25 0 1 1 1.5 0v.878a2.25 2.25 0 0 1-2.25 2.25h-1.5v2.128a2.251 2.251 0 1 1-1.5 0V8.5h-1.5A2.25 2.25 0 0 1 3.5 6.25v-.878a2.25 2.25 0 1 1 1.5 0ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm6.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-3 8.75a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z"/></svg>Fork <span class="cnt">11</span></span><span class="dd">▼</span></div>
+    <div class="btn" id="star"><span class="main"><svg id="starsvg" viewBox="0 0 16 16"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Zm0 2.445L6.615 5.5a.75.75 0 0 1-.564.41l-3.097.45 2.24 2.184a.75.75 0 0 1 .216.664l-.528 3.084 2.769-1.456a.75.75 0 0 1 .698 0l2.77 1.456-.53-3.084a.75.75 0 0 1 .216-.664l2.24-2.183-3.096-.45a.75.75 0 0 1-.564-.41L8 2.694Z"/></svg><span id="starlbl">Star</span> <span class="cnt" id="starcnt">142</span></span><span class="dd">▼</span></div>
+   </div>
+  </div>
+  <div>
+   <div class="bar"><div class="pill">main ▾</div><div class="pill" style="border:0;background:none;color:#59636e;font-weight:400">⑂ 2 Branches &nbsp; 🏷 61 Tags</div><div class="pill ghost">🔍&nbsp; Go to file</div><div class="pill">Add file ▾</div><div class="pill green">&lt;&gt; Code ▾</div></div>
+   <div class="list">
+    <div class="row"><span class="cmt"><span class="ava"><img src="logo.png"></span><b>drewnekota</b><span style="color:#59636e">release: migrate stale Claude model ids; bump to 0.3.85</span></span><span class="t">7f9a472 · today</span></div>
+    <div class="row"><span class="n"><i></i>.github/workflows</span><span class="m">ci: build universal dmg and publish updater manifest</span><span class="t">3 weeks ago</span></div>
+    <div class="row"><span class="n"><i></i>cetus-runtime</span><span class="m">runtime: adopt login shell env for sidecars</span><span class="t">last week</span></div>
+    <div class="row"><span class="n"><i></i>docs</span><span class="m">docs: refresh quick launcher and automations gifs</span><span class="t">2 weeks ago</span></div>
+    <div class="row"><span class="n"><i></i>src</span><span class="m">model picker: versioned live catalog</span><span class="t">yesterday</span></div>
+    <div class="row"><span class="n"><i></i>src-tauri</span><span class="m">release: migrate stale Claude model ids</span><span class="t">today</span></div>
+    <div class="row"><span class="n"><i class="f"></i>README.md</span><span class="m">readme: add star-us section</span><span class="t">today</span></div>
+    <div class="row"><span class="n"><i class="f"></i>package.json</span><span class="m">bump to 0.3.85</span><span class="t">today</span></div>
+   </div>
+  </div>
+  <div class="about">
+   <h3>About</h3>
+   <p>One macOS app for Claude Code, Codex, and every agent runtime you use — scheduled runs, global hotkey launcher, per-run git worktrees, one review board.</p>
+   <div class="topics"><span>macos</span><span>claude-code</span><span>codex</span><span>ai-agent</span><span>automation</span><span>tauri</span><span>rust</span><span>local-first</span></div>
+   <div class="meta"><div><i></i>Readme</div><div><i></i>MIT license</div><div><i></i>Activity</div><div><i></i><b id="starmeta" style="color:#1f2328;font-weight:600">142</b>&nbsp;stars</div><div><i></i>3 watching</div><div><i></i>11 forks</div></div>
+  </div>
+ </div>
+</div>
+<div id="hint">Star Cetus to get notified about new releases</div>
+<svg id="cursor" viewBox="0 0 28 42"><path d="M2 2 L2 32 L9.5 25 L14 36 L19.5 33.5 L15 22.5 L25 22.5 Z" fill="#fff" stroke="#000" stroke-width="2" stroke-linejoin="round"/></svg>
+<script>
+const q=new URLSearchParams(location.search);const t=parseFloat(q.get('t')||'0');
+const ease=x=>x<0?0:x>1?1:(x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2);
+const lerp=(a,b,k)=>a+(b-a)*k;
+const stage=document.getElementById('stage');
+const star=document.getElementById('star');
+const r=star.getBoundingClientRect();
+const sx=r.left+r.width*0.42, sy=r.top+r.height/2;           // star button center (pre-transform)
+const Z=2.4;                                                   // zoom factor
+// Zoom: keep star button at a fixed viewport point.
+const target={x:790,y:300};
+function zoomAt(k){const z=lerp(1,Z,k);const ox=lerp(0,target.x-sx*Z,k), oy=lerp(0,target.y-sy*Z,k);stage.style.transform=`translate(${ox}px,${oy}px) scale(${z})`;return {ox,oy}}
+// timeline
+const T={zoomStart:0.5,zoomEnd:1.7,click:2.05,release:2.2,hint:2.5,end:4.6};
+const zk=ease((t-T.zoomStart)/(T.zoomEnd-T.zoomStart));
+const o=zoomAt(zk);
+// cursor path in viewport coords
+const start={x:520,y:520};
+let cx,cy;
+const mvS=0.2,mvE=1.9;
+const k=ease((t-mvS)/(mvE-mvS));
+const dest={x:target.x-34,y:target.y+4};
+cx=lerp(start.x,dest.x,k);cy=lerp(start.y,dest.y,k)+Math.sin(k*Math.PI)*-70;
+const cur=document.getElementById('cursor');
+const press=t>=T.click&&t<T.release;
+cur.style.transform=`translate(${cx}px,${cy}px) scale(${press?0.85:1})`;
+if(t>=T.click)star.classList.add('pressed');
+if(t>=T.release){star.classList.remove('pressed');star.classList.add('starred');document.getElementById('starlbl').textContent='Starred';document.getElementById('starsvg').innerHTML='<path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/>';document.getElementById('starcnt').textContent='143';document.getElementById('starmeta').textContent='143';}
+// hint bubble
+const hint=document.getElementById('hint');
+if(t>=T.hint){const hk=ease((t-T.hint)/0.3);hint.style.opacity=hk;const hw=hint.offsetWidth;hint.style.left=(target.x-hw/2)+'px';hint.style.top=(target.y-r.height*Z/2-14-hint.offsetHeight+ (1-hk)*8)+'px';}
+</script></body></html>

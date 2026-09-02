@@ -32,6 +32,12 @@
 
 ![Cetus demo — launch an agent, schedule an automation, and switch runtimes](docs/cetus-demo.gif)
 
+## Stay tuned
+
+⭐️ Star Cetus to get notified about every new release, and to help more people find it.
+
+<p align="center"><a href="https://github.com/drewnekota/cetus"><img src="docs/star-us.gif" width="720" alt="Star the Cetus repository on GitHub" /></a></p>
+
 ## Four things Cetus adds to your agent
 
 ### Quick Launcher — your agent, one hotkey away
