@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ButtonHTMLAttributes,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import {
@@ -95,6 +96,20 @@ export interface WorkspaceTab {
   browserState?: BrowserViewState;
 }
 
+/** Matches the panel's `min-h-56` (14rem) floor. */
+const BOTTOM_PANEL_MIN_HEIGHT = 224;
+const BOTTOM_PANEL_HEIGHT_KEY = "cetus:workspace-bottom-height";
+
+function loadBottomPanelHeight(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = Number(window.localStorage.getItem(BOTTOM_PANEL_HEIGHT_KEY));
+  return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : null;
+}
+
+function maxBottomPanelHeight(): number {
+  return Math.max(BOTTOM_PANEL_MIN_HEIGHT, Math.round(window.innerHeight * 0.8));
+}
+
 interface Props {
   tabs: WorkspaceTab[];
   activeId: string | null;
@@ -136,6 +151,54 @@ export function WorkspacePanel({
   const cwd = workspaceDir || defaultWorkspace;
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
   const newTabMenuCloseTimerRef = useRef<number | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const [bottomHeight, setBottomHeight] = useState<number | null>(loadBottomPanelHeight);
+  const [resizing, setResizing] = useState(false);
+  const resizeDragRef = useRef<{
+    pointerId: number;
+    panelBottom: number;
+    maxHeight: number;
+    height: number;
+  } | null>(null);
+
+  function onResizeHandlePointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.button !== 0 || !panelRef.current) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    resizeDragRef.current = {
+      pointerId: e.pointerId,
+      panelBottom: panelRef.current.getBoundingClientRect().bottom,
+      maxHeight: maxBottomPanelHeight(),
+      height: panelRef.current.getBoundingClientRect().height,
+    };
+    setResizing(true);
+  }
+
+  function onResizeHandlePointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const drag = resizeDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const next = Math.min(
+      drag.maxHeight,
+      Math.max(BOTTOM_PANEL_MIN_HEIGHT, Math.round(drag.panelBottom - e.clientY)),
+    );
+    drag.height = next;
+    setBottomHeight(next);
+  }
+
+  function onResizeHandlePointerEnd(e: ReactPointerEvent<HTMLDivElement>) {
+    const drag = resizeDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    resizeDragRef.current = null;
+    setResizing(false);
+    window.localStorage.setItem(BOTTOM_PANEL_HEIGHT_KEY, String(drag.height));
+  }
+
+  function resetBottomHeight() {
+    resizeDragRef.current = null;
+    setResizing(false);
+    setBottomHeight(null);
+    window.localStorage.removeItem(BOTTOM_PANEL_HEIGHT_KEY);
+  }
 
   function clearNewTabMenuCloseTimer() {
     if (newTabMenuCloseTimerRef.current == null) return;
@@ -166,12 +229,14 @@ export function WorkspacePanel({
 
   return (
     <aside
+      ref={panelRef}
+      style={layout === "bottom" && bottomHeight != null ? { height: bottomHeight } : undefined}
       className={cn(
         "flex flex-col bg-background",
         hidden && "hidden",
         layout === "side"
           ? "h-full w-1/2 min-w-[min(420px,50%)] max-w-3xl border-l border-border"
-          : "h-[32vh] min-h-56 w-full border-t border-border",
+          : "relative h-[32vh] max-h-[80vh] min-h-56 w-full border-t border-border",
         motionState === "open" &&
           (layout === "side"
             ? "animate-in fade-in-0 slide-in-from-right-6 duration-120 ease-out"
@@ -185,6 +250,28 @@ export function WorkspacePanel({
       data-layout={layout}
       data-state={motionState}
     >
+      {layout === "bottom" && (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={t("workspacePanel.resize")}
+          data-testid="workspace-resize-handle"
+          data-resizing={resizing ? "true" : "false"}
+          className="group/resize absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize touch-none select-none"
+          onPointerDown={onResizeHandlePointerDown}
+          onPointerMove={onResizeHandlePointerMove}
+          onPointerUp={onResizeHandlePointerEnd}
+          onPointerCancel={onResizeHandlePointerEnd}
+          onDoubleClick={resetBottomHeight}
+        >
+          <div
+            className={cn(
+              "absolute inset-x-0 top-1 h-0.5 transition-colors group-hover/resize:bg-primary/40",
+              resizing && "bg-primary/60",
+            )}
+          />
+        </div>
+      )}
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <div className="min-w-0 overflow-x-auto">

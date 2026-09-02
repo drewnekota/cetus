@@ -404,6 +404,17 @@ export function CliTuningMenu({
     : CLI_MODELS[backend];
   const efforts = CLI_EFFORTS[backend];
   const curModel = findCatalogModel(model, models) ?? models[0];
+  // A persisted full id goes stale when the CLI starts reporting a newer
+  // release of the same family ("claude-fable-5[1m]" → "claude-fable-5-1[1m]").
+  // The family match above keeps the new row visually checked while the stale
+  // id is what actually spawns — migrate the stored override to the catalog id
+  // so the checkmark and the running session agree.
+  const liveModels = defaults?.models;
+  useEffect(() => {
+    if (!liveModels || !model) return;
+    const match = findCatalogModel(model, liveModels);
+    if (match && match.id !== model) onModelChange(match.id);
+  }, [liveModels, model, onModelChange]);
   const curEffort = efforts.find((e) => e.id === effort) ?? efforts[0];
   // Claude Code reports its account-specific resolved default through the
   // initialize handshake. "Recommended" remains only as a compatibility

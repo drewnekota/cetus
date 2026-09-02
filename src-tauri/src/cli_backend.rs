@@ -192,15 +192,17 @@ pub async fn get_cli_defaults(backend: String) -> Result<CliDefaults, String> {
     Ok(match backend.as_str() {
         "claude-code" => {
             let mut defaults = claude_defaults(&home);
-            // Claude's recommended model is account/rollout dependent and is
-            // not persisted in settings. Its initialize response is the only
-            // authoritative source (for example default may currently resolve
-            // to Opus even while Fable is also available).
-            if defaults.model.is_none() {
-                if let Some(probed) = probe_claude_defaults().await {
+            // The initialize probe is the only source of the live model
+            // catalog, so it runs even when settings pin a model — otherwise
+            // a pinned model would leave the picker on the static alias list,
+            // blind to new releases. The pinned model itself still wins over
+            // the probed account default (which is rollout dependent and not
+            // persisted in settings).
+            if let Some(probed) = probe_claude_defaults().await {
+                if defaults.model.is_none() {
                     defaults.model = probed.model;
-                    defaults.models = probed.models;
                 }
+                defaults.models = probed.models;
             }
             defaults
         }
@@ -549,6 +551,43 @@ async fn probe_claude_initialize(cwd: Option<&Path>, safe_mode: bool) -> Option<
     result
 }
 
+/// Version digits carried by a model id ("claude-fable-5-1[1m]" → "5.1"),
+/// skipping 8-digit date stamps ("claude-haiku-4-5-20251001" → "4.5").
+fn claude_model_version(raw: &str) -> Option<String> {
+    let base = raw.split('[').next().unwrap_or(raw);
+    let nums: Vec<&str> = base
+        .split('-')
+        .filter(|t| !t.is_empty() && t.len() < 8 && t.bytes().all(|b| b.is_ascii_digit()))
+        .collect();
+    (!nums.is_empty()).then(|| nums.join("."))
+}
+
+/// Append the model's version to the CLI's display name ("Fable" →
+/// "Fable 5.1", "Opus (1M context)" → "Opus 5 (1M context)"). The initialize
+/// catalog's displayName carries no version, so two CLI releases pointing
+/// "Fable" at different models would otherwise be indistinguishable in the
+/// picker. The version comes from the selectable id, falling back to
+/// resolvedModel for floating aliases like "opus[1m]"; names already carrying
+/// a digit are left alone.
+fn claude_versioned_label(display_name: &str, id: &str, resolved: Option<&str>) -> String {
+    let (name, suffix) = match display_name.split_once(" (") {
+        Some((name, rest)) => (name, Some(rest)),
+        None => (display_name, None),
+    };
+    if name.bytes().any(|b| b.is_ascii_digit()) {
+        return display_name.to_string();
+    }
+    let Some(version) = claude_model_version(id)
+        .or_else(|| resolved.and_then(claude_model_version))
+    else {
+        return display_name.to_string();
+    };
+    match suffix {
+        Some(rest) => format!("{name} {version} ({rest}"),
+        None => format!("{name} {version}"),
+    }
+}
+
 fn claude_defaults_from_initialize(value: &Value) -> Option<CliDefaults> {
     let models = value.pointer("/response/response/models")?.as_array()?;
     let default = models
@@ -569,9 +608,10 @@ fn claude_defaults_from_initialize(value: &Value) -> Option<CliDefaults> {
                 .get("displayName")
                 .and_then(Value::as_str)
                 .unwrap_or(id);
+            let resolved = entry.get("resolvedModel").and_then(Value::as_str);
             Some(CliModelEntry {
                 id: id.to_string(),
-                label: label.to_string(),
+                label: claude_versioned_label(label, id, resolved),
             })
         })
         .collect();
@@ -1899,22 +1939,40 @@ mod tests {
                 {
                     "value": "opus[1m]",
                     "resolvedModel": "claude-opus-4-8[1m]",
-                    "displayName": "Opus"
+                    "displayName": "Opus (1M context)"
                 },
                 {
-                    "value": "claude-fable-5[1m]",
-                    "resolvedModel": "claude-fable-5",
+                    "value": "claude-fable-5-1[1m]",
+                    "resolvedModel": "claude-fable-5-1",
                     "displayName": "Fable"
+                },
+                {
+                    "value": "haiku",
+                    "resolvedModel": "claude-haiku-4-5-20251001",
+                    "displayName": "Haiku"
                 }
             ]}}
         });
         let defaults = claude_defaults_from_initialize(&response).unwrap();
         assert_eq!(defaults.model.as_deref(), Some("claude-opus-4-8[1m]"));
         let models = defaults.models.unwrap();
-        assert_eq!(models.len(), 2);
+        assert_eq!(models.len(), 3);
         assert_eq!(models[0].id, "opus[1m]");
-        assert_eq!(models[0].label, "Opus");
-        assert_eq!(models[1].label, "Fable");
+        // Floating alias carries no version itself → resolvedModel's, spliced
+        // ahead of the parenthetical.
+        assert_eq!(models[0].label, "Opus 4.8 (1M context)");
+        assert_eq!(models[1].label, "Fable 5.1");
+        // Date stamps are not versions.
+        assert_eq!(models[2].label, "Haiku 4.5");
+    }
+
+    #[test]
+    fn claude_versioned_label_leaves_versioned_names_alone() {
+        assert_eq!(
+            claude_versioned_label("GPT-5.5", "gpt-5.5", None),
+            "GPT-5.5"
+        );
+        assert_eq!(claude_versioned_label("Fable", "fable", None), "Fable");
     }
 
     #[test]
