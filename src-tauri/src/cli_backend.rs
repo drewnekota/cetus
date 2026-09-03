@@ -577,8 +577,8 @@ fn claude_versioned_label(display_name: &str, id: &str, resolved: Option<&str>) 
     if name.bytes().any(|b| b.is_ascii_digit()) {
         return display_name.to_string();
     }
-    let Some(version) = claude_model_version(id)
-        .or_else(|| resolved.and_then(claude_model_version))
+    let Some(version) =
+        claude_model_version(id).or_else(|| resolved.and_then(claude_model_version))
     else {
         return display_name.to_string();
     };

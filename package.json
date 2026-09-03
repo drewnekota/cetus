@@ -5,6 +5,7 @@
   "private": true,
   "packageManager": "pnpm@10.27.0",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "dev": "next dev -p 17381",
     "build": "next build",
     "start": "next start",

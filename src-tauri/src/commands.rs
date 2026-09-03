@@ -1341,8 +1341,8 @@ pub async fn pick_workspace_dir(app: tauri::AppHandle) -> CmdResult<Option<Strin
 /// from the quick panel where there is no key window to sheet onto.
 #[cfg(target_os = "macos")]
 fn pick_folder_native() -> Option<PathBuf> {
-    use objc2::runtime::{AnyClass, AnyObject, Bool};
     use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject, Bool};
     let caught = objc2::exception::catch(core::panic::AssertUnwindSafe(|| unsafe {
         let cls = AnyClass::get(c"NSOpenPanel")?;
         let panel: *mut AnyObject = msg_send![cls, openPanel];
