@@ -7,14 +7,26 @@
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
   "exports": {
-    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
     "./package.json": "./package.json"
   },
-  "files": ["lib"],
+  "files": [
+    "lib"
+  ],
   "license": "BSD-3-Clause",
-  "engines": { "dsh": ">=0.0.1" },
+  "engines": {
+    "dsh": ">=0.1.2"
+  },
   "dshx": {
-    "contributes": { "tools": ["send_artifact"], "skills": [] }
+    "contributes": {
+      "tools": [
+        "send_artifact"
+      ],
+      "skills": []
+    }
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-system-prompt": "^0.0.1",

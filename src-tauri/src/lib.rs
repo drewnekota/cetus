@@ -1123,114 +1123,6 @@ pub fn run() {
                 Ok(_) => {}
                 Err(e) => tracing::warn!("interrupted-run sweep failed: {e}"),
             }
-            // Dsh bridge tools call back into Cetus over the authenticated
-            // reverse-RPC channel. The handler executes only after AppState is
-            // managed, when the shared Dsh host is first started.
-            {
-                let handle = app.handle().clone();
-                cetus_bridge::cli_agent::set_dsh_companion_rpc_handler(std::sync::Arc::new(
-                    move |method, params| {
-                        let handle = handle.clone();
-                        Box::pin(async move {
-                            match method.as_str() {
-                                "automation.create" => {
-                                    let input: crate::automation::AutomationInput =
-                                        serde_json::from_value(params).map_err(|e| e.to_string())?;
-                                    let automation = crate::automation_api::create(&handle, input)?;
-                                    serde_json::to_value(automation).map_err(|e| e.to_string())
-                                }
-                                "automation.list" => {
-                                    let state = handle.state::<AppState>();
-                                    let automations = crate::automation_api::list(&state)?;
-                                    serde_json::to_value(automations).map_err(|e| e.to_string())
-                                }
-                                "screen.search" => {
-                                    let state = handle.state::<AppState>();
-                                    let query = params
-                                        .get("query")
-                                        .and_then(serde_json::Value::as_str)
-                                        .unwrap_or("");
-                                    let hours = params
-                                        .get("hours")
-                                        .and_then(serde_json::Value::as_i64)
-                                        .unwrap_or(8)
-                                        .clamp(1, 168);
-                                    let app = params
-                                        .get("app")
-                                        .and_then(serde_json::Value::as_str)
-                                        .unwrap_or("");
-                                    let now = crate::store::now_ms();
-                                    crate::ambient::context_search(
-                                        &state.store,
-                                        query,
-                                        now - hours * 3_600_000,
-                                        now,
-                                        app,
-                                        20,
-                                    )
-                                    .map(serde_json::Value::String)
-                                }
-                                "screen.timeline" => {
-                                    let state = handle.state::<AppState>();
-                                    let hours = params
-                                        .get("hours")
-                                        .and_then(serde_json::Value::as_i64)
-                                        .unwrap_or(8)
-                                        .clamp(1, 168);
-                                    let since = crate::store::now_ms() - hours * 3_600_000;
-                                    let entries = state
-                                        .store
-                                        .ax_context_since(since, 4_000)
-                                        .map_err(|e| e.to_string())?;
-                                    let mut lines = Vec::new();
-                                    let mut last_key = String::new();
-                                    for entry in &entries {
-                                        let app = entry
-                                            .app_name
-                                            .clone()
-                                            .or(entry.bundle_id.clone())
-                                            .unwrap_or_default();
-                                        let title = entry
-                                            .window_title
-                                            .clone()
-                                            .or(entry.page_title.clone())
-                                            .unwrap_or_default();
-                                        let key = format!("{app}|{title}");
-                                        if key == last_key {
-                                            continue;
-                                        }
-                                        last_key = key;
-                                        let time = chrono::DateTime::from_timestamp_millis(entry.ts)
-                                            .map(|date| {
-                                                date.with_timezone(&chrono::Local)
-                                                    .format("%H:%M")
-                                                    .to_string()
-                                            })
-                                            .unwrap_or_default();
-                                        let url = entry.url.clone().unwrap_or_default();
-                                        lines.push(if url.is_empty() {
-                                            format!("{time} {app} — {title}")
-                                        } else {
-                                            format!("{time} {app} — {title} ({url})")
-                                        });
-                                    }
-                                    if lines.len() > 200 {
-                                        let skipped = lines.len() - 200;
-                                        lines = lines.split_off(skipped);
-                                        lines.insert(0, format!("(… {skipped} earlier entries omitted)"));
-                                    }
-                                    Ok(serde_json::Value::String(if lines.is_empty() {
-                                        "no screen activity recorded in this window (is Screen Context enabled?)".to_string()
-                                    } else {
-                                        lines.join("\n")
-                                    }))
-                                }
-                                other => Err(format!("unknown companion RPC method: {other}")),
-                            }
-                        })
-                    },
-                ));
-            }
             // Size/position the main window before it's presented: restore the
             // user's last geometry, or default to 90% of the current monitor,
             // centered, on the first ever launch. Tracking + persistence is wired
@@ -1709,11 +1601,8 @@ pub fn run() {
             {
                 let probe_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    let mut tick =
-                        tokio::time::interval(std::time::Duration::from_secs(300));
-                    tick.set_missed_tick_behavior(
-                        tokio::time::MissedTickBehavior::Delay,
-                    );
+                    let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+                    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     loop {
                         tick.tick().await;
                         let report = resources::webview_footprint_report(&probe_handle);
@@ -1810,6 +1699,7 @@ pub fn run() {
         commands::list_workspace_files,
         commands::list_workspace_directory,
         commands::search_workspace_files,
+        commands::export_conversation_transcript,
         commands::create_workspace_entry,
         commands::rename_workspace_entry,
         commands::trash_workspace_entry,
@@ -1928,6 +1818,8 @@ pub fn run() {
         quick::screen_recording_trusted,
         quick::request_screen_recording,
         quick::open_screen_recording_settings,
+        quick::full_disk_access_trusted,
+        quick::open_full_disk_access_settings,
         snip::snip_finish,
         snip::snip_cancel,
         voice::voice_permissions,
@@ -1996,6 +1888,7 @@ pub fn run() {
         commands::list_workspace_files,
         commands::list_workspace_directory,
         commands::search_workspace_files,
+        commands::export_conversation_transcript,
         commands::create_workspace_entry,
         commands::rename_workspace_entry,
         commands::trash_workspace_entry,
@@ -2114,6 +2007,8 @@ pub fn run() {
         quick::screen_recording_trusted,
         quick::request_screen_recording,
         quick::open_screen_recording_settings,
+        quick::full_disk_access_trusted,
+        quick::open_full_disk_access_settings,
         snip::snip_finish,
         snip::snip_cancel,
         voice::voice_permissions,
@@ -2152,7 +2047,6 @@ pub fn run() {
             if let tauri::RunEvent::Exit = &_event {
                 window_geom::flush(&_app.state::<AppState>().store);
                 _app.state::<terminal::TerminalRuntime>().shutdown_all();
-                cetus_bridge::cli_agent::dsh_shutdown_host();
                 // Hand Caps Lock back to the OS if we'd remapped it for dictation.
                 caps_remap::restore();
                 // A dev hot-reload or app quit must never orphan a meeting

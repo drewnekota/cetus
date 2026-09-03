@@ -7,7 +7,7 @@
  * @module dsh-vision
  */
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import z from 'schemastery';
+import z from '@deepseek-ai/schemastery';
 import { visionChat } from './vlm.js';
 export const name = 'dsh-vision';
 export const inject = ['tools', 'systemPrompt'];

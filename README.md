@@ -162,7 +162,7 @@ The three factors describe a single moment. What makes an agent useful over time
 - **Rust** stable (`rustc`, `cargo`)
 - **Tauri** prerequisites: <https://v2.tauri.app/start/prerequisites/>
 - A **`DEEPSEEK_API_KEY`** (or your provider of choice; pi auto-picks up `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)
-- **Optional**: the **Claude Code** (`claude`), **Codex** (`codex`), and/or **DeepSeek Harness** (`dsh`) CLIs installed and logged in, if you want them as conversation runtimes — Cetus reuses their existing login, no extra setup
+- **Optional**: the **Claude Code** (`claude`), **Codex** (`codex`), and/or **DeepSeek Harness** (`dsh`, 0.1.2 or newer — Cetus drives it through its ACP profile) CLIs installed and logged in, if you want them as conversation runtimes — Cetus reuses their existing login, no extra setup
 
 ### First-time setup
 
@@ -232,7 +232,7 @@ Outputs `.app` / `.dmg` on macOS. A real multi-size icon set is required for `ta
 - **Streaming**: pi emits `agent_start`, `message_update` with `assistantMessageEvent` deltas, and `tool_execution_*` events. The frontend `chatReducer` folds these into stable `RenderedMessage[]` indexed by `contentIndex`, with a `toolCallId → block` side-table to route execution updates.
 - **Framing**: strict-LF JSONL. `tauri-plugin-shell` delivers stdout in arbitrary byte chunks, so the reader maintains its own accumulator and emits one line per `\n`, stripping optional `\r`. Generic line readers that split on Unicode separators (Node `readline`) are non-compliant.
 - **Sidecar packaging**: `src-tauri/binaries/pi-<target>` ships inside `.app/Contents/Resources/`. `PI_BIN` env var is the dev backdoor for iterating on pi.
-- **CLI runtimes**: conversations on **Claude Code** / **Codex** / **DeepSeek Harness** bypass the pi RPC entirely — `cetus-bridge::cli_agent` keeps a conversation-scoped Claude (or DeepSeek Harness) streaming session or Codex app-server thread alive, and a unit-tested `EventTranslator` maps their events into the same PiEvent stream `chatReducer` already consumes. Context and background terminals persist across turns via the vendor session/thread; optional per-conversation git worktrees isolate edits.
+- **CLI runtimes**: conversations on **Claude Code** / **Codex** / **DeepSeek Harness** bypass the pi RPC entirely — `cetus-bridge::cli_agent` keeps a conversation-scoped Claude streaming session, Codex app-server thread, or ACP stdio session (DeepSeek Harness, OpenCode, Grok, Kimi) alive, and a unit-tested `EventTranslator` maps their events into the same PiEvent stream `chatReducer` already consumes. Context and background terminals persist across turns via the vendor session/thread; optional per-conversation git worktrees isolate edits.
 - **Extension UI**: when a pi extension calls `ctx.ui.select()` etc., pi sends `extension_ui_request` over the event stream. The frontend `DialogHost` renders a dialog and replies via the `extension_ui_respond` Tauri command.
 - **Bridge**: Cetus also intercepts known extension host tunnels and routes them to native handlers. See [docs/bridge.md](docs/bridge.md) for the protocol, security boundary, and open-source extraction plan.
 

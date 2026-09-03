@@ -250,6 +250,7 @@ export const CLI_MODELS: Record<
     { id: "", label: "Default" },
     { id: "deepseek-v4-flash", label: "DeepSeek-V4-Flash" },
     { id: "deepseek-v4-pro", label: "DeepSeek-V4-Pro" },
+    { id: "deepseek-v4-flash-vision-exp", label: "DeepSeek-V4-Flash-Vision-Exp" },
   ],
 };
 
@@ -281,10 +282,11 @@ export const CLI_EFFORTS: Record<
     { id: "medium", label: "Medium" },
     { id: "high", label: "High" },
   ],
+  // dsh's ACP `reasoning_effort` option: off / low / high / max (no medium).
   dsh: [
     { id: "", label: "Default" },
+    { id: "off", label: "Off" },
     { id: "low", label: "Low" },
-    { id: "medium", label: "Medium" },
     { id: "high", label: "High" },
     { id: "max", label: "Max" },
   ],

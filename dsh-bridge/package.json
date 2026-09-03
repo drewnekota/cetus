@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/dsh-companion-bridge",
-  "version": "0.1.0",
-  "description": "DSH Companion 的本地网关插件：把宿主 ApiProxy 暴露为 127.0.0.1 上的 HTTP + SSE（token 鉴权），供桌面壳驱动会话",
+  "version": "0.2.0",
+  "description": "Cetus tools for a dsh agent driven over ACP: scheduled automations and on-device screen memory, called back into the Cetus app over its control socket",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -18,7 +18,7 @@
   ],
   "license": "MIT",
   "engines": {
-    "dsh": ">=0.0.1"
+    "dsh": ">=0.1.2"
   },
   "dshx": {
     "contributes": {
@@ -32,13 +32,9 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-host-apiproxy": "^0.0.1",
     "@deepseek-ai/dsh-system-prompt": "^0.0.1",
     "@deepseek-ai/dsh-tools": "^0.0.1",
     "@deepseek-ai/cordis": "^4.0.1-rc.1"
-  },
-  "dependencies": {
-    "schemastery": "^3.18.0"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

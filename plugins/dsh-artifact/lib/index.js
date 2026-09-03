@@ -96,7 +96,12 @@ export function apply(ctx) {
                 throw new Error(`send_artifact: not a regular file: ${path}`);
             sizeCache.set(path, info.size);
             const descriptor = describeArtifact(path, typeof input.caption === 'string' && input.caption !== '' ? input.caption : null, info.size);
-            return `Delivered ${descriptor.name} (${descriptor.artifactKind}, ${info.size} bytes) to the user.`;
+            // Two delivery channels: the presentation meta above for clients on
+            // dsh's own event stream, and Cetus's `CETUS_ARTIFACT:` marker in
+            // the visible tool result for clients that only see the standard
+            // ACP tool lifecycle (Cetus promotes the marker into a file card).
+            const marker = `CETUS_ARTIFACT:${JSON.stringify({ path, sizeBytes: info.size, caption: descriptor.caption })}`;
+            return `Delivered ${descriptor.name} (${descriptor.artifactKind}, ${info.size} bytes) to the user.\n${marker}`;
         },
     })), 'dsh-artifact.tool');
     ctx.effect(() => ctx.systemPrompt.section({

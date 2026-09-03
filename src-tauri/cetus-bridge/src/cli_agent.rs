@@ -40,79 +40,14 @@ pub enum CliBackend {
     Dsh,
 }
 // ===========================================================================
-// DSH backend: one shared `dsh web` host process with the
-// companion bridge plugin mounted, one dsh session per conversation, driven
-// over the bridge's HTTP + SSE. Reuses `AcpSessionHandle` as the command
-// surface so the app-side session map, kill paths, and dispatch shape are
-// identical to the ACP runtimes.
-// Bridge protocol and adapter design adapted from william-jin-cmu/dsh-companion
-// (MIT): https://github.com/william-jin-cmu/dsh-companion
+// DSH backend: dsh's `acp` profile is a standard ACP v1 stdio server, so a
+// conversation drives `dsh --profile acp` through the same `spawn_acp_session`
+// path as the other native ACP runtimes. What stays dsh-specific lives here:
+// the vendored plugins Cetus mounts into `$DSH_HOME` (companion tools, vision,
+// artifact delivery), the `.env` credential passthrough, the version gate
+// (dsh < 0.1.2 has no `acp` profile), and the mapping from Cetus's model /
+// effort choice onto dsh's `session/set_config_option` catalog.
 // ===========================================================================
-
-struct DshHost {
-    base: String,
-    token: String,
-    client: reqwest::Client,
-    routes: std::sync::Mutex<
-        std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<Value>>,
-    >,
-}
-
-static DSH_HOST: tokio::sync::Mutex<Option<std::sync::Arc<DshHost>>> =
-    tokio::sync::Mutex::const_new(None);
-
-/// Future type for companion reverse-RPC handlers (bridge tools → app).
-pub type CompanionRpcFuture = futures_util::future::BoxFuture<'static, Result<Value, String>>;
-type CompanionRpcHandler =
-    std::sync::Arc<dyn Fn(String, Value) -> CompanionRpcFuture + Send + Sync>;
-static DSH_COMPANION_RPC: std::sync::OnceLock<CompanionRpcHandler> = std::sync::OnceLock::new();
-
-/// Register the app-side handler for bridge tool requests (automation.create
-/// etc.). Call once at startup, before the first dsh conversation.
-pub fn set_dsh_companion_rpc_handler(
-    handler: std::sync::Arc<dyn Fn(String, Value) -> CompanionRpcFuture + Send + Sync>,
-) {
-    let _ = DSH_COMPANION_RPC.set(handler);
-}
-
-/// PID of the spawned `dsh web` host, for process-group teardown at app exit.
-static DSH_HOST_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
-/// Stop the dsh host's whole process tree. Call from the app's exit path.
-pub fn dsh_shutdown_host() {
-    let pid = DSH_HOST_PID.swap(0, std::sync::atomic::Ordering::SeqCst);
-    if pid != 0 {
-        #[cfg(unix)]
-        let _ = std::process::Command::new("kill")
-            .args(["-TERM", &format!("-{pid}")])
-            .status();
-        #[cfg(windows)]
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status();
-    }
-}
-
-fn dsh_free_port() -> Result<u16> {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-    Ok(listener.local_addr()?.port())
-}
-
-fn dsh_random_token() -> String {
-    use std::io::Read;
-    let mut bytes = [0u8; 16];
-    if std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut bytes))
-        .is_err()
-    {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        bytes[..8].copy_from_slice(&now.as_nanos().to_le_bytes()[..8]);
-    }
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 const DSH_BRIDGE_JS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../dsh-bridge/lib/index.js"
@@ -187,19 +122,29 @@ const DSH_HOST_PACKAGES: &[(&str, &str)] = &[
     ("cordis", "vendor/cordis"),
     ("cosmokit", "vendor/cosmokit"),
     ("schemastery", "vendor/schemastery"),
+    ("@deepseek-ai/schemastery", "vendor/schemastery"),
     ("@deepseek-ai/dsh-tools", "packages/core/tools"),
     (
         "@deepseek-ai/dsh-system-prompt",
         "packages/core/system-prompt",
     ),
-    ("@deepseek-ai/dsh-host-apiproxy", "packages/host/apiproxy"),
 ];
 
-fn dsh_install_from_path() -> Option<std::path::PathBuf> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    let launcher = std::env::split_paths(&path)
-        .flat_map(|dir| ["dsh", "dsh.cmd", "dsh.exe"].map(move |name| dir.join(name)))
-        .find(|candidate| candidate.is_file())?;
+/// Root of the dsh install behind `bin`: a monorepo checkout (has `packages/`
+/// and `apps/`) or the installed `@deepseek-ai/dsh` package. `bin` is either
+/// an explicit path or a name resolved on `PATH`.
+fn dsh_install_for_bin(bin: &str) -> Option<std::path::PathBuf> {
+    let launcher = if std::path::Path::new(bin).components().count() > 1 {
+        std::path::PathBuf::from(bin)
+    } else {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::split_paths(&path)
+            .flat_map(|dir| {
+                [bin.to_string(), format!("{bin}.cmd"), format!("{bin}.exe")]
+                    .map(move |name| dir.join(name))
+            })
+            .find(|candidate| candidate.is_file())?
+    };
     let real = std::fs::canonicalize(launcher).ok()?;
     let mut cursor = real.as_path();
     let mut package_root = None;
@@ -222,10 +167,7 @@ fn dsh_install_from_path() -> Option<std::path::PathBuf> {
 }
 
 /// marisa#2 workaround for a vendored plugin dir: link declared host packages.
-fn dsh_link_host_packages(plugin_dir: &std::path::Path) {
-    let Some(install) = dsh_install_from_path() else {
-        return;
-    };
+fn dsh_link_host_packages(plugin_dir: &std::path::Path, install: &std::path::Path) {
     let Ok(text) = std::fs::read_to_string(plugin_dir.join("package.json")) else {
         return;
     };
@@ -245,24 +187,60 @@ fn dsh_link_host_packages(plugin_dir: &std::path::Path) {
                 .flat_map(|object| object.keys()),
         );
     for name in names {
-        if let Some((_, rel)) = DSH_HOST_PACKAGES.iter().find(|(known, _)| known == name) {
-            let checkout_source = install.join(rel);
-            let package_source = install.join("node_modules").join(name);
-            let source = if checkout_source.exists() {
-                checkout_source
-            } else {
-                package_source
-            };
-            let link = plugin_dir.join("node_modules").join(name);
-            if source.exists() && !link.exists() {
-                if let Some(parent) = link.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                #[cfg(unix)]
-                let _ = std::os::unix::fs::symlink(&source, &link);
+        let Some((_, rel)) = DSH_HOST_PACKAGES.iter().find(|(known, _)| known == name) else {
+            continue;
+        };
+        let Some(source) = dsh_host_package_source(install, rel, name) else {
+            continue;
+        };
+        let link = plugin_dir.join("node_modules").join(name);
+        // Re-point a link left behind by a previous dsh install; a real
+        // directory (the user's own copy) is left alone.
+        if let Ok(meta) = std::fs::symlink_metadata(&link) {
+            if meta.file_type().is_symlink()
+                && std::fs::read_link(&link).ok().as_deref() != Some(&source)
+            {
+                let _ = std::fs::remove_file(&link);
             }
         }
+        if !link.exists() {
+            if let Some(parent) = link.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            #[cfg(unix)]
+            let _ = std::os::unix::fs::symlink(&source, &link);
+        }
     }
+}
+
+/// Where a host package lives for a given dsh install: the checkout's own
+/// package dir, else `node_modules/<name>` beside the install or in any
+/// ancestor `node_modules` (npm hoists `@deepseek-ai/dsh`'s dependencies above
+/// the package directory itself).
+fn dsh_host_package_source(
+    install: &std::path::Path,
+    checkout_rel: &str,
+    name: &str,
+) -> Option<std::path::PathBuf> {
+    let checkout = install.join(checkout_rel);
+    if checkout.exists() {
+        return Some(checkout);
+    }
+    let mut cursor = Some(install);
+    while let Some(dir) = cursor {
+        let candidate = dir.join("node_modules").join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        if dir.file_name().is_some_and(|n| n == "node_modules") {
+            let sibling = dir.join(name);
+            if sibling.exists() {
+                return Some(sibling);
+            }
+        }
+        cursor = dir.parent();
+    }
+    None
 }
 
 /// Where the vendored plugins live: env override, else the repo dir in dev.
@@ -272,14 +250,25 @@ fn dsh_vendored_plugins_dir() -> std::path::PathBuf {
         .unwrap_or_else(|_| dsh_home().join("cetus-runtime/plugins"))
 }
 
-/// Ensure the formal Dsh home overlay mounts the companion bridge and bundled
-/// plugins. Existing rows win, so this can safely fill additions after an
-/// upgrade without replacing a user's own plugin mount.
-fn dsh_ensure_bridge_mounted() -> Result<()> {
+/// Ensure the dsh home overlay (`$DSH_HOME/cordis.patch.yml`, applied to every
+/// profile including `acp`) mounts the companion tools plugin and the bundled
+/// plugins. Cetus owns the rows inside its marked block and rewrites them on
+/// every launch, so a stale path from a previous app version heals itself
+/// (dsh 0.1.2 fails the whole profile boot on one unloadable plugin). A row
+/// for the same id that the user wrote outside the block wins as long as the
+/// file it points at still exists.
+fn dsh_ensure_plugins_mounted(bin: &str) -> Result<()> {
     let runtime = dsh_materialize_runtime()?;
+    let install = dsh_install_for_bin(bin);
+    let link = |plugin_dir: &std::path::Path| {
+        if let Some(install) = install.as_deref() {
+            dsh_link_host_packages(plugin_dir, install);
+        }
+    };
     let home = dsh_home();
     let config = home.join("cordis.patch.yml");
-    let existing = std::fs::read_to_string(&config).unwrap_or_default();
+    let (existing, previous_block) =
+        dsh_split_managed_block(&std::fs::read_to_string(&config).unwrap_or_default());
     let lib = std::env::var("DSH_COMPANION_BRIDGE_LIB").unwrap_or_else(|_| {
         runtime
             .join("bridge/lib/index.js")
@@ -290,943 +279,432 @@ fn dsh_ensure_bridge_mounted() -> Result<()> {
         .parent()
         .and_then(std::path::Path::parent)
         .context("invalid Dsh bridge path")?;
-    dsh_link_host_packages(bridge_dir);
+    link(bridge_dir);
     std::fs::create_dir_all(&home)?;
     let mut rows = String::new();
-    if !existing.contains("- id: dsh-companion-bridge") {
+    if !dsh_user_row_is_live(&existing, "dsh-companion-bridge") {
         rows.push_str(&format!(
             "    - id: dsh-companion-bridge\n      name: '{lib}'\n"
         ));
     }
     let plugins_dir = dsh_vendored_plugins_dir();
     for id in VENDORED_PLUGINS {
-        if existing.contains(&format!("- id: {id}")) {
-            continue; // the user's own mount of this plugin wins
+        if dsh_user_row_is_live(&existing, id) {
+            continue; // the user's own working mount of this plugin wins
         }
         let dir = plugins_dir.join(id);
         let entry = dir.join("lib/index.js");
         if entry.exists() {
-            dsh_link_host_packages(&dir);
+            link(&dir);
             rows.push_str(&format!(
                 "    - id: {id}\n      name: '{}'\n",
                 entry.display()
             ));
         }
     }
-    if rows.is_empty() {
+    let block = if rows.is_empty() {
+        String::new()
+    } else {
+        format!("\n{DSH_MANAGED_BEGIN}\n- insert:\n{rows}{DSH_MANAGED_END}\n")
+    };
+    if previous_block.as_deref() == Some(block.as_str()) {
         return Ok(());
     }
-    let block = format!(
-        "\n# >>> dsh-companion managed block (do not edit)\n- insert:\n{rows}# <<< dsh-companion managed block\n"
-    );
-    std::fs::write(&config, format!("{existing}{block}"))?;
+    std::fs::write(
+        &config,
+        format!("{}{block}", existing.trim_end_matches('\n')),
+    )?;
     Ok(())
 }
 
-async fn dsh_ensure_host(
-    bin: &str,
-    extra_env: Vec<(String, String)>,
-) -> Result<std::sync::Arc<DshHost>> {
-    let bin = bin.to_string();
-    let mut cached = DSH_HOST.lock().await;
-    if let Some(host) = cached.as_ref() {
-        let healthy = host
-            .client
-            .get(format!("{}/health", host.base))
-            .header("x-companion-token", &host.token)
-            .timeout(std::time::Duration::from_secs(2))
-            .send()
-            .await
-            .is_ok_and(|response| response.status().is_success());
-        if healthy {
-            return Ok(host.clone());
+const DSH_MANAGED_BEGIN: &str = "# >>> dsh-companion managed block (do not edit)";
+const DSH_MANAGED_END: &str = "# <<< dsh-companion managed block";
+
+/// Split `cordis.patch.yml` into the user's text and Cetus's managed block
+/// (`None` when there is none). The block is returned in the exact form the
+/// writer emits, so an unchanged mount is a no-op write.
+fn dsh_split_managed_block(text: &str) -> (String, Option<String>) {
+    let Some(begin) = text.find(DSH_MANAGED_BEGIN) else {
+        return (text.to_string(), None);
+    };
+    let Some(end_rel) = text[begin..].find(DSH_MANAGED_END) else {
+        return (text.to_string(), None);
+    };
+    let end = begin + end_rel + DSH_MANAGED_END.len();
+    let end = end
+        + text[end..]
+            .find('\n')
+            .map(|n| n + 1)
+            .unwrap_or(text.len() - end);
+    let before = text[..begin].trim_end_matches('\n');
+    let mut user = String::from(before);
+    if !before.is_empty() {
+        user.push('\n');
+    }
+    user.push_str(&text[end..]);
+    let block = format!("\n{}", &text[begin..end]);
+    (user, Some(block))
+}
+
+/// A row `- id: <id>` the user wrote themselves whose `name: '<path>'` still
+/// resolves to a file. Dead rows fall through so Cetus's own mount replaces
+/// the plugin (the dead row still needs the user's attention; dsh reports it).
+fn dsh_user_row_is_live(user_text: &str, id: &str) -> bool {
+    let marker = format!("- id: {id}");
+    let Some(at) = user_text.find(&marker) else {
+        return false;
+    };
+    let rest = &user_text[at + marker.len()..];
+    let Some(name_line) = rest.lines().nth(1) else {
+        return true; // not a plain file mount (a package name or a config-only row)
+    };
+    let Some(value) = name_line.trim().strip_prefix("name:") else {
+        return true;
+    };
+    let value = value.trim().trim_matches('\'').trim_matches('"');
+    if !std::path::Path::new(value).is_absolute() {
+        return true; // a package name: the loader resolves it
+    }
+    std::path::Path::new(value).exists()
+}
+
+/// Oldest dsh whose `acp` profile Cetus can drive. Earlier releases only had
+/// the ApiProxy gateway that the retired companion bridge wrapped.
+const DSH_MIN_VERSION: (u64, u64, u64) = (0, 1, 2);
+
+/// `major.minor.patch` from a version string, ignoring any prerelease or build
+/// suffix (`0.1.2-rc.1` → `(0, 1, 2)`).
+fn parse_semver_triple(text: &str) -> Option<(u64, u64, u64)> {
+    let core = text
+        .trim()
+        .trim_start_matches('v')
+        .split(['-', '+'])
+        .next()?;
+    let mut parts = core.split('.').map(|part| part.trim().parse::<u64>().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
+}
+
+/// Reject a dsh that predates the `acp` profile with a message that says what
+/// to install, instead of the opaque boot error `--profile acp` would produce.
+fn dsh_check_version(version: &str) -> Result<()> {
+    let parsed = parse_semver_triple(version)
+        .with_context(|| format!("could not parse the dsh version {version:?}"))?;
+    anyhow::ensure!(
+        parsed >= DSH_MIN_VERSION,
+        "dsh {} is too old for Cetus: it drives dsh over the `acp` profile, which needs dsh \
+         {}.{}.{} or newer. Upgrade with `npm i -g @deepseek-ai/dsh@latest` and retry.",
+        version.trim(),
+        DSH_MIN_VERSION.0,
+        DSH_MIN_VERSION.1,
+        DSH_MIN_VERSION.2
+    );
+    Ok(())
+}
+
+/// Binaries already verified this process lifetime; `dsh --version` boots node,
+/// so it is only worth paying once per install.
+static DSH_VERIFIED_BINS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Run `dsh --version` and gate on [`DSH_MIN_VERSION`]. Cached per binary.
+async fn dsh_require_supported_version(bin: &str) -> Result<()> {
+    if DSH_VERIFIED_BINS
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|verified| verified == bin)
+    {
+        return Ok(());
+    }
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        TokioCommand::new(bin)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .output(),
+    )
+    .await
+    .context("`dsh --version` timed out")?
+    .with_context(|| format!("failed to run `{bin} --version`"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let version = stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| parse_semver_triple(line).is_some())
+        .unwrap_or_else(|| stdout.trim());
+    dsh_check_version(version)?;
+    DSH_VERIFIED_BINS.lock().unwrap().push(bin.to_string());
+    Ok(())
+}
+
+/// `$DSH_HOME/.env` is dsh's own credential file; hand it to the child so the
+/// vendored plugins (dsh-vision etc.) see their keys regardless of which shell
+/// rc files a non-interactive login shell reads. Caller-supplied env is applied
+/// afterwards and wins.
+fn dsh_dotenv() -> Vec<(String, String)> {
+    let Ok(text) = std::fs::read_to_string(dsh_home().join(".env")) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            let value = value.trim().trim_matches('"').trim_matches('\'');
+            Some((key.trim().to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+/// Every selectable value of one ACP session config option, flattening the
+/// optional `{ group, options: [...] }` nesting dsh uses for provider groups.
+fn acp_config_choices(option: &Value) -> Vec<(String, String)> {
+    let mut choices = Vec::new();
+    let mut stack: Vec<&Value> = option
+        .get("options")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().collect())
+        .unwrap_or_default();
+    while let Some(item) = stack.pop() {
+        if let Some(nested) = item.get("options").and_then(Value::as_array) {
+            stack.extend(nested.iter());
+            continue;
         }
-        dsh_shutdown_host();
-        *cached = None;
-    }
-    let started: Result<std::sync::Arc<DshHost>> = async move {
-            dsh_ensure_bridge_mounted()?;
-            let web_port = dsh_free_port()?;
-            let bridge_port = dsh_free_port()?;
-            let token = dsh_random_token();
-            let mut command = TokioCommand::new(&bin);
-            command
-                .args(["web", "--port", &web_port.to_string()])
-                .env("DSH_COMPANION_BRIDGE_PORT", bridge_port.to_string())
-                .env("DSH_COMPANION_BRIDGE_TOKEN", &token);
-            // $DSH_HOME/.env is dsh's own credential file; inject it into the
-            // host env so plugins (dsh-vision etc.) see their keys regardless
-            // of which shell rc files a non-interactive login shell reads.
-            let dsh_env = std::env::var("DSH_HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| {
-                    std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
-                        .join(".dsh")
-                })
-                .join(".env");
-            if let Ok(text) = std::fs::read_to_string(&dsh_env) {
-                for line in text.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line.starts_with('#') {
-                        continue;
-                    }
-                    if let Some((key, value)) = line.split_once('=') {
-                        let value = value.trim().trim_matches('"').trim_matches('\'');
-                        command.env(key.trim(), value);
-                    }
-                }
-            }
-            command
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped());
-            for (key, value) in extra_env {
-                command.env(key, value);
-            }
-            #[cfg(unix)]
-            command.process_group(0);
-            let client = reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(3))
-                .build()?;
-            let mut child = command
-                .spawn()
-                .with_context(|| format!("failed to launch `{bin} web`"))?;
-            // The host outlives conversation handles; the app's exit path
-            // calls dsh_shutdown_host() to tear down the process group.
-            if let Some(pid) = child.id() {
-                DSH_HOST_PID.store(pid, std::sync::atomic::Ordering::SeqCst);
-            }
-            // Always drain stderr so a chatty long-lived host cannot block on
-            // pipe backpressure. Keep only a bounded tail for startup errors.
-            let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-            if let Some(mut stream) = child.stderr.take() {
-                let tail = stderr_tail.clone();
-                tokio::spawn(async move {
-                    use tokio::io::AsyncReadExt;
-                    let mut chunk = [0u8; 4096];
-                    while let Ok(count) = stream.read(&mut chunk).await {
-                        if count == 0 {
-                            break;
-                        }
-                        let mut text = tail.lock().unwrap();
-                        text.push_str(&String::from_utf8_lossy(&chunk[..count]));
-                        if text.len() > 32 * 1024 {
-                            let mut boundary = text.len() - 32 * 1024;
-                            while !text.is_char_boundary(boundary) {
-                                boundary += 1;
-                            }
-                            text.drain(..boundary);
-                        }
-                    }
-                });
-            }
-            let base = format!("http://127.0.0.1:{bridge_port}");
-            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
-            loop {
-                if let Some(status) = child.try_wait()? {
-                    DSH_HOST_PID.store(0, std::sync::atomic::Ordering::SeqCst);
-                    let stderr = stderr_tail.lock().unwrap().clone();
-                    anyhow::bail!(
-                        "`{bin} web` exited during startup ({status}): {}",
-                        stderr.trim()
-                    );
-                }
-                let health = client
-                    .get(format!("{base}/health"))
-                    .header("x-companion-token", &token)
-                    .timeout(std::time::Duration::from_secs(2))
-                    .send()
-                    .await;
-                if matches!(&health, Ok(resp) if resp.status().is_success()) {
-                    break;
-                }
-                if tokio::time::Instant::now() >= deadline {
-                    dsh_shutdown_host();
-                    anyhow::bail!(
-                        "dsh web + bridge not ready within 90s (is `{bin}` on PATH and the bridge plugin mounted?)"
-                    );
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-            }
-            let host_pid = child.id().unwrap_or(0);
-            tokio::spawn(async move {
-                let _ = child.wait().await;
-                if host_pid != 0
-                    && DSH_HOST_PID
-                        .compare_exchange(
-                            host_pid,
-                            0,
-                            std::sync::atomic::Ordering::SeqCst,
-                            std::sync::atomic::Ordering::SeqCst,
-                        )
-                        .is_ok()
-                {
-                    *DSH_HOST.lock().await = None;
-                }
-            });
-
-            let host = std::sync::Arc::new(DshHost {
-                base,
-                token,
-                client,
-                routes: std::sync::Mutex::new(std::collections::HashMap::new()),
-            });
-            // SSE pump: route every frame to its session's channel.
-            let pump = host.clone();
-            let (events_ready_tx, events_ready_rx) = tokio::sync::oneshot::channel();
-            tokio::spawn(async move {
-                let mut events_ready_tx = Some(events_ready_tx);
-                loop {
-                    let request = pump
-                        .client
-                        .get(format!("{}/events", pump.base))
-                        .header("x-companion-token", &pump.token)
-                        .send()
-                        .await;
-                    if let Ok(resp) = request {
-                        if !resp.status().is_success() {
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                            continue;
-                        }
-                        if let Some(ready) = events_ready_tx.take() {
-                            let _ = ready.send(());
-                        }
-                        let mut buf = String::new();
-                        let mut stream = resp.bytes_stream();
-                        use futures_util::StreamExt;
-                        while let Some(Ok(bytes)) = stream.next().await {
-                            buf.push_str(&String::from_utf8_lossy(&bytes));
-                            while let Some(pos) = buf.find("\n\n") {
-                                let chunk: String = buf.drain(..pos + 2).collect();
-                                for line in chunk.lines() {
-                                    let Some(data) = line.strip_prefix("data: ") else {
-                                        continue;
-                                    };
-                                    let Ok(value) = serde_json::from_str::<Value>(data) else {
-                                        continue;
-                                    };
-                                    if value.get("stream").and_then(Value::as_str) == Some("companion") {
-                                        let rpc_id = value.get("rpcId").and_then(Value::as_str).unwrap_or("").to_string();
-                                        let frame = value.get("frame").cloned().unwrap_or(Value::Null);
-                                        let host = pump.clone();
-                                        tokio::spawn(async move {
-                                            let method = frame.get("method").and_then(Value::as_str).unwrap_or("").to_string();
-                                            let params = frame.get("params").cloned().unwrap_or(Value::Null);
-                                            let result = match DSH_COMPANION_RPC.get() {
-                                                Some(handler) => handler(method, params).await,
-                                                None => Err("companion rpc handler not registered".to_string()),
-                                            };
-                                            let body = match result {
-                                                Ok(value) => json!({ "id": rpc_id, "ok": true, "value": value }),
-                                                Err(error) => json!({ "id": rpc_id, "ok": false, "error": error }),
-                                            };
-                                            let _ = host.client
-                                                .post(format!("{}/rpc-result", host.base))
-                                                .header("x-companion-token", &host.token)
-                                                .timeout(std::time::Duration::from_secs(30))
-                                                .json(&body)
-                                                .send()
-                                                .await;
-                                        });
-                                        continue;
-                                    }
-                                    let session_id = value
-                                        .get("frame")
-                                        .and_then(|f| f.get("sessionId"))
-                                        .and_then(Value::as_str)
-                                        .map(str::to_string);
-                                    if let Some(session_id) = session_id {
-                                        let routes = pump.routes.lock().unwrap();
-                                        if let Some(tx) = routes.get(&session_id) {
-                                            let _ = tx.send(value);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                }
-            });
-            if !matches!(
-                tokio::time::timeout(std::time::Duration::from_secs(10), events_ready_rx).await,
-                Ok(Ok(()))
-            ) {
-                dsh_shutdown_host();
-                anyhow::bail!("dsh bridge event stream did not become ready");
-            }
-            Ok(host)
-    }
-    .await;
-    if let Ok(host) = &started {
-        *cached = Some(host.clone());
-    }
-    started
-}
-
-impl DshHost {
-    /// POST /call and unwrap both envelopes (bridge + RpcResponse) to the value.
-    async fn call(&self, path: &str, payload: Value) -> Result<Value> {
-        let resp = self
-            .client
-            .post(format!("{}/call", self.base))
-            .header("x-companion-token", &self.token)
-            .timeout(std::time::Duration::from_secs(600))
-            .json(&json!({ "path": path, "payload": payload }))
-            .send()
-            .await
-            .with_context(|| format!("bridge call {path} failed"))?;
-        let body: Value = resp.json().await?;
-        anyhow::ensure!(
-            body.get("ok").and_then(Value::as_bool) == Some(true),
-            "bridge {path}: {}",
-            body.get("error")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown error")
-        );
-        let result = body.get("result").cloned().unwrap_or(Value::Null);
-        // respond() returns a bare receipt; domain calls return RpcResponse.
-        if let Some(inner) = result.get("result") {
-            anyhow::ensure!(
-                inner.get("ok").and_then(Value::as_bool) == Some(true),
-                "dsh {path}: {}",
-                inner
-                    .get("error")
-                    .map(|e| e.to_string())
-                    .unwrap_or_else(|| "unknown error".to_string())
-            );
-            return Ok(inner.get("value").cloned().unwrap_or(Value::Null));
+        if let Some(value) = item.get("value").and_then(Value::as_str) {
+            let name = item.get("name").and_then(Value::as_str).unwrap_or("");
+            choices.push((value.to_string(), name.to_string()));
         }
-        Ok(result)
     }
+    choices
 }
 
-impl EventTranslator {
-    /// Translate one dsh SessionEvent (`{type, data}` from the bridge mux
-    /// stream) into PiEvents, in the same vocabulary as the ACP path.
-    pub fn on_dsh_event(&mut self, event: &Value) -> Vec<Value> {
-        let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
-        let data = event.get("data").cloned().unwrap_or(Value::Null);
-        let out = match kind {
-            "assistant/chunk" => {
-                let chunk = data.get("chunk").cloned().unwrap_or(Value::Null);
-                let index = chunk.get("index").and_then(Value::as_u64).unwrap_or(0);
-                match chunk.get("type").and_then(Value::as_str).unwrap_or("") {
-                    "text-delta" => {
-                        let text = chunk.get("text").and_then(Value::as_str).unwrap_or("");
-                        self.emit_codex_delta(
-                            format!("dsh-text-{index}"),
-                            "dsh-message",
-                            LiveKind::Text,
-                            text,
-                        )
-                    }
-                    "reasoning-delta" => {
-                        let text = chunk.get("text").and_then(Value::as_str).unwrap_or("");
-                        self.emit_codex_delta(
-                            format!("dsh-think-{index}"),
-                            "dsh-message",
-                            LiveKind::Thinking,
-                            text,
-                        )
-                    }
-                    _ => Vec::new(),
+/// Map Cetus's per-conversation model / effort choice onto dsh's
+/// `session/set_config_option` calls, using the catalog dsh returned with the
+/// session. Cetus stores bare model ids (`deepseek-v4-pro`); dsh's option
+/// values are `["<provider>", "<model>"]` JSON strings, so a choice matches on
+/// the whole value, on the model half, or on the display name. Unknown values
+/// are skipped (dsh keeps its own default) rather than sent to fail.
+fn dsh_config_updates(
+    config_options: &Value,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Vec<(String, String)> {
+    let options = config_options.as_array().cloned().unwrap_or_default();
+    let option = |id: &str| {
+        options
+            .iter()
+            .find(|option| option.get("id").and_then(Value::as_str) == Some(id))
+    };
+    let mut updates = Vec::new();
+    if let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) {
+        if let Some(option) = option("model") {
+            let choices = acp_config_choices(option);
+            let matched = choices.iter().find(|(value, name)| {
+                if value == model || name.eq_ignore_ascii_case(model) {
+                    return true;
                 }
-            }
-            "assistant/message" => {
-                // Authoritative assembled message. If nothing streamed (e.g. a
-                // provider without deltas), emit the text once, then settle.
-                let mut events = Vec::new();
-                if self.codex_live_blocks.is_empty() {
-                    let content = data
-                        .get("message")
-                        .and_then(|m| m.get("content"))
-                        .and_then(Value::as_array)
-                        .cloned()
-                        .unwrap_or_default();
-                    for block in &content {
-                        match block.get("type").and_then(Value::as_str).unwrap_or("") {
-                            "text" => {
-                                let text = block.get("text").and_then(Value::as_str).unwrap_or("");
-                                events.extend(self.emit_codex_delta(
-                                    "dsh-text-final".to_string(),
-                                    "dsh-message",
-                                    LiveKind::Text,
-                                    text,
-                                ));
-                            }
-                            "reasoning" => {
-                                let text = block.get("text").and_then(Value::as_str).unwrap_or("");
-                                events.extend(self.emit_codex_delta(
-                                    "dsh-think-final".to_string(),
-                                    "dsh-message",
-                                    LiveKind::Thinking,
-                                    text,
-                                ));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                events.extend(self.close_all_codex_blocks());
-                events
-            }
-            "tool/call" => {
-                let mut events = self.close_all_codex_blocks();
-                let id = data
-                    .get("callId")
-                    .and_then(Value::as_str)
-                    .unwrap_or("dsh-tool")
-                    .to_string();
-                let name = data
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("tool")
-                    .to_string();
-                let raw_args = data
-                    .get("arguments")
-                    .and_then(Value::as_str)
-                    .unwrap_or("{}");
-                let input: Value =
-                    serde_json::from_str(raw_args).unwrap_or_else(|_| json!({ "raw": raw_args }));
-                if self.started_items.insert(id.clone()) {
-                    events.extend(self.emit_tool_call(&id, &name, &input));
-                    events.push(json!({ "type": "tool_execution_start", "toolCallId": id }));
-                }
-                events
-            }
-            "tool/result" => {
-                let mut events = self.close_all_codex_blocks();
-                let message = data.get("message").cloned().unwrap_or(Value::Null);
-                let id = message
-                    .get("callId")
-                    .and_then(Value::as_str)
-                    .or_else(|| message.get("toolCallId").and_then(Value::as_str))
-                    .unwrap_or("dsh-tool")
-                    .to_string();
-                let failed = data.get("error").is_some();
-                let text = message
-                    .get("content")
-                    .and_then(Value::as_array)
-                    .map(|blocks| {
-                        blocks
-                            .iter()
-                            .filter_map(|b| b.get("text").and_then(Value::as_str))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                    .unwrap_or_default();
-                let details = data.get("meta").cloned().unwrap_or(Value::Null);
-                events.extend(self.emit_tool_result_end_with_details(
-                    &id,
-                    &json!(text),
-                    details,
-                    failed,
-                ));
-                self.started_items.remove(&id);
-                events
-            }
-            _ => Vec::new(),
-        };
-        self.with_open(out)
-    }
-}
-
-struct ActiveDshTurn {
-    sink: Arc<dyn EventSink>,
-    outcome: tokio::sync::oneshot::Sender<CliTurnOutcome>,
-    translator: EventTranslator,
-}
-
-/// Spawn (or adopt) the dsh session behind one conversation and return the
-/// standard session handle. `opts.resume` carries the dsh session id from a
-/// previous run; absent → a fresh session is created lazily on first turn.
-pub fn spawn_dsh_session(
-    bin: &str,
-    cwd: &Path,
-    conversation_id: Option<String>,
-    extra_env: Vec<(String, String)>,
-    opts: CliRunOpts,
-) -> Result<AcpSessionHandle> {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let handle = AcpSessionHandle { tx };
-    let bin = bin.to_string();
-    let cwd = cwd.to_string_lossy().into_owned();
-
-    tokio::spawn(async move {
-        let host = match dsh_ensure_host(&bin, extra_env).await {
-            Ok(host) => host,
-            Err(error) => {
-                dsh_fail_all(
-                    &mut rx,
-                    &conversation_id,
-                    &format!("dsh host failed: {error:#}"),
-                )
-                .await;
-                return;
-            }
-        };
-        // Resolve the session: reuse the stored id or create a fresh one.
-        let session_id = match &opts.resume {
-            Some(resume) => resume.clone(),
-            None => {
-                match host
-                    .call("sessions.create", json!({ "cwd": cwd }))
-                    .await
-                    .and_then(|v| {
-                        v.get("sessionId")
+                serde_json::from_str::<Value>(value)
+                    .ok()
+                    .and_then(|parsed| {
+                        parsed
+                            .as_array()
+                            .and_then(|pair| pair.last())
                             .and_then(Value::as_str)
                             .map(str::to_string)
-                            .ok_or_else(|| anyhow::anyhow!("sessions.create returned no id"))
-                    }) {
-                    Ok(id) => id,
-                    Err(error) => {
-                        dsh_fail_all(
-                            &mut rx,
-                            &conversation_id,
-                            &format!("dsh session create failed: {error:#}"),
-                        )
-                        .await;
-                        return;
-                    }
-                }
-            }
-        };
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
-        host.routes
-            .lock()
-            .unwrap()
-            .insert(session_id.clone(), event_tx);
-
-        // Apply the conversation's model/effort choice for this session. The
-        // app recreates the session task on every tuning change, so once per
-        // spawn is enough.
-        if opts.model.is_some() || opts.effort.is_some() {
-            let model = opts
-                .model
-                .clone()
-                .unwrap_or_else(|| "deepseek-v4-flash".to_string());
-            let mut select = json!({
-                "sessionId": session_id,
-                "provider": "deepseek-official",
-                "model": model,
+                    })
+                    .is_some_and(|candidate| candidate == model)
             });
-            if let Some(effort) = opts.effort.clone().filter(|e| !e.is_empty()) {
-                select["reasoningEffort"] = json!(effort);
+            match matched {
+                Some((value, _)) => updates.push(("model".to_string(), value.clone())),
+                None => tracing::warn!("dsh has no model {model:?}; keeping its default"),
             }
-            if let Err(error) = host.call("sessions.selectModel", select).await {
-                tracing::warn!("dsh selectModel failed (continuing on defaults): {error:#}");
-            }
-        }
-
-        let mut active: Option<ActiveDshTurn> = None;
-        let bypass_approvals = opts.bypass_approvals;
-        // A pending ask_user_question: (frame rpcId, question items). The next
-        // StartTurn answers it (free-text) instead of sending a new prompt.
-        let mut pending_question: Option<(String, Vec<Value>)> = None;
-        loop {
-            tokio::select! {
-                command = rx.recv() => {
-                    match command {
-                        Some(AcpSessionCommand::StartTurn { prompt, images, sink, outcome }) => {
-                            let mut translator = EventTranslator::new(CliBackend::Dsh);
-                            translator.resume_id = Some(session_id.clone());
-                            emit_protocol(&sink, &conversation_id, translator.start());
-                            if let Some((question_rpc, items)) = pending_question.take() {
-                                // The user's message answers the pending question.
-                                let answers: Vec<Value> = items.iter().map(|item| json!({
-                                    "id": item.get("id").cloned().unwrap_or(json!("q")),
-                                    "selected": [],
-                                    "custom": prompt,
-                                })).collect();
-                                let answered = host.call("respond", json!({
-                                    "type": "client-response",
-                                    "rpcId": question_rpc,
-                                    "result": { "ok": true, "value": {
-                                        "sessionId": session_id,
-                                        "answer": { "answers": answers },
-                                    }},
-                                })).await;
-                                match answered {
-                                    Ok(_) => {
-                                        // The same dsh turn resumes; stream it into this new bubble.
-                                        active = Some(ActiveDshTurn { sink, outcome, translator });
-                                    }
-                                    Err(error) => {
-                                        let msg = format!("answer delivery failed: {error:#}");
-                                        let events = translator.finish(Some(&msg));
-                                        emit_protocol(&sink, &conversation_id, events);
-                                        let _ = outcome.send(CliTurnOutcome {
-                                            resume_id: Some(session_id.clone()),
-                                            messages: std::mem::take(&mut translator.messages),
-                                            aborted: false,
-                                            streamed: false,
-                                            resume_rejected: false,
-                                            error: Some(msg),
-                                        });
-                                    }
-                                }
-                                continue;
-                            }
-                            // dsh's LLM protocol has no image blocks yet
-                            // (dsh-external/issues#131): save attachments to
-                            // disk and reference them by path — with the
-                            // dsh-vision plugin mounted the model views them
-                            // through its view_image tool.
-                            let mut prompt = prompt;
-                            for (index, (mime, base64_data)) in images.iter().enumerate() {
-                                let ext = match mime.as_str() {
-                                    "image/jpeg" => "jpg",
-                                    "image/webp" => "webp",
-                                    "image/gif" => "gif",
-                                    _ => "png",
-                                };
-                                let path = std::env::temp_dir().join(format!(
-                                    "dsh-companion-attachment-{}-{index}.{ext}",
-                                    std::process::id()
-                                ));
-                                use base64::Engine as _;
-                                if base64::engine::general_purpose::STANDARD
-                                    .decode(base64_data)
-                                    .ok()
-                                    .and_then(|bytes| std::fs::write(&path, bytes).ok())
-                                    .is_some()
-                                {
-                                    prompt.push_str(&format!(
-                                        "\n\n[attached image {}: {} — view it with the view_image tool if available, otherwise read what you can from context]",
-                                        index + 1,
-                                        path.display()
-                                    ));
-                                }
-                            }
-                            let sent = host.call("sessions.prompt", json!({
-                                "sessionId": session_id,
-                                "mode": "queue",
-                                "content": [{ "type": "text", "text": prompt }],
-                            })).await;
-                            match sent {
-                                Ok(_) => active = Some(ActiveDshTurn { sink, outcome, translator }),
-                                Err(error) => {
-                                    let msg = format!("{error:#}");
-                                    let events = translator.finish(Some(&msg));
-                                    emit_protocol(&sink, &conversation_id, events);
-                                    let _ = outcome.send(CliTurnOutcome {
-                                        resume_id: Some(session_id.clone()),
-                                        messages: std::mem::take(&mut translator.messages),
-                                        aborted: false,
-                                        streamed: false,
-                                        resume_rejected: false,
-                                        error: Some(msg),
-                                    });
-                                }
-                            }
-                        }
-                        Some(AcpSessionCommand::RespondQuestion { request_id, response }) => {
-                            let raw = request_id.as_str().unwrap_or("");
-                            let rpc = raw.strip_prefix("q::").unwrap_or(raw).to_string();
-                            let items = pending_question
-                                .take()
-                                .filter(|(pending_rpc, _)| *pending_rpc == rpc)
-                                .map(|(_, items)| items)
-                                .unwrap_or_default();
-                            // Card answers: { answers: { <id>: { answers: [..] } } }.
-                            let by_id = response
-                                .get("answers")
-                                .cloned()
-                                .unwrap_or_else(|| json!({}));
-                            let answers: Vec<Value> = items.iter().enumerate().map(|(i, item)| {
-                                let id = item.get("id").and_then(Value::as_str)
-                                    .map(str::to_string)
-                                    .unwrap_or_else(|| format!("q{i}"));
-                                let picked: Vec<String> = by_id
-                                    .get(&id)
-                                    .and_then(|a| a.get("answers"))
-                                    .and_then(Value::as_array)
-                                    .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
-                                    .unwrap_or_default();
-                                let labels: Vec<&str> = item.get("options").and_then(Value::as_array)
-                                    .map(|opts| opts.iter().filter_map(|o| o.get("label").and_then(Value::as_str)).collect())
-                                    .unwrap_or_default();
-                                let (selected, custom): (Vec<String>, Vec<String>) =
-                                    picked.into_iter().partition(|p| labels.contains(&p.as_str()));
-                                let mut answer = json!({ "id": id, "selected": selected });
-                                if !custom.is_empty() {
-                                    answer["custom"] = json!(custom.join("; "));
-                                }
-                                answer
-                            }).collect();
-                            let result = host.call("respond", json!({
-                                "type": "client-response",
-                                "rpcId": rpc,
-                                "result": { "ok": true, "value": {
-                                    "sessionId": session_id,
-                                    "answer": { "answers": answers },
-                                }},
-                            })).await;
-                            if let Err(error) = result {
-                                tracing::warn!("dsh question answer rejected: {error:#}");
-                            }
-                        }
-                        Some(AcpSessionCommand::RespondPermission { request_id, allow }) => {
-                            // request_id = "<rpcId>::<approvalId>" (see frame handling).
-                            let raw = request_id.as_str().unwrap_or("");
-                            let (rpc_id, approval_id) = raw.split_once("::").unwrap_or((raw, raw));
-                            let outcome = if allow { "allowed-once" } else { "rejected" };
-                            let _ = host.call("respond", json!({
-                                "type": "client-response",
-                                "rpcId": rpc_id,
-                                "result": { "ok": true, "value": {
-                                    "sessionId": session_id,
-                                    "approvalId": approval_id,
-                                    "outcome": outcome,
-                                }},
-                            })).await;
-                        }
-                        Some(AcpSessionCommand::Abort) => {
-                            let _ = host.call("sessions.cancel", json!({ "sessionId": session_id })).await;
-                            // Settle the turn NOW with everything streamed so
-                            // far — the trajectory must survive an abort even
-                            // if the host's turn/end never reaches us.
-                            pending_question = None;
-                            if let Some(mut turn) = active.take() {
-                                let events = turn.translator.finish(None);
-                                emit_protocol(&turn.sink, &conversation_id, events);
-                                let _ = turn.outcome.send(CliTurnOutcome {
-                                    resume_id: Some(session_id.clone()),
-                                    messages: std::mem::take(&mut turn.translator.messages),
-                                    aborted: true,
-                                    streamed: true,
-                                    resume_rejected: false,
-                                    error: None,
-                                });
-                            }
-                        }
-                        Some(AcpSessionCommand::Shutdown) | None => break,
-                    }
-                }
-                event = event_rx.recv() => {
-                    let Some(envelope) = event else { break };
-                    let rpc_id = envelope.get("rpcId").and_then(Value::as_str).unwrap_or("").to_string();
-                    let frame = envelope.get("frame").cloned().unwrap_or(Value::Null);
-                    let frame_type = frame.get("type").and_then(Value::as_str).unwrap_or("");
-                    match frame_type {
-                        "session/event" => {
-                            let Some(turn) = active.as_mut() else { continue };
-                            let event = frame.get("event").cloned().unwrap_or(Value::Null);
-                            let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
-                            if event_type == "turn/end" {
-                                let reason = event.get("data").and_then(|d| d.get("reason"));
-                                let error = reason
-                                    .and_then(|r| r.get("kind"))
-                                    .and_then(Value::as_str)
-                                    .filter(|kind| *kind != "completed")
-                                    .map(|kind| {
-                                        let detail = reason
-                                            .and_then(|r| r.get("message"))
-                                            .and_then(Value::as_str)
-                                            .unwrap_or("");
-                                        if detail.is_empty() { format!("turn ended: {kind}") } else { detail.to_string() }
-                                    });
-                                let mut turn = active.take().expect("checked above");
-                                let events = turn.translator.finish(error.as_deref());
-                                emit_protocol(&turn.sink, &conversation_id, events);
-                                let _ = turn.outcome.send(CliTurnOutcome {
-                                    resume_id: Some(session_id.clone()),
-                                    messages: std::mem::take(&mut turn.translator.messages),
-                                    aborted: false,
-                                    streamed: true,
-                                    resume_rejected: false,
-                                    error,
-                                });
-                            } else {
-                                let events = turn.translator.on_dsh_event(&event);
-                                emit_protocol(&turn.sink, &conversation_id, events);
-                            }
-                        }
-                        "approval/requested" => {
-                            if bypass_approvals {
-                                let approval_id = frame
-                                    .get("approvalId")
-                                    .and_then(Value::as_str)
-                                    .unwrap_or("");
-                                let _ = host.call("respond", json!({
-                                    "type": "client-response",
-                                    "rpcId": rpc_id,
-                                    "result": { "ok": true, "value": {
-                                        "sessionId": session_id,
-                                        "approvalId": approval_id,
-                                        "outcome": "allowed-once",
-                                    }},
-                                })).await;
-                                continue;
-                            }
-                            let Some(turn) = active.as_ref() else {
-                                // Nothing can answer: reject to unblock the agent.
-                                let approval_id = frame.get("approvalId").and_then(Value::as_str).unwrap_or("");
-                                let _ = host.call("respond", json!({
-                                    "type": "client-response",
-                                    "rpcId": rpc_id,
-                                    "result": { "ok": true, "value": {
-                                        "sessionId": session_id,
-                                        "approvalId": approval_id,
-                                        "outcome": "rejected",
-                                    }},
-                                })).await;
-                                continue;
-                            };
-                            let approval_id = frame.get("approvalId").and_then(Value::as_str).unwrap_or("");
-                            let tool_name = frame.get("toolName").and_then(Value::as_str).unwrap_or("tool");
-                            emit_protocol(&turn.sink, &conversation_id, vec![json!({
-                                "type": "cli_control_request",
-                                "requestId": format!("{rpc_id}::{approval_id}"),
-                                "source": "acp",
-                                "toolName": tool_name,
-                                "input": { "title": tool_name, "reason": frame.get("reason") },
-                                "toolUseId": frame.get("callId"),
-                                "suggestions": Value::Null,
-                            })]);
-                        }
-                        "question/requested" => {
-                            let items = frame.get("questions").and_then(Value::as_array).cloned().unwrap_or_default();
-                            if let Some(turn) = active.as_ref() {
-                                // Render cetus's native interactive question card;
-                                // the answer arrives as RespondQuestion.
-                                let questions: Vec<Value> = items.iter().enumerate().map(|(i, item)| json!({
-                                    "id": item.get("id").cloned().unwrap_or(json!(format!("q{i}"))),
-                                    "question": item.get("question").cloned().unwrap_or(json!("")),
-                                    "header": item.get("header").cloned().unwrap_or(json!("Question")),
-                                    "options": item.get("options").cloned().unwrap_or(json!([])),
-                                    "multiSelect": item.get("multiSelect").cloned().unwrap_or(json!(false)),
-                                    "isOther": true,
-                                    "isSecret": false,
-                                })).collect();
-                                emit_protocol(&turn.sink, &conversation_id, vec![json!({
-                                    "type": "cli_control_request",
-                                    "requestId": format!("q::{rpc_id}"),
-                                    "source": "dsh",
-                                    "requestKind": "request_user_input",
-                                    "toolName": "ask_user_question",
-                                    "input": { "questions": questions },
-                                    "toolUseId": Value::Null,
-                                })]);
-                                pending_question = Some((rpc_id.clone(), items));
-                            } else {
-                                // No open UI turn to carry the question: cancel politely.
-                                let _ = host.call("respond", json!({
-                                    "type": "client-response",
-                                    "rpcId": rpc_id,
-                                    "result": { "ok": false, "error": {
-                                        "code": "cancelled",
-                                        "message": "no interactive surface for this question; continue with reasonable assumptions",
-                                        "details": {},
-                                    }},
-                                })).await;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        host.routes.lock().unwrap().remove(&session_id);
-    });
-
-    Ok(handle)
-}
-
-/// Fail every queued command on a session whose host never came up.
-async fn dsh_fail_all(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<AcpSessionCommand>,
-    conversation_id: &Option<String>,
-    message: &str,
-) {
-    while let Some(command) = rx.recv().await {
-        match command {
-            AcpSessionCommand::StartTurn { sink, outcome, .. } => {
-                let mut translator = EventTranslator::new(CliBackend::Dsh);
-                emit_protocol(&sink, conversation_id, translator.start());
-                let events = translator.finish(Some(message));
-                emit_protocol(&sink, conversation_id, events);
-                let _ = outcome.send(CliTurnOutcome {
-                    resume_id: None,
-                    messages: std::mem::take(&mut translator.messages),
-                    aborted: false,
-                    streamed: false,
-                    resume_rejected: false,
-                    error: Some(message.to_string()),
-                });
-            }
-            AcpSessionCommand::Shutdown => break,
-            _ => {}
         }
     }
+    if let Some(effort) = effort.map(str::trim).filter(|value| !value.is_empty()) {
+        if let Some(option) = option("reasoning_effort") {
+            let choices = acp_config_choices(option);
+            let matched = choices
+                .iter()
+                .find(|(value, name)| value == effort || name.eq_ignore_ascii_case(effort));
+            match matched {
+                Some((value, _)) => updates.push(("reasoning_effort".to_string(), value.clone())),
+                None => {
+                    tracing::warn!("dsh has no reasoning effort {effort:?}; keeping its default")
+                }
+            }
+        }
+    }
+    updates
 }
 
 #[cfg(test)]
 mod dsh_tests {
     use super::*;
 
-    fn event_types(events: &[Value]) -> Vec<&str> {
-        events
-            .iter()
-            .filter_map(|event| {
-                event
-                    .pointer("/assistantMessageEvent/type")
-                    .and_then(Value::as_str)
-                    .or_else(|| event.get("type").and_then(Value::as_str))
-            })
-            .collect()
-    }
-
     #[test]
-    fn dsh_has_no_one_shot_headless_argv() {
+    fn dsh_is_driven_over_the_acp_profile() {
+        assert!(CliBackend::Dsh.is_acp());
+        assert_eq!(CliBackend::Dsh.acp_args(), ["--profile", "acp"]);
         assert!(CliBackend::Dsh
             .turn_args("ignored", &CliRunOpts::default())
             .is_empty());
     }
 
     #[test]
-    fn dsh_stream_preserves_markdown_and_reasoning() {
-        let mut translator = EventTranslator::new(CliBackend::Dsh);
-        let mut events = translator.start();
-        events.extend(translator.on_dsh_event(&json!({
-            "type": "assistant/chunk",
-            "data": { "chunk": { "type": "reasoning-delta", "index": 0, "text": "checking\n" } }
-        })));
-        events.extend(translator.on_dsh_event(&json!({
-            "type": "assistant/chunk",
-            "data": { "chunk": { "type": "text-delta", "index": 1, "text": "```rs\n    let x = 1;\n```\n\n" } }
-        })));
-        events.extend(translator.on_dsh_event(&json!({
-            "type": "assistant/message",
-            "data": { "message": { "content": [] } }
-        })));
-        events.extend(translator.finish(None));
+    fn dsh_version_gate_accepts_0_1_2_and_rejects_older() {
+        assert!(dsh_check_version("0.1.2-rc.1").is_ok());
+        assert!(dsh_check_version("0.1.2").is_ok());
+        assert!(dsh_check_version("v0.2.0\n").is_ok());
+        let error = dsh_check_version("0.1.1-rc.2").unwrap_err().to_string();
+        assert!(error.contains("0.1.1-rc.2"), "{error}");
+        assert!(error.contains("npm i -g @deepseek-ai/dsh"), "{error}");
+        assert!(dsh_check_version("garbage").is_err());
+    }
 
-        let types = event_types(&events);
-        assert!(types.contains(&"thinking_delta"));
-        assert!(types.contains(&"text_delta"));
-        assert_eq!(
-            translator.messages[0]["content"][1]["text"],
-            "```rs\n    let x = 1;\n```\n\n"
-        );
+    fn sample_catalog() -> Value {
+        json!([
+            {
+                "id": "model", "type": "select",
+                "currentValue": "[\"deepseek-official\",\"deepseek-v4-flash\"]",
+                "options": [{
+                    "group": "deepseek-official", "name": "DeepSeek",
+                    "options": [
+                        { "value": "[\"deepseek-official\",\"deepseek-v4-flash\"]", "name": "DeepSeek-V4-Flash" },
+                        { "value": "[\"deepseek-official\",\"deepseek-v4-pro\"]", "name": "DeepSeek-V4-Pro" }
+                    ]
+                }]
+            },
+            {
+                "id": "reasoning_effort", "type": "select", "currentValue": "high",
+                "options": [
+                    { "value": "off", "name": "Off" }, { "value": "low", "name": "Low" },
+                    { "value": "high", "name": "High" }, { "value": "max", "name": "Max" }
+                ]
+            }
+        ])
     }
 
     #[test]
-    fn dsh_tool_events_translate_to_cards_and_artifacts() {
-        let mut translator = EventTranslator::new(CliBackend::Dsh);
-        let mut events = translator.on_dsh_event(&json!({
-            "type": "tool/call",
-            "data": { "callId": "call-1", "name": "send_artifact", "arguments": "{\"path\":\"/tmp/report.pdf\"}" }
-        }));
-        events.extend(translator.on_dsh_event(&json!({
-            "type": "tool/result",
-            "data": {
-                "message": { "callId": "call-1", "content": [{ "type": "text", "text": "delivered" }] },
-                "meta": { "kind": "artifact", "path": "/tmp/report.pdf", "mimeType": "application/pdf" }
-            }
-        })));
+    fn dsh_config_updates_map_bare_model_ids_onto_provider_pairs() {
+        let updates = dsh_config_updates(&sample_catalog(), Some("deepseek-v4-pro"), Some("max"));
+        assert_eq!(
+            updates,
+            [
+                (
+                    "model".to_string(),
+                    "[\"deepseek-official\",\"deepseek-v4-pro\"]".to_string()
+                ),
+                ("reasoning_effort".to_string(), "max".to_string()),
+            ]
+        );
+        // Display names and full values match too.
+        let by_name = dsh_config_updates(&sample_catalog(), Some("DeepSeek-V4-Flash"), None);
+        assert_eq!(
+            by_name[0].1,
+            "[\"deepseek-official\",\"deepseek-v4-flash\"]"
+        );
+        let by_value = dsh_config_updates(
+            &sample_catalog(),
+            Some("[\"deepseek-official\",\"deepseek-v4-flash\"]"),
+            None,
+        );
+        assert_eq!(by_value.len(), 1);
+    }
 
+    #[test]
+    fn dsh_managed_block_round_trips_and_heals_stale_rows() {
+        let user = "- id: dsh-gal\n  name: '/nowhere/dsh-gal/lib/index.js'\n";
+        let block = format!(
+            "\n{DSH_MANAGED_BEGIN}\n- insert:\n    - id: dsh-vision\n      name: '/old/app/dsh-vision/lib/index.js'\n{DSH_MANAGED_END}\n"
+        );
+        let text = format!("{user}{block}");
+        let (rest, previous) = dsh_split_managed_block(&text);
+        assert_eq!(rest, user);
+        assert_eq!(previous.as_deref(), Some(block.as_str()));
+        // No block at all, and a block in the middle of user text.
+        assert_eq!(dsh_split_managed_block(user), (user.to_string(), None));
+        let middle = format!("{block}- id: after\n  name: '@scope/pkg'\n");
+        let (rest, previous) = dsh_split_managed_block(&middle);
+        assert_eq!(rest, "- id: after\n  name: '@scope/pkg'\n");
+        assert!(previous.is_some());
+        // A user row for a managed id only wins while its file exists; a stale
+        // row (the 2026-08-24 boot failure) no longer blocks Cetus's mount.
+        assert!(!dsh_user_row_is_live(user, "dsh-gal"));
+        assert!(!dsh_user_row_is_live(user, "dsh-vision"));
+        assert!(dsh_user_row_is_live(
+            "- id: dsh-vision\n  name: '@dsh-external/dsh-vision'\n",
+            "dsh-vision"
+        ));
+        let live = std::env::temp_dir().join(format!("cetus-dsh-live-row-{}", std::process::id()));
+        std::fs::write(&live, b"").unwrap();
+        assert!(dsh_user_row_is_live(
+            &format!("- id: dsh-vision\n  name: '{}'\n", live.display()),
+            "dsh-vision"
+        ));
+        let _ = std::fs::remove_file(live);
+    }
+
+    #[test]
+    fn dsh_host_packages_resolve_through_hoisted_node_modules() {
+        let root = std::env::temp_dir().join(format!("cetus-dsh-hoist-{}", std::process::id()));
+        let install = root.join("node_modules/@deepseek-ai/dsh");
+        let hoisted = root.join("node_modules/@deepseek-ai/dsh-tools");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::create_dir_all(&hoisted).unwrap();
+        assert_eq!(
+            dsh_host_package_source(&install, "packages/core/tools", "@deepseek-ai/dsh-tools"),
+            Some(hoisted)
+        );
+        assert_eq!(
+            dsh_host_package_source(&install, "vendor/x", "@deepseek-ai/missing"),
+            None
+        );
+        let checkout = root.join("checkout");
+        std::fs::create_dir_all(checkout.join("packages/core/tools")).unwrap();
+        assert_eq!(
+            dsh_host_package_source(&checkout, "packages/core/tools", "@deepseek-ai/dsh-tools"),
+            Some(checkout.join("packages/core/tools"))
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn dsh_config_updates_skip_unknown_choices_and_empty_input() {
+        assert!(dsh_config_updates(&sample_catalog(), Some("gpt-9"), Some("medium")).is_empty());
+        assert!(dsh_config_updates(&sample_catalog(), Some(""), Some("")).is_empty());
+        assert!(dsh_config_updates(&Value::Null, Some("deepseek-v4-pro"), None).is_empty());
+    }
+
+    /// dsh-artifact's `send_artifact` answers with Cetus's `CETUS_ARTIFACT:`
+    /// marker in the visible tool result, because the ACP tool lifecycle
+    /// carries no presentation meta. The generic ACP translator must promote
+    /// it into a file card exactly like a `cetus artifact` bash call.
+    #[test]
+    fn dsh_send_artifact_marker_is_promoted_over_acp() {
+        let dir =
+            std::env::temp_dir().join(format!("cetus-dsh-acp-artifact-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("report.pdf");
+        std::fs::write(&file, b"%PDF").unwrap();
+        let mut translator =
+            EventTranslator::new(CliBackend::Dsh).with_artifact_storage(dir.clone(), dir.clone());
+        let mut events = translator.on_acp_update(&json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call-1",
+            "title": "send_artifact",
+            "kind": "other",
+            "status": "in_progress",
+            "rawInput": { "path": file.to_string_lossy() }
+        }));
+        let marker = format!(
+            "CETUS_ARTIFACT:{}",
+            json!({ "path": file.to_string_lossy(), "sizeBytes": 4 })
+        );
+        events.extend(translator.on_acp_update(&json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "call-1",
+            "status": "completed",
+            "content": [{ "type": "content", "content": { "type": "text", "text": format!("Delivered report.pdf to the user.\n{marker}") } }]
+        })));
         assert!(events
             .iter()
             .any(|event| event.get("type") == Some(&json!("tool_execution_start"))));
@@ -1234,13 +712,19 @@ mod dsh_tests {
             .iter()
             .find(|event| event.get("type") == Some(&json!("tool_execution_end")))
             .expect("tool result event");
-        assert_eq!(end["result"]["details"]["kind"], "artifact");
-        assert_eq!(end["result"]["details"]["path"], "/tmp/report.pdf");
+        assert_eq!(end["result"]["details"]["name"], json!("report.pdf"));
+        assert_eq!(end["result"]["details"]["artifactKind"], json!("pdf"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// Drive a real `dsh --profile acp` end to end through the generic ACP
+    /// session path: version gate, plugin mount, model selection, one turn,
+    /// then a resume of the same session in a fresh process.
+    /// `cargo test -p cetus-bridge live_dsh_acp -- --ignored --nocapture`;
+    /// `CETUS_TEST_DSH_BIN` picks the binary (default `dsh` on PATH).
     #[tokio::test]
     #[ignore]
-    async fn live_dsh_bridge_smoke() {
+    async fn live_dsh_acp_smoke() {
         struct Sink(std::sync::Mutex<Vec<Value>>);
         impl EventSink for Sink {
             fn emit(&self, event: RuntimeEvent) {
@@ -1249,49 +733,57 @@ mod dsh_tests {
                 }
             }
         }
-
-        // Exercise the embedded bridge in an otherwise clean DSH_HOME so this
-        // cannot accidentally pass through a developer's existing companion
-        // plugin mount. Preserve only provider credentials when present.
+        let bin = std::env::var("CETUS_TEST_DSH_BIN").unwrap_or_else(|_| "dsh".to_string());
+        // Isolated DSH_HOME so the run cannot lean on a developer's own plugin
+        // mounts; only provider credentials and defaults are carried over.
         let original_home = dsh_home();
         let isolated_home =
-            std::env::temp_dir().join(format!("cetus-live-dsh-home-{}", std::process::id()));
+            std::env::temp_dir().join(format!("cetus-live-dsh-acp-{}", std::process::id()));
         std::fs::create_dir_all(&isolated_home).unwrap();
-        if let Ok(credentials) = std::fs::read(original_home.join(".env")) {
-            std::fs::write(isolated_home.join(".env"), credentials).unwrap();
+        for file in [".env", "settings.yaml"] {
+            if let Ok(bytes) = std::fs::read(original_home.join(file)) {
+                std::fs::write(isolated_home.join(file), bytes).unwrap();
+            }
         }
         std::env::set_var("DSH_HOME", &isolated_home);
-
-        let cwd = std::env::temp_dir().join("cetus-live-dsh");
+        let cwd = std::env::temp_dir().join("cetus-live-dsh-acp-cwd");
         std::fs::create_dir_all(&cwd).unwrap();
-        let sink = Arc::new(Sink(std::sync::Mutex::new(Vec::new())));
-        let session = spawn_dsh_session(
-            "dsh",
-            &cwd,
-            Some("live-dsh".into()),
-            std::env::vars().collect(),
-            CliRunOpts {
-                bypass_approvals: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(180),
-            session
-                .start_turn(
-                    "Reply with exactly CETUS_DSH_OK. Do not use tools.".into(),
-                    Vec::new(),
-                    sink.clone(),
-                )
-                .unwrap(),
-        )
-        .await
-        .expect("live Dsh turn timed out")
-        .expect("live Dsh session exited");
-        session.shutdown();
-        dsh_shutdown_host();
-        let messages = serde_json::to_string(&outcome.messages).unwrap();
+        let env: Vec<(String, String)> = std::env::vars().collect();
+
+        let run = |resume: Option<String>, prompt: &str| {
+            let sink = Arc::new(Sink(std::sync::Mutex::new(Vec::new())));
+            let session = spawn_acp_session(
+                CliBackend::Dsh,
+                &bin,
+                &cwd,
+                Some(cwd.join("artifacts")),
+                Some("live-dsh-acp".into()),
+                env.clone(),
+                CliRunOpts {
+                    model: Some("deepseek-v4-flash".into()),
+                    effort: Some("low".into()),
+                    resume,
+                    bypass_approvals: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let receiver = session
+                .start_turn(prompt.to_string(), Vec::new(), sink.clone())
+                .unwrap();
+            async move {
+                let outcome = tokio::time::timeout(Duration::from_secs(240), receiver)
+                    .await
+                    .expect("live dsh turn timed out")
+                    .expect("live dsh session exited");
+                session.shutdown();
+                (outcome, sink)
+            }
+        };
+
+        let (first, sink) = run(None, "Reply with exactly CETUS_DSH_OK. Do not use tools.").await;
+        assert!(first.error.is_none(), "{:?}", first.error);
+        let messages = serde_json::to_string(&first.messages).unwrap();
         assert!(messages.contains("CETUS_DSH_OK"), "{messages}");
         assert!(sink.0.lock().unwrap().iter().any(|event| {
             event
@@ -1299,6 +791,33 @@ mod dsh_tests {
                 .and_then(Value::as_str)
                 == Some("text_delta")
         }));
+        let session_id = first.resume_id.clone().expect("dsh session id");
+
+        // The plugins mounted: list_automations is a Cetus tool, and a fresh
+        // process resumes the persisted session with its context intact.
+        let (second, sink) = run(
+            Some(session_id.clone()),
+            "What exact token did I ask you to reply with a moment ago? Answer with just that token. Then call the list_automations tool once and reply DONE.",
+        )
+        .await;
+        assert!(second.error.is_none(), "{:?}", second.error);
+        assert_eq!(second.resume_id.as_deref(), Some(session_id.as_str()));
+        let messages = serde_json::to_string(&second.messages).unwrap();
+        assert!(
+            messages.contains("CETUS_DSH_OK"),
+            "resume lost context: {messages}"
+        );
+        let events = sink.0.lock().unwrap();
+        assert!(
+            events.iter().any(|event| event
+                .pointer("/assistantMessageEvent/type")
+                .and_then(Value::as_str)
+                == Some("toolcall_start")
+                || event.get("type").and_then(Value::as_str) == Some("tool_execution_start")),
+            "no tool call observed: {}",
+            serde_json::to_string(&*events).unwrap()
+        );
+        let _ = std::fs::remove_dir_all(isolated_home);
     }
 }
 
@@ -1340,7 +859,7 @@ impl CliBackend {
     }
 
     pub fn is_acp(self) -> bool {
-        matches!(self, Self::OpenCode | Self::Grok | Self::Kimi)
+        matches!(self, Self::OpenCode | Self::Grok | Self::Kimi | Self::Dsh)
     }
 
     /// Arguments that start the vendor's native ACP stdio server.
@@ -1349,6 +868,7 @@ impl CliBackend {
             Self::OpenCode => &["acp"],
             Self::Grok => &["agent", "stdio"],
             Self::Kimi => &["acp"],
+            Self::Dsh => &["--profile", "acp"],
             _ => &[],
         }
     }
@@ -1476,10 +996,7 @@ impl CliBackend {
                 }
                 a.push(prompt.into());
             }
-            CliBackend::OpenCode | CliBackend::Grok | CliBackend::Kimi => {
-                let _ = (prompt, opts);
-            }
-            CliBackend::Dsh => {
+            CliBackend::OpenCode | CliBackend::Grok | CliBackend::Kimi | CliBackend::Dsh => {
                 let _ = (prompt, opts);
             }
         }
@@ -3234,8 +2751,9 @@ impl EventTranslator {
         let events = match self.backend {
             CliBackend::ClaudeCode => self.on_claude(&v),
             CliBackend::Codex => self.on_codex(&v),
-            CliBackend::OpenCode | CliBackend::Grok | CliBackend::Kimi => Vec::new(),
-            CliBackend::Dsh => Vec::new(),
+            CliBackend::OpenCode | CliBackend::Grok | CliBackend::Kimi | CliBackend::Dsh => {
+                Vec::new()
+            }
         };
         self.with_open(events)
     }
@@ -4742,10 +4260,6 @@ enum AcpSessionCommand {
         request_id: Value,
         allow: bool,
     },
-    RespondQuestion {
-        request_id: Value,
-        response: Value,
-    },
     Abort,
     Shutdown,
 }
@@ -4773,15 +4287,6 @@ impl AcpSessionHandle {
         self.tx
             .send(AcpSessionCommand::RespondPermission { request_id, allow })
             .map_err(|_| anyhow::anyhow!("ACP session has exited"))
-    }
-
-    pub fn respond_question(&self, request_id: Value, response: Value) -> Result<()> {
-        self.tx
-            .send(AcpSessionCommand::RespondQuestion {
-                request_id,
-                response,
-            })
-            .map_err(|_| anyhow::anyhow!("agent session has exited"))
     }
 
     pub fn abort(&self) {
@@ -4988,6 +4493,16 @@ pub fn spawn_acp_session(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    if backend == CliBackend::Dsh {
+        // dsh reads `$DSH_HOME/cordis.patch.yml` for every profile, so the
+        // companion tools / vision / artifact plugins mount into `acp` too.
+        if let Err(error) = dsh_ensure_plugins_mounted(bin) {
+            tracing::warn!("dsh: could not mount the Cetus plugins: {error:#}");
+        }
+        for (key, value) in dsh_dotenv() {
+            command.env(key, value);
+        }
+    }
     for (key, value) in extra_env {
         command.env(key, value);
     }
@@ -4999,6 +4514,7 @@ pub fn spawn_acp_session(
     let stderr = child.stderr.take();
     let translator_cwd = cwd.to_path_buf();
     let cwd_string = cwd.to_string_lossy().into_owned();
+    let bin_name = bin.to_string();
     let client_version = opts
         .client_version
         .clone()
@@ -5007,15 +4523,54 @@ pub fn spawn_acp_session(
     let handle = AcpSessionHandle { tx };
 
     tokio::spawn(async move {
+        // Bounded stderr head: a handshake failure's JSON-RPC error is usually
+        // opaque ("bridge disposed"), while the agent already explained itself
+        // on stderr (missing package, bad plugin, no credentials). Boot
+        // diagnostics come first, so keep the head and drop stack frames.
+        let stderr_head = Arc::new(std::sync::Mutex::new(String::new()));
         if let Some(stderr) = stderr {
+            let head = stderr_head.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     tracing::debug!("{} ACP stderr: {line}", backend.as_str());
+                    let mut text = head.lock().unwrap();
+                    if text.len() < 8 * 1024 && !line.trim_start().starts_with("at ") {
+                        text.push_str(&line);
+                        text.push('\n');
+                    }
                 }
             });
         }
+        let with_stderr = |error: String| {
+            // Give the agent a beat to finish writing its boot diagnostics.
+            let head = stderr_head.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let head = head.lock().unwrap().trim().to_string();
+                if head.is_empty() {
+                    error
+                } else {
+                    format!("{error}\n\n{} stderr:\n{head}", backend.as_str())
+                }
+            }
+        };
         let mut reader = BufReader::new(stdout).lines();
+        if backend == CliBackend::Dsh {
+            if let Err(error) = dsh_require_supported_version(&bin_name).await {
+                tracing::warn!("dsh version gate: {error:#}");
+                fail_queued_acp_turns(
+                    &mut rx,
+                    backend,
+                    artifact_dir.as_deref(),
+                    &translator_cwd,
+                    &conversation_id,
+                    &format!("{error:#}"),
+                );
+                let _ = child.start_kill();
+                return;
+            }
+        }
         let init = acp_handshake_request(
             &mut stdin,
             &mut reader,
@@ -5035,13 +4590,14 @@ pub fn spawn_acp_session(
             Ok(value) => value,
             Err(error) => {
                 tracing::warn!("{} ACP initialize failed: {error}", backend.as_str());
+                let error = with_stderr(error.to_string()).await;
                 fail_queued_acp_turns(
                     &mut rx,
                     backend,
                     artifact_dir.as_deref(),
                     &translator_cwd,
                     &conversation_id,
-                    &error.to_string(),
+                    &error,
                 );
                 let _ = child.start_kill();
                 return;
@@ -5051,6 +4607,14 @@ pub fn spawn_acp_session(
             .pointer("/agentCapabilities/loadSession")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        // dsh persists sessions itself and restores one through the ACP
+        // `session/resume` extension (advertised under sessionCapabilities)
+        // instead of `session/load`; its log comes back without replaying old
+        // updates, which is exactly what Cetus wants — the transcript is
+        // already on screen.
+        let can_resume = init
+            .pointer("/agentCapabilities/sessionCapabilities/resume")
+            .is_some();
         let grok_default_model = (backend == CliBackend::Grok)
             .then(|| {
                 init.pointer("/_meta/modelState/currentModelId")
@@ -5068,26 +4632,32 @@ pub fn spawn_acp_session(
             }
         }
         let resume_requested = opts.resume.is_some();
-        let loaded = if can_load {
-            if let Some(resume) = opts.resume.as_ref() {
-                acp_handshake_request(
-                    &mut stdin,
-                    &mut reader,
-                    2,
-                    "session/load",
-                    json!({
-                        "sessionId": resume,
-                        "cwd": cwd_string,
-                        "mcpServers": []
-                    }),
-                )
-                .await
-                .ok()
-            } else {
-                None
-            }
+        let resume_method = if can_load {
+            Some("session/load")
+        } else if can_resume {
+            Some("session/resume")
         } else {
             None
+        };
+        let loaded = match (resume_method, opts.resume.as_ref()) {
+            (Some(method), Some(resume)) => acp_handshake_request(
+                &mut stdin,
+                &mut reader,
+                2,
+                method,
+                json!({
+                    "sessionId": resume,
+                    "cwd": cwd_string,
+                    "mcpServers": []
+                }),
+            )
+            .await
+            .map_err(|error| {
+                tracing::warn!("{} ACP {method} failed: {error}", backend.as_str());
+                error
+            })
+            .ok(),
+            _ => None,
         };
         let loaded_existing = loaded.is_some();
         let session_result = match loaded {
@@ -5104,13 +4674,14 @@ pub fn spawn_acp_session(
                 Ok(value) => value,
                 Err(error) => {
                     tracing::warn!("{} ACP session/new failed: {error}", backend.as_str());
+                    let error = with_stderr(error.to_string()).await;
                     fail_queued_acp_turns(
                         &mut rx,
                         backend,
                         artifact_dir.as_deref(),
                         &translator_cwd,
                         &conversation_id,
-                        &error.to_string(),
+                        &error,
                     );
                     let _ = child.start_kill();
                     return;
@@ -5157,6 +4728,33 @@ pub fn spawn_acp_session(
                         .await
                 {
                     tracing::warn!("Grok ACP session/set_model failed: {error}");
+                }
+            }
+        }
+
+        if backend == CliBackend::Dsh && (opts.model.is_some() || opts.effort.is_some()) {
+            let catalog = session_result
+                .get("configOptions")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let updates =
+                dsh_config_updates(&catalog, opts.model.as_deref(), opts.effort.as_deref());
+            for (index, (config_id, value)) in updates.into_iter().enumerate() {
+                let params = json!({
+                    "sessionId": session_id,
+                    "configId": config_id,
+                    "value": value,
+                });
+                if let Err(error) = acp_handshake_request(
+                    &mut stdin,
+                    &mut reader,
+                    5 + index as u64,
+                    "session/set_config_option",
+                    params,
+                )
+                .await
+                {
+                    tracing::warn!("dsh ACP session/set_config_option {config_id} failed: {error}");
                 }
             }
         }
@@ -5253,9 +4851,6 @@ pub fn spawn_acp_session(
                             ).await;
                         }
                     }
-                    // Native ACP currently exposes permission requests only;
-                    // structured question responses are used by Dsh sessions.
-                    Some(AcpSessionCommand::RespondQuestion { .. }) => {}
                     Some(AcpSessionCommand::Abort) => {
                         let _ = acp_write(
                             &mut stdin,

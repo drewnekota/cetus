@@ -811,31 +811,9 @@ pub async fn cli_control_respond(
     source: Option<String>,
     install_plugin_id: Option<String>,
 ) -> Result<(), String> {
-    if source.as_deref() == Some("dsh") {
-        let session = state
-            .acp_session(&id)
-            .ok_or_else(|| "Dsh session is no longer running".to_string())?;
-        if request_id
-            .as_str()
-            .is_some_and(|raw| raw.starts_with("q::"))
-        {
-            return session
-                .respond_question(request_id, response)
-                .map_err(|error| error.to_string());
-        }
-        let allow = response
-            .get("behavior")
-            .and_then(Value::as_str)
-            .is_some_and(|behavior| behavior == "allow")
-            || response
-                .get("action")
-                .and_then(Value::as_str)
-                .is_some_and(|action| action == "accept");
-        return session
-            .respond_permission(request_id, allow)
-            .map_err(|error| error.to_string());
-    }
-    if source.as_deref() == Some("acp") {
+    // "dsh" is the pre-0.1.2 bridge's source tag; dsh now answers through the
+    // generic ACP path like every other ACP runtime.
+    if matches!(source.as_deref(), Some("acp") | Some("dsh")) {
         let allow = response
             .get("behavior")
             .and_then(Value::as_str)
@@ -1132,6 +1110,8 @@ pub fn dispatch_turn(
     // Image attachments: claude takes them inline on the stdin user message
     // (native content blocks); codex ingests file paths via `-i`. Both get the
     // on-disk paths appended to the prompt (image_refs) for file-based reuse.
+    // dsh's ACP profile advertises no image prompt capability, so it also
+    // works from the on-disk paths (the vendored dsh-vision plugin views them).
     let is_codex = backend == cetus_bridge::cli_agent::CliBackend::Codex;
     let is_dsh = backend == cetus_bridge::cli_agent::CliBackend::Dsh;
     let image_blocks: Vec<(String, String)> = if is_codex || is_dsh {
@@ -1162,7 +1142,7 @@ pub fn dispatch_turn(
     };
     // codex has no --append-system-prompt equivalent, so the Cetus hint rides
     // the first turn's prompt (resumed turns already have it in context).
-    if (is_codex || is_dsh || backend.is_acp()) && resume_before.is_empty() {
+    if (is_codex || backend.is_acp()) && resume_before.is_empty() {
         prompt = format!(
             "<cetus-env>\n{}\n</cetus-env>\n\n{prompt}",
             crate::control::AGENT_HINT
@@ -1205,7 +1185,7 @@ pub fn dispatch_turn(
         image_blocks: image_blocks.clone(),
         // claude: the Cetus hint goes on the system prompt every turn (codex
         // and the ACP runtimes got it as a first-turn preamble above).
-        append_system_prompt: (!is_codex && !is_dsh && !backend.is_acp())
+        append_system_prompt: (!is_codex && !backend.is_acp())
             .then(|| crate::control::AGENT_HINT.to_string()),
         cold_start_preamble: acp_cold_start_preamble,
         client_version: Some(handle.package_info().version.to_string()),
@@ -1362,29 +1342,19 @@ pub fn dispatch_turn(
         return Ok(());
     }
 
-    if backend.is_acp() || backend == cetus_bridge::cli_agent::CliBackend::Dsh {
+    if backend.is_acp() {
         let session = match state.acp_session(&conv.id) {
             Some(session) => session,
             None => {
-                let spawned = if backend == cetus_bridge::cli_agent::CliBackend::Dsh {
-                    cetus_bridge::cli_agent::spawn_dsh_session(
-                        &bin,
-                        &cwd,
-                        Some(conv.id.clone()),
-                        env,
-                        opts,
-                    )
-                } else {
-                    cetus_bridge::cli_agent::spawn_acp_session(
-                        backend,
-                        &bin,
-                        &cwd,
-                        Some(artifacts_dir(&state.app_data_dir, &conv.id)),
-                        Some(conv.id.clone()),
-                        env,
-                        opts,
-                    )
-                };
+                let spawned = cetus_bridge::cli_agent::spawn_acp_session(
+                    backend,
+                    &bin,
+                    &cwd,
+                    Some(artifacts_dir(&state.app_data_dir, &conv.id)),
+                    Some(conv.id.clone()),
+                    env,
+                    opts,
+                );
                 let session = match spawned {
                     Ok(session) => session,
                     Err(error) => {
