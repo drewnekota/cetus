@@ -83,6 +83,9 @@ export const settings = {
     "permissions.microphone.label": "Microphone",
     "permissions.microphone.description":
       "Voice dictation and meeting transcription.",
+    "permissions.fullDisk.label": "Full Disk Access",
+    "permissions.fullDisk.description":
+      "Lets agents read files inside other apps' folders (Mail, WeChat, Notes…) without macOS asking \"access data from other apps\" every time.",
 
     // --- Onboarding (first run) -------------------------------------------
     "onboarding.welcome.title": "Choose how cetus thinks",
@@ -805,6 +808,9 @@ export const settings = {
       "截图启动器与屏幕上下文记忆（捕捉屏幕上的内容）。",
     "permissions.microphone.label": "麦克风",
     "permissions.microphone.description": "语音听写与会议转录。",
+    "permissions.fullDisk.label": "完全磁盘访问",
+    "permissions.fullDisk.description":
+      "允许智能体读取其它应用目录里的文件（邮件、微信、备忘录等），不再反复弹出「访问其他 App 的数据」。",
 
     // --- 首次引导 ---------------------------------------------------------
     "onboarding.welcome.title": "选择 cetus 的思考方式",

@@ -3,7 +3,7 @@
 // out of message-bubble.tsx so both a single bubble (user / custom) and a
 // grouped assistant turn (assistant-turn.tsx) render text, attachments, and the
 // hover toolbar identically.
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -27,6 +27,7 @@ import type { RenderedBlock } from "@/lib/types";
 import { ArtifactView } from "./artifact-view";
 import { ContextCard } from "./context-card";
 import { artifactsFromDetails, formatBytes } from "@/lib/artifact";
+import { findMentionSpans } from "@/lib/mentions";
 import { formatTimeHM, formatFullDateTime } from "@/lib/format";
 import {
   Dialog,
@@ -302,10 +303,13 @@ export function TextBlock({
   text,
   streaming,
   isUser,
+  mentions,
 }: {
   text: string;
   streaming?: boolean;
   isUser: boolean;
+  /** `@label` tokens in a user prompt to draw as pills. */
+  mentions?: string[];
 }) {
   const throttled = useThrottledText(text, streaming ?? false);
   return (
@@ -315,7 +319,7 @@ export function TextBlock({
         // output where the model emits **bold** / code / lists. We still linkify
         // bare URLs so a pasted link is clickable.
         <div className="whitespace-pre-wrap">
-          <LinkifiedText text={text} />
+          <MentionedText text={text} labels={mentions} />
         </div>
       ) : (
         <AssistantMarkdown text={throttled} streaming={streaming} />
@@ -325,6 +329,29 @@ export function TextBlock({
       )}
     </div>
   );
+}
+
+/** User prose with its `@label` mentions drawn as pills; everything between
+ *  them is linkified plain text like before. */
+function MentionedText({ text, labels }: { text: string; labels?: string[] }) {
+  const spans = labels?.length ? findMentionSpans(text, labels) : [];
+  if (spans.length === 0) return <LinkifiedText text={text} />;
+  const parts: ReactNode[] = [];
+  let last = 0;
+  spans.forEach((s, i) => {
+    if (s.start > last) parts.push(<LinkifiedText key={`t${i}`} text={text.slice(last, s.start)} />);
+    parts.push(
+      <span
+        key={`m${i}`}
+        className="rounded-md bg-background/70 px-1 py-0.5 font-medium text-primary ring-1 ring-primary/20 [box-decoration-break:clone] dark:bg-background/40"
+      >
+        {text.slice(s.start, s.end)}
+      </span>,
+    );
+    last = s.end;
+  });
+  if (last < text.length) parts.push(<LinkifiedText key="tail" text={text.slice(last)} />);
+  return <>{parts}</>;
 }
 
 /** An attached image. Renders as a capped thumbnail that opens a full-size,
@@ -379,7 +406,14 @@ export const AnswerBlock = memo(function AnswerBlock({
 }) {
   const { t } = useTranslation("chat");
   if (block.kind === "text")
-    return <TextBlock text={block.text} streaming={block.streaming} isUser={isUser} />;
+    return (
+      <TextBlock
+        text={block.text}
+        streaming={block.streaming}
+        isUser={isUser}
+        mentions={block.mentions}
+      />
+    );
   if (block.kind === "image")
     return <ImageBlock dataUrl={block.dataUrl} name={block.name} />;
   if (block.kind === "file")

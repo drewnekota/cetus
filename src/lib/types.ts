@@ -1066,7 +1066,9 @@ export type ExtensionUIResponseBody =
 // Internal render state ----------------------------------------------------
 
 export type RenderedBlock =
-  | { kind: "text"; text: string; streaming?: boolean }
+  // `mentions`: labels of the `@label` tokens a user prompt carried (from its
+  // stripped <cetus-mentions> block) so the bubble can draw them as pills.
+  | { kind: "text"; text: string; streaming?: boolean; mentions?: string[] }
   | { kind: "thinking"; text: string; streaming?: boolean }
   // Local-only block for image previews on user messages. Persisted nowhere;
   // pi never sees this kind — actual image bytes are forwarded to the agent

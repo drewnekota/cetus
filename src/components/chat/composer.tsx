@@ -11,7 +11,7 @@ import {
   CornerDownRight,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
-import { formatBytes } from "@/lib/artifact";
+import { artifactsFromDetails, formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ModelPicker } from "@/components/chat/model-picker";
@@ -28,8 +28,25 @@ import {
   SlashCommandDialog,
   type EditableSlashCommand,
 } from "@/components/chat/slash-command-dialog";
-import { MentionMenu } from "@/components/chat/mention-menu";
-import { MENTIONS, expandGoalDirective } from "@/lib/goal";
+import { MentionMenu, nextMentionTab, type MentionTab } from "@/components/chat/mention-menu";
+import { MentionHighlight } from "@/components/chat/mention-highlight";
+import {
+  FUNCTION_MENTIONS,
+  buildMentionRefs,
+  extractMentionRefs,
+  mentionDraftKey,
+  mentionToken,
+  mentionsInText,
+  parseRefs,
+  recallRefs,
+  rememberRef,
+  serializeRefs,
+  textWithoutMentions,
+  uniqueLabel,
+  type MentionItem,
+  type MentionRef,
+  type MentionResolution,
+} from "@/lib/mentions";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
@@ -46,9 +63,12 @@ import {
   writeDraftAttachments,
 } from "@/lib/draft-store";
 import type {
+  Automation,
   BackendId,
   CliSlashCommand,
+  Conversation,
   ModelChoice,
+  WorkspaceFileEntry,
 } from "@/lib/types";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import { toast } from "sonner";
@@ -454,6 +474,7 @@ export function Composer({
     setText(draftKey ? readDraft(draftKey) : "");
     setQuote(draftKey ? readDraft(quoteKey(draftKey)) : "");
     setAttachments(restoreAttachments(draftKey));
+    setMentionRefs(draftKey ? parseRefs(readDraft(mentionDraftKey(draftKey))) : []);
   }, [draftKey, restoreAttachments]);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
     restoreAttachments(draftKey),
@@ -598,6 +619,38 @@ export function Composer({
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionActive, setMentionActive] = useState(0);
   const mentionSuppress = useRef(false);
+  const [mentionTab, setMentionTab] = useState<MentionTab>("all");
+  // What each `@label` in the draft points at. Persisted next to the draft text
+  // so the pills survive a view switch / reload; pruned as tokens are edited out.
+  const [mentionRefs, setMentionRefs] = useState<MentionRef[]>(() =>
+    draftKey ? parseRefs(readDraft(mentionDraftKey(draftKey))) : [],
+  );
+  const updateMentionRefs = useCallback(
+    (next: MentionRef[] | ((prev: MentionRef[]) => MentionRef[])) => {
+      setMentionRefs((prev) => {
+        const value = typeof next === "function" ? next(prev) : next;
+        if (draftKey) writeDraft(mentionDraftKey(draftKey), serializeRefs(value));
+        return value;
+      });
+    },
+    [draftKey],
+  );
+  // A token edited out of the text (or the text cleared on send) drops its ref.
+  useEffect(() => {
+    if (mentionRefs.length === 0) return;
+    const live = mentionsInText(text, mentionRefs);
+    if (live.length !== mentionRefs.length) updateMentionRefs(live);
+  }, [text, mentionRefs, updateMentionRefs]);
+  const mentionLabels = useMemo(() => mentionRefs.map((r) => r.label), [mentionRefs]);
+  const highlightRef = useRef<HTMLDivElement>(null);
+  // Menu data sources, loaded when the menu opens (cheap SQL / a snapshot of the
+  // resident message list) — never subscribed to, so streaming tokens don't
+  // re-render the composer.
+  const [mentionAutomations, setMentionAutomations] = useState<Automation[]>([]);
+  const [mentionConversations, setMentionConversations] = useState<Conversation[]>([]);
+  const [mentionArtifacts, setMentionArtifacts] = useState<MentionItem[]>([]);
+  const [mentionFiles, setMentionFiles] = useState<WorkspaceFileEntry[]>([]);
+  const [mentionFilesLoading, setMentionFilesLoading] = useState(false);
   const withFocusHint = useCallback(
     (base: string) => {
       const trimmed = base.trimEnd();
@@ -797,15 +850,148 @@ export function Composer({
     setSlashOpen(false);
   }
 
-  const mentionItems = useMemo(() => {
-    const q = mentionQuery.toLowerCase();
-    return MENTIONS.filter(
-      (it) => it.name.toLowerCase().includes(q) || it.description.toLowerCase().includes(q),
-    );
-  }, [mentionQuery]);
+  useEffect(() => {
+    if (!mentionOpen) return;
+    let alive = true;
+    api
+      .listAutomations()
+      .then((rows) => alive && setMentionAutomations(rows))
+      .catch(() => {});
+    api
+      .listConversations(true)
+      .then((rows) => alive && setMentionConversations(rows))
+      .catch(() => {});
+    // Artifacts the agent delivered in this conversation, newest first.
+    const messages = conversationId
+      ? useChatStore.getState().chats[conversationId]?.messages ?? []
+      : [];
+    const seen = new Set<string>();
+    const artifacts: MentionItem[] = [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      for (const b of messages[i].blocks) {
+        if (b.kind !== "tool_use" || !b.result) continue;
+        for (const a of artifactsFromDetails(b.result.details)) {
+          if (seen.has(a.path)) continue;
+          seen.add(a.path);
+          artifacts.push({
+            kind: "artifact",
+            label: a.name,
+            id: a.path,
+            path: a.path,
+            title: a.name,
+            subtitle: a.caption ?? a.path,
+            meta: `${a.mimeType}, ${formatBytes(a.sizeBytes)}`,
+          });
+        }
+      }
+    }
+    setMentionArtifacts(artifacts);
+    return () => {
+      alive = false;
+    };
+  }, [mentionOpen, conversationId]);
 
-  const mentionVisible = mentionOpen && mentionItems.length > 0;
-  const mentionIdx = Math.min(mentionActive, mentionItems.length - 1);
+  // Files: root listing (folders first) for an empty query, else a debounced
+  // workspace search that includes folders. Only when the tab can show them.
+  const filesWanted = mentionOpen && (mentionTab === "all" || mentionTab === "file");
+  useEffect(() => {
+    if (!filesWanted) return;
+    const ws = workspaceDir || defaultWorkspace;
+    if (!ws) return;
+    let alive = true;
+    const q = mentionQuery.trim();
+    setMentionFilesLoading(true);
+    const run = () =>
+      (q
+        ? api.searchWorkspaceFiles(ws, q, true)
+        : api.listWorkspaceDirectory(ws)
+      )
+        .then((listing) => {
+          if (!alive) return;
+          setMentionFiles(listing.entries);
+        })
+        .catch(() => alive && setMentionFiles([]))
+        .finally(() => alive && setMentionFilesLoading(false));
+    const timer = window.setTimeout(run, q ? 120 : 0);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [filesWanted, mentionQuery, workspaceDir, defaultWorkspace]);
+
+  const mentionItems = useMemo<MentionItem[]>(() => {
+    const q = mentionQuery.trim().toLowerCase();
+    const hit = (...fields: (string | undefined | null)[]) =>
+      !q || fields.some((f) => f?.toLowerCase().includes(q));
+    const all = mentionTab === "all";
+    const want = (k: MentionItem["kind"]) => all || mentionTab === k;
+    const cap = (rows: MentionItem[], n: number) => (all ? rows.slice(0, n) : rows);
+    const out: MentionItem[] = [];
+    if (want("function")) {
+      out.push(...FUNCTION_MENTIONS.filter((f) => hit(f.label, f.subtitle)));
+    }
+    if (want("automation")) {
+      const rows = mentionAutomations
+        .filter((a) => hit(a.name, a.prompt))
+        .map<MentionItem>((a) => ({
+          kind: "automation",
+          label: a.name,
+          id: a.id,
+          title: a.name,
+          subtitle: a.prompt.replace(/\s+/g, " "),
+          meta: `${describeSchedule(a)}${a.enabled ? "" : ", disabled"}`,
+        }));
+      out.push(...cap(rows, 3));
+    }
+    if (want("artifact")) {
+      out.push(...cap(mentionArtifacts.filter((a) => hit(a.title, a.subtitle)), 3));
+    }
+    if (want("file")) {
+      const rows = mentionFiles
+        .filter((f) => hit(f.relativePath, f.name))
+        .map<MentionItem>((f) => ({
+          kind: "file",
+          label: f.isDir ? `${f.relativePath.replace(/\/$/, "")}/` : f.relativePath,
+          id: f.path,
+          path: f.path,
+          isDir: f.isDir,
+          title: f.name,
+          subtitle: f.relativePath,
+        }));
+      out.push(...cap(rows, 5));
+    }
+    if (want("conversation")) {
+      const rows = mentionConversations
+        .filter((c) => c.id !== conversationId && hit(c.title))
+        .sort((a, b) => {
+          const aa = a.archivedAt ? 1 : 0;
+          const ba = b.archivedAt ? 1 : 0;
+          return aa - ba || b.updatedAt - a.updatedAt;
+        })
+        .map<MentionItem>((c) => ({
+          kind: "conversation",
+          label: c.title,
+          id: c.id,
+          title: c.title,
+          subtitle: c.workspaceDir.split("/").pop() || c.workspaceDir,
+          archived: !!c.archivedAt,
+          meta: `runtime ${c.backend || "pi"}, last updated ${new Date(c.updatedAt).toISOString()}`,
+        }));
+      out.push(...cap(rows, 4));
+    }
+    return out;
+  }, [
+    mentionQuery,
+    mentionTab,
+    mentionAutomations,
+    mentionArtifacts,
+    mentionFiles,
+    mentionConversations,
+    conversationId,
+  ]);
+
+  const mentionVisible = mentionOpen;
+  const mentionIdx = Math.max(0, Math.min(mentionActive, mentionItems.length - 1));
 
   function closeMention() {
     setMentionOpen(false);
@@ -903,12 +1089,21 @@ export function Composer({
     setMentionOpen(true);
   }
 
-  /** Replace the `@<token>` with the picked mention's `@name ` token. The token
-   *  is expanded into its full directive at send time (see {@link expandGoalDirective}). */
-  function applyMention(item: (typeof MENTIONS)[number]) {
+  /** Replace the `@<token>` with the picked item's `@label ` token and record
+   *  what the label points at. The token is resolved for the model at send
+   *  time (see {@link buildMentionRefs}); in the textarea it stays `@label`. */
+  function applyMention(item: MentionItem | undefined) {
+    if (!item) return;
     const el = taRef.current;
     const caret = el?.selectionStart ?? text.length;
-    const insert = `@${item.name} `;
+    const { title: _title, subtitle: _subtitle, archived: _archived, ...base } = item;
+    const label = uniqueLabel(item.label, mentionRefs, base);
+    const ref: MentionRef = { ...base, label };
+    rememberRef(ref);
+    updateMentionRefs((prev) =>
+      prev.some((r) => r.label === label) ? prev : [...prev, ref],
+    );
+    const insert = `${mentionToken(label)} `;
     const next = text.slice(0, mentionStart) + insert + text.slice(caret);
     const pos = mentionStart + insert.length;
     updateText(next);
@@ -931,6 +1126,7 @@ export function Composer({
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, variant === "hero" ? 320 : 240) + "px";
     el.scrollTop = scrollTop;
+    if (highlightRef.current) highlightRef.current.scrollTop = el.scrollTop;
   }, [text, variant]);
 
   useEffect(() => {
@@ -960,7 +1156,11 @@ export function Composer({
   useEffect(() => {
     if (!draftRequest || draftRequest.id === lastDraftRequestIdRef.current) return;
     lastDraftRequestIdRef.current = draftRequest.id;
-    updateText(draftRequest.text);
+    // A queued message comes back with its mention block already appended;
+    // peel it off and re-arm the pills from this session's ref cache.
+    const { text: prose, labels } = extractMentionRefs(draftRequest.text);
+    updateMentionRefs(recallRefs(labels));
+    updateText(prose);
     updateAttachments((previous) => {
       previous.forEach((attachment) => {
         if (attachment.type === "image" && attachment.previewUrl.startsWith("blob:")) {
@@ -986,7 +1186,7 @@ export function Composer({
       const pos = node.value.length;
       node.setSelectionRange(pos, pos);
     });
-  }, [disabled, draftRequest, updateAttachments, updateText]);
+  }, [disabled, draftRequest, updateAttachments, updateText, updateMentionRefs]);
 
   useEffect(() => {
     if (disabled) return;
@@ -1169,8 +1369,6 @@ export function Composer({
       setAttachError(null);
       return;
     }
-    // Expand any `@goal` token into its full directive before sending. Empty
-    // when the user typed only `@goal` with no objective — treated as no message.
     const trimmedText = text.trim();
     if (backend === "codex" && attachments.length === 0) {
       if (trimmedText === "/status") {
@@ -1209,7 +1407,26 @@ export function Composer({
         return;
       }
     }
-    let outgoing = expandGoalDirective(trimmedText);
+    // Mentions stay in the prose as `@label` tokens; a machine block appended
+    // below resolves each for the model (and is stripped from the bubble).
+    // A draft that is nothing but tokens (a bare `@goal`) has no objective and
+    // is treated as empty.
+    const used = mentionsInText(trimmedText, mentionRefs);
+    const prose = textWithoutMentions(trimmedText, used);
+    let outgoing = prose || attachments.length > 0 ? trimmedText : "";
+    if (outgoing && used.length > 0) {
+      const resolutions = new Map<string, MentionResolution>();
+      for (const ref of used) {
+        if (ref.kind !== "conversation") continue;
+        try {
+          const exported = await api.exportConversationTranscript(ref.id);
+          resolutions.set(ref.label, { transcriptPath: exported.path });
+        } catch (e) {
+          console.warn("[mention] transcript export failed", ref.id, e);
+        }
+      }
+      outgoing += buildMentionRefs(used, resolutions);
+    }
     // Pending quote leads the message as a Markdown blockquote — the bubble
     // renderer splits it back out into the quote header above the bubble.
     const quoteMarkdown = quote ? formatQuoteMarkdown(quote) : "";
@@ -1253,6 +1470,7 @@ export function Composer({
     });
     updateText("");
     updateQuote("");
+    updateMentionRefs([]);
     setAttachError(null);
   }
 
@@ -1352,8 +1570,14 @@ export function Composer({
 
       {mentionVisible && !slashVisible && (
         <MentionMenu
+          tab={mentionTab}
+          onTabChange={(k) => {
+            setMentionTab(k);
+            setMentionActive(0);
+          }}
           items={mentionItems}
           activeIndex={mentionIdx}
+          loading={filesWanted && mentionFilesLoading}
           onSelect={applyMention}
           onHover={setMentionActive}
         />
@@ -1450,9 +1674,25 @@ export function Composer({
         </div>
       )}
 
+      <div className="relative">
+      <MentionHighlight
+        ref={highlightRef}
+        text={text}
+        labels={mentionLabels}
+        // Mirror the textarea's type ramp exactly (the shared Textarea adds
+        // md:text-sm) — the pills only line up if both layers wrap alike.
+        className={cn(
+          "min-h-14 text-base md:text-sm",
+          variant === "hero" ? "px-3 py-3" : "px-2.5 py-2",
+        )}
+      />
       <Textarea
         ref={taRef}
         value={text}
+        onScroll={(e) => {
+          const layer = highlightRef.current;
+          if (layer) layer.scrollTop = e.currentTarget.scrollTop;
+        }}
         onChange={(e) => {
           slashSuppress.current = false; // a fresh edit re-arms the menu
           mentionSuppress.current = false;
@@ -1510,6 +1750,35 @@ export function Composer({
         }}
         onKeyDown={(e) => {
           const composing = e.nativeEvent.isComposing || e.keyCode === 229;
+          // Backspace right after a mention pill removes the whole token (plus
+          // the space that follows it) instead of nibbling the label.
+          if (e.key === "Backspace" && !composing && mentionRefs.length > 0) {
+            const el = e.currentTarget;
+            const caret = el.selectionStart ?? 0;
+            if (caret > 0 && caret === el.selectionEnd) {
+              const head = text.slice(0, caret);
+              const tokens = mentionRefs
+                .map((r) => mentionToken(r.label))
+                .sort((a, b) => b.length - a.length);
+              for (const token of tokens) {
+                const trailing = head.endsWith(`${token} `) ? 1 : head.endsWith(token) ? 0 : -1;
+                if (trailing < 0) continue;
+                const start = head.length - token.length - trailing;
+                const before = start > 0 ? text[start - 1] : "";
+                if (before && !/\s/.test(before)) continue;
+                e.preventDefault();
+                const next = text.slice(0, start) + text.slice(caret);
+                updateText(next);
+                requestAnimationFrame(() => {
+                  const node = taRef.current;
+                  if (!node) return;
+                  node.setSelectionRange(start, start);
+                  syncMention();
+                });
+                return;
+              }
+            }
+          }
           // Slash menu owns the navigation keys while it's open. Guard against
           // IME composition so candidate selection isn't stolen.
           if (slashVisible && !composing) {
@@ -1539,20 +1808,36 @@ export function Composer({
           // The @-mention menu owns the same nav keys when it's open (and the
           // slash menu isn't — they're mutually exclusive per caret token).
           if (mentionVisible && !slashVisible && !composing) {
+            const n = Math.max(1, mentionItems.length);
             if (e.key === "ArrowDown") {
               e.preventDefault();
-              setMentionActive((i) => (i + 1) % mentionItems.length);
+              setMentionActive((i) => (i + 1) % n);
               return;
             }
             if (e.key === "ArrowUp") {
               e.preventDefault();
-              setMentionActive((i) => (i - 1 + mentionItems.length) % mentionItems.length);
+              setMentionActive((i) => (i - 1 + n) % n);
               return;
             }
-            if (e.key === "Enter" || e.key === "Tab") {
+            // Tab / ⇧Tab walk the kind tabs (All → Functions → … → Chats);
+            // ⏎ picks the highlighted row.
+            if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey) {
               e.preventDefault();
-              applyMention(mentionItems[mentionIdx]);
+              setMentionTab((k) => nextMentionTab(k, e.shiftKey ? -1 : 1));
+              setMentionActive(0);
               return;
+            }
+            if (e.key === "Enter") {
+              // Nothing to pick (e.g. an email-like `@word`): close the menu and
+              // let Enter fall through to send as usual.
+              if (mentionItems.length === 0) {
+                mentionSuppress.current = true;
+                closeMention();
+              } else {
+                e.preventDefault();
+                applyMention(mentionItems[mentionIdx]);
+                return;
+              }
             }
             if (e.key === "Escape") {
               e.preventDefault();
@@ -1615,10 +1900,11 @@ export function Composer({
         rows={1}
         disabled={disabled}
         className={cn(
-          "min-h-14 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent",
+          "relative min-h-14 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent",
           variant === "hero" ? "px-3 py-3 text-base" : "px-2.5 py-2 text-base",
         )}
       />
+      </div>
       {attachError && (
         <div className="px-2 pb-1 text-xs text-destructive">{attachError}</div>
       )}
@@ -1750,6 +2036,23 @@ export function Composer({
 /** Draft-store key for the pending quote attached to a composer draft. */
 function quoteKey(draftKey: string): string {
   return `${draftKey}#quote`;
+}
+
+/** One-line schedule summary for the model's view of an `@automation`. */
+function describeSchedule(a: Automation): string {
+  const s = a.schedule;
+  switch (s.kind) {
+    case "once":
+      return `runs once at ${new Date(s.atMs).toISOString()}`;
+    case "interval":
+      return `runs every ${s.everyMinutes} minutes`;
+    case "daily":
+      return `runs daily at ${s.time}`;
+    case "cron":
+      return `cron ${s.expr}`;
+    default:
+      return "scheduled";
+  }
 }
 
 function cleanQuoteText(text: string): string {

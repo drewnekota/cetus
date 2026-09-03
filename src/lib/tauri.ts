@@ -329,8 +329,16 @@ export const api = {
       workspaceDir,
       directoryPath: directoryPath ?? null,
     }),
-  searchWorkspaceFiles: (workspaceDir: string, query: string) =>
-    invoke<WorkspaceDirectoryListing>("search_workspace_files", { workspaceDir, query }),
+  searchWorkspaceFiles: (workspaceDir: string, query: string, includeDirs = false) =>
+    invoke<WorkspaceDirectoryListing>("search_workspace_files", {
+      workspaceDir,
+      query,
+      includeDirs,
+    }),
+  /** Write a conversation's transcript to disk as Markdown (for `@chat`
+   *  mentions) and return where it landed. */
+  exportConversationTranscript: (id: string) =>
+    invoke<{ path: string; messageCount: number }>("export_conversation_transcript", { id }),
   createWorkspaceEntry: (workspaceDir: string, parentPath: string, name: string, isDir: boolean) =>
     invoke<string>("create_workspace_entry", { workspaceDir, parentPath, name, isDir }),
   renameWorkspaceEntry: (workspaceDir: string, path: string, newName: string) =>
@@ -613,6 +621,9 @@ export const api = {
   requestScreenRecording: () => invoke<boolean>("request_screen_recording"),
   openScreenRecordingSettings: () =>
     invoke<void>("open_screen_recording_settings"),
+  fullDiskAccessTrusted: () => invoke<boolean>("full_disk_access_trusted"),
+  openFullDiskAccessSettings: () =>
+    invoke<void>("open_full_disk_access_settings"),
 
   // Voice dictation --------------------------------------------------------
   voicePermissions: () => invoke<VoicePermissions>("voice_permissions"),

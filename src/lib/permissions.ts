@@ -7,7 +7,7 @@
 // to English, so callers only need en + zh strings.
 
 import type { ComponentType } from "react";
-import { Accessibility, Bell, Mic, Monitor } from "lucide-react";
+import { Accessibility, Bell, HardDrive, Mic, Monitor } from "lucide-react";
 import { api } from "@/lib/tauri";
 import { ensurePermission, refreshPermission } from "@/lib/notifications";
 
@@ -19,7 +19,8 @@ export type PermissionId =
   | "notifications"
   | "accessibility"
   | "screen"
-  | "microphone";
+  | "microphone"
+  | "fullDisk";
 
 export interface PermissionMeta {
   id: PermissionId;
@@ -66,6 +67,16 @@ export const PERMISSIONS: PermissionMeta[] = [
     macOnly: true,
     canOpenSettings: true,
   },
+  {
+    id: "fullDisk",
+    icon: HardDrive,
+    labelKey: "permissions.fullDisk.label",
+    descKey: "permissions.fullDisk.description",
+    macOnly: true,
+    // No system prompt exists for FDA — "Grant" itself opens System Settings,
+    // so a second "Open Settings" button would be redundant.
+    canOpenSettings: false,
+  },
 ];
 
 /** Read the current state without prompting (where the platform allows it). */
@@ -86,6 +97,8 @@ export async function checkPermission(id: PermissionId): Promise<PermStatus> {
           ? "granted"
           : "needed";
       }
+      case "fullDisk":
+        return (await api.fullDiskAccessTrusted()) ? "granted" : "needed";
     }
   } catch {
     return "unknown";
@@ -108,6 +121,11 @@ export async function requestPermission(id: PermissionId): Promise<PermStatus> {
           ? "granted"
           : "needed";
       }
+      case "fullDisk":
+        // macOS offers no prompt for Full Disk Access: send the user to the
+        // Privacy pane; the row re-probes when the window regains focus.
+        await api.openFullDiskAccessSettings();
+        return (await api.fullDiskAccessTrusted()) ? "granted" : "needed";
     }
   } catch {
     return "unknown";
@@ -126,6 +144,9 @@ export async function openPermissionSettings(id: PermissionId): Promise<void> {
         break;
       case "microphone":
         await api.openMicrophoneSettings();
+        break;
+      case "fullDisk":
+        await api.openFullDiskAccessSettings();
         break;
       case "notifications":
         break; // no deep link; the Grant button re-checks instead

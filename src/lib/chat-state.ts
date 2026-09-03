@@ -19,6 +19,7 @@ import type {
 export type BashExecResult = BashResult;
 import { stripAttachmentRefs } from "./attachments";
 import { userTextBlocks } from "./quick-context";
+import { extractMentionRefs } from "./mentions";
 import { artifactsFromDetails } from "./artifact";
 
 export interface ChatState {
@@ -145,7 +146,7 @@ function inflate(msg: PiMessage): RenderedMessage {
         // A quick-launcher prompt may lead with a fenced <context> block —
         // split it back into a chip + prose so reloaded history reads like the
         // live turn did, not raw XML.
-        blocks.push(...userTextBlocks(c.text));
+        blocks.push(...userPromptBlocks(c.text));
       } else {
         blocks.push({ kind: "text", text: c.text });
       }
@@ -266,6 +267,17 @@ function stripDescription(m: RenderedMessage, desc: string): RenderedMessage | n
   return changed ? { ...m, blocks } : null;
 }
 
+/** Blocks for a user prompt: strip the appended <cetus-mentions> block (the
+ *  model-facing resolution of `@label` tokens) and keep its labels on the text
+ *  block so the bubble draws the tokens as pills, then split any leading
+ *  context fence into its chip. Shared by the live and reload paths. */
+function userPromptBlocks(text: string): RenderedBlock[] {
+  const { text: prose, labels } = extractMentionRefs(text);
+  const blocks = userTextBlocks(prose);
+  if (labels.length === 0) return blocks;
+  return blocks.map((b) => (b.kind === "text" ? { ...b, mentions: labels } : b));
+}
+
 // pi persists the user message with the file-reference block we appended for
 // the model (see lib/attachments.ts). Strip it back off the displayed bubble on
 // reload so history reads like the live turn — clean prompt, no path block.
@@ -338,7 +350,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           sizeBytes: f.sizeBytes,
         });
       }
-      if (action.text) blocks.push(...userTextBlocks(action.text));
+      if (action.text) blocks.push(...userPromptBlocks(action.text));
       const msg: RenderedMessage = {
         key: genKey("user"),
         role: "user",
