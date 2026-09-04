@@ -613,6 +613,9 @@ export const api = {
   }) => invoke<void>("post_notification", p),
   quickSubmit: (payload: QuickLaunchPayload) =>
     invoke<void>("quick_submit", { payload }),
+  /** Report the shared ⌘+/⌘− zoom so the launcher window grows with it. */
+  quickSetScale: (scale: number) =>
+    invoke<void>("quick_set_scale", { scale }),
   accessibilityTrusted: () => invoke<boolean>("accessibility_trusted"),
   requestAccessibility: () => invoke<boolean>("request_accessibility"),
   openAccessibilitySettings: () =>

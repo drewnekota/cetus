@@ -459,6 +459,8 @@ export interface QuickLaunchPayload {
   cliModel: string;
   /** CLI backends' reasoning-effort override ("" = the CLI's default). */
   cliEffort: string;
+  /** "Create more": launch in the background and keep the launcher open. */
+  keepOpen?: boolean;
 }
 
 export const DEFAULT_MODEL_CHOICE: ModelChoice = {

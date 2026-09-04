@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AppWindow, CornerDownLeft, File, Globe, ImageOff, Paperclip, ScanText, TextSelect, X } from "lucide-react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { AppWindow, Check, CornerDownLeft, File, Globe, ImageOff, Layers, Paperclip, ScanText, TextSelect, X } from "lucide-react";
 import { formatBytes } from "@/lib/artifact";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
@@ -68,6 +69,22 @@ import {
  *  named in the prompt by path instead — same limit the chat composer uses. */
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
+/** Main window's ⌘+/⌘− zoom level (see hooks/use-zoom.ts). Same origin, so
+ *  the launcher reads it straight from localStorage and follows changes via
+ *  the cross-window `storage` event. */
+const ZOOM_STORAGE_KEY = "cetus:zoom";
+/** Sticky "Create more" switch: keep the launcher up after each launch. */
+const KEEP_OPEN_STORAGE_KEY = "cetus:quickKeepOpen";
+
+function readZoom(): number {
+  try {
+    const z = Number(localStorage.getItem(ZOOM_STORAGE_KEY)) || 1;
+    return Math.min(2, Math.max(0.5, z));
+  } catch {
+    return 1;
+  }
+}
+
 /** The frameless global launcher. Lives in the `quick` window (vibrancy applied
  *  natively behind a transparent webview), stays mounted + hidden, and wakes on
  *  the "quick-open" event the gesture listener emits. */
@@ -117,6 +134,11 @@ export function QuickPanel() {
   // handler doesn't close the panel when that OS dialog steals focus.
   const pickingWorkspaceRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
+  // "Create more": each launch runs in the background and the panel stays up
+  // for the next one instead of handing off to the main window.
+  const [keepOpen, setKeepOpen] = useState(false);
+  // Bumped per background launch; drives the transient "Started" confirmation.
+  const [launchedTick, setLaunchedTick] = useState(0);
   // Whether any non-archived chat exists — gates the "Last" session option.
   const [hasLastChat, setHasLastChat] = useState(true);
   const [surface, setSurface] = useState<"launcher" | "reply">("launcher");
@@ -164,6 +186,41 @@ export function QuickPanel() {
       body.style.background = prevBody;
     };
   }, []);
+
+  // Follow the main window's ⌘+/⌘− zoom: scale this webview the same way and
+  // tell the native side so the window's logical size grows to match —
+  // otherwise a 125% UI clips inside the 100% box.
+  useEffect(() => {
+    const sync = () => {
+      const z = readZoom();
+      getCurrentWebview().setZoom(z).catch(() => {});
+      api.quickSetScale(z).catch(() => {});
+    };
+    sync();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === ZOOM_STORAGE_KEY) sync();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  useEffect(() => {
+    try {
+      setKeepOpen(localStorage.getItem(KEEP_OPEN_STORAGE_KEY) === "1");
+    } catch {}
+  }, []);
+  const onKeepOpenChange = useCallback((next: boolean) => {
+    setKeepOpen(next);
+    try {
+      localStorage.setItem(KEEP_OPEN_STORAGE_KEY, next ? "1" : "0");
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!launchedTick) return;
+    const id = window.setTimeout(() => setLaunchedTick(0), 1600);
+    return () => window.clearTimeout(id);
+  }, [launchedTick]);
 
   // Seed defaults on mount in case the very first gesture beat our listener.
   useEffect(() => {
@@ -520,22 +577,32 @@ export function QuickPanel() {
         backend,
         cliModel: backend === "pi" ? "" : cliModel,
         cliEffort: backend === "pi" ? "" : cliEffort,
+        keepOpen,
       });
-      // quick_submit hides the window for us; clear for the next open so a
-      // with-screenshot submit doesn't leave a stale thumbnail that flashes
-      // when the no-screenshot launcher opens next.
+      // quick_submit hides the window for us (unless keepOpen); clear for the
+      // next open so a with-screenshot submit doesn't leave a stale thumbnail
+      // that flashes when the no-screenshot launcher opens next.
       setText("");
       setAttachments([]);
       setScreenshot(null);
       setScreenshotDenied(false);
       setIncludeScreenshot(false);
       setContext(null);
+      if (keepOpen) {
+        // The task now runs in the background; stay up for the next one. A
+        // chat exists from here on, so "Last" becomes a valid target.
+        setHasLastChat(true);
+        setLaunchedTick((n) => n + 1);
+        setSubmitting(false);
+        submittingRef.current = false;
+        focusSoon();
+      }
     } catch {
       // Keep the panel up so the user can retry.
       setSubmitting(false);
       submittingRef.current = false;
     }
-  }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, backend, cliModel, cliEffort]);
+  }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, backend, cliModel, cliEffort, keepOpen, focusSoon]);
 
   const insertReply = useCallback(async () => {
     const value = replyDraft.trim();
@@ -867,7 +934,35 @@ export function QuickPanel() {
             className="h-8 text-md hover:bg-black/5 dark:hover:bg-white/[0.08]"
           />
         ) : null}
+        <TooltipProvider disableHoverableContent>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={keepOpen}
+                onClick={() => onKeepOpenChange(!keepOpen)}
+                className={cn(
+                  "flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors",
+                  keepOpen
+                    ? "bg-black/10 text-foreground dark:bg-white/15"
+                    : "text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/[0.08]",
+                )}
+              >
+                <Layers className="size-3.5" />
+                {t("footer.createMore")}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">{t("footer.createMore.hint")}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <span className="ml-auto flex items-center gap-1.5 pr-1">
+          {launchedTick > 0 && (
+            <span className="mr-2 flex items-center gap-1 text-success">
+              <Check className="size-3.5" />
+              {t("footer.started")}
+            </span>
+          )}
           <Kbd>
             <CornerDownLeft className="size-2.5" />
           </Kbd>

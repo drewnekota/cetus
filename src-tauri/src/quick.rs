@@ -418,6 +418,10 @@ pub struct QuickRuntime {
     /// and results carrying a stale run are dropped, so a superseded turn can't
     /// stream into the draft the user is now watching.
     pub reply_run: Arc<AtomicU32>,
+    /// Main-window zoom (⌘+/⌘−) as a percentage, reported by the panel's
+    /// webview on mount and whenever it changes. The launcher's logical window
+    /// size scales with it so a zoomed-in UI doesn't clip inside a fixed box.
+    pub scale_pct: Arc<AtomicU32>,
 
     // ---- Global voice dictation (read live by the hotkey thread) ----
     pub voice_enabled: Arc<AtomicBool>,
@@ -463,6 +467,7 @@ impl QuickRuntime {
             snip_stash: Arc::new(std::sync::Mutex::new(None)),
             reply_stash: Arc::new(std::sync::Mutex::new(None)),
             reply_run: Arc::new(AtomicU32::new(0)),
+            scale_pct: Arc::new(AtomicU32::new(100)),
             voice_enabled: Arc::new(AtomicBool::new(s.voice_enabled)),
             voice_gesture: Arc::new(AtomicU8::new(voice_gesture_code(&s.voice_gesture))),
             voice_handsfree_shortcut: Arc::new(AtomicBool::new(s.voice_handsfree_shortcut)),
@@ -780,6 +785,44 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
     present_launcher(app, shot, context, capture).await;
 }
 
+/// Launcher geometry at 100% zoom (logical px). Reply mode is taller to fit
+/// the streamed draft plus the captured-input band.
+const LAUNCHER_BASE: (f64, f64) = (920.0, 232.0);
+const REPLY_BASE: (f64, f64) = (920.0, 380.0);
+
+/// Scale a base size by the main window's zoom so the panel grows with ⌘+.
+fn scaled_size(app: &AppHandle, base: (f64, f64)) -> tauri::LogicalSize<f64> {
+    let pct = app
+        .state::<AppState>()
+        .quick
+        .scale_pct
+        .load(Ordering::Relaxed);
+    let f = (pct.clamp(50, 200) as f64) / 100.0;
+    tauri::LogicalSize::new((base.0 * f).round(), (base.1 * f).round())
+}
+
+/// The panel reports the shared ⌘+/⌘− zoom level here (it mirrors the main
+/// window's `cetus:zoom` localStorage key). If the launcher is up, resize in
+/// place so the change is visible immediately.
+#[tauri::command]
+pub async fn quick_set_scale(app: AppHandle, scale: f64) -> Result<(), String> {
+    let pct = ((scale * 100.0).round() as u32).clamp(50, 200);
+    let state = app.state::<AppState>();
+    state.quick.scale_pct.store(pct, Ordering::Relaxed);
+    if state.quick.shown.load(Ordering::Relaxed) {
+        // A live reply stash means the taller reply surface is what's up.
+        let base = if state.quick.reply_stash.lock().unwrap().is_some() {
+            REPLY_BASE
+        } else {
+            LAUNCHER_BASE
+        };
+        if let Some(win) = app.get_webview_window("quick") {
+            let _ = win.set_size(scaled_size(&app, base));
+        }
+    }
+    Ok(())
+}
+
 /// Present the launcher with an already-captured screenshot + pre-focus
 /// context. Shared tail of [`open_panel`] (which captures the full screen
 /// inline) and the snip overlay's finish path (which captured a user-selected
@@ -801,7 +844,7 @@ pub async fn present_launcher(
     };
     // Reply mode grows this same warm window to fit its candidates. Restore the
     // launcher's compact geometry on every normal open before centering it.
-    let _ = win.set_size(tauri::LogicalSize::new(800.0, 196.0));
+    let _ = win.set_size(scaled_size(app, LAUNCHER_BASE));
     // Stamp the open so the reopen handler can ignore the activation this show
     // may cause (see the macOS Reopen branch in lib.rs). The same stamp doubles
     // as this open's token, threaded through both the `quick-open` event and the
@@ -973,7 +1016,7 @@ pub async fn open_reply(app: &AppHandle) {
 
     // The reply surface is a single editable draft that streams in live, with
     // a captured-input band (screenshot thumbnail + context chips) beneath it.
-    let _ = win.set_size(tauri::LogicalSize::new(800.0, 344.0));
+    let _ = win.set_size(scaled_size(app, REPLY_BASE));
     #[cfg(target_os = "macos")]
     {
         let app_for_main = app.clone();
@@ -1413,6 +1456,11 @@ pub struct QuickSubmit {
     pub cli_model: String,
     #[serde(default)]
     pub cli_effort: String,
+    /// "Create more" mode: launch the task in the background and keep the
+    /// panel up (and the main window where it is) so the next prompt can be
+    /// typed right away.
+    #[serde(default)]
+    pub keep_open: bool,
 }
 
 /// Hand the captured prompt to the main window, bring it forward, hide the
@@ -1437,6 +1485,9 @@ pub async fn quick_submit(app: AppHandle, payload: QuickSubmit) -> Result<(), St
             "cliEffort": payload.cli_effort,
         }),
     );
+    if payload.keep_open {
+        return Ok(());
+    }
     // Routes through `focus_main` so a parked (warm off-screen) main window is
     // restored to its real position before it's brought forward.
     crate::focus_main(&app);
