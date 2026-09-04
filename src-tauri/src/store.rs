@@ -369,6 +369,21 @@ impl Store {
             -- screenshots_fts.
             CREATE VIRTUAL TABLE IF NOT EXISTS ax_context_fts
                 USING fts5(id UNINDEXED, text);
+
+            -- Cross-conversation content search (⌘K). One row per conversation
+            -- holding its title + visible prose, rebuilt whole whenever the
+            -- conversation changes (see search_index.rs). Trigram tokenizer so
+            -- CJK runs and code identifiers match as substrings — unicode61
+            -- would treat a whole Chinese sentence as one token. Trigger-free
+            -- like the other FTS tables; conversation_index records what the
+            -- row was built from so the background sweep can find stale ones.
+            CREATE VIRTUAL TABLE IF NOT EXISTS conversation_fts
+                USING fts5(id UNINDEXED, title, body, tokenize = 'trigram');
+            CREATE TABLE IF NOT EXISTS conversation_index (
+                id TEXT PRIMARY KEY,
+                indexed_updated_at INTEGER NOT NULL,
+                indexed_at INTEGER NOT NULL
+            );
             "#,
         )?;
         // Additive column for automation-minted conversations. A DB created
@@ -948,6 +963,138 @@ impl Store {
             )?,
         };
         Ok(())
+    }
+
+    // ---- conversation search index (⌘K content search) ---------------------
+
+    /// Replace a conversation's search-index row. `updated_at` is the
+    /// conversation's `updated_at` the text was built from; the sweep reindexes
+    /// when the row moves past it.
+    pub fn upsert_conversation_index(
+        &self,
+        id: &str,
+        title: &str,
+        body: &str,
+        updated_at: i64,
+    ) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM conversation_fts WHERE id = ?1", params![id])?;
+        tx.execute(
+            "INSERT INTO conversation_fts (id, title, body) VALUES (?1, ?2, ?3)",
+            params![id, title, body],
+        )?;
+        tx.execute(
+            "INSERT INTO conversation_index (id, indexed_updated_at, indexed_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET indexed_updated_at = excluded.indexed_updated_at,
+                                           indexed_at = excluded.indexed_at",
+            params![id, updated_at, now_ms()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_conversation_index(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM conversation_fts WHERE id = ?1", params![id])?;
+        conn.execute("DELETE FROM conversation_index WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Conversations whose index row is missing or older than the conversation
+    /// itself, newest activity first. Archived rows included — that's the point.
+    pub fn stale_index_conversations(&self, limit: u32) -> Result<Vec<Conversation>> {
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {CONVERSATION_COLS} FROM conversations c
+             LEFT JOIN conversation_index i ON i.id = c.id
+             WHERE i.id IS NULL OR i.indexed_updated_at < c.updated_at
+             ORDER BY c.updated_at DESC LIMIT ?1"
+        ))?;
+        let rows = stmt.query_map(params![limit], row_to_conversation)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Full-text search over indexed conversations. Every whitespace token must
+    /// appear (AND) in title or body. Tokens of three or more characters go
+    /// through the trigram index; shorter ones (a two-character Chinese word is
+    /// the common case) fall back to LIKE, which the trigram table answers with
+    /// a scan — fine at hundreds of conversations. `archived`: Some(true) only
+    /// archived rows, Some(false) only active, None both. Returns raw
+    /// (conversation, title, body) so the caller can build snippets.
+    pub fn search_conversations_raw(
+        &self,
+        query: &str,
+        archived: Option<bool>,
+        limit: u32,
+    ) -> Result<Vec<(Conversation, String, String)>> {
+        let mut long: Vec<String> = Vec::new();
+        let mut short: Vec<String> = Vec::new();
+        for tok in query.split_whitespace() {
+            if tok.chars().count() >= 3 {
+                long.push(format!("\"{}\"", tok.replace('"', "\"\"")));
+            } else {
+                short.push(tok.to_string());
+            }
+        }
+        if long.is_empty() && short.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut wheres: Vec<String> = Vec::new();
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if !long.is_empty() {
+            args.push(Box::new(long.join(" ")));
+            wheres.push(format!("f.conversation_fts MATCH ?{}", args.len()));
+        }
+        for tok in &short {
+            let pat = format!(
+                "%{}%",
+                tok.replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            );
+            args.push(Box::new(pat));
+            let n = args.len();
+            wheres.push(format!(
+                "(f.title LIKE ?{n} ESCAPE '\\' OR f.body LIKE ?{n} ESCAPE '\\')"
+            ));
+        }
+        match archived {
+            Some(true) => wheres.push("c.archived_at IS NOT NULL".into()),
+            Some(false) => wheres.push("c.archived_at IS NULL".into()),
+            None => {}
+        }
+        let order = if long.is_empty() {
+            "c.updated_at DESC".to_string()
+        } else {
+            "bm25(f.conversation_fts, 0.0, 6.0, 1.0), c.updated_at DESC".to_string()
+        };
+        args.push(Box::new(limit));
+        let sql = format!(
+            "SELECT {CONVERSATION_COLS}, f.title, f.body FROM conversation_fts f
+             JOIN conversations c ON c.id = f.id
+             WHERE {} ORDER BY {order} LIMIT ?{}",
+            wheres.join(" AND "),
+            args.len(),
+        );
+        let conn = self.read_conn.lock().unwrap();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+            let conv = row_to_conversation(r)?;
+            let title: String = r.get(CONVERSATION_COL_COUNT)?;
+            let body: String = r.get(CONVERSATION_COL_COUNT + 1)?;
+            Ok((conv, title, body))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     // ---- app_settings key/value -------------------------------------------
@@ -1923,6 +2070,10 @@ fn row_to_automation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
     })
 }
 
+/// Column list `row_to_conversation` expects, aliased to `c` for joins.
+const CONVERSATION_COLS: &str = "c.id, c.title, c.session_file, c.workspace_dir, c.ds_model, c.reasoning, c.created_at, c.updated_at, c.archived_at, c.unread_at, c.source_automation_id, c.parallel_group_id, c.solution_index, c.review_state, c.backend, c.cli_model, c.cli_effort, c.run_state, c.pinned_at";
+const CONVERSATION_COL_COUNT: usize = 19;
+
 fn row_to_conversation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> {
     let model_str: String = r.get(4)?;
     let reasoning_str: String = r.get(5)?;
@@ -2042,6 +2193,105 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("cetus-store-test-{}.db", uuid::Uuid::new_v4()));
         (Store::open(&path).unwrap(), path)
+    }
+
+    fn search_conv(id: &str, title: &str, archived: bool) -> Conversation {
+        Conversation {
+            id: id.into(),
+            title: title.into(),
+            session_file: String::new(),
+            workspace_dir: "/tmp".into(),
+            model: Default::default(),
+            created_at: 1,
+            updated_at: 1,
+            archived_at: if archived { Some(5) } else { None },
+            unread_at: None,
+            pinned_at: None,
+            source_automation_id: None,
+            parallel_group_id: None,
+            solution_index: None,
+            review_state: "none".into(),
+            backend: "claude-code".into(),
+            cli_model: String::new(),
+            cli_effort: String::new(),
+            run_state: "idle".to_string(),
+        }
+    }
+
+    #[test]
+    fn conversation_search_trigram_like_fallback_and_archived_filter() {
+        let (store, path) = temp_store();
+        store
+            .insert(&search_conv("a", "Active chat", false))
+            .unwrap();
+        store.insert(&search_conv("b", "Old thread", true)).unwrap();
+        store
+            .upsert_conversation_index("a", "Active chat", "we talked about useChatStore here", 1)
+            .unwrap();
+        store
+            .upsert_conversation_index("b", "Old thread", "关于归档搜索的讨论 and Rust", 1)
+            .unwrap();
+
+        // Both stale rows were indexed; nothing left for the sweep.
+        assert!(store.stale_index_conversations(10).unwrap().is_empty());
+
+        // Trigram MATCH: substring of an identifier, case-insensitive.
+        let hits = store
+            .search_conversations_raw("chatstore", None, 10)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0.id, "a");
+
+        // Two-character CJK token → LIKE fallback.
+        let hits = store.search_conversations_raw("归档", None, 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0.id, "b");
+
+        // Mixed long + short tokens, AND semantics.
+        assert_eq!(
+            store
+                .search_conversations_raw("rust 归档", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .search_conversations_raw("rust 缺失", None, 10)
+                .unwrap()
+                .len(),
+            0
+        );
+
+        // Archived filter.
+        assert_eq!(
+            store
+                .search_conversations_raw("thread", Some(false), 10)
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(
+            store
+                .search_conversations_raw("thread", Some(true), 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // Bumping updated_at makes the row stale again; deleting clears it.
+        store.set_archived("a", true, 9).unwrap();
+        let stale = store.stale_index_conversations(10).unwrap();
+        assert_eq!(
+            stale.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            vec!["a"]
+        );
+        store.delete_conversation_index("b").unwrap();
+        assert!(store
+            .search_conversations_raw("thread", None, 10)
+            .unwrap()
+            .is_empty());
+        std::fs::remove_file(path).ok();
     }
 
     #[test]

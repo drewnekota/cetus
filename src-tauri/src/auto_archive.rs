@@ -1,4 +1,6 @@
-//! Auto-archive: quietly archive conversations you haven't touched in a while.
+//! Auto-archive: quietly archive conversations you haven't touched in a while,
+//! and (separately opt-in) permanently delete chats that have sat in the
+//! archive long enough.
 //!
 //! Opt-in (default OFF). When enabled, one long-lived background task sweeps
 //! every [`TICK`] and archives any active conversation whose `updated_at` is
@@ -20,6 +22,14 @@
 //! - **Self-notifying**: each archived row is emitted as `ConversationUpdated`
 //!   (now carrying a non-null `archivedAt`), which the frontend drops from the
 //!   active sidebar list.
+//!
+//! Auto-delete is a second, independent switch (default OFF) on the same
+//! settings row. When on, the same sweeper permanently deletes any *archived*
+//! conversation whose `archived_at` is older than its own threshold, through
+//! the exact path the "Delete" button uses ([`crate::commands::purge_conversation`]),
+//! and emits `ConversationDeleted` so the Archived chats page drops the row.
+//! It only ever looks at archived rows, so an active chat can never be deleted
+//! without first passing through the archive (manually or via auto-archive).
 
 use crate::store::now_ms;
 use crate::AppState;
@@ -58,10 +68,24 @@ pub struct AutoArchiveSettings {
     /// Unit for [`Self::value`]: `"hours"` or `"days"`.
     #[serde(default = "default_unit")]
     pub unit: String,
+    /// Auto-delete switch. Default OFF — independent of [`Self::enabled`], so
+    /// you can prune hand-archived chats without auto-archiving anything.
+    #[serde(default)]
+    pub delete_enabled: bool,
+    /// How long a chat may sit in the archive before it's deleted, in
+    /// [`Self::delete_unit`].
+    #[serde(default = "default_delete_value")]
+    pub delete_value: u32,
+    /// Unit for [`Self::delete_value`]: `"hours"` or `"days"`.
+    #[serde(default = "default_unit")]
+    pub delete_unit: String,
 }
 
 fn default_value() -> u32 {
     30
+}
+fn default_delete_value() -> u32 {
+    7
 }
 fn default_unit() -> String {
     "days".to_string()
@@ -73,20 +97,32 @@ impl Default for AutoArchiveSettings {
             enabled: false,
             value: default_value(),
             unit: default_unit(),
+            delete_enabled: false,
+            delete_value: default_delete_value(),
+            delete_unit: default_unit(),
         }
     }
 }
 
+/// `value` in `unit` as milliseconds. A value of 0 is clamped to 1 so neither
+/// sweep can fire against everything the instant it's turned on.
+fn threshold_ms(value: u32, unit: &str) -> i64 {
+    let per_unit = if unit == "hours" {
+        MS_PER_HOUR
+    } else {
+        MS_PER_DAY
+    };
+    value.max(1) as i64 * per_unit
+}
+
 impl AutoArchiveSettings {
-    /// Idle threshold in milliseconds. A value of 0 is clamped to 1 so the
-    /// feature can never archive everything the instant it's turned on.
+    /// Idle threshold before an active chat is archived.
     fn idle_ms(&self) -> i64 {
-        let per_unit = if self.unit == "hours" {
-            MS_PER_HOUR
-        } else {
-            MS_PER_DAY
-        };
-        self.value.max(1) as i64 * per_unit
+        threshold_ms(self.value, &self.unit)
+    }
+    /// Age-in-archive threshold before an archived chat is deleted.
+    fn delete_after_ms(&self) -> i64 {
+        threshold_ms(self.delete_value, &self.delete_unit)
     }
 }
 
@@ -125,6 +161,11 @@ pub async fn set_auto_archive_settings(
             tracing::warn!("auto-archive: immediate sweep failed: {e}");
         }
     }
+    if settings.delete_enabled {
+        if let Err(e) = sweep_delete(&state, &app, &settings).await {
+            tracing::warn!("auto-delete: immediate sweep failed: {e}");
+        }
+    }
     Ok(())
 }
 
@@ -149,10 +190,13 @@ pub fn spawn_auto_archiver(handle: AppHandle) {
 async fn tick(handle: &AppHandle) -> Result<()> {
     let state = handle.state::<AppState>();
     let settings = load_settings(&state.store);
-    if !settings.enabled {
-        return Ok(());
+    if settings.enabled {
+        sweep(&state, handle, &settings).await?;
     }
-    sweep(&state, handle, &settings).await
+    if settings.delete_enabled {
+        sweep_delete(&state, handle, &settings).await?;
+    }
+    Ok(())
 }
 
 /// One pass: archive every active conversation idle past the threshold. Shared
@@ -233,6 +277,56 @@ async fn sweep(state: &AppState, handle: &AppHandle, settings: &AutoArchiveSetti
             );
         }
         tracing::info!("auto-archived idle conversation {}", c.id);
+    }
+
+    Ok(())
+}
+
+/// One pass: permanently delete every archived conversation whose
+/// `archived_at` is older than the delete threshold. Only archived rows are
+/// considered, so nothing active can be deleted here. Assumes the caller
+/// already checked `settings.delete_enabled`.
+async fn sweep_delete(
+    state: &AppState,
+    handle: &AppHandle,
+    settings: &AutoArchiveSettings,
+) -> Result<()> {
+    let now = now_ms();
+    let cutoff = now - settings.delete_after_ms();
+    let archived = state
+        .store
+        .list(true)
+        .map_err(|e| anyhow!("list archived conversations: {e}"))?;
+    let visible_conversation_id = state.active_conversation().await;
+
+    for c in archived {
+        // `list(true)` is archived-only, but be explicit: never delete a row
+        // without an archive timestamp to age against.
+        let Some(archived_at) = c.archived_at else {
+            continue;
+        };
+        if archived_at >= cutoff {
+            continue;
+        }
+        // An archived chat can still be open in the pane (opened from the
+        // Archived page, or archived while being viewed). Don't pull the floor
+        // out from under it; it'll go on the next tick once they navigate away.
+        if visible_conversation_id.as_deref() == Some(c.id.as_str()) {
+            continue;
+        }
+        if let Err(e) = crate::commands::purge_conversation(state, &c.id).await {
+            tracing::warn!("auto-delete: failed to delete {}: {e}", c.id);
+            continue;
+        }
+        let _ = handle.emit(
+            "app-event",
+            crate::app_event::AppEvent::ConversationDeleted { id: c.id.clone() },
+        );
+        tracing::info!(
+            "auto-deleted archived conversation {} (archived {}ms ago)",
+            c.id,
+            now - archived_at
+        );
     }
 
     Ok(())

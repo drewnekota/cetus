@@ -22,6 +22,8 @@ export const commandPalette = {
     "group.reasoning": "Reasoning",
     "group.screenHistoryCount": "Screen history · {count}",
     "group.screenHistoryRecent": "Screen history · recent",
+    "group.archivedCount": "Archived · {count}",
+    "archivedHint": "Archived · Enter to restore and open",
 
     // Screen-history items
     screenFallback: "Screen",
@@ -76,6 +78,8 @@ export const commandPalette = {
     "group.reasoning": "推理",
     "group.screenHistoryCount": "屏幕历史 · {count}",
     "group.screenHistoryRecent": "屏幕历史 · 最近",
+    "group.archivedCount": "已归档 · {count}",
+    "archivedHint": "已归档 · 回车恢复并打开",
 
     screenFallback: "屏幕",
     noRecognizedText: "（未识别到文本）",
@@ -125,6 +129,8 @@ export const commandPalette = {
     "group.reasoning": "推論",
     "group.screenHistoryCount": "画面履歴 · {count}",
     "group.screenHistoryRecent": "画面履歴 · 最近",
+    "group.archivedCount": "アーカイブ済み · {count}",
+    "archivedHint": "アーカイブ済み · Enter で復元して開く",
 
     screenFallback: "画面",
     noRecognizedText: "（認識されたテキストなし）",
@@ -174,6 +180,8 @@ export const commandPalette = {
     "group.reasoning": "추론",
     "group.screenHistoryCount": "화면 기록 · {count}",
     "group.screenHistoryRecent": "화면 기록 · 최근",
+    "group.archivedCount": "보관됨 · {count}",
+    "archivedHint": "보관됨 · Enter로 복원 후 열기",
 
     screenFallback: "화면",
     noRecognizedText: "(인식된 텍스트 없음)",
@@ -223,6 +231,8 @@ export const commandPalette = {
     "group.reasoning": "Razonamiento",
     "group.screenHistoryCount": "Historial de pantalla · {count}",
     "group.screenHistoryRecent": "Historial de pantalla · reciente",
+    "group.archivedCount": "Archivadas · {count}",
+    "archivedHint": "Archivada · Intro para restaurar y abrir",
 
     screenFallback: "Pantalla",
     noRecognizedText: "(sin texto reconocido)",
@@ -272,6 +282,8 @@ export const commandPalette = {
     "group.reasoning": "Raciocínio",
     "group.screenHistoryCount": "Histórico de tela · {count}",
     "group.screenHistoryRecent": "Histórico de tela · recente",
+    "group.archivedCount": "Arquivadas · {count}",
+    "archivedHint": "Arquivada · Enter para restaurar e abrir",
 
     screenFallback: "Tela",
     noRecognizedText: "(nenhum texto reconhecido)",
@@ -321,6 +333,8 @@ export const commandPalette = {
     "group.reasoning": "Raisonnement",
     "group.screenHistoryCount": "Historique d’écran · {count}",
     "group.screenHistoryRecent": "Historique d’écran · récent",
+    "group.archivedCount": "Archivées · {count}",
+    "archivedHint": "Archivée · Entrée pour restaurer et ouvrir",
 
     screenFallback: "Écran",
     noRecognizedText: "(aucun texte reconnu)",
@@ -370,6 +384,8 @@ export const commandPalette = {
     "group.reasoning": "Schlussfolgern",
     "group.screenHistoryCount": "Bildschirmverlauf · {count}",
     "group.screenHistoryRecent": "Bildschirmverlauf · zuletzt",
+    "group.archivedCount": "Archiviert · {count}",
+    "archivedHint": "Archiviert · Eingabe zum Wiederherstellen und Öffnen",
 
     screenFallback: "Bildschirm",
     noRecognizedText: "(kein erkannter Text)",
@@ -419,6 +435,8 @@ export const commandPalette = {
     "group.reasoning": "Ragionamento",
     "group.screenHistoryCount": "Cronologia schermo · {count}",
     "group.screenHistoryRecent": "Cronologia schermo · recente",
+    "group.archivedCount": "Archiviate · {count}",
+    "archivedHint": "Archiviata · Invio per ripristinare e aprire",
 
     screenFallback: "Schermo",
     noRecognizedText: "(nessun testo riconosciuto)",
@@ -468,6 +486,8 @@ export const commandPalette = {
     "group.reasoning": "Рассуждение",
     "group.screenHistoryCount": "История экрана · {count}",
     "group.screenHistoryRecent": "История экрана · недавнее",
+    "group.archivedCount": "В архиве · {count}",
+    "archivedHint": "В архиве · Enter — восстановить и открыть",
 
     screenFallback: "Экран",
     noRecognizedText: "(текст не распознан)",

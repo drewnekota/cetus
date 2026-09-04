@@ -422,6 +422,9 @@ pub struct QuickRuntime {
     /// webview on mount and whenever it changes. The launcher's logical window
     /// size scales with it so a zoomed-in UI doesn't clip inside a fixed box.
     pub scale_pct: Arc<AtomicU32>,
+    /// Launcher content height in CSS px at 100% zoom, reported by the panel
+    /// as its input/attachments grow. 0 = unknown (use the compact base).
+    pub content_height: Arc<AtomicU32>,
 
     // ---- Global voice dictation (read live by the hotkey thread) ----
     pub voice_enabled: Arc<AtomicBool>,
@@ -468,6 +471,7 @@ impl QuickRuntime {
             reply_stash: Arc::new(std::sync::Mutex::new(None)),
             reply_run: Arc::new(AtomicU32::new(0)),
             scale_pct: Arc::new(AtomicU32::new(100)),
+            content_height: Arc::new(AtomicU32::new(0)),
             voice_enabled: Arc::new(AtomicBool::new(s.voice_enabled)),
             voice_gesture: Arc::new(AtomicU8::new(voice_gesture_code(&s.voice_gesture))),
             voice_handsfree_shortcut: Arc::new(AtomicBool::new(s.voice_handsfree_shortcut)),
@@ -785,10 +789,36 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
     present_launcher(app, shot, context, capture).await;
 }
 
-/// Launcher geometry at 100% zoom (logical px). Reply mode is taller to fit
-/// the streamed draft plus the captured-input band.
-const LAUNCHER_BASE: (f64, f64) = (920.0, 232.0);
-const REPLY_BASE: (f64, f64) = (920.0, 380.0);
+/// Launcher geometry at 100% zoom (logical px), Raycast-sized: a 750-wide
+/// single input row over the action strip. The height is only a floor — the
+/// panel reports its real content height and the window grows downward with
+/// it. Reply mode is a fixed taller box for the streamed draft plus the
+/// captured-input band.
+const LAUNCHER_BASE: (f64, f64) = (750.0, 100.0);
+const REPLY_BASE: (f64, f64) = (750.0, 380.0);
+/// Cap so a huge paste can't push the launcher off the screen.
+const LAUNCHER_MAX_H: f64 = 560.0;
+
+/// Launcher box: base width × max(base height, reported content height).
+fn launcher_size(app: &AppHandle) -> tauri::LogicalSize<f64> {
+    let h = app
+        .state::<AppState>()
+        .quick
+        .content_height
+        .load(Ordering::Relaxed) as f64;
+    let h = h.max(LAUNCHER_BASE.1).min(LAUNCHER_MAX_H);
+    scaled_size(app, (LAUNCHER_BASE.0, h))
+}
+
+/// Resize in place keeping the top-left corner fixed, so the launcher grows
+/// downward like Raycast instead of re-centering (or, on AppKit, growing up).
+fn resize_anchored_top(win: &tauri::WebviewWindow, size: tauri::LogicalSize<f64>) {
+    let pos = win.outer_position().ok();
+    let _ = win.set_size(size);
+    if let Some(pos) = pos {
+        let _ = win.set_position(pos);
+    }
+}
 
 /// Scale a base size by the main window's zoom so the panel grows with ⌘+.
 fn scaled_size(app: &AppHandle, base: (f64, f64)) -> tauri::LogicalSize<f64> {
@@ -811,13 +841,34 @@ pub async fn quick_set_scale(app: AppHandle, scale: f64) -> Result<(), String> {
     state.quick.scale_pct.store(pct, Ordering::Relaxed);
     if state.quick.shown.load(Ordering::Relaxed) {
         // A live reply stash means the taller reply surface is what's up.
-        let base = if state.quick.reply_stash.lock().unwrap().is_some() {
-            REPLY_BASE
+        let size = if state.quick.reply_stash.lock().unwrap().is_some() {
+            scaled_size(&app, REPLY_BASE)
         } else {
-            LAUNCHER_BASE
+            launcher_size(&app)
         };
         if let Some(win) = app.get_webview_window("quick") {
-            let _ = win.set_size(scaled_size(&app, base));
+            resize_anchored_top(&win, size);
+        }
+    }
+    Ok(())
+}
+
+/// The launcher reports its natural content height (CSS px, pre-zoom) whenever
+/// it changes — more lines typed, an attachment chip added. The window hugs
+/// that height, anchored at its top edge. Ignored while the reply surface is
+/// up (it has its own fixed geometry).
+#[tauri::command]
+pub async fn quick_set_content_height(app: AppHandle, height: f64) -> Result<(), String> {
+    let h = height.max(0.0).round() as u32;
+    let state = app.state::<AppState>();
+    if state.quick.content_height.swap(h, Ordering::Relaxed) == h {
+        return Ok(());
+    }
+    if state.quick.shown.load(Ordering::Relaxed)
+        && state.quick.reply_stash.lock().unwrap().is_none()
+    {
+        if let Some(win) = app.get_webview_window("quick") {
+            resize_anchored_top(&win, launcher_size(&app));
         }
     }
     Ok(())
@@ -843,7 +894,12 @@ pub async fn present_launcher(
         None => return,
     };
     // Reply mode grows this same warm window to fit its candidates. Restore the
-    // launcher's compact geometry on every normal open before centering it.
+    // launcher's compact geometry on every normal open before centering it; the
+    // panel clears its draft on open and re-reports its height from there.
+    app.state::<AppState>()
+        .quick
+        .content_height
+        .store(0, Ordering::Relaxed);
     let _ = win.set_size(scaled_size(app, LAUNCHER_BASE));
     // Stamp the open so the reopen handler can ignore the activation this show
     // may cause (see the macOS Reopen branch in lib.rs). The same stamp doubles

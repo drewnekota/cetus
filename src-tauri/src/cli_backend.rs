@@ -1511,6 +1511,9 @@ fn persist_cli_outcome(
             store.set_session_file(conv_id, resume).ok();
         }
     }
+    // Keep the ⌘K content index current the moment a turn settles, so the
+    // reply is findable before the background sweep gets to it.
+    crate::search_index::reindex_cli(store, conv_id);
 }
 
 /// Consecutive automatic retries a conversation gets before the error is left

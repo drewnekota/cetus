@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -7,6 +7,7 @@ import { AppWindow, Check, CornerDownLeft, File, Globe, ImageOff, Layers, Paperc
 import { formatBytes } from "@/lib/artifact";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { WorkspacePicker } from "@/components/chat/workspace-picker";
 import { ModelPicker } from "@/components/chat/model-picker";
 import {
@@ -73,6 +74,9 @@ const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
  *  the launcher reads it straight from localStorage and follows changes via
  *  the cross-window `storage` event. */
 const ZOOM_STORAGE_KEY = "cetus:zoom";
+/** Input line height / max visible lines before the textarea scrolls. */
+const TEXTAREA_LINE_PX = 28;
+const TEXTAREA_MAX_LINES = 8;
 /** Sticky "Create more" switch: keep the launcher up after each launch. */
 const KEEP_OPEN_STORAGE_KEY = "cetus:quickKeepOpen";
 
@@ -153,6 +157,29 @@ export function QuickPanel() {
   const [replyBackend, setReplyBackend] = useState<BackendId>("pi");
 
   const taRef = useRef<HTMLTextAreaElement>(null);
+  // Wraps everything the launcher renders. Its natural height drives the
+  // native window height (Raycast-style: one input row that grows downward
+  // as you type or attach things, instead of a fixed box of empty space).
+  const measureRef = useRef<HTMLDivElement>(null);
+  const reportHeight = useCallback(() => {
+    const h = measureRef.current?.getBoundingClientRect().height;
+    if (h) api.quickSetContentHeight(Math.ceil(h)).catch(() => {});
+  }, []);
+  useEffect(() => {
+    const el = measureRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(reportHeight);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [reportHeight]);
+  // Auto-grow the textarea with its content (capped, then it scrolls).
+  useLayoutEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "0px";
+    const max = TEXTAREA_LINE_PX * TEXTAREA_MAX_LINES;
+    ta.style.height = `${Math.min(Math.max(ta.scrollHeight, TEXTAREA_LINE_PX), max)}px`;
+  }, [text]);
   const rootRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -195,6 +222,9 @@ export function QuickPanel() {
       const z = readZoom();
       getCurrentWebview().setZoom(z).catch(() => {});
       api.quickSetScale(z).catch(() => {});
+      // Zoom doesn't change CSS layout, so the content observer below stays
+      // quiet — re-report the height so the native box rescales with it.
+      reportHeight();
     };
     sync();
     const onStorage = (e: StorageEvent) => {
@@ -202,7 +232,7 @@ export function QuickPanel() {
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  }, [reportHeight]);
 
   useEffect(() => {
     try {
@@ -397,6 +427,9 @@ export function QuickPanel() {
       const p = e.payload;
       setSurface("launcher");
       openIdRef.current = p.openId;
+      // The native side resets to the compact base box on every open; the
+      // observer only fires on change, so re-report once the reset lays out.
+      requestAnimationFrame(reportHeight);
       setText("");
       setAttachments([]);
       setAttachError(null);
@@ -437,7 +470,7 @@ export function QuickPanel() {
       cancelled = true;
       unlisten?.();
     };
-  }, [focusSoon]);
+  }, [focusSoon, reportHeight]);
 
   // Direct visual reply is a separate state of the same warm, non-activating
   // window. The open event paints a loading shell immediately; the turn then
@@ -786,10 +819,10 @@ export function QuickPanel() {
         isDragging && "ring-2 ring-inset ring-primary dark:ring-2 dark:ring-primary",
       )}
     >
-      {/* The input owns the whole region above the action strip: the textarea
-          fills it so typing wraps and uses the full height, and the screenshot
-          chip (when present) tucks in at the bottom of the same region. */}
-      <div className="relative flex flex-1 flex-col overflow-hidden px-6 pt-5 pb-2.5">
+     <div ref={measureRef} className="flex shrink-0 flex-col">
+      {/* Raycast-style input row: a single 56px line that grows with the text,
+          with the attachment chips (when present) tucked under it. */}
+      <div className="relative flex flex-col px-5 py-3.5">
         <textarea
           ref={taRef}
           autoFocus
@@ -798,10 +831,11 @@ export function QuickPanel() {
           onPaste={onPaste}
           onKeyDown={onKeyDown}
           placeholder={t("launcher.placeholder")}
-          className="w-full flex-1 resize-none overflow-x-hidden overflow-y-auto bg-transparent text-lg font-medium leading-7 text-foreground outline-none placeholder:font-medium placeholder:text-muted-foreground/60"
+          rows={1}
+          className="w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent text-[20px] font-medium leading-7 text-foreground outline-none placeholder:font-medium placeholder:text-muted-foreground/60"
         />
         {submitting && (
-          <Spinner className="absolute right-4 top-4 size-4 text-muted-foreground" />
+          <Spinner className="absolute right-5 top-[18px] size-4 text-muted-foreground" />
         )}
 
         {/* Attachments band — screenshot thumbnail (or its denied hint) and the
@@ -887,7 +921,7 @@ export function QuickPanel() {
       </div>
 
       {/* Thin, muted action strip — subordinate to the input. */}
-      <div className="flex items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-md text-muted-foreground dark:border-white/[0.06]">
+      <div className="flex items-center gap-2.5 border-t border-black/[0.06] px-3 py-1.5 text-md text-muted-foreground dark:border-white/[0.06]">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { pickingWorkspaceRef.current = false; if (e.target.files?.length) void addFiles(e.target.files); e.target.value = ""; }} />
         <button type="button" onClick={() => { pickingWorkspaceRef.current = true; fileInputRef.current?.click(); }} title={t("attachment.add")} aria-label={t("attachment.add")} className="inline-flex size-8 items-center justify-center rounded-md hover:bg-black/5 hover:text-foreground dark:hover:bg-white/[0.08]"><Paperclip className="size-3.5" /></button>
         <Segmented
@@ -937,21 +971,21 @@ export function QuickPanel() {
         <TooltipProvider disableHoverableContent>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={keepOpen}
-                onClick={() => onKeepOpenChange(!keepOpen)}
+              <label
                 className={cn(
-                  "flex h-8 items-center gap-1.5 rounded-md px-2.5 font-medium transition-colors",
-                  keepOpen
-                    ? "bg-black/10 text-foreground dark:bg-white/15"
-                    : "text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/[0.08]",
+                  "flex h-8 cursor-pointer select-none items-center gap-2 rounded-md px-2.5 font-medium transition-colors hover:bg-black/5 dark:hover:bg-white/[0.08]",
+                  keepOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 <Layers className="size-3.5" />
                 {t("footer.createMore")}
-              </button>
+                <Switch
+                  size="sm"
+                  checked={keepOpen}
+                  onCheckedChange={onKeepOpenChange}
+                  aria-label={t("footer.createMore")}
+                />
+              </label>
             </TooltipTrigger>
             <TooltipContent side="top">{t("footer.createMore.hint")}</TooltipContent>
           </Tooltip>
@@ -977,6 +1011,7 @@ export function QuickPanel() {
           {t("footer.dismiss")}
         </span>
       </div>
+     </div>
       {attachError && <div className="absolute bottom-12 left-4 text-xs text-destructive">{attachError}</div>}
     </div>
   );

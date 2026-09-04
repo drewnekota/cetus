@@ -517,6 +517,13 @@ export const settings = {
     "autoArchive.unit.hours": "hours",
     "autoArchive.unit.days": "days",
 
+    "autoDelete.enable.label": "Auto-delete archived chats",
+    "autoDelete.enable.description":
+      "Permanently delete chats that have sat in the archive for a while. This can't be undone.",
+    "autoDelete.threshold.label": "Delete after",
+    "autoDelete.threshold.description":
+      "How long a chat stays in the archive before it's deleted. Only archived chats are affected; anything still in the sidebar is never touched.",
+
 
     // --- Memory -----------------------------------------------------------
     "memory.title": "Memory",
@@ -1145,6 +1152,13 @@ export const settings = {
       "对话闲置多久后自动归档。正在打开的对话、还没读的运行结果，以及自动化（Automation）产生的对话不会被归档。",
     "autoArchive.unit.hours": "小时",
     "autoArchive.unit.days": "天",
+
+    "autoDelete.enable.label": "自动删除已归档对话",
+    "autoDelete.enable.description":
+      "把在归档里放了一段时间的对话永久删除。删除后无法恢复。",
+    "autoDelete.threshold.label": "删除阈值",
+    "autoDelete.threshold.description":
+      "对话归档多久后自动删除。只影响已归档的对话，侧栏里的对话不会被动。",
 
 
     "memory.title": "记忆",

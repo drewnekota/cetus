@@ -20,6 +20,7 @@ import {
   stripDanglingCodexCitation,
   KATEX_OPTIONS,
   REMARK_MATH_OPTIONS,
+  remarkTrimAutolinkCjk,
 } from "@/lib/markdown";
 import { Check, Copy, FileText, GitFork } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
@@ -173,7 +174,7 @@ const assistantMarkdownComponents: Components = {
 const RawMarkdown = memo(function RawMarkdown({ text }: { text: string }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[[remarkGfm, { singleTilde: false }], [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly]}
+      remarkPlugins={[[remarkGfm, { singleTilde: false }], [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly, remarkTrimAutolinkCjk]}
       rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
       components={assistantMarkdownComponents}
       urlTransform={markdownUrlTransform}

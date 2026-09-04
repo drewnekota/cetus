@@ -9,10 +9,10 @@
   --runtime-pi: var(--brand);
   --runtime-claude: #d97757;
   --runtime-codex: #10a37f;
-  --runtime-opencode: light-dark(#201d1d, #d6d3d1);
+  --runtime-opencode: #7f7f7f;
   --runtime-grok: #71717a;
   --runtime-kimi: #1783ff;
-  --runtime-dsh: #4d6bfe;
+  --runtime-dsh: #000000;
   --background: var(--surface);
   --foreground: var(--ink);
   --card: var(--surface);

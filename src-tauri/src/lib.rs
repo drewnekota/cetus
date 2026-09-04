@@ -53,6 +53,7 @@ mod quick_reply;
 mod remote;
 mod resources;
 mod scheduler;
+mod search_index;
 mod secrets;
 mod skill_tool;
 mod skills;
@@ -1241,6 +1242,10 @@ pub fn run() {
             // left untouched past the user's idle threshold. No-op while off.
             auto_archive::spawn_auto_archiver(app.handle().clone());
 
+            // ⌘K content search index: backfills every conversation (archived
+            // included) after a startup grace, then keeps stale rows current.
+            search_index::spawn_indexer(app.handle().clone());
+
             // OAuth token keep-alive: proactively refresh near-expiry mcporter
             // tokens so remote connectors (Notion, …) don't silently die ~1h after
             // authorizing. No-op when there are no OAuth connectors.
@@ -1737,6 +1742,7 @@ pub fn run() {
         commands::capture_stats,
         commands::recent_screenshots,
         commands::search_screenshots,
+        commands::search_conversations,
         commands::get_ambient_settings,
         commands::set_ambient_settings,
         commands::ambient_stats,
@@ -1813,6 +1819,7 @@ pub fn run() {
         quick::quick_reply_regenerate,
         quick::quick_submit,
         quick::quick_set_scale,
+        quick::quick_set_content_height,
         quick::accessibility_trusted,
         quick::request_accessibility,
         quick::open_accessibility_settings,
@@ -1927,6 +1934,7 @@ pub fn run() {
         commands::capture_stats,
         commands::recent_screenshots,
         commands::search_screenshots,
+        commands::search_conversations,
         commands::get_ambient_settings,
         commands::set_ambient_settings,
         commands::ambient_stats,
@@ -2003,6 +2011,7 @@ pub fn run() {
         quick::quick_reply_regenerate,
         quick::quick_submit,
         quick::quick_set_scale,
+        quick::quick_set_content_height,
         quick::accessibility_trusted,
         quick::request_accessibility,
         quick::open_accessibility_settings,

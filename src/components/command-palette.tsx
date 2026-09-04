@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Archive,
   BrainCircuit,
   Check,
   Clock,
@@ -44,7 +45,7 @@ import {
 } from "@/lib/conversation-search";
 import type { SidebarView } from "@/components/sidebar/view-toggle";
 import type { Conversation, ModelChoice, ReasoningLevel } from "@/lib/types";
-import { api, type Screenshot } from "@/lib/tauri";
+import { api, type ConversationSearchHit, type Screenshot } from "@/lib/tauri";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 interface Props {
@@ -54,6 +55,8 @@ interface Props {
   activeId: string | null;
   modelChoice: ModelChoice;
   onSelectConversation: (id: string) => void;
+  /** An archived hit was chosen: restore it and open it. */
+  onSelectArchivedConversation: (conv: Conversation) => void;
   onNewTask: () => void;
   onModelChange: (next: ModelChoice) => void;
   onOpenSettings: () => void;
@@ -127,6 +130,7 @@ export function CommandPalette({
   activeId,
   modelChoice,
   onSelectConversation,
+  onSelectArchivedConversation,
   onNewTask,
   onModelChange,
   onOpenSettings,
@@ -142,6 +146,11 @@ export function CommandPalette({
     () => new Map(),
   );
   const [indexing, setIndexing] = useState(true);
+  // Archived hits come from the backend FTS index (search_index.rs): archived
+  // rows aren't in the sidebar list and their IDB render cache is pruned on
+  // launch, so the client-side index can't see them. Searched on demand like
+  // screen history; never shown for an empty query.
+  const [archivedHits, setArchivedHits] = useState<ConversationSearchHit[]>([]);
   // Screen-context (OCR) hits for the current query — searched on demand.
   const [screenHits, setScreenHits] = useState<Screenshot[]>([]);
 
@@ -265,10 +274,48 @@ export function CommandPalette({
     }));
   }, [t, tokens, conversations, index]);
 
+  // Archived hits sit in their own group below the active ones so a stale
+  // thread never outranks live work. Debounced backend query, empty on an
+  // empty query.
+  useEffect(() => {
+    if (!q) {
+      setArchivedHits([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api
+        .searchConversations(q, true, 6)
+        .then((hits) => {
+          if (!cancelled) setArchivedHits(hits);
+        })
+        .catch(() => {
+          if (!cancelled) setArchivedHits([]);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [q]);
+
+  const archivedResults = useMemo(
+    () =>
+      archivedHits.map(({ conversation: conv, snippet }) => ({
+        conv,
+        titleRanges: highlightRanges(conv.title || t("untitled"), tokens),
+        snippet: snippet
+          ? { text: snippet, ranges: highlightRanges(snippet, tokens) }
+          : null,
+      })),
+    [t, tokens, archivedHits],
+  );
+
   const total =
     shownActions.length +
     shownReasoning.length +
     convResults.length +
+    archivedResults.length +
     screenHits.length;
   const hasCommands =
     shownActions.length > 0 || shownReasoning.length > 0;
@@ -351,7 +398,49 @@ export function CommandPalette({
                   </CommandGroup>
                 )}
 
-                {convResults.length > 0 && hasCommands && <CommandSeparator />}
+                {archivedResults.length > 0 && (
+                  <CommandGroup
+                    heading={t("group.archivedCount", { count: archivedResults.length })}
+                  >
+                    {archivedResults.map(({ conv, titleRanges, snippet }) => (
+                      <CommandItem
+                        key={`archived-${conv.id}`}
+                        value={`archived-${conv.id}`}
+                        onSelect={() => onSelectArchivedConversation(conv)}
+                        className="items-start"
+                      >
+                        <Archive className="mt-0.5 size-4 opacity-70" />
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">
+                              <Highlight text={conv.title || t("untitled")} ranges={titleRanges} />
+                            </span>
+                            <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">
+                              {formatRelativeTime(conv.archivedAt ?? conv.updatedAt)}
+                            </span>
+                          </div>
+                          <span className="truncate text-xs text-muted-foreground">
+                            {snippet ? (
+                              <Highlight text={snippet.text} ranges={snippet.ranges} />
+                            ) : (
+                              <>
+                                <span className="text-muted-foreground/60">
+                                  {shortenWorkspace(conv.workspaceDir)}
+                                </span>
+                                {" · "}
+                                {t("archivedHint")}
+                              </>
+                            )}
+                          </span>
+                        </div>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+
+                {(convResults.length > 0 || archivedResults.length > 0) && hasCommands && (
+                  <CommandSeparator />
+                )}
 
                 {shownActions.length > 0 && (
                   <CommandGroup heading={t("group.actions")}>
@@ -386,7 +475,9 @@ export function CommandPalette({
                 )}
                 {screenHits.length > 0 && (
                   <>
-                    {(convResults.length > 0 || hasCommands) && <CommandSeparator />}
+                    {(convResults.length > 0 || archivedResults.length > 0 || hasCommands) && (
+                      <CommandSeparator />
+                    )}
                     <CommandGroup
                       heading={
                         q

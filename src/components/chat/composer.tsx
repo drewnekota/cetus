@@ -1809,14 +1809,16 @@ export function Composer({
           // slash menu isn't — they're mutually exclusive per caret token).
           if (mentionVisible && !slashVisible && !composing) {
             const n = Math.max(1, mentionItems.length);
+            // Clamp at the ends instead of wrapping — pressing ↑ on the first
+            // row (or ↓ on the last) is a no-op.
             if (e.key === "ArrowDown") {
               e.preventDefault();
-              setMentionActive((i) => (i + 1) % n);
+              setMentionActive((i) => Math.min(i + 1, n - 1));
               return;
             }
             if (e.key === "ArrowUp") {
               e.preventDefault();
-              setMentionActive((i) => (i - 1 + n) % n);
+              setMentionActive((i) => Math.max(i - 1, 0));
               return;
             }
             // Tab / ⇧Tab walk the kind tabs (All → Functions → … → Chats);

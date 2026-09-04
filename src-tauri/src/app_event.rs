@@ -28,6 +28,10 @@ pub enum AppEvent {
     ConversationUpdated {
         conversation: crate::store::Conversation,
     },
+    /// A conversation was permanently deleted out-of-band (e.g. by the
+    /// auto-delete sweep over archived chats). The frontend drops it from
+    /// every list it holds.
+    ConversationDeleted { id: String },
     /// An automation's state advanced (scheduled next-run computed, enabled
     /// toggled, run recorded). The frontend merges `automation` into its list.
     AutomationUpdated {

@@ -213,6 +213,88 @@ export const markdownComponents: Components = {
   },
 };
 
+// First non-ASCII punctuation or symbol in a run of URL-ish text: the
+// full-width `）。，：` that Chinese prose glues straight onto a URL.
+const CJK_URL_BREAK = /(?![\x00-\x7f])[\p{P}\p{S}]/u;
+// GFM's trailing-punctuation set for literal autolinks.
+const GFM_URL_TRAIL = /[?!.,:*_~]+$/;
+
+/**
+ * Split a bare URL from the CJK prose that GFM's literal-autolink tokenizer
+ * glued onto it. That tokenizer ends a URL only at whitespace or `<`, so
+ * `https://x.com/p/abc）。本地稿在` links the whole run. Cut at the first
+ * non-ASCII punctuation/symbol (CJK *letters* stay — `/wiki/中文` is a real
+ * path), then re-apply GFM's own trailing rules at the new boundary: strip
+ * `?!.,:*_~` and an unbalanced closing paren, as it would have done had the
+ * URL ended there. Returns [url, rest]; rest is "" when nothing was cut.
+ */
+export function splitBareUrl(text: string): [string, string] {
+  const m = CJK_URL_BREAK.exec(text);
+  if (!m) return [text, ""];
+  let url = text.slice(0, m.index);
+  for (;;) {
+    const trimmed = url.replace(GFM_URL_TRAIL, "");
+    if (
+      trimmed.endsWith(")") &&
+      (trimmed.match(/\(/g)?.length ?? 0) < (trimmed.match(/\)/g)?.length ?? 0)
+    ) {
+      url = trimmed.slice(0, -1);
+      continue;
+    }
+    if (trimmed === url) break;
+    url = trimmed;
+  }
+  return [url, text.slice(url.length)];
+}
+
+// Minimal mdast shape; enough to walk and patch link nodes without pulling
+// in @types/mdast or unist-util-visit as direct deps.
+interface MdNode {
+  type: string;
+  url?: string;
+  value?: string;
+  children?: MdNode[];
+}
+
+/**
+ * remark plugin: give literal autolinks a CJK-aware end. Runs after remark-gfm
+ * has tokenized, and rewrites any link whose href is its own text (the
+ * signature of a literal autolink — `www.` ones carry an `http://` prefix)
+ * so the URL stops at the first full-width punctuation mark and the rest of
+ * the sentence goes back to being prose. See splitBareUrl.
+ */
+export function remarkTrimAutolinkCjk() {
+  return (tree: MdNode) => {
+    const walk = (node: MdNode) => {
+      const kids = node.children;
+      if (!kids) return;
+      for (let i = 0; i < kids.length; i++) {
+        const link = kids[i];
+        if (link.type !== "link" || link.children?.length !== 1) {
+          walk(link);
+          continue;
+        }
+        const text = link.children[0];
+        if (
+          text.type !== "text" ||
+          typeof text.value !== "string" ||
+          typeof link.url !== "string" ||
+          !link.url.endsWith(text.value)
+        )
+          continue;
+        const [url, rest] = splitBareUrl(text.value);
+        if (!rest || !url) continue;
+        const prefix = link.url.slice(0, link.url.length - text.value.length);
+        text.value = url;
+        link.url = prefix + url;
+        kids.splice(i + 1, 0, { type: "text", value: rest });
+        i++;
+      }
+    };
+    walk(tree);
+  };
+}
+
 // Bare http(s):// or www. URLs. Trailing sentence punctuation is peeled off the
 // match below so "see https://x.com." doesn't swallow the period.
 const URL_RE = /(https?:\/\/[^\s<]+|www\.[a-z0-9][^\s<]*)/gi;
@@ -231,8 +313,10 @@ export function LinkifiedText({ text }: { text: string }) {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const raw = m[0];
-    const trail = raw.match(TRAILING_PUNCT)?.[0] ?? "";
-    const url = raw.slice(0, raw.length - trail.length);
+    const [bare, cjkRest] = splitBareUrl(raw);
+    const punct = bare.match(TRAILING_PUNCT)?.[0] ?? "";
+    const url = bare.slice(0, bare.length - punct.length);
+    const trail = punct + cjkRest;
     const href = url.startsWith("www.") ? `https://${url}` : url;
     if (m.index > last) parts.push(text.slice(last, m.index));
     parts.push(

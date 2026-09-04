@@ -156,7 +156,7 @@ export function MentionMenu({
 
   return (
     <div
-      className="absolute bottom-full left-0 right-0 z-20 mb-2 flex max-h-80 flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-lg"
+      className="absolute bottom-full left-0 right-0 z-20 mb-2 flex h-80 flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-lg"
       role="listbox"
     >
       <div className="flex shrink-0 items-center gap-0.5 border-b border-border px-1.5 pt-1">

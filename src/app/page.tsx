@@ -1290,6 +1290,11 @@ export default function Home() {
             );
             break;
           }
+          case "conversation_deleted":
+            // Auto-delete sweep purged an archived chat. It's normally already
+            // out of the active list; filter defensively anyway.
+            setConversations((cs) => cs.filter((c) => c.id !== evt.id));
+            break;
           case "automation_updated":
             setAutomations((as) => mergeAutomation(as, evt.automation));
             break;
@@ -3477,6 +3482,24 @@ export default function Home() {
           setView("chat");
           setPaletteOpen(false);
           onSelect(id);
+        }}
+        onSelectArchivedConversation={async (conv) => {
+          setPaletteOpen(false);
+          // Archived rows aren't in the sidebar list, so opening one means
+          // restoring it first — the same path Settings › Archived uses —
+          // then selecting it like any other chat. Push its metadata into
+          // state directly so the pane doesn't wait on the next render of
+          // `conversationsRef` (which onSelect reads after an await).
+          try {
+            const restored = await api.archiveConversation(conv.id, false);
+            onSettingsConversationsChanged(restored);
+            conversationsRef.current = mergeConversation(conversationsRef.current, restored);
+            setView("chat");
+            onSelect(restored.id);
+          } catch (e) {
+            console.error("restore archived conversation failed", conv.id, e);
+            toast.error(String(e));
+          }
         }}
         onNewTask={() => {
           setPaletteOpen(false);

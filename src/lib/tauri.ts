@@ -78,6 +78,12 @@ export interface CaptureStats {
   count: number;
 }
 
+export interface ConversationSearchHit {
+  conversation: Conversation;
+  /** Body window around the first hit; empty for a title-only match. */
+  snippet: string;
+}
+
 export interface Screenshot {
   id: string;
   ts: number;
@@ -616,6 +622,10 @@ export const api = {
   /** Report the shared ⌘+/⌘− zoom so the launcher window grows with it. */
   quickSetScale: (scale: number) =>
     invoke<void>("quick_set_scale", { scale }),
+  /** Report the launcher's natural content height (CSS px) so the native
+   *  window hugs it, growing downward as text/attachments are added. */
+  quickSetContentHeight: (height: number) =>
+    invoke<void>("quick_set_content_height", { height }),
   accessibilityTrusted: () => invoke<boolean>("accessibility_trusted"),
   requestAccessibility: () => invoke<boolean>("request_accessibility"),
   openAccessibilitySettings: () =>
@@ -658,6 +668,16 @@ export const api = {
       sinceTs: sinceTs ?? null,
       limit: limit ?? null,
       beforeTs: beforeTs ?? null,
+    }),
+
+  /** Backend FTS over conversation titles + prose (archived included). See
+   *  src-tauri/src/search_index.rs. `archived`: true = archived only,
+   *  false = active only, undefined = both. */
+  searchConversations: (query: string, archived?: boolean, limit?: number) =>
+    invoke<ConversationSearchHit[]>("search_conversations", {
+      query,
+      archived: archived ?? null,
+      limit: limit ?? null,
     }),
 
   // Ambient text context (Littlebird-like AX collector) ---------------------

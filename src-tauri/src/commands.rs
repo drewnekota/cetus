@@ -812,6 +812,15 @@ pub async fn set_review_state(
 
 #[tauri::command]
 pub async fn delete_conversation(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    purge_conversation(&state, &id).await
+}
+
+/// Permanently delete a conversation and everything hanging off it: live
+/// runtimes, the CLI worktree, transcript, attachments, artifacts, and the
+/// search index. Shared by the `delete_conversation` command and the
+/// auto-delete sweep in `auto_archive.rs` so both paths clean up identically.
+pub async fn purge_conversation(state: &AppState, id: &str) -> CmdResult<()> {
+    let id = id.to_string();
     state.kill_pi(&id).await;
     state.abort_cli_turn(&id);
     state.kill_claude_session(&id);
@@ -832,6 +841,7 @@ pub async fn delete_conversation(state: State<'_, AppState>, id: String) -> CmdR
         }
     }
     state.store.delete_cli_messages(&id).ok();
+    state.store.delete_conversation_index(&id).ok();
     let _ = std::fs::remove_dir_all(crate::cli_backend::attachments_dir(
         &state.app_data_dir,
         &id,
@@ -1937,6 +1947,26 @@ fn search_remote_workspace_files(
     })
 }
 
+/// Backend full-text search over conversation titles + prose (see
+/// search_index.rs). `archived`: true = archived only, false = active only,
+/// omitted = both. Off the async runtime — a LIKE fallback for short tokens
+/// scans the FTS table.
+#[tauri::command]
+pub async fn search_conversations(
+    state: State<'_, AppState>,
+    query: String,
+    archived: Option<bool>,
+    limit: Option<u32>,
+) -> CmdResult<Vec<crate::search_index::ConversationSearchHit>> {
+    let store = state.store.clone();
+    let limit = limit.unwrap_or(12).clamp(1, 50);
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::search_index::search(&store, &query, archived, limit).map_err(err)
+    })
+    .await
+    .map_err(err)?
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptExport {
@@ -1981,7 +2011,7 @@ pub async fn export_conversation_transcript(
     })
 }
 
-fn read_pi_session_messages(path: &Path) -> CmdResult<Vec<serde_json::Value>> {
+pub(crate) fn read_pi_session_messages(path: &Path) -> CmdResult<Vec<serde_json::Value>> {
     let raw = std::fs::read_to_string(path).map_err(err)?;
     Ok(raw
         .lines()

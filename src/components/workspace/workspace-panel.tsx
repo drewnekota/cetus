@@ -62,7 +62,7 @@ import {
 import { formatBytes } from "@/lib/artifact";
 import { escapeHtml, fileExtension, highlightSource, HLJS_THEME_CLASS } from "@/lib/highlight";
 import { useTranslation } from "@/lib/i18n";
-import { markdownComponents, markdownUrlTransform } from "@/lib/markdown";
+import { markdownComponents, markdownUrlTransform, remarkTrimAutolinkCjk } from "@/lib/markdown";
 import { api } from "@/lib/tauri";
 import type { WorkspaceFileEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -1020,7 +1020,7 @@ function FilePreview({
             {(value) => (
               <div className="prose prose-sm dark:prose-invert max-w-none px-5 py-4 prose-pre:bg-secondary prose-pre:text-foreground">
                 <ReactMarkdown
-                  remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkFriendly]}
+                  remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkFriendly, remarkTrimAutolinkCjk]}
                   components={markdownComponents}
                   urlTransform={markdownUrlTransform}
                 >

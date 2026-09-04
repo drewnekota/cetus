@@ -51,6 +51,7 @@ import {
   normalizeMath,
   KATEX_OPTIONS,
   REMARK_MATH_OPTIONS,
+  remarkTrimAutolinkCjk,
 } from "@/lib/markdown";
 import { useTranslation } from "@/lib/i18n";
 
@@ -228,7 +229,7 @@ function Thumbnail({
           render={(text) => (
             <div className="prose prose-sm dark:prose-invert h-full w-full max-w-none overflow-hidden bg-card p-4 text-xs leading-[1.55] [&>*]:my-1.5 [&>:first-child]:mt-0 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-md [&_h3]:font-semibold [&_pre]:text-2xs">
               <ReactMarkdown
-                remarkPlugins={[remarkGfm, [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly]}
+                remarkPlugins={[remarkGfm, [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly, remarkTrimAutolinkCjk]}
                 rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
                 components={markdownComponents}
                 urlTransform={markdownUrlTransform}
@@ -722,7 +723,7 @@ function FullPreview({
           render={(text) => (
             <div className="prose prose-sm dark:prose-invert mx-auto max-w-3xl px-6 py-6">
               <ReactMarkdown
-                remarkPlugins={[remarkGfm, [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly]}
+                remarkPlugins={[remarkGfm, [remarkMath, REMARK_MATH_OPTIONS], remarkCjkFriendly, remarkTrimAutolinkCjk]}
                 rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
                 components={markdownComponents}
                 urlTransform={markdownUrlTransform}

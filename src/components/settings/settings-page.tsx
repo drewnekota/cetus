@@ -9,7 +9,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { markdownComponents, markdownUrlTransform } from "@/lib/markdown";
+import { markdownComponents, markdownUrlTransform, remarkTrimAutolinkCjk } from "@/lib/markdown";
 import {
   ClaudeCodeIcon,
   CodexIcon,
@@ -3814,7 +3814,7 @@ function MeetingsSection({ open }: { open: boolean }) {
                       {m.summary ? (
                         <div className="prose prose-sm dark:prose-invert max-w-none text-sm">
                           <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
+                            remarkPlugins={[remarkGfm, remarkTrimAutolinkCjk]}
                             components={markdownComponents}
                             urlTransform={markdownUrlTransform}
                           >
@@ -3934,6 +3934,64 @@ function AutoArchiveSettingsBlock() {
           </Select>
         </div>
       </div>
+
+      <div className="mt-4 border-t border-border pt-4">
+        <ToggleRow
+          id="auto-delete-enabled"
+          label={t("autoDelete.enable.label")}
+          description={t("autoDelete.enable.description")}
+          checked={settings.deleteEnabled}
+          onCheckedChange={(v) => update({ deleteEnabled: v })}
+        />
+
+        <div
+          className={cn(
+            "mt-4 flex items-center justify-between gap-4",
+            !settings.deleteEnabled && "pointer-events-none opacity-50",
+          )}
+        >
+          <div className="min-w-0 space-y-0.5">
+            <Label htmlFor="auto-delete-value" className="font-medium">
+              {t("autoDelete.threshold.label")}
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              {t("autoDelete.threshold.description")}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Input
+              id="auto-delete-value"
+              type="number"
+              min={1}
+              className="w-20"
+              value={settings.deleteValue}
+              onChange={(e) =>
+                update({
+                  deleteValue: Math.max(1, Number(e.target.value) || 1),
+                })
+              }
+            />
+            <Select
+              value={settings.deleteUnit}
+              onValueChange={(v) =>
+                update({ deleteUnit: v as AutoArchiveSettings["unit"] })
+              }
+            >
+              <SelectTrigger className="w-24" id="auto-delete-unit">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="hours">
+                  {t("autoArchive.unit.hours")}
+                </SelectItem>
+                <SelectItem value="days">
+                  {t("autoArchive.unit.days")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3969,6 +4027,28 @@ function ArchivedChatsSection({
   useEffect(() => {
     if (open) load();
   }, [open]);
+
+  // The auto-delete sweep purges rows out-of-band (including right after the
+  // user lowers its threshold above); drop them live instead of waiting for
+  // the next visit.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    onAppEvent((e) => {
+      if (e.type === "conversation_deleted") {
+        setChats((cs) => (cs ? cs.filter((x) => x.id !== e.id) : cs));
+        onConversationsChanged?.();
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function restore(c: Conversation) {
     const originalIndex = chats?.findIndex((x) => x.id === c.id) ?? -1;
@@ -5401,7 +5481,7 @@ function DiscoveredSkillRow({
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-pre:my-2 prose-ul:my-2 prose-ol:my-2 prose-headings:my-3 prose-pre:bg-secondary prose-pre:text-foreground prose-code:rounded prose-code:bg-secondary prose-code:px-1 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none">
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkTrimAutolinkCjk]}
                 components={markdownComponents}
                 urlTransform={markdownUrlTransform}
               >

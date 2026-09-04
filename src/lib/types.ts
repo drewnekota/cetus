@@ -604,13 +604,24 @@ export interface AutoArchiveSettings {
   value: number;
   /** Unit for `value`. */
   unit: AutoArchiveUnit;
+  /** Auto-delete switch for archived chats. Default OFF — independent of
+   *  `enabled`, so hand-archived chats can be pruned without auto-archiving. */
+  deleteEnabled: boolean;
+  /** How long a chat may sit in the archive before it's permanently deleted,
+   *  in `deleteUnit`s. */
+  deleteValue: number;
+  /** Unit for `deleteValue`. */
+  deleteUnit: AutoArchiveUnit;
 }
 
-/** Default OFF — auto-archive only runs once the user turns it on. */
+/** Default OFF — auto-archive / auto-delete only run once the user turns them on. */
 export const DEFAULT_AUTO_ARCHIVE_SETTINGS: AutoArchiveSettings = {
   enabled: false,
   value: 30,
   unit: "days",
+  deleteEnabled: false,
+  deleteValue: 7,
+  deleteUnit: "days",
 };
 
 // ---- Skills (Agent Skills standard) ---------------------------------------
@@ -1011,6 +1022,9 @@ export type AppEvent =
   | { type: "pi_event"; conversationId?: string; event: PiEvent | ExtensionUIRequest }
   // Emitted when a conversation row changes out-of-band (async auto-titling).
   | { type: "conversation_updated"; conversation: Conversation }
+  // A conversation was permanently deleted out-of-band (auto-delete sweep over
+  // archived chats). Drop it from every list.
+  | { type: "conversation_deleted"; id: string }
   // An automation's state advanced (next-run computed, toggled, run recorded).
   | { type: "automation_updated"; automation: Automation }
   // An automation was deleted out-of-band (e.g. via the control socket).
