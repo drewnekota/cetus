@@ -1030,7 +1030,17 @@ pub fn run() {
     let builder = builder.on_web_content_process_terminate(|webview| {
         if webview.label() == "main" {
             tracing::warn!("main WKWebView content process terminated; reloading UI");
-            let _ = webview.reload();
+            // Navigate to the current URL rather than `reload()`: after a
+            // client-requested kill+reset there is no page state left to
+            // reload, and `reload()` would settle on an empty document.
+            match webview.url() {
+                Ok(url) => {
+                    let _ = webview.navigate(url);
+                }
+                Err(_) => {
+                    let _ = webview.reload();
+                }
+            }
         }
     });
 

@@ -48,7 +48,11 @@ export const MentionHighlight = forwardRef<
         s.pill ? (
           <span
             key={i}
-            className="rounded-md bg-primary/15 ring-1 ring-primary/20 [box-decoration-break:clone] dark:bg-primary/25"
+            // Horizontal padding is cancelled by a matching negative margin so
+            // the span's advance width stays identical to the textarea's text
+            // and the pill keeps lining up under the token. Vertical padding
+            // on an inline span never affects line boxes, so it is free.
+            className="-mx-1 rounded-md bg-primary/35 px-1 py-0.5 [box-decoration-break:clone] dark:bg-primary/45"
           >
             {s.text}
           </span>

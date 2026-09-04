@@ -3,8 +3,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { AppWindow, Check, CornerDownLeft, File, Globe, ImageOff, Layers, Paperclip, ScanText, TextSelect, X } from "lucide-react";
+import { AppWindow, ArrowUp, Check, CornerDownLeft, File, Globe, ImageOff, Paperclip, ScanText, TextSelect, X } from "lucide-react";
 import { formatBytes } from "@/lib/artifact";
+import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
@@ -75,7 +76,9 @@ const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
  *  the cross-window `storage` event. */
 const ZOOM_STORAGE_KEY = "cetus:zoom";
 /** Input line height / max visible lines before the textarea scrolls. */
-const TEXTAREA_LINE_PX = 28;
+/** Fallback only; the real line box is read from the textarea's computed
+ * style so the cap follows the type-scale setting. */
+const TEXTAREA_LINE_PX = 24;
 const TEXTAREA_MAX_LINES = 8;
 /** Sticky "Create more" switch: keep the launcher up after each launch. */
 const KEEP_OPEN_STORAGE_KEY = "cetus:quickKeepOpen";
@@ -177,8 +180,9 @@ export function QuickPanel() {
     const ta = taRef.current;
     if (!ta) return;
     ta.style.height = "0px";
-    const max = TEXTAREA_LINE_PX * TEXTAREA_MAX_LINES;
-    ta.style.height = `${Math.min(Math.max(ta.scrollHeight, TEXTAREA_LINE_PX), max)}px`;
+    const line = parseFloat(getComputedStyle(ta).lineHeight) || TEXTAREA_LINE_PX;
+    const max = line * TEXTAREA_MAX_LINES;
+    ta.style.height = `${Math.min(Math.max(ta.scrollHeight, line), max)}px`;
   }, [text]);
   const rootRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -801,7 +805,7 @@ export function QuickPanel() {
   }
 
   // Every action-strip control shares one quiet language: borderless ghost
-  // triggers at h-8/13px, hovering to black/5 (white/8 in dark), selected
+  // triggers at h-7/12px (the main composer's exact sizes), hovering to black/5 (white/8 in dark), selected
   // state black/10 (white/15). The select-trigger overrides on the root
   // normalize the shared pickers (workspace/model) that carry their own
   // solid-token hover styles; alpha overlays keep the vibrancy visible.
@@ -813,16 +817,45 @@ export function QuickPanel() {
       // there is no HTML5 `drop` to listen for).
       data-file-drop-target
       className={cn(
-        "flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-md [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5 [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-xs dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]",
+        "flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-7 [&_[data-slot=select-trigger]]:!text-xs [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3 [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-xs dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]",
         // Drop affordance: overrides the panel's own hairline ring in both
         // themes so the launcher reads as "release here".
         isDragging && "ring-2 ring-inset ring-primary dark:ring-2 dark:ring-primary",
       )}
     >
-     <div ref={measureRef} className="flex shrink-0 flex-col">
-      {/* Raycast-style input row: a single 56px line that grows with the text,
-          with the attachment chips (when present) tucked under it. */}
-      <div className="relative flex flex-col px-5 py-3.5">
+     {/* 240px (CSS, pre-zoom) mirrors the native LAUNCHER_BASE floor so the
+         reported height never shrinks the window below the default box; it
+         only grows past it when the draft or attachments need to. The strip
+         is pinned to the bottom edge of that box, Raycast-style. */}
+     <div ref={measureRef} className="flex min-h-[240px] shrink-0 flex-col">
+      {/* The input owns the whole region above the action strip: the textarea
+          grows with the text (capped, then scrolls) and the attachment chips
+          (when present) tuck in under it. Clicking the empty space focuses. */}
+      <div className="relative flex flex-1 flex-col px-5 pt-4 pb-3" onMouseDown={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); taRef.current?.focus(); } }}>
+        {/* "Create more" lives in the top-right corner of the input, out of the
+            crowded action strip: a plain label + switch, no icon. The textarea
+            keeps a right gutter so the first line never runs under it. */}
+        <TooltipProvider disableHoverableContent>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <label
+                className={cn(
+                  "absolute right-3 top-2.5 flex h-7 shrink-0 cursor-pointer select-none items-center gap-2 whitespace-nowrap rounded-md px-2 text-xs font-medium transition-colors hover:bg-black/5 dark:hover:bg-white/[0.08]",
+                  keepOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t("footer.createMore")}
+                <Switch
+                  size="sm"
+                  checked={keepOpen}
+                  onCheckedChange={onKeepOpenChange}
+                  aria-label={t("footer.createMore")}
+                />
+              </label>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("footer.createMore.hint")}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <textarea
           ref={taRef}
           autoFocus
@@ -832,11 +865,8 @@ export function QuickPanel() {
           onKeyDown={onKeyDown}
           placeholder={t("launcher.placeholder")}
           rows={1}
-          className="w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent text-[20px] font-medium leading-7 text-foreground outline-none placeholder:font-medium placeholder:text-muted-foreground/60"
+          className="w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent pr-36 text-base font-normal text-foreground outline-none placeholder:text-muted-foreground/60"
         />
-        {submitting && (
-          <Spinner className="absolute right-5 top-[18px] size-4 text-muted-foreground" />
-        )}
 
         {/* Attachments band — screenshot thumbnail (or its denied hint) and the
             ambient-context chips share ONE horizontal row so they don't stack
@@ -845,7 +875,7 @@ export function QuickPanel() {
         {(attachments.length > 0 || (includeScreenshot &&
           (screenshot ||
             screenshotDenied ||
-            (context && (context.app || context.url || context.selection))))) && (
+            (context && (context.url || context.selection))))) && (
           <div className="flex shrink-0 flex-wrap items-end gap-2 pt-2">
             {attachments.map((attachment, index) => (
               <div key={`${attachment.name}-${index}`} className="group/shot relative inline-block">
@@ -888,16 +918,12 @@ export function QuickPanel() {
                 {t("screenshot.permission")}
               </span>
             ) : null}
-            {includeScreenshot && context && (context.app || context.url || context.selection) && (
+            {/* The frontmost app name still rides along in the prompt for the
+                agent, but it is not worth a chip: the screenshot already says
+                where you were. Only URL and selection get a visible, removable
+                chip. */}
+            {includeScreenshot && context && (context.url || context.selection) && (
               <div className="flex flex-wrap items-center gap-1.5">
-                {context.app && (
-                  <ContextChip
-                    icon={<AppWindow className="size-3" />}
-                    label={context.app}
-                    title={context.app}
-                    onRemove={() => setContext((c) => (c ? { ...c, app: "", bundleId: "" } : c))}
-                  />
-                )}
                 {context.url && (
                   <ContextChip
                     icon={<Globe className="size-3" />}
@@ -920,10 +946,12 @@ export function QuickPanel() {
         )}
       </div>
 
-      {/* Thin, muted action strip — subordinate to the input. */}
-      <div className="flex items-center gap-2.5 border-t border-black/[0.06] px-3 py-1.5 text-md text-muted-foreground dark:border-white/[0.06]">
+      {/* Bottom action strip: the same control cluster as the main composer
+          (attach · session · workspace · runtime · model) with the send button
+          at the far right, so the launcher reads as the composer's sibling. */}
+      <div className="flex shrink-0 items-center gap-1.5 border-t border-black/[0.06] px-3 py-2 text-xs text-muted-foreground dark:border-white/[0.06]">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { pickingWorkspaceRef.current = false; if (e.target.files?.length) void addFiles(e.target.files); e.target.value = ""; }} />
-        <button type="button" onClick={() => { pickingWorkspaceRef.current = true; fileInputRef.current?.click(); }} title={t("attachment.add")} aria-label={t("attachment.add")} className="inline-flex size-8 items-center justify-center rounded-md hover:bg-black/5 hover:text-foreground dark:hover:bg-white/[0.08]"><Paperclip className="size-3.5" /></button>
+        <button type="button" onClick={() => { pickingWorkspaceRef.current = true; fileInputRef.current?.click(); }} title={t("attachment.add")} aria-label={t("attachment.add")} className="inline-flex size-7 items-center justify-center rounded-md hover:bg-black/5 hover:text-foreground dark:hover:bg-white/[0.08]"><Paperclip className="size-3" /></button>
         <Segmented
           value={sessionMode}
           onChange={setSessionMode}
@@ -965,50 +993,40 @@ export function QuickPanel() {
             effort={cliEffort}
             onModelChange={onCliModelChange}
             onEffortChange={onCliEffortChange}
-            className="h-8 text-md hover:bg-black/5 dark:hover:bg-white/[0.08]"
+            className="h-7 text-xs hover:bg-black/5 dark:hover:bg-white/[0.08]"
           />
         ) : null}
-        <TooltipProvider disableHoverableContent>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <label
-                className={cn(
-                  "flex h-8 cursor-pointer select-none items-center gap-2 rounded-md px-2.5 font-medium transition-colors hover:bg-black/5 dark:hover:bg-white/[0.08]",
-                  keepOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Layers className="size-3.5" />
-                {t("footer.createMore")}
-                <Switch
-                  size="sm"
-                  checked={keepOpen}
-                  onCheckedChange={onKeepOpenChange}
-                  aria-label={t("footer.createMore")}
-                />
-              </label>
-            </TooltipTrigger>
-            <TooltipContent side="top">{t("footer.createMore.hint")}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        <span className="ml-auto flex items-center gap-1.5 pr-1">
+        <span className="ml-auto flex shrink-0 items-center gap-2 pl-2">
           {launchedTick > 0 && (
-            <span className="mr-2 flex items-center gap-1 text-success">
+            <span className="flex items-center gap-1 text-success">
               <Check className="size-3.5" />
               {t("footer.started")}
             </span>
           )}
-          <Kbd>
-            <CornerDownLeft className="size-2.5" />
-          </Kbd>
-          {t("footer.start")}
-          <span className="text-muted-foreground/40">·</span>
-          <span className={cn("flex items-center gap-1.5", !hasLastChat && "opacity-35")}>
-            <Kbd>⇥</Kbd>
-            {t("footer.switch")}
+          {/* The "Started" flash borrows the hints' room so the strip never
+              wraps in the narrow box. */}
+          {launchedTick === 0 && (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground/70">
+            <span className={cn("flex items-center gap-1", !hasLastChat && "opacity-35")}>
+              <Kbd>⇥</Kbd>
+              {t("footer.switch")}
+            </span>
+            <span className="text-muted-foreground/40">·</span>
+            <Kbd>esc</Kbd>
+            {t("footer.dismiss")}
           </span>
-          <span className="text-muted-foreground/40">·</span>
-          <Kbd>esc</Kbd>
-          {t("footer.dismiss")}
+          )}
+          <Button
+            type="button"
+            size="icon-sm"
+            className="shrink-0"
+            onClick={() => { void submit(); }}
+            disabled={submitting || (!text.trim() && attachments.length === 0 && !screenshot)}
+            title={`${t("footer.start")} · ⏎`}
+            aria-label={t("footer.start")}
+          >
+            {submitting ? <Spinner className="size-4" /> : <ArrowUp className="size-4" />}
+          </Button>
         </span>
       </div>
      </div>
@@ -1149,7 +1167,7 @@ function QuickReplySurface({
 
       {/* Same action strip as the launcher, minus everything a one-shot turn
           doesn't have: just the runtime, which doubles as the re-draft control. */}
-      <div className="flex shrink-0 items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-md text-muted-foreground dark:border-white/[0.06] [&_[data-slot=select-trigger]]:!h-8 [&_[data-slot=select-trigger]]:!text-md [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3.5">
+      <div className="flex shrink-0 items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-md text-muted-foreground dark:border-white/[0.06] [&_[data-slot=select-trigger]]:!h-7 [&_[data-slot=select-trigger]]:!text-xs [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3">
         <BackendSelect value={backend} onChange={onBackendChange} />
         <span className="min-w-0 truncate text-muted-foreground/70">
           {result?.output ? t("reply.drafted") : status}
@@ -1334,7 +1352,7 @@ function Segmented<T extends string>({
               type="button"
               onClick={() => !o.disabled && onChange(o.value)}
               className={cn(
-                "flex h-8 items-center rounded-md px-2.5 font-medium transition-colors",
+                "flex h-7 items-center rounded-md px-2 font-medium transition-colors",
                 value === o.value
                   ? "bg-black/10 text-foreground dark:bg-white/15"
                   : "text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/[0.08]",

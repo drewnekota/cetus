@@ -80,6 +80,12 @@ pub fn arm_focus_watchdog(app: AppHandle) {
                 let Some(window) = app_for_reset.get_webview_window("main") else {
                     return;
                 };
+                // `_killWebContentProcessAndResetState` wipes the page state
+                // along with the process, so a plain `reload()` afterwards has
+                // nothing to reload and lands on an empty document that never
+                // heartbeats (every later focus then re-trips this watchdog).
+                // Capture the URL first and navigate back to it explicitly.
+                let url = window.url().ok();
                 if let Ok(ptr) = window.ns_window() {
                     let reset = crate::panel::reset_web_content_process(ptr);
                     tracing::warn!(
@@ -87,10 +93,14 @@ pub fn arm_focus_watchdog(app: AppHandle) {
                         "resetting main WebContent process after missed heartbeat"
                     );
                 }
-                // Reload is intentionally issued even after a process reset;
-                // the reset clears state, and this navigation starts the fresh
-                // renderer. The termination callback is an idempotent backup.
-                let _ = window.reload();
+                match url {
+                    Some(url) => {
+                        let _ = window.navigate(url);
+                    }
+                    None => {
+                        let _ = window.reload();
+                    }
+                }
             });
         }
         #[cfg(not(target_os = "macos"))]

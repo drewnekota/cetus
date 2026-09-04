@@ -239,15 +239,13 @@ pub fn disable_occlusion_throttling(ns_window: *mut c_void) {
     }
 }
 
-/// Center `ns_window` on the screen that currently holds the mouse cursor —
-/// Raycast behavior: the launcher follows the mouse across displays, no click
-/// needed to "activate" a screen first. Works entirely in AppKit coordinates
-/// (points, bottom-left origin) so there's no coordinate-space mismatch.
-///
-/// `NSEvent.mouseLocation` is the live global cursor position regardless of
-/// which app/window is key, which is exactly why this is reliable where Tauri's
-/// `center()` (keyed to the active screen) is not.
-pub fn center_on_mouse_screen(ns_window: *mut c_void) {
+/// Size `ns_window` to `width`×`height` (points) and place it on the screen
+/// that holds the mouse cursor in ONE `setFrame:` call, with the same
+/// upward-biased centering (halfway between dead-center and the top, Raycast-style). Sizing and placing
+/// separately (Tauri `set_size` + a centering pass) races: the two go through
+/// different main-thread queues, so the centering can run against the old
+/// frame and the panel lands off-center by half the size delta.
+pub fn place_on_mouse_screen(ns_window: *mut c_void, width: f64, height: f64) {
     if ns_window.is_null() {
         return;
     }
@@ -257,22 +255,53 @@ pub fn center_on_mouse_screen(ns_window: *mut c_void) {
             return;
         };
         let window: &AnyObject = &*obj;
-        let win_frame: NSRect = msg_send![window, frame];
-        let free_x = frame.size.width - win_frame.size.width;
-        let free_y = frame.size.height - win_frame.size.height;
-        // Horizontally centered; vertically biased upward — the panel sits
-        // halfway between dead-center and the top (Raycast-style), so 3/4 of the
-        // free vertical space ends up below it (AppKit y grows upward).
-        let x = frame.origin.x + free_x / 2.0;
-        let y = frame.origin.y + free_y * 0.75;
-        let origin = NSPoint { x, y };
-        let _: () = msg_send![window, setFrameOrigin: origin];
+        let free_x = frame.size.width - width;
+        let free_y = frame.size.height - height;
+        let rect = NSRect {
+            origin: NSPoint {
+                x: frame.origin.x + free_x / 2.0,
+                y: frame.origin.y + free_y * 0.75,
+            },
+            size: NSSize { width, height },
+        };
+        let _: () = msg_send![window, setFrame: rect, display: true];
+    }
+}
+
+/// Resize `ns_window` to `width`×`height` (points) keeping its top edge where
+/// it is and re-centering it horizontally on the screen it currently occupies.
+/// Used when the panel's scale changes while it is up (⌘+/⌘− in the main
+/// window): growing anchored at the top-left would walk it off-center.
+pub fn resize_keep_top_centered(ns_window: *mut c_void, width: f64, height: f64) {
+    if ns_window.is_null() {
+        return;
+    }
+    let obj = ns_window as *mut AnyObject;
+    unsafe {
+        let window: &AnyObject = &*obj;
+        let old: NSRect = msg_send![window, frame];
+        let screen: *mut AnyObject = msg_send![window, screen];
+        let screen_frame: Option<NSRect> = if screen.is_null() {
+            mouse_screen_frame()
+        } else {
+            Some(msg_send![screen, frame])
+        };
+        let x = match screen_frame {
+            Some(f) => f.origin.x + (f.size.width - width) / 2.0,
+            None => old.origin.x + (old.size.width - width) / 2.0,
+        };
+        let top = old.origin.y + old.size.height;
+        let rect = NSRect {
+            origin: NSPoint { x, y: top - height },
+            size: NSSize { width, height },
+        };
+        let _: () = msg_send![window, setFrame: rect, display: true];
     }
 }
 
 /// Park `ns_window` at the bottom-center of the screen that currently holds
 /// the mouse cursor — the dictation HUD's Wispr-style resting spot. Same
-/// AppKit-native screen lookup as `center_on_mouse_screen`: Tauri's
+/// AppKit-native screen lookup as `place_on_mouse_screen`: Tauri's
 /// `cursor_position()` reports physical pixels while macOS
 /// `monitor_from_point()` expects AppKit points, so that pairing misresolves
 /// on scaled/secondary displays and the HUD lands on the primary monitor.

@@ -1397,8 +1397,16 @@ const ConversationRow = memo(function ConversationRow({
           className="flex w-60 flex-col items-stretch gap-2 px-3 py-2.5"
         >
           <div className="flex min-w-0 items-center gap-2">
+            {/* dsh's identity color is the foreground, which is exactly this
+                inverted tooltip's background, so swap it for the one color
+                that is guaranteed to contrast here. */}
             <span
-              style={{ backgroundColor: RUNTIME_THEME[backend].color }}
+              style={{
+                backgroundColor:
+                  backend === "dsh"
+                    ? "var(--background)"
+                    : RUNTIME_THEME[backend].color,
+              }}
               className="size-1.5 shrink-0 rounded-full"
             />
             <span className="truncate font-medium">{runtimeLabel(backend)}</span>

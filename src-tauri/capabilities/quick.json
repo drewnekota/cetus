@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "quick",
-  "description": "Minimal capability for the always-summonable frameless launcher window: invoke the quick_* commands and listen for events, nothing else (no dialog / notification surface).",
-  "windows": ["quick"],
-  "permissions": ["core:default"]
+  "description": "Minimal capability for the always-summonable frameless launcher window: invoke the quick_* commands, listen for events and mirror the main window's zoom, nothing else (no dialog / notification surface).",
+  "windows": ["quick", "snip"],
+  "permissions": ["core:default", "core:webview:allow-set-webview-zoom"]
 }

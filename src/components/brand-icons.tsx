@@ -1,5 +1,7 @@
 import type { ComponentType } from "react";
 
+import { cn } from "@/lib/utils";
+
 export type AppIcon = ComponentType<{ className?: string }>;
 
 function BrandImage({
@@ -70,12 +72,15 @@ export function KimiIcon({ className }: { className?: string }) {
   );
 }
 
+/** The dsh mark is a bare black glyph with no badge behind it (unlike Kimi /
+ * Grok / OpenCode / Cetus, which ship their own dark tile), so it vanishes on
+ * dark surfaces unless we flip it. */
 export function DshIcon({ className }: { className?: string }) {
   return (
     <BrandImage
       src="/brands/dsh.svg"
       label="DeepSeek Harness"
-      className={className}
+      className={cn("dark:invert", className)}
     />
   );
 }

@@ -684,7 +684,7 @@ pub fn capture_screenshot_region(region: Option<(f64, f64, f64, f64)>) -> Option
 /// whatever screen it last lived on instead of the one the user is working on.
 /// Falls back to `center()` if the cursor or its monitor can't be resolved.
 ///
-/// macOS does this natively in `panel::center_on_mouse_screen` (AppKit cursor
+/// macOS does this natively in `panel::place_on_mouse_screen` (AppKit cursor
 /// tracking, no coordinate-space surprises); this is the cross-platform path.
 #[cfg(not(target_os = "macos"))]
 fn center_on_cursor_monitor(win: &tauri::WebviewWindow) {
@@ -789,15 +789,17 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
     present_launcher(app, shot, context, capture).await;
 }
 
-/// Launcher geometry at 100% zoom (logical px), Raycast-sized: a 750-wide
-/// single input row over the action strip. The height is only a floor — the
-/// panel reports its real content height and the window grows downward with
-/// it. Reply mode is a fixed taller box for the streamed draft plus the
-/// captured-input band.
-const LAUNCHER_BASE: (f64, f64) = (750.0, 100.0);
-const REPLY_BASE: (f64, f64) = (750.0, 380.0);
+/// Launcher geometry at 100% zoom (logical px): a Raycast-proportioned
+/// 760×240 box (narrower and taller than a chat composer) whose input region
+/// fills the space above the bottom action strip. The height is a floor — the
+/// panel reports its real content height (the same 240 floor is baked into its
+/// layout) and the window grows downward past it when the draft or attachments
+/// need more room. Reply mode is a fixed taller box for the streamed draft plus
+/// the captured-input band.
+const LAUNCHER_BASE: (f64, f64) = (760.0, 240.0);
+const REPLY_BASE: (f64, f64) = (760.0, 400.0);
 /// Cap so a huge paste can't push the launcher off the screen.
-const LAUNCHER_MAX_H: f64 = 560.0;
+const LAUNCHER_MAX_H: f64 = 640.0;
 
 /// Launcher box: base width × max(base height, reported content height).
 fn launcher_size(app: &AppHandle) -> tauri::LogicalSize<f64> {
@@ -847,6 +849,15 @@ pub async fn quick_set_scale(app: AppHandle, scale: f64) -> Result<(), String> {
             launcher_size(&app)
         };
         if let Some(win) = app.get_webview_window("quick") {
+            #[cfg(target_os = "macos")]
+            {
+                let _ = app.run_on_main_thread(move || {
+                    if let Ok(ptr) = win.ns_window() {
+                        crate::panel::resize_keep_top_centered(ptr, size.width, size.height);
+                    }
+                });
+            }
+            #[cfg(not(target_os = "macos"))]
             resize_anchored_top(&win, size);
         }
     }
@@ -900,7 +911,9 @@ pub async fn present_launcher(
         .quick
         .content_height
         .store(0, Ordering::Relaxed);
-    let _ = win.set_size(scaled_size(app, LAUNCHER_BASE));
+    let launcher_box = scaled_size(app, LAUNCHER_BASE);
+    #[cfg(not(target_os = "macos"))]
+    let _ = win.set_size(launcher_box);
     // Stamp the open so the reopen handler can ignore the activation this show
     // may cause (see the macOS Reopen branch in lib.rs). The same stamp doubles
     // as this open's token, threaded through both the `quick-open` event and the
@@ -938,7 +951,11 @@ pub async fn present_launcher(
                 .unwrap_or(false);
             if let Some(w) = app_for_main.get_webview_window("quick") {
                 if let Ok(ptr) = w.ns_window() {
-                    crate::panel::center_on_mouse_screen(ptr);
+                    crate::panel::place_on_mouse_screen(
+                        ptr,
+                        launcher_box.width,
+                        launcher_box.height,
+                    );
                     crate::panel::present(ptr);
                 }
             }
@@ -1072,7 +1089,9 @@ pub async fn open_reply(app: &AppHandle) {
 
     // The reply surface is a single editable draft that streams in live, with
     // a captured-input band (screenshot thumbnail + context chips) beneath it.
-    let _ = win.set_size(scaled_size(app, REPLY_BASE));
+    let reply_box = scaled_size(app, REPLY_BASE);
+    #[cfg(not(target_os = "macos"))]
+    let _ = win.set_size(reply_box);
     #[cfg(target_os = "macos")]
     {
         let app_for_main = app.clone();
@@ -1084,7 +1103,7 @@ pub async fn open_reply(app: &AppHandle) {
                 .unwrap_or(false);
             if let Some(w) = app_for_main.get_webview_window("quick") {
                 if let Ok(ptr) = w.ns_window() {
-                    crate::panel::center_on_mouse_screen(ptr);
+                    crate::panel::place_on_mouse_screen(ptr, reply_box.width, reply_box.height);
                     crate::panel::present(ptr);
                 }
             }

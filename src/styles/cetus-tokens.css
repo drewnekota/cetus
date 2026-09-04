@@ -12,7 +12,8 @@
   --runtime-opencode: #7f7f7f;
   --runtime-grok: #71717a;
   --runtime-kimi: #1783ff;
-  --runtime-dsh: #000000;
+  /* dsh brands in pure black; track the foreground so it flips in dark mode. */
+  --runtime-dsh: var(--ink);
   --background: var(--surface);
   --foreground: var(--ink);
   --card: var(--surface);
