@@ -40,8 +40,15 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-echo "→ Downloading @earendil-works/pi-coding-agent tarball..."
-TARBALL_URL="$(npm view @earendil-works/pi-coding-agent dist.tarball)"
+PI_PACKAGE="@earendil-works/pi-coding-agent"
+# Keep release builds reproducible. In particular, 0.85.0 was published with
+# imports from @earendil-works/pi-server but without declaring that package as
+# a dependency, which made the same Cetus commit start failing later in the day
+# as npm's `latest` tag moved. Upgrade this deliberately after the full sidecar
+# gate below passes on every release platform.
+PI_VERSION="0.84.4"
+echo "→ Downloading $PI_PACKAGE@$PI_VERSION tarball..."
+TARBALL_URL="$(npm view "$PI_PACKAGE@$PI_VERSION" dist.tarball)"
 curl -fsSL "$TARBALL_URL" -o "$WORK/pi.tgz"
 
 echo "→ Extracting..."
