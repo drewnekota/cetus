@@ -1417,7 +1417,7 @@ pub fn run() {
                             focus_main(app);
                             let _ = app.emit_to("main", "open-settings", ());
                         }
-                        "tray_quit" => app.exit(0),
+                        "tray_quit" => request_quit(app),
                         _ => {}
                     });
                 // macOS wants a monochrome template glyph so the system can
@@ -1635,6 +1635,34 @@ pub fn run() {
         // frontend reload.
         .menu(|app| {
             let menu = tauri::menu::Menu::default(app)?;
+            // Swap the platform's predefined Quit for our own item. On macOS the
+            // predefined one sends `terminate:` straight to NSApp, which skips
+            // Tauri's ExitRequested hook entirely — so it's the only way to put
+            // a "Quit Cetus?" confirmation in front of a stray Cmd+Q.
+            {
+                use tauri::menu::{MenuItem, MenuItemKind};
+                let quit = MenuItem::with_id(
+                    app,
+                    "app_quit",
+                    format!("Quit {}", app.package_info().name),
+                    true,
+                    Some("CmdOrCtrl+Q"),
+                )?;
+                for item in menu.items()? {
+                    let MenuItemKind::Submenu(submenu) = item else {
+                        continue;
+                    };
+                    let predefined_quit = submenu.items()?.into_iter().find(|it| {
+                        matches!(it, MenuItemKind::Predefined(p)
+                            if p.text().map(|t| t.starts_with("Quit")).unwrap_or(false))
+                    });
+                    if let Some(old) = predefined_quit {
+                        submenu.remove(&old)?;
+                        submenu.append(&quit)?;
+                        break;
+                    }
+                }
+            }
             #[cfg(target_os = "macos")]
             {
                 use tauri::menu::{MenuItem, MenuItemKind};
@@ -1653,12 +1681,14 @@ pub fn run() {
             }
             Ok(menu)
         })
-        .on_menu_event(|app, event| {
-            if event.id().as_ref() == "view_reload" {
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "view_reload" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.reload();
                 }
             }
+            "app_quit" => request_quit(app),
+            _ => {}
         });
 
     // Self-update plugin. Registered only in release builds so `tauri dev` never
@@ -2206,6 +2236,94 @@ pub(crate) fn park_main(app: &AppHandle) {
     {
         if let Some(w) = app.get_webview_window("main") {
             let _ = w.hide();
+        }
+    }
+}
+
+/// Quit the app, asking first when the "confirm before quitting" setting is
+/// on (default). Shared by the menu-bar Quit (Cmd+Q) and the tray Quit. The
+/// dialog is app-modal so it shows even when the main window is parked.
+pub(crate) fn request_quit(app: &AppHandle) {
+    let confirm = quick::load_settings(&app.state::<AppState>().store).confirm_quit;
+    if !confirm {
+        app.exit(0);
+        return;
+    }
+    let name = app.package_info().name.clone();
+    let title = format!("Quit {name}?");
+    let body = "Running agent sessions and meeting captures will be interrupted.";
+    #[cfg(target_os = "macos")]
+    {
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if confirm_quit_native(&title, body) {
+                app2.exit(0);
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+        let app2 = app.clone();
+        app.dialog()
+            .message(body)
+            .title(title)
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Quit".into(),
+                "Cancel".into(),
+            ))
+            .show(move |ok| {
+                if ok {
+                    app2.exit(0);
+                }
+            });
+    }
+}
+
+/// App-modal NSAlert "Quit?" prompt. Must run on the main thread. `runModal`
+/// (not a sheet) so it works with the main window parked off-screen and from
+/// the tray with no key window. Returns true when the user picked Quit; any
+/// exception is swallowed as "cancel" so the prompt can never crash the app.
+#[cfg(target_os = "macos")]
+fn confirm_quit_native(title: &str, body: &str) -> bool {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject, Bool};
+    use objc2_foundation::NSString;
+    let caught = objc2::exception::catch(core::panic::AssertUnwindSafe(|| unsafe {
+        // Make sure the alert lands in front: a tray-initiated quit can arrive
+        // with another app active.
+        if let Some(ns_app) = AnyClass::get(c"NSApplication") {
+            let shared: *mut AnyObject = msg_send![ns_app, sharedApplication];
+            if !shared.is_null() {
+                let _: () = msg_send![shared, activateIgnoringOtherApps: Bool::YES];
+            }
+        }
+        let cls = AnyClass::get(c"NSAlert")?;
+        let alert: objc2::rc::Retained<AnyObject> = msg_send![cls, new];
+        let alert = &*alert;
+        let title = NSString::from_str(title);
+        let body = NSString::from_str(body);
+        let quit = NSString::from_str("Quit");
+        let cancel = NSString::from_str("Cancel");
+        let _: () = msg_send![alert, setMessageText: &*title];
+        let _: () = msg_send![alert, setInformativeText: &*body];
+        // NSAlertStyleWarning == 0.
+        let _: () = msg_send![alert, setAlertStyle: 0usize];
+        // First button is the default (Return); a button titled "Cancel"
+        // automatically gets Escape.
+        let _: *mut AnyObject = msg_send![alert, addButtonWithTitle: &*quit];
+        let _: *mut AnyObject = msg_send![alert, addButtonWithTitle: &*cancel];
+        // NSAlertFirstButtonReturn == 1000.
+        let response: isize = msg_send![alert, runModal];
+        Some(response == 1000)
+    }));
+    match caught {
+        Ok(Some(ok)) => ok,
+        Ok(None) => false,
+        Err(e) => {
+            tracing::warn!("confirm_quit_native: alert raised an exception: {e:?}");
+            false
         }
     }
 }

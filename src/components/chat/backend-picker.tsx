@@ -325,17 +325,25 @@ function fetchCliDefaults(backend: string): Promise<CliDefaults> {
 /** Backend's on-disk defaults, fetched once per app session and shared by
  *  every tuning surface. `null` until the first fetch resolves. */
 export function useCliDefaults(backend: TunableBackendId): CliDefaults | null {
-  const [defaults, setDefaults] = useState<CliDefaults | null>(null);
+  // Keyed by backend: while a switch is in flight the previous runtime's
+  // defaults must read as "not loaded" rather than leak through. The
+  // migration effect below acts on whatever defaults it sees, and one render
+  // of codex paired with claude's defaults was enough to rewrite codex's
+  // sticky "" into claude's model id.
+  const [state, setState] = useState<{
+    backend: TunableBackendId;
+    defaults: CliDefaults;
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetchCliDefaults(backend).then((d) => {
-      if (!cancelled) setDefaults(d);
+    fetchCliDefaults(backend).then((defaults) => {
+      if (!cancelled) setState({ backend, defaults });
     });
     return () => {
       cancelled = true;
     };
   }, [backend]);
-  return defaults;
+  return state?.backend === backend ? state.defaults : null;
 }
 
 /** Model catalog to offer for a backend: the live list the CLI reports
@@ -421,6 +429,11 @@ function isStaleCandidate(backend: TunableBackendId, model: string): boolean {
   return backend === "claude-code" && model.startsWith("claude-");
 }
 
+/** A full Claude id stored for a runtime that can't run Claude models. */
+function isForeignModel(backend: TunableBackendId, model: string): boolean {
+  return backend !== "claude-code" && model.startsWith("claude-");
+}
+
 /** Combined model + reasoning-effort menu for a CLI backend, styled after
  *  the native codex picker: one compact trigger ("Fable · Max"), a flat list
  *  of reasoning levels on top, and the model catalog in a submenu. "" always
@@ -487,6 +500,11 @@ export function CliTuningMenu({
       nextModel = curModel?.id ?? model;
     } else if (defaults.models && isStaleCandidate(backend, model)) {
       nextModel = findCatalogModel(model, defaults.models)?.id ?? model;
+    } else if (isForeignModel(backend, model)) {
+      // 3. A Claude id persisted for another runtime (the leak the keyed
+      //    useCliDefaults above now prevents). It can't launch there, so fall
+      //    back to that runtime's own default, or "" (no flag) when unknown.
+      nextModel = curModel?.id ?? "";
     }
     const nextEffort = effort ? effort : (curEffort?.id ?? effort);
     if (nextModel !== model || nextEffort !== effort) {

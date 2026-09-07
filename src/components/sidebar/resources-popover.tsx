@@ -199,7 +199,7 @@ export function ResourcesPopover({
         </TooltipTrigger>
         <TooltipContent side="right">{t("nav.resources")}</TooltipContent>
       </Tooltip>
-      <PopoverContent side="right" align="start" className="w-80 p-0">
+      <PopoverContent side="right" align="end" className="w-80 p-0">
         <div className="border-b border-border px-3 py-2">
           <span className="text-xs font-semibold">{t("resources.title")}</span>
         </div>

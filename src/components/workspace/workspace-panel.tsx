@@ -937,7 +937,7 @@ function FilePreview({
   }
 
   return (
-    <section className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background">
+    <section className="grid h-full min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background">
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
         <FilePreviewIcon kind={kind} />
         <div className="min-w-0 flex-1">
@@ -1084,7 +1084,7 @@ function TextPreview({
       </div>
     );
   }
-  return <div className="h-full min-h-0 overflow-hidden">{children(text)}</div>;
+  return <div className="h-full min-h-0">{children(text)}</div>;
 }
 
 function CsvPreview({ text }: { text: string }) {

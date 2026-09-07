@@ -24,6 +24,7 @@ export type ShortcutId =
   | "runtimeSlot7"
   | "runtimeSlot8"
   | "runtimeSlot9"
+  | "toggleSidebar"
   | "toggleWorkspace"
   | "toggleTerminal"
   | "openBrowserTab"
@@ -158,6 +159,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     defaultAccelerator: `Ctrl+${index + 1}`,
     windowsAccelerator: `Alt+${index + 1}`,
   })),
+  {
+    id: "toggleSidebar",
+    label: "Toggle sidebar",
+    description: "Collapse or expand the left sidebar",
+    defaultAccelerator: "Shift+Cmd+S",
+  },
   {
     id: "toggleWorkspace",
     label: "Toggle workspace",

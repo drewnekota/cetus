@@ -149,6 +149,8 @@ export interface QuickSettings {
   /** Silently check for and install app updates in the background at launch
    *  (applied on next launch). On by default; takes effect next launch. */
   autoUpdate: boolean;
+  /** Ask "Quit Cetus?" before quitting (Cmd+Q, menu, tray). On by default. */
+  confirmQuit: boolean;
 }
 
 export const DEFAULT_QUICK_SETTINGS: QuickSettings = {
@@ -172,6 +174,7 @@ export const DEFAULT_QUICK_SETTINGS: QuickSettings = {
   voiceStartSound: true,
   launchOnStartup: false,
   autoUpdate: true,
+  confirmQuit: true,
 };
 
 /** Metadata for an available app update (from the release manifest). */

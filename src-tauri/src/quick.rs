@@ -116,6 +116,11 @@ pub struct QuickSettings {
     /// startup; toggling it takes effect next launch. Release builds only.
     #[serde(default = "default_true")]
     pub auto_update: bool,
+    /// Ask before quitting (Cmd+Q / menu Quit / tray Quit). On by default so a
+    /// stray Cmd+Q next to Cmd+W can't silently kill every running agent
+    /// session. Read at quit time, so toggling takes effect immediately.
+    #[serde(default = "default_true")]
+    pub confirm_quit: bool,
 }
 
 fn default_voice_start_sound() -> bool {
@@ -173,6 +178,7 @@ impl Default for QuickSettings {
             voice_start_sound: true,
             launch_on_startup: false,
             auto_update: true,
+            confirm_quit: true,
         }
     }
 }

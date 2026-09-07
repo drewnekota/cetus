@@ -26,6 +26,7 @@ import {
   Gauge,
   MessageSquare,
   MoreHorizontal,
+  PanelLeft,
   Pencil,
   Pin,
   PinOff,
@@ -46,6 +47,7 @@ import {
   SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
@@ -194,10 +196,12 @@ export const AppSidebar = memo(function AppSidebar({
       switchChats: shortcutDisplay(shortcuts.switchChats),
       switchBoard: shortcutDisplay(shortcuts.switchBoard),
       switchAutomations: shortcutDisplay(shortcuts.switchAutomations),
+      toggleSidebar: shortcutDisplay(shortcuts.toggleSidebar),
     }),
     [shortcuts],
   );
   const { width, startResize, resetWidth } = useSidebarWidth();
+  const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
   const autoSortConversations = useConversationAutoSort();
   const groups = useMemo(
     () =>
@@ -285,6 +289,9 @@ export const AppSidebar = memo(function AppSidebar({
       className={cn(
         // `relative` anchors the drag-to-resize handle pinned to the right edge.
         "relative",
+        // Collapsed = focus mode. Hide rather than unmount so the list keeps
+        // its scroll position and the dnd/resize state survives a round trip.
+        !sidebarOpen && "hidden",
         // Solid sidebar token, no backdrop-filter: the shell root already paints
         // opaque bg-sidebar, so the old translucent+blurred surface only blurred
         // a flat color while forcing a GPU recomposite of the whole strip on
@@ -322,10 +329,31 @@ export const AppSidebar = memo(function AppSidebar({
                 <span className="translate-y-px font-serif text-sm font-bold italic">
                   Cetus
                 </span>
-                {/* Resources lives at the sidebar's top-right as an icon-only
-                    affordance — it's a monitor, not a nav destination. */}
+                {/* Collapse lives at the sidebar's top-right; when hidden, the
+                    matching expand button appears at the content card's
+                    top-left (page.tsx header). */}
                 <span className="ml-auto">
-                  <ResourcesPopover onSelectConversation={onSelect} />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => setSidebarOpen(false)}
+                        data-testid="sidebar-collapse"
+                        className={cn(
+                          "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors",
+                          "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                          "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                        )}
+                      >
+                        <PanelLeft className="size-3.5" />
+                        <span className="sr-only">{t("toggleSidebar")}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <span>{t("toggleSidebar")}</span>
+                      <Kbd>{shortcutLabels.toggleSidebar}</Kbd>
+                    </TooltipContent>
+                  </Tooltip>
                 </span>
               </div>
             </SidebarMenuButton>
@@ -552,11 +580,18 @@ export const AppSidebar = memo(function AppSidebar({
               </SidebarMenuButton>
             </SidebarMenuItem>
           )}
-          <SidebarMenuItem>
-            <SidebarMenuButton onClick={onOpenSettings} tooltip={t("nav.settings")}>
+          <SidebarMenuItem className="flex items-center gap-1">
+            <SidebarMenuButton
+              onClick={onOpenSettings}
+              tooltip={t("nav.settings")}
+              className="min-w-0 flex-1"
+            >
               <SettingsIcon />
               <span>{t("nav.settings")}</span>
             </SidebarMenuButton>
+            {/* Resources sits beside Settings as an icon-only monitor — it's
+                a status readout, not a nav destination. */}
+            <ResourcesPopover onSelectConversation={onSelect} />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

@@ -161,6 +161,8 @@ export const settings = {
     "general.autoUpdate.label": "Automatic updates",
     "general.autoUpdate.description":
       "Check for and install updates in the background. Applied the next time you open Cetus.",
+    "general.confirmQuit.label": "Confirm before quitting",
+    "general.confirmQuit.description": "Ask before Cmd+Q closes Cetus, so a slip of the hand doesn't interrupt running agents.",
     "general.cliAgents.label": "CLI agents: skip permission prompts",
     "general.cliAgents.description":
       "Let external runtimes run without approval prompts. Off = tool calls ask first through approval cards in the chat.",
@@ -757,6 +759,8 @@ export const settings = {
       "对话收到新消息时自动重新排序。关闭后按创建顺序固定排列，新建的对话位于顶部。",
     "general.autoUpdate.label": "自动更新",
     "general.autoUpdate.description": "在后台检查并安装更新，下次打开 Cetus 时生效。",
+    "general.confirmQuit.label": "退出前确认",
+    "general.confirmQuit.description": "按 Cmd+Q 退出 Cetus 前先询问，避免误触打断正在运行的智能体。",
     "general.cliAgents.label": "CLI 智能体：跳过权限确认",
     "general.cliAgents.description":
       "允许外部 Runtime 跳过逐项确认。关闭后工具调用会通过聊天中的审批卡片先询问。",
@@ -1335,6 +1339,8 @@ export const settings = {
     "general.autoUpdate.label": "自動アップデート",
     "general.autoUpdate.description":
       "バックグラウンドで更新を確認・インストールします。次回 Cetus 起動時に適用されます。",
+    "general.confirmQuit.label": "終了前に確認",
+    "general.confirmQuit.description": "Cmd+Q で Cetus を終了する前に確認し、誤操作で実行中のエージェントを中断しないようにします。",
     "nav.api-keys": "API キー",
     "nav.memory": "メモリ",
     "nav.skills": "スキル",
@@ -1731,6 +1737,8 @@ export const settings = {
     "general.autoUpdate.label": "자동 업데이트",
     "general.autoUpdate.description":
       "백그라운드에서 업데이트를 확인하고 설치합니다. 다음에 Cetus를 열 때 적용됩니다.",
+    "general.confirmQuit.label": "종료 전 확인",
+    "general.confirmQuit.description": "Cmd+Q로 Cetus를 종료하기 전에 확인하여 실수로 실행 중인 에이전트를 중단하지 않도록 합니다.",
     "nav.api-keys": "API 키",
     "nav.memory": "메모리",
     "nav.skills": "스킬",
@@ -2121,6 +2129,8 @@ export const settings = {
     "general.autoUpdate.label": "Actualizaciones automáticas",
     "general.autoUpdate.description":
       "Busca e instala actualizaciones en segundo plano. Se aplican la próxima vez que abras Cetus.",
+    "general.confirmQuit.label": "Confirmar antes de salir",
+    "general.confirmQuit.description": "Pregunta antes de que Cmd+Q cierre Cetus para que un descuido no interrumpa los agentes en ejecución.",
     "nav.api-keys": "Claves API",
     "nav.memory": "Memoria",
     "nav.skills": "Habilidades",
@@ -2511,6 +2521,8 @@ export const settings = {
     "general.autoUpdate.label": "Atualizações automáticas",
     "general.autoUpdate.description":
       "Verifica e instala atualizações em segundo plano. Aplicadas na próxima vez que você abrir o Cetus.",
+    "general.confirmQuit.label": "Confirmar antes de sair",
+    "general.confirmQuit.description": "Pergunta antes de o Cmd+Q fechar o Cetus, para que um deslize não interrompa agentes em execução.",
     "nav.api-keys": "Chaves de API",
     "nav.memory": "Memória",
     "nav.skills": "Habilidades",
@@ -2898,6 +2910,8 @@ export const settings = {
     "general.autoUpdate.label": "Mises à jour automatiques",
     "general.autoUpdate.description":
       "Recherche et installe les mises à jour en arrière-plan. Appliquées au prochain lancement de Cetus.",
+    "general.confirmQuit.label": "Confirmer avant de quitter",
+    "general.confirmQuit.description": "Demande confirmation avant que Cmd+Q ne ferme Cetus, pour qu'une fausse manipulation n'interrompe pas les agents en cours.",
     "nav.api-keys": "Clés API",
     "nav.memory": "Mémoire",
     "nav.skills": "Compétences",
@@ -3285,6 +3299,8 @@ export const settings = {
     "general.autoUpdate.label": "Automatische Updates",
     "general.autoUpdate.description":
       "Sucht und installiert Updates im Hintergrund. Wird beim nächsten Start von Cetus angewendet.",
+    "general.confirmQuit.label": "Vor dem Beenden nachfragen",
+    "general.confirmQuit.description": "Fragt nach, bevor Cmd+Q Cetus beendet, damit ein Fehlgriff keine laufenden Agenten unterbricht.",
     "nav.api-keys": "API-Schlüssel",
     "nav.memory": "Gedächtnis",
     "nav.skills": "Fähigkeiten",
@@ -3672,6 +3688,8 @@ export const settings = {
     "general.autoUpdate.label": "Aggiornamenti automatici",
     "general.autoUpdate.description":
       "Cerca e installa gli aggiornamenti in background. Applicati al prossimo avvio di Cetus.",
+    "general.confirmQuit.label": "Conferma prima di uscire",
+    "general.confirmQuit.description": "Chiede conferma prima che Cmd+Q chiuda Cetus, così un tocco involontario non interrompe gli agenti in esecuzione.",
     "nav.api-keys": "Chiavi API",
     "nav.memory": "Memoria",
     "nav.skills": "Competenze",
@@ -4059,6 +4077,8 @@ export const settings = {
     "general.autoUpdate.label": "Автоматические обновления",
     "general.autoUpdate.description":
       "Проверяет и устанавливает обновления в фоне. Применяются при следующем запуске Cetus.",
+    "general.confirmQuit.label": "Подтверждать выход",
+    "general.confirmQuit.description": "Спрашивать перед тем, как Cmd+Q закроет Cetus, чтобы случайное нажатие не прервало работающих агентов.",
     "nav.api-keys": "API-ключи",
     "nav.memory": "Память",
     "nav.skills": "Навыки",

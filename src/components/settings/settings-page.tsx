@@ -1320,6 +1320,13 @@ function GeneralSection() {
           checked={settings.autoUpdate}
           onCheckedChange={(v) => update({ autoUpdate: v })}
         />
+        <ToggleRow
+          id="confirm-quit"
+          label={t("general.confirmQuit.label")}
+          description={t("general.confirmQuit.description")}
+          checked={settings.confirmQuit}
+          onCheckedChange={(v) => update({ confirmQuit: v })}
+        />
         <div className="flex items-center justify-between gap-4 py-3">
           <div className="min-w-0 space-y-0.5">
             <div className="flex items-center gap-2">

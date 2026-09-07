@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Inbox, PanelBottom, PanelRight } from "lucide-react";
+import { Inbox, PanelBottom, PanelLeft, PanelRight } from "lucide-react";
 import {
   Composer,
   type ComposerAttachment,
@@ -131,6 +131,7 @@ import {
   matchesShortcut,
   readKeyboardShortcuts,
   shortcutDisplay,
+  shortcutPlatform,
 } from "@/lib/keyboard-shortcuts";
 import {
   HIDDEN_WORKSPACES_STORAGE_KEY,
@@ -163,6 +164,7 @@ const Onboarding = dynamic(
 );
 
 const APP_VIEW_STATE_KEY = "cetus:viewState";
+const SIDEBAR_OPEN_KEY = "cetus:sidebarOpen";
 
 interface PersistedAppViewState {
   view?: SidebarView;
@@ -565,19 +567,18 @@ export default function Home() {
       )?.id,
     );
   }, [pendingBackend, pendingCliModel, pendingCliEffort, cliAgentSettings]);
-  // Persist the active model/reasoning choice on *every* change — manual picker,
-  // launcher adopt, and conversation switch alike — so the quick launcher (which
-  // reads "cetus:lastModelChoice") always mirrors what the main composer shows.
-  // Skip the very first run: that's the initial DEFAULT, before the load effect
-  // above has hydrated state, and writing it would clobber the stored value.
-  const modelChoiceHydrated = useRef(false);
+  // The sticky new-chat model/reasoning choice ("cetus:lastModelChoice",
+  // shared with the quick launcher) only follows *explicit* picks — the
+  // composer picker (onModelChange) and the launcher's own picker. Opening an
+  // existing conversation adopts that conversation's model into the composer
+  // but must not overwrite the sticky choice, otherwise the last chat the user
+  // happened to look at (or the one restored on launch) would silently become
+  // the default for every new chat. Landing back on the new-chat hero restores
+  // the sticky choice for the same reason.
   useEffect(() => {
-    if (!modelChoiceHydrated.current) {
-      modelChoiceHydrated.current = true;
-      return;
-    }
-    saveModelChoice(modelChoice);
-  }, [modelChoice]);
+    if (activeId !== null) return;
+    setModelChoice(mergeStoredModelChoice(DEFAULT_MODEL_CHOICE));
+  }, [activeId]);
   const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
   const [defaultWorkspace, setDefaultWorkspace] = useState<string>("");
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
@@ -638,6 +639,20 @@ export default function Home() {
     } catch {}
     return "chat";
   });
+  // Collapsed sidebar = focus mode: only the conversation stays. Persisted
+  // like the view so a reload keeps the layout you chose.
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return localStorage.getItem(SIDEBAR_OPEN_KEY) !== "0";
+    } catch {}
+    return true;
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_OPEN_KEY, sidebarOpen ? "1" : "0");
+    } catch {}
+  }, [sidebarOpen]);
   // This is shared with the sidebar because folded chat rows are not navigation
   // targets either: archive fallback and keyboard switching must only walk rows
   // the user can currently see.
@@ -1680,6 +1695,7 @@ export default function Home() {
   //   ⌘[/⌘] — go back / forward through the page history (views + settings)
   //   ⌃⇥    — switch to the most recently used page (including chats/settings)
   //   ⌃1…⌃3 — switch the current chat's runtime (Cetus / Claude Code / Codex)
+  //   ⌘⇧S   — collapse / expand the left sidebar
   //   ⌘B    — toggle workspace
   //   ⌘J    — toggle Terminal in the workspace
   //   ⌘T    — open a Browser tab in the right workspace
@@ -1764,7 +1780,10 @@ export default function Home() {
         if (lastId) onSelectChat(lastId);
         return;
       }
-      if (shortcut("toggleWorkspace")) {
+      if (shortcut("toggleSidebar")) {
+        e.preventDefault();
+        setSidebarOpen((v) => !v);
+      } else if (shortcut("toggleWorkspace")) {
         e.preventDefault();
         toggleSideWorkspacePanel();
       } else if (shortcut("toggleTerminal")) {
@@ -2548,9 +2567,10 @@ export default function Home() {
   const onOpenDetail = useCallback((id: string) => setDetailId(id), []);
 
   async function onModelChange(next: ModelChoice) {
-    // The [modelChoice] effect mirrors this into localStorage; here we only need
-    // to update state and the per-conversation backend record.
+    // An explicit pick is what the sticky new-chat choice (and the quick
+    // launcher) should follow; conversation switches deliberately don't save.
     setModelChoice(next);
+    saveModelChoice(next);
     if (activeId) {
       api.setModelChoice(activeId, next).catch(console.error);
     }
@@ -2827,7 +2847,7 @@ export default function Home() {
     // Adopt the model choice the launcher made so the composer and launched
     // conversation agree.
     const launchedModel: ModelChoice = { model: p.model, reasoning: p.reasoning };
-    // The [modelChoice] effect persists this to localStorage.
+    // The launcher already persisted its own pick to localStorage.
     setModelChoice(launchedModel);
 
     let target: string | null = null;
@@ -3460,6 +3480,8 @@ export default function Home() {
       // also paints the gutter around the content card, so keep it tied to the
       // same sidebar token.
       className="fixed inset-0 !min-h-0 bg-sidebar"
+      open={sidebarOpen}
+      onOpenChange={setSidebarOpen}
     >
       <DialogHost />
       <ZoomHud />
@@ -3659,6 +3681,35 @@ export default function Home() {
             <header
               className="flex h-10 items-center justify-end gap-3 px-4 text-xs text-muted-foreground"
             >
+              {/* With the sidebar collapsed, nothing else clears the macOS
+                  traffic lights, so the content card takes over: a drag spacer
+                  wide enough for the three lights, then the expand button in
+                  the spot the sidebar's collapse button used to be. */}
+              {!sidebarOpen && (
+                <>
+                  {shortcutPlatform() === "mac" && (
+                    <div data-tauri-drag-region className="h-full w-14 shrink-0" />
+                  )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label={tt("sidebar", "toggleSidebar")}
+                        data-testid="sidebar-expand"
+                        onClick={() => setSidebarOpen(true)}
+                      >
+                        <PanelLeft className="size-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <span>{tt("sidebar", "toggleSidebar")}</span>
+                      <Kbd>{shortcutDisplay(keyboardShortcuts.toggleSidebar)}</Kbd>
+                    </TooltipContent>
+                  </Tooltip>
+                </>
+              )}
               <div data-tauri-drag-region className="h-full flex-1" />
               {!piReady && <span className="text-muted-foreground/70">○ connecting…</span>}
               {/* With messages present, the failure surfaces inline at the end of
