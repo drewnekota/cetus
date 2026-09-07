@@ -4,6 +4,7 @@ import { Clock, CornerDownLeft, Command as CommandKey } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ModelPicker } from "@/components/chat/model-picker";
@@ -354,11 +355,10 @@ export function AutomationDialog({
               {mode === "interval" && (
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-muted-foreground">{t("field.every")}</span>
-                  <Input
-                    type="number"
+                  <NumberInput
                     min={1}
                     value={intervalValue}
-                    onChange={(e) => setIntervalValue(Number(e.target.value))}
+                    onValueChange={setIntervalValue}
                     className="h-8 w-20"
                   />
                   <select
@@ -507,6 +507,10 @@ export function AutomationDialog({
                 effort={cliEffort}
                 onModelChange={setCliModel}
                 onEffortChange={setCliEffort}
+                onMigrate={(m, e) => {
+                  setCliModel(m);
+                  setCliEffort(e);
+                }}
               />
             ) : null}
           </div>

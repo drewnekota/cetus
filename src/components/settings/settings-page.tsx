@@ -58,14 +58,18 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   BACKENDS,
   CLI_EFFORTS,
-  CLI_MODELS,
   backendSupportsTuning,
+  cliModelCatalog,
+  resolveCliEffort,
+  resolveCliModel,
   runtimePresetLabel,
+  useCliDefaults,
   useRuntimeCatalog,
   useRuntimeSlots,
   type TunableBackendId,
 } from "@/components/chat/backend-picker";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -1013,13 +1017,23 @@ function AddPresetForm({ onAdd }: { onAdd: (preset: RuntimePreset) => void }) {
   const [backend, setBackend] = useState<TunableBackendId>("claude-code");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
+  // Same live catalog the composer menu offers, so a preset can pin any model
+  // the CLI currently reports rather than only the static fallback list. With
+  // nothing picked yet the form pre-selects what the CLI would launch anyway;
+  // a preset pins an explicit id, so that resolution is what gets saved.
+  const defaults = useCliDefaults(backend);
+  const models = cliModelCatalog(backend, defaults);
+  const efforts = CLI_EFFORTS[backend];
+  const curModel = resolveCliModel(model, models, defaults) ?? models[0];
+  const curEffort = resolveCliEffort(effort, efforts, defaults);
   const tunableBackends = BACKENDS.filter((runtime) =>
     backendSupportsTuning(runtime.id),
   );
 
   function selectBackend(next: string) {
     setBackend(next as TunableBackendId);
-    // Catalogs differ per runtime; a stale id would silently mean "Default".
+    // Catalogs differ per runtime; a stale id would silently pin the wrong
+    // thing, so re-resolve from that runtime's own default.
     setModel("");
     setEffort("");
   }
@@ -1044,7 +1058,7 @@ function AddPresetForm({ onAdd }: { onAdd: (preset: RuntimePreset) => void }) {
           ))}
         </SelectContent>
       </Select>
-      <Select value={model || "__default"} onValueChange={(v) => setModel(v === "__default" ? "" : v)}>
+      <Select value={curModel.id} onValueChange={setModel}>
         <SelectTrigger
           size="sm"
           className="w-44 text-xs"
@@ -1054,25 +1068,25 @@ function AddPresetForm({ onAdd }: { onAdd: (preset: RuntimePreset) => void }) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {CLI_MODELS[backend].map((m) => (
-            <SelectItem key={m.id || "__default"} value={m.id || "__default"} className="text-xs">
+          {models.map((m) => (
+            <SelectItem key={m.id} value={m.id} className="text-xs">
               {m.label}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <Select value={effort || "__default"} onValueChange={(v) => setEffort(v === "__default" ? "" : v)}>
+      <Select value={curEffort?.id ?? ""} onValueChange={setEffort}>
         <SelectTrigger
           size="sm"
           className="w-32 text-xs"
           aria-label={t("runtimes.presets.reasoning")}
           data-testid="runtime-preset-effort"
         >
-          <SelectValue />
+          <SelectValue placeholder={t("runtimes.presets.reasoning")} />
         </SelectTrigger>
         <SelectContent>
-          {CLI_EFFORTS[backend].map((e) => (
-            <SelectItem key={e.id || "__default"} value={e.id || "__default"} className="text-xs">
+          {efforts.map((e) => (
+            <SelectItem key={e.id} value={e.id} className="text-xs">
               {e.label}
             </SelectItem>
           ))}
@@ -1087,8 +1101,8 @@ function AddPresetForm({ onAdd }: { onAdd: (preset: RuntimePreset) => void }) {
           onAdd({
             id: `preset-${crypto.randomUUID()}`,
             backend,
-            model,
-            effort,
+            model: curModel.id,
+            effort: curEffort?.id ?? "",
           })
         }
       >
@@ -2986,17 +3000,13 @@ function ScreenContextSection({ onOpenHistory }: { onOpenHistory: () => void }) 
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <Input
+            <NumberInput
               id="capture-interval"
-              type="number"
               min={2}
+              fallback={30}
               className="w-20"
               value={settings.intervalSeconds}
-              onChange={(e) =>
-                update({
-                  intervalSeconds: Math.max(2, Number(e.target.value) || 30),
-                })
-              }
+              onValueChange={(v) => update({ intervalSeconds: v })}
             />
             <span className="text-xs text-muted-foreground">
               {t("screen.interval.unit")}
@@ -3014,17 +3024,13 @@ function ScreenContextSection({ onOpenHistory }: { onOpenHistory: () => void }) 
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <Input
+            <NumberInput
               id="capture-retention"
-              type="number"
               min={0}
+              fallback={0}
               className="w-20"
               value={settings.retentionDays}
-              onChange={(e) =>
-                update({
-                  retentionDays: Math.max(0, Number(e.target.value) || 0),
-                })
-              }
+              onValueChange={(v) => update({ retentionDays: v })}
             />
             <span className="text-xs text-muted-foreground">
               {t("screen.retention.unit")}
@@ -3042,17 +3048,13 @@ function ScreenContextSection({ onOpenHistory }: { onOpenHistory: () => void }) 
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <Input
+            <NumberInput
               id="capture-frame-retention"
-              type="number"
               min={0}
+              fallback={0}
               className="w-20"
               value={settings.frameRetentionDays}
-              onChange={(e) =>
-                update({
-                  frameRetentionDays: Math.max(0, Number(e.target.value) || 0),
-                })
-              }
+              onValueChange={(v) => update({ frameRetentionDays: v })}
             />
             <span className="text-xs text-muted-foreground">
               {t("screen.frameRetention.unit")}
@@ -3178,17 +3180,13 @@ function AmbientContextSection() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <Input
+            <NumberInput
               id="ambient-retention"
-              type="number"
               min={0}
+              fallback={0}
               className="w-20"
               value={settings.retentionDays}
-              onChange={(e) =>
-                update({
-                  retentionDays: Math.max(0, Number(e.target.value) || 0),
-                })
-              }
+              onValueChange={(v) => update({ retentionDays: v })}
             />
             <span className="text-xs text-muted-foreground">
               {t("ambient.retention.unit")}
@@ -3727,15 +3725,13 @@ function MeetingsSection({ open }: { open: boolean }) {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <Input
+            <NumberInput
               id="meeting-retention"
-              type="number"
               min={0}
+              fallback={0}
               className="w-20"
               value={settings.retentionDays}
-              onChange={(e) =>
-                update({ retentionDays: Math.max(0, Number(e.target.value) || 0) })
-              }
+              onValueChange={(v) => update({ retentionDays: v })}
             />
             <span className="text-xs text-muted-foreground">
               {t("retention.unit")}
@@ -3904,15 +3900,13 @@ function AutoArchiveSettingsBlock() {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          <Input
+          <NumberInput
             id="auto-archive-value"
-            type="number"
             min={1}
+            fallback={1}
             className="w-20"
             value={settings.value}
-            onChange={(e) =>
-              update({ value: Math.max(1, Number(e.target.value) || 1) })
-            }
+            onValueChange={(v) => update({ value: v })}
           />
           <Select
             value={settings.unit}
@@ -3959,17 +3953,13 @@ function AutoArchiveSettingsBlock() {
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <Input
+            <NumberInput
               id="auto-delete-value"
-              type="number"
               min={1}
+              fallback={1}
               className="w-20"
               value={settings.deleteValue}
-              onChange={(e) =>
-                update({
-                  deleteValue: Math.max(1, Number(e.target.value) || 1),
-                })
-              }
+              onValueChange={(v) => update({ deleteValue: v })}
             />
             <Select
               value={settings.deleteUnit}

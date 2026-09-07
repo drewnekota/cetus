@@ -1145,11 +1145,19 @@ function runtimeTuning(
   return { model: displayModelName(model), effort };
 }
 
-/** Compact quota text for the row tooltip. A healthy heartbeat without a
- * utilization value stays quiet, matching the runtime picker. */
-function runtimeQuota(q: CliRateLimitInfo | undefined): string | null {
+/** Compact quota text for the row tooltip, phrased as remaining share
+ * ("N% left") so it reads the same across runtimes: Codex reports used
+ * percent on every heartbeat, Claude only near the warning threshold. A
+ * healthy heartbeat without a utilization value stays quiet, matching the
+ * runtime picker. */
+function runtimeQuota(
+  q: CliRateLimitInfo | undefined,
+): { text: string; warn: boolean } | null {
   if (!q) return null;
-  const pct = q.utilization == null ? null : `${Math.round(q.utilization * 100)}%`;
+  const left =
+    q.utilization == null
+      ? null
+      : `${Math.max(0, Math.round((1 - q.utilization) * 100))}% left`;
   const reset = q.resetsAt
     ? new Date(q.resetsAt * 1000).toLocaleTimeString([], {
         hour: "2-digit",
@@ -1158,10 +1166,16 @@ function runtimeQuota(q: CliRateLimitInfo | undefined): string | null {
     : null;
   const window = q.rateLimitType?.replace("five_hour", "5h").replace("seven_day", "7d");
   if (q.status === "rejected")
-    return [window, "limit reached", reset && `↻ ${reset}`].filter(Boolean).join(" · ");
+    return {
+      text: [window, "limit reached", reset && `↻ ${reset}`].filter(Boolean).join(" · "),
+      warn: true,
+    };
   if (q.status === "allowed_warning")
-    return [window, pct ?? "near limit", reset && `↻ ${reset}`].filter(Boolean).join(" · ");
-  return pct ? [window, pct].filter(Boolean).join(" · ") : null;
+    return {
+      text: [window, left ?? "near limit", reset && `↻ ${reset}`].filter(Boolean).join(" · "),
+      warn: true,
+    };
+  return left ? { text: [window, left].filter(Boolean).join(" · "), warn: false } : null;
 }
 
 function compactTokens(tokens: number): string {
@@ -1442,8 +1456,15 @@ const ConversationRow = memo(function ConversationRow({
                 surface in light mode, dark amber on the light surface in dark
                 mode. */}
             {quota && (
-              <div className="tabular-nums text-amber-300 dark:text-amber-700">
-                {quota}
+              <div
+                className={cn(
+                  "tabular-nums",
+                  quota.warn
+                    ? "text-amber-300 dark:text-amber-700"
+                    : "text-background/60",
+                )}
+              >
+                {quota.text}
               </div>
             )}
           </div>

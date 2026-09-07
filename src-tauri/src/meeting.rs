@@ -496,16 +496,16 @@ async fn start_internal(
         if cloud {
             args.push("--cloud".into());
         }
-        if auto {
-            // The conferencing app that triggered auto-detect owns the mic
-            // experience (and its own echo cancellation). Enabling our
-            // voice-processing unit on top is a system-wide side effect — its
-            // AGC audibly lowers the user's voice for everyone on the call —
-            // so auto sessions record the raw mic. Manual sessions keep AEC:
-            // there Cetus is the primary recorder and speaker playback would
-            // otherwise be transcribed twice.
-            args.push("--no-aec".into());
-        }
+        // Always record the raw mic — never Apple's voice-processing (AEC)
+        // unit. Manual sessions used to keep AEC on so speaker playback would
+        // not be transcribed twice, but in practice the VP unit's output was
+        // silent for the whole call: every AEC session on record produced zero
+        // `mic` segments (and a ~3 kbps mic.m4a), while the one `--no-aec`
+        // session transcribed both sides fine. The VP unit is also a
+        // system-wide side effect (its AGC audibly lowers the user's voice for
+        // everyone on the call). Speaker users may see the far side echoed
+        // into "You" lines; a dead "You" stream is the worse failure.
+        args.push("--no-aec".into());
         let id = uuid::Uuid::new_v4().to_string();
         if settings.save_audio {
             args.push("--save-dir".into());

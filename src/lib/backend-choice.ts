@@ -34,9 +34,11 @@ interface StoredBackendChoice extends Partial<BackendChoice> {
 
 export interface BackendChoice {
   backend: BackendId;
-  /** CLI backends' model override; "" = the CLI's own default. */
+  /** CLI backends' model override. "" (no flag, the CLI's own default) is
+   * only a legacy value now: the tuning menu rewrites it to the concrete id
+   * once the CLI's default resolves. */
   cliModel: string;
-  /** CLI backends' reasoning-effort override; "" = the CLI's default. */
+  /** CLI backends' reasoning-effort override; "" as above. */
   cliEffort: string;
 }
 
@@ -59,7 +61,8 @@ function validTuning(value: unknown): CliTuningChoice | null {
 }
 
 /** The last explicit model/effort choice for one CLI runtime. Empty strings
- * are a real remembered choice: the user selected the vendor's Default row. */
+ * mean no override (legacy "Default" row, or the CLI reports no default for
+ * that field); the menu migrates them to concrete ids when it can. */
 export function loadCliTuningChoice(backend: CliBackendId): CliTuningChoice {
   const stored = readStoredChoice();
   const perBackend = validTuning(stored?.cliChoices?.[backend]);

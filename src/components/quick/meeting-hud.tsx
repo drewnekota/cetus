@@ -25,6 +25,8 @@ const MAX_FINALS = 80;
  *  the cursor crosses the gap between pill and card. */
 const EXPAND_DELAY_MS = 120;
 const COLLAPSE_DELAY_MS = 300;
+/** Cursor watchdog cadence while the card is open. */
+const WATCHDOG_MS = 200;
 /** Within this distance of the bottom the tail auto-follows new captions. */
 const PIN_SLOP_PX = 48;
 
@@ -33,10 +35,18 @@ const PIN_SLOP_PX = 48;
  *  the top-center of the screen while a session is live, mirroring the macOS
  *  screen-recording indicator). Pulsing red dot + elapsed timer + one-click
  *  stop; the capsule is a drag region so it can be moved out of the way.
- *  Hovering the pill expands the panel (Granola-style) into a live-caption
- *  card: settled sentences plus the in-flight hypothesis per stream, replaced
- *  in place as recognition refines it. Visibility is owned by the backend, so
- *  a recording is never on screen without its indicator. */
+ *  Hovering (or clicking) the pill expands the panel (Granola-style) into a
+ *  live-caption card: settled sentences plus the in-flight hypothesis per
+ *  stream, replaced in place as recognition refines it. Visibility is owned
+ *  by the backend, so a recording is never on screen without its indicator.
+ *
+ *  Hover tracking deliberately avoids `mouseenter`/`mouseleave`: in this
+ *  never-key panel WebKit drops them (the window resizes under the cursor on
+ *  every expand/collapse, and the card auto-scrolls on every caption), which
+ *  left the card either flickering open/shut or — once a leave was lost —
+ *  never re-opening because no enter ever fired again. Open is driven by
+ *  `mousemove`/`mousedown`, which fire regardless of that bookkeeping; close
+ *  is driven solely by the backend cursor watchdog. */
 export function MeetingHud() {
   const [startedTs, setStartedTs] = useState<number | null>(null);
   const [meetingId, setMeetingId] = useState<string | null>(null);
@@ -49,6 +59,8 @@ export function MeetingHud() {
   const [, setTick] = useState(0);
 
   const meetingIdRef = useRef<string | null>(null);
+  const expandedRef = useRef(false);
+  const openingRef = useRef(false);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinnedRef = useRef(true);
@@ -172,14 +184,61 @@ export function MeetingHud() {
     return () => clearInterval(timer);
   }, [startedTs]);
 
+  const collapseNow = useCallback(() => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+    expandedRef.current = false;
+    openingRef.current = false;
+    // Unmount the card BEFORE the window shrinks: a 300px card squeezed into
+    // the 52px collapsed frame for a frame is a visible flash.
+    setExpanded(false);
+    pinnedRef.current = true;
+    api.meetingHudSetExpanded(false).catch(() => {});
+  }, []);
+
+  const openNow = useCallback(() => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+    if (expandedRef.current || openingRef.current) return;
+    const id = meetingIdRef.current;
+    if (!id) return;
+    openingRef.current = true;
+    // Grow the window FIRST, then mount the card — the mirror of collapse.
+    // Rendering the card into the collapsed frame clips it until the resize
+    // lands, which read as a flicker.
+    api
+      .meetingHudSetExpanded(true)
+      .catch(() => {})
+      .then(() => {
+        if (!openingRef.current || meetingIdRef.current !== id) return;
+        openingRef.current = false;
+        expandedRef.current = true;
+        setExpanded(true);
+        syncTranscript(id);
+      });
+  }, [syncTranscript]);
+
+  // Hover intent: the first movement over the collapsed pill arms a short
+  // timer; when it fires, the backend confirms the cursor is still over the
+  // window (a fly-by must not pop the card open behind the cursor's back).
+  const onMouseMove = useCallback(() => {
+    if (expandedRef.current || openingRef.current || hoverTimer.current) return;
+    hoverTimer.current = setTimeout(() => {
+      hoverTimer.current = null;
+      api
+        .meetingHudCursorInside()
+        .then((inside) => {
+          if (inside) openNow();
+        })
+        .catch(() => {});
+    }, EXPAND_DELAY_MS);
+  }, [openNow]);
+
   // Session ended while the card was open (auto-stop, crash): fold the panel
   // back so the next show presents a clean collapsed pill.
   useEffect(() => {
-    if (startedTs === null && expanded) {
-      setExpanded(false);
-      api.meetingHudSetExpanded(false).catch(() => {});
-    }
-  }, [startedTs, expanded]);
+    if (startedTs === null && expanded) collapseNow();
+  }, [startedTs, expanded, collapseNow]);
 
   // Follow the live tail unless the user scrolled up to read.
   useEffect(() => {
@@ -188,37 +247,11 @@ export function MeetingHud() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [expanded, finals, partials]);
 
-  const expand = useCallback(() => {
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    hoverTimer.current = setTimeout(() => {
-      setExpanded(true);
-      api.meetingHudSetExpanded(true).catch(() => {});
-      const id = meetingIdRef.current;
-      if (id) syncTranscript(id);
-    }, EXPAND_DELAY_MS);
-  }, [syncTranscript]);
-
-  const collapseNow = useCallback(() => {
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    setExpanded(false);
-    pinnedRef.current = true;
-    api.meetingHudSetExpanded(false).catch(() => {});
-  }, []);
-
-  const scheduleCollapse = useCallback(() => {
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    hoverTimer.current = setTimeout(collapseNow, COLLAPSE_DELAY_MS);
-  }, [collapseNow]);
-
-  // Watchdog: WebKit's hover tracking in this never-key panel can drop the
-  // `mouseleave` (same family of bugs as the stuck `:hover` under auto-scroll
-  // elsewhere in the app — and this card auto-scrolls on every caption), which
-  // leaves the panel stuck open with no way to close it. While expanded, poll
-  // the real cursor against the window frame and fold once it has truly left.
-  // The containment test runs backend-side (`meeting_hud_cursor_inside`): the
-  // JS cursorPosition()/outerPosition() pair mixes coordinate spaces on
-  // scaled/secondary displays and read "outside" during a legitimate hover,
-  // auto-folding the card moments after it opened.
+  // Cursor watchdog — the ONLY close path besides the X button. While the
+  // card is open, poll the real cursor against the window frame (backend-side:
+  // the JS cursorPosition()/outerPosition() pair mixes coordinate spaces on
+  // scaled/secondary displays and read "outside" mid-hover) and fold once it
+  // has stayed outside for the collapse delay.
   useEffect(() => {
     if (!expanded) return;
     let cancelled = false;
@@ -232,8 +265,6 @@ export function MeetingHud() {
             outsideSince = null;
             return;
           }
-          // Two consecutive outside reads ≈ the collapse delay, so the
-          // watchdog matches the mouseleave path instead of racing it.
           if (outsideSince === null) {
             outsideSince = Date.now();
           } else if (Date.now() - outsideSince >= COLLAPSE_DELAY_MS) {
@@ -241,7 +272,7 @@ export function MeetingHud() {
           }
         })
         .catch(() => {});
-    }, 250);
+    }, WATCHDOG_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
@@ -271,17 +302,16 @@ export function MeetingHud() {
   return (
     <div
       className="flex h-screen w-screen flex-col items-center"
-      onMouseEnter={expand}
-      onMouseLeave={scheduleCollapse}
+      onMouseMove={onMouseMove}
     >
       <div
         data-tauri-drag-region
-        // Starting a drag hands the mouse to the native window-move loop, so
-        // WebKit may never deliver the matching mouseleave — cancel a pending
-        // hover-expand so a drag can't pop the card open in a state it can't
-        // cleanly leave. (The cursor watchdog covers a card already open.)
-        onMouseDown={() => {
-          if (hoverTimer.current) clearTimeout(hoverTimer.current);
+        // A press on the capsule opens the card at once. `mousedown` rather
+        // than `click`: the drag region hands the mouse to the native
+        // window-move loop, which swallows the matching mouseup/click. A drag
+        // simply carries the open card along; the cursor watchdog closes it.
+        onMouseDown={(e) => {
+          if (e.button === 0) openNow();
         }}
         className="flex h-[52px] w-full shrink-0 items-center justify-center"
       >
@@ -298,6 +328,7 @@ export function MeetingHud() {
           </span>
           <button
             type="button"
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={onStop}
             disabled={stopping}
             aria-label={tt("meeting", "action.stop")}

@@ -380,6 +380,26 @@ export function QuickPanel() {
     [backend, cliModel],
   );
 
+  // Legacy "" / stale tuning rewritten to concrete ids by the menu (see
+  // CliTuningMenu.onMigrate). Never while a preset row is selected: its fixed
+  // tuning is what the row means, and rewriting it would knock the selection
+  // off the preset.
+  const onPresetRow = entries.some(
+    (entry) =>
+      entry.kind === "preset" &&
+      entry.preset.backend === backend &&
+      entry.preset.model === cliModel &&
+      entry.preset.effort === cliEffort,
+  );
+  const onCliTuningMigrate = useCallback(
+    (m: string, e: string) => {
+      setCliModel(m);
+      setCliEffort(e);
+      saveBackendChoice({ backend, cliModel: m, cliEffort: e });
+    },
+    [backend],
+  );
+
   /** Re-draft on another runtime against the capture already in flight. The
    *  turn streams into the same draft, so clear it back to the loading shell
    *  first; a superseded turn's late deltas are dropped natively. */
@@ -993,6 +1013,7 @@ export function QuickPanel() {
             effort={cliEffort}
             onModelChange={onCliModelChange}
             onEffortChange={onCliEffortChange}
+            onMigrate={onPresetRow ? undefined : onCliTuningMigrate}
             className="h-7 text-xs hover:bg-black/5 dark:hover:bg-white/[0.08]"
           />
         ) : null}

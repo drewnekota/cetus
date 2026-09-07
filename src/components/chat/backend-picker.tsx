@@ -218,36 +218,32 @@ export function RuntimeShortcutHint({ entryId }: { entryId: string }) {
 }
 
 /** Model overrides offered per CLI backend. Ids are passed straight through to
- *  `claude --model` / `codex -m`; "" keeps the CLI's own configured default
- *  (also the graceful fallback if a vendor renames a model — a stale id fails
- *  that one turn with a visible error, nothing sticks). Claude ids are the
- *  CLI's aliases (always resolve to the latest of each tier). The codex list
- *  is only the fallback when its models_cache.json can't be read — normally
- *  the live catalog from `api.getCliDefaults` replaces it. */
+ *  `claude --model` / `codex -m`. A persisted "" (legacy, or nothing chosen
+ *  yet) means no flag: the CLI's own configured default launches, and the menu
+ *  shows that resolved model checked rather than a separate "Default" row.
+ *  Claude ids are the CLI's aliases (always resolve to the latest of each
+ *  tier). The codex list is only the fallback when its models_cache.json can't
+ *  be read — normally the live catalog from `api.getCliDefaults` replaces it. */
 export const CLI_MODELS: Record<
   TunableBackendId,
   { id: string; label: string }[]
 > = {
   "claude-code": [
-    { id: "", label: "Default" },
     { id: "fable", label: "Fable" },
     { id: "opus", label: "Opus" },
     { id: "sonnet", label: "Sonnet" },
     { id: "haiku", label: "Haiku" },
   ],
   codex: [
-    { id: "", label: "Default" },
     { id: "gpt-5.5", label: "GPT-5.5" },
     { id: "gpt-5.4", label: "GPT-5.4" },
     { id: "gpt-5.4-mini", label: "GPT-5.4-Mini" },
     { id: "gpt-5.3-codex-spark", label: "GPT-5.3-Codex-Spark" },
   ],
   grok: [
-    { id: "", label: "Default" },
     { id: "grok-4.5", label: "Grok 4.5" },
   ],
   dsh: [
-    { id: "", label: "Default" },
     { id: "deepseek-v4-flash", label: "DeepSeek-V4-Flash" },
     { id: "deepseek-v4-pro", label: "DeepSeek-V4-Pro" },
     { id: "deepseek-v4-flash-vision-exp", label: "DeepSeek-V4-Flash-Vision-Exp" },
@@ -256,13 +252,13 @@ export const CLI_MODELS: Record<
 
 /** Reasoning-effort levels per CLI backend, matching what each CLI accepts
  *  natively: `claude --effort` (low…max) / codex `model_reasoning_effort`
- *  (low…xhigh). "" keeps the CLI's configured default. */
+ *  (low…xhigh). A persisted "" means no flag (the CLI's configured default);
+ *  the menu checks that level when the CLI reports it. */
 export const CLI_EFFORTS: Record<
   TunableBackendId,
   { id: string; label: string }[]
 > = {
   "claude-code": [
-    { id: "", label: "Default" },
     { id: "low", label: "Low" },
     { id: "medium", label: "Medium" },
     { id: "high", label: "High" },
@@ -270,21 +266,18 @@ export const CLI_EFFORTS: Record<
     { id: "max", label: "Max" },
   ],
   codex: [
-    { id: "", label: "Default" },
     { id: "low", label: "Low" },
     { id: "medium", label: "Medium" },
     { id: "high", label: "High" },
     { id: "xhigh", label: "XHigh" },
   ],
   grok: [
-    { id: "", label: "Default" },
     { id: "low", label: "Low" },
     { id: "medium", label: "Medium" },
     { id: "high", label: "High" },
   ],
   // dsh's ACP `reasoning_effort` option: off / low / high / max (no medium).
   dsh: [
-    { id: "", label: "Default" },
     { id: "off", label: "Off" },
     { id: "low", label: "Low" },
     { id: "high", label: "High" },
@@ -294,7 +287,8 @@ export const CLI_EFFORTS: Record<
 
 /** Display label for a preset row, resolved against the static catalogs
  *  ("Fable · Medium"). Ids missing from the catalog (renamed models, live
- *  codex ids) fall back to the raw string rather than hiding the row. */
+ *  codex ids) fall back to the raw string rather than hiding the row; a legacy
+ *  preset with no pinned effort shows the model alone. */
 export function runtimePresetLabel(preset: RuntimePreset): string {
   const none: { id: string; label: string }[] = [];
   const models = backendSupportsTuning(preset.backend)
@@ -308,10 +302,8 @@ export function runtimePresetLabel(preset: RuntimePreset): string {
     preset.model ||
     "Default";
   const effort =
-    efforts.find((e) => e.id === preset.effort)?.label ||
-    preset.effort ||
-    "Default";
-  return `${model} · ${effort}`;
+    efforts.find((e) => e.id === preset.effort)?.label || preset.effort;
+  return effort ? `${model} · ${effort}` : model;
 }
 
 /** One fetch of a backend's on-disk defaults per app session, shared by every
@@ -330,21 +322,79 @@ function fetchCliDefaults(backend: string): Promise<CliDefaults> {
   return p;
 }
 
-/** Human label for a raw configured default: exact catalog id first, then
- *  substring (claude reports full ids like "claude-opus-4-8[1m]" while the
- *  catalog carries aliases like "opus[1m]"), else the raw string as-is. */
-function resolveDefaultLabel(
+/** Backend's on-disk defaults, fetched once per app session and shared by
+ *  every tuning surface. `null` until the first fetch resolves. */
+export function useCliDefaults(backend: TunableBackendId): CliDefaults | null {
+  const [defaults, setDefaults] = useState<CliDefaults | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchCliDefaults(backend).then((d) => {
+      if (!cancelled) setDefaults(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [backend]);
+  return defaults;
+}
+
+/** Model catalog to offer for a backend: the live list the CLI reports
+ *  (codex's models_cache.json, claude's initialize handshake), or the static
+ *  fallback until it loads / when it can't be read. Every picker (composer,
+ *  quick panel, preset form) must go through this so they all agree on what's
+ *  selectable. */
+export function cliModelCatalog(
+  backend: TunableBackendId,
+  defaults: CliDefaults | null,
+) {
+  return defaults?.models ?? CLI_MODELS[backend];
+}
+
+/** The catalog row a persisted override selects. Exact id first, then the
+ *  family match (a stale pinned Claude id vs. the live catalog), and when
+ *  nothing is persisted ("" = no flag) the row the CLI itself reports as its
+ *  configured default. `undefined` when even that can't be resolved (catalog
+ *  still loading, or an older CLI that doesn't report one). */
+export function resolveCliModel(
+  selected: string,
+  catalog: { id: string; label: string }[],
+  defaults: CliDefaults | null,
+) {
+  return (
+    findCatalogModel(selected, catalog) ??
+    resolveDefaultEntry(defaults?.model, catalog)
+  );
+}
+
+/** Effort row a persisted override selects, falling back to the level the
+ *  CLI reports as its default. `undefined` when the CLI doesn't say (Claude
+ *  with no `effortLevel` set), in which case no row is checked and the trigger
+ *  shows the model alone. */
+export function resolveCliEffort(
+  selected: string,
+  catalog: { id: string; label: string }[],
+  defaults: CliDefaults | null,
+) {
+  return (
+    catalog.find((e) => e.id === selected) ??
+    resolveDefaultEntry(defaults?.effort, catalog)
+  );
+}
+
+/** Catalog row for a raw configured default: exact id first, then substring
+ *  (claude reports full ids like "claude-opus-4-8[1m]" while the catalog
+ *  carries aliases like "opus[1m]"). */
+function resolveDefaultEntry(
   raw: string | null | undefined,
   catalog: { id: string; label: string }[],
-): string | null {
-  if (!raw) return null;
+) {
+  if (!raw) return undefined;
   const exact = catalog.find((m) => m.id && m.id === raw);
-  if (exact) return exact.label;
-  const sub = catalog.find((m) => {
+  if (exact) return exact;
+  return catalog.find((m) => {
     const family = m.id.split("[")[0];
     return family && raw.includes(family);
   });
-  return sub ? sub.label : raw;
 }
 
 /** Keep persisted Claude aliases (for example `fable`) selected when a newer
@@ -381,7 +431,7 @@ export function CliTuningMenu({
   effort,
   onModelChange,
   onEffortChange,
-  onModelMigrate,
+  onMigrate,
   disabled,
   className,
   open,
@@ -392,71 +442,61 @@ export function CliTuningMenu({
   effort: string;
   onModelChange: (model: string) => void;
   onEffortChange: (effort: string) => void;
-  /** Receives the live catalog id when the persisted `model` is a stale full
-   *  id of the same family (see the migration effect). Omit to disable the
-   *  migration — e.g. while a preset's fixed tuning is what's selected, since
-   *  rewriting it would move the selection off the preset row and leak the
-   *  preset's model into the runtime's own sticky choice. */
-  onModelMigrate?: (model: string) => void;
+  /** Receives concrete ids to persist in place of what's stored when the
+   *  stored tuning can't be shown as-is: a legacy "" (the retired "Default"
+   *  row) becomes the model/effort the CLI reports as its default, and a
+   *  stale full Claude id becomes the live catalog id of the same family (see
+   *  the migration effect). Omit to disable the migration — e.g. while a
+   *  preset's fixed tuning is what's selected, since rewriting it would move
+   *  the selection off the preset row and leak the preset's model into the
+   *  runtime's own sticky choice. */
+  onMigrate?: (model: string, effort: string) => void;
   disabled?: boolean;
   className?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  // On-disk defaults (and codex's live model catalog) so "Default" echoes what
-  // it actually resolves to; until they load, plain "Default" renders.
-  const [defaults, setDefaults] = useState<CliDefaults | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetchCliDefaults(backend).then((d) => {
-      if (!cancelled) setDefaults(d);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [backend]);
-
-  const models = defaults?.models
-    ? [{ id: "", label: "Default" }, ...defaults.models]
-    : CLI_MODELS[backend];
+  // On-disk defaults (and codex's live model catalog): with nothing persisted
+  // the row the CLI would launch anyway is the one shown checked. Until they
+  // load, an unresolved selection renders its raw id.
+  const defaults = useCliDefaults(backend);
+  const models = cliModelCatalog(backend, defaults);
   const efforts = CLI_EFFORTS[backend];
-  const curModel = findCatalogModel(model, models) ?? models[0];
-  // A persisted full id goes stale when the CLI starts reporting a newer
-  // release of the same family ("claude-fable-5[1m]" → "claude-fable-5-1[1m]").
-  // The family match above keeps the new row visually checked while the stale
-  // id is what actually spawns — migrate the stored override to the catalog id
-  // so the checkmark and the running session agree.
+  const curModel = resolveCliModel(model, models, defaults);
+  const curEffort = resolveCliEffort(effort, efforts, defaults);
+  // Two stored shapes can't be shown as-is and get rewritten to what's
+  // checked, so the menu and the running session agree:
   //
-  // Only full ids can go stale. Floating aliases ("opus", "fable") always
-  // resolve to the current release inside the CLI, and the family match would
-  // otherwise "migrate" them to a different catalog row ("opus" → "opus[1m]"),
-  // changing what they mean.
-  const liveModels = defaults?.models;
+  // 1. "" — the retired "Default" row, still persisted for users who picked it
+  //    before it was removed. Once the CLI's own default resolves against the
+  //    catalog, that concrete id is stored instead (the client, not the CLI's
+  //    config, owns the choice from then on). Left alone while unresolved so
+  //    the CLI default keeps launching.
+  // 2. A persisted full Claude id gone stale when the CLI reports a newer
+  //    release of the same family ("claude-fable-5[1m]" →
+  //    "claude-fable-5-1[1m]"): the family match keeps the new row checked
+  //    while the stale id spawns, so store the live catalog id. Only full ids
+  //    can go stale — floating aliases ("opus", "fable") always resolve to the
+  //    current release inside the CLI, and the family match would otherwise
+  //    "migrate" them to a different row ("opus" → "opus[1m]"), changing what
+  //    they mean. Only the live catalog is trusted for this one.
   useEffect(() => {
-    if (!onModelMigrate || !liveModels || !isStaleCandidate(backend, model)) {
-      return;
+    if (!onMigrate || !defaults) return;
+    let nextModel = model;
+    if (!model) {
+      nextModel = curModel?.id ?? model;
+    } else if (defaults.models && isStaleCandidate(backend, model)) {
+      nextModel = findCatalogModel(model, defaults.models)?.id ?? model;
     }
-    const match = findCatalogModel(model, liveModels);
-    if (match && match.id !== model) onModelMigrate(match.id);
-  }, [backend, liveModels, model, onModelMigrate]);
-  const curEffort = efforts.find((e) => e.id === effort) ?? efforts[0];
-  // Claude Code reports its account-specific resolved default through the
-  // initialize handshake. "Recommended" remains only as a compatibility
-  // fallback for older CLI versions that don't expose that catalog.
-  const defaultModelLabel =
-    resolveDefaultLabel(defaults?.model, models) ??
-    (backend === "claude-code" && defaults !== null ? "Recommended" : null);
-  const defaultEffortLabel = resolveDefaultLabel(defaults?.effort, efforts);
-  // Menu rows spell the resolution out ("Default (Fable)"); the compact
-  // trigger shows the resolved name directly.
-  const modelRowLabel = (m: { id: string; label: string }) =>
-    m.id === "" && defaultModelLabel ? `Default (${defaultModelLabel})` : m.label;
-  const effortRowLabel = (e: { id: string; label: string }) =>
-    e.id === "" && defaultEffortLabel ? `Default (${defaultEffortLabel})` : e.label;
-  const shownModel =
-    curModel.id === "" ? (defaultModelLabel ?? curModel.label) : curModel.label;
-  const shownEffort =
-    curEffort.id === "" ? defaultEffortLabel : curEffort.label;
+    const nextEffort = effort ? effort : (curEffort?.id ?? effort);
+    if (nextModel !== model || nextEffort !== effort) {
+      onMigrate(nextModel, nextEffort);
+    }
+  }, [backend, defaults, model, effort, curModel, curEffort, onMigrate]);
+  // Raw ids stand in while the catalog is loading or when the CLI reports a
+  // default the catalog doesn't carry; "Model" only when nothing is known.
+  const shownModel = curModel?.label || model || defaults?.model || "Model";
+  const shownEffort = curEffort?.label || effort || defaults?.effort || null;
   const label = shownEffort ? `${shownModel} · ${shownEffort}` : shownModel;
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -478,18 +518,18 @@ export function CliTuningMenu({
         </DropdownMenuLabel>
         {efforts.map((e) => (
           <DropdownMenuItem
-            key={e.id || "default"}
+            key={e.id}
             className="text-xs"
             onClick={() => onEffortChange(e.id)}
           >
-            <span className="flex-1">{effortRowLabel(e)}</span>
-            {e.id === curEffort.id && <Check className="size-3.5" />}
+            <span className="flex-1">{e.label}</span>
+            {e.id === curEffort?.id && <Check className="size-3.5" />}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className="text-xs">
-            {modelRowLabel(curModel)}
+            {shownModel}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="min-w-44">
             <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -497,12 +537,12 @@ export function CliTuningMenu({
             </DropdownMenuLabel>
             {models.map((m) => (
               <DropdownMenuItem
-                key={m.id || "default"}
+                key={m.id}
                 className="text-xs"
                 onClick={() => onModelChange(m.id)}
               >
-                <span className="flex-1">{modelRowLabel(m)}</span>
-                {m.id === curModel.id && <Check className="size-3.5" />}
+                <span className="flex-1">{m.label}</span>
+                {m.id === curModel?.id && <Check className="size-3.5" />}
               </DropdownMenuItem>
             ))}
           </DropdownMenuSubContent>
@@ -520,7 +560,8 @@ function formatReset(resetsAt: number): string {
   return d.toLocaleString(undefined, opts);
 }
 
-/** Quota line for a runtime row in the picker dropdown. Deliberately quiet:
+/** Quota line for a runtime row in the picker dropdown, phrased as the
+ *  remaining share ("N% left") to match the sidebar tooltip. Deliberately quiet:
  *  a healthy account (status "allowed", no utilization reported) renders
  *  nothing at all — the line appears only when there's something to say. */
 function quotaLabel(
@@ -528,7 +569,9 @@ function quotaLabel(
 ): { text: string; warn: boolean } | null {
   if (!q) return null;
   const pct =
-    q.utilization !== undefined ? `${Math.round(q.utilization * 100)}%` : null;
+    q.utilization !== undefined
+      ? `${Math.max(0, Math.round((1 - q.utilization) * 100))}% left`
+      : null;
   const reset = q.resetsAt ? `resets ${formatReset(q.resetsAt)}` : null;
   if (q.status === "rejected")
     return { text: ["limit reached", reset].filter(Boolean).join(" · "), warn: true };
@@ -737,22 +780,19 @@ export function BackendPicker({
     }
   }
 
-  function selectModel(model: string) {
+  function selectTuning(model: string, effort: string) {
     setCliModel(model);
-    saveCliTuningChoice(shown as TunableBackendId, {
-      model,
-      effort: cliEffort,
-    });
-    onTuningChange?.(model, cliEffort);
+    setCliEffort(effort);
+    saveCliTuningChoice(shown as TunableBackendId, { model, effort });
+    onTuningChange?.(model, effort);
+  }
+
+  function selectModel(model: string) {
+    selectTuning(model, cliEffort);
   }
 
   function selectEffort(effort: string) {
-    setCliEffort(effort);
-    saveCliTuningChoice(shown as TunableBackendId, {
-      model: cliModel,
-      effort,
-    });
-    onTuningChange?.(cliModel, effort);
+    selectTuning(cliModel, effort);
   }
 
   return (
@@ -836,7 +876,7 @@ export function BackendPicker({
             effort={cliEffort}
             onModelChange={selectModel}
             onEffortChange={selectEffort}
-            onModelMigrate={matchedPreset ? undefined : selectModel}
+            onMigrate={matchedPreset ? undefined : selectTuning}
             disabled={disabled}
             open={tuningMenuOpen}
             onOpenChange={onTuningMenuOpenChange}
@@ -848,11 +888,7 @@ export function BackendPicker({
             effort={pendingEffort ?? ""}
             onModelChange={(m) => onPendingTuningChange(m, pendingEffort ?? "")}
             onEffortChange={(e) => onPendingTuningChange(pendingModel ?? "", e)}
-            onModelMigrate={
-              matchedPreset
-                ? undefined
-                : (m) => onPendingTuningChange(m, pendingEffort ?? "")
-            }
+            onMigrate={matchedPreset ? undefined : onPendingTuningChange}
             disabled={disabled}
             open={tuningMenuOpen}
             onOpenChange={onTuningMenuOpenChange}
