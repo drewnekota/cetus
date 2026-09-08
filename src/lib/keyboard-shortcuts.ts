@@ -163,13 +163,13 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: "toggleSidebar",
     label: "Toggle sidebar",
     description: "Collapse or expand the left sidebar",
-    defaultAccelerator: "Shift+Cmd+S",
+    defaultAccelerator: "Cmd+B",
   },
   {
     id: "toggleWorkspace",
     label: "Toggle workspace",
     description: "Open or close the right workspace panel",
-    defaultAccelerator: "Cmd+B",
+    defaultAccelerator: "Cmd+Backslash",
   },
   {
     id: "toggleTerminal",
@@ -356,6 +356,20 @@ export function mergeStoredShortcutMap(
       (slot >= 0 ? legacy[LEGACY_RUNTIME_SHORTCUT_IDS[slot] ?? ""] : undefined);
     if (typeof value !== "string") continue;
     const normalized = normalizeAccelerator(value);
+    // Stored maps include defaults. Upgrade the former sidebar bindings while
+    // preserving bindings that differ from those defaults on either platform.
+    const oldPanelDefault =
+      def.id === "toggleSidebar" ? "Shift+Cmd+S" :
+      def.id === "toggleWorkspace" ? "Cmd+B" : undefined;
+    if (
+      oldPanelDefault &&
+      (normalized === normalizeAccelerator(oldPanelDefault) ||
+        (platform === "windows" &&
+          normalized === normalizeAccelerator(oldPanelDefault.replaceAll("Cmd", "Ctrl"))))
+    ) {
+      next[def.id] = defaults[def.id];
+      continue;
+    }
     // Releases before 0.3.40 wrote the macOS defaults verbatim on Windows.
     // Migrate only values that still equal that old default; genuinely custom
     // bindings survive untouched.

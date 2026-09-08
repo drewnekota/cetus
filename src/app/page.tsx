@@ -188,7 +188,7 @@ function ChatLoadingPane({ opticalCenter }: { opticalCenter: boolean }) {
       aria-label="Loading conversation"
     >
       <div className="min-h-0 flex-1 overflow-hidden px-4 pt-4">
-        <div className={`mx-auto flex w-full max-w-3xl flex-col gap-6 ${columnShift}`}>
+        <div className={`mx-auto flex w-full max-w-3xl flex-col gap-6 panel-motion transition-[translate] ${columnShift}`}>
           <div className="flex justify-end">
             <Skeleton className="h-10 w-2/5 rounded-2xl" />
           </div>
@@ -209,7 +209,7 @@ function ChatLoadingPane({ opticalCenter }: { opticalCenter: boolean }) {
         </div>
       </div>
       <div className="shrink-0 bg-background px-4 pb-3 pt-2">
-        <div className={`mx-auto w-full max-w-3xl ${columnShift}`}>
+        <div className={`mx-auto w-full max-w-3xl panel-motion transition-[translate] ${columnShift}`}>
           <Skeleton className="h-[92px] w-full rounded-2xl" />
         </div>
       </div>
@@ -371,7 +371,7 @@ async function prepareOutgoing(
   return { localImages, savedFiles, piImages, piMessage: text + buildAttachmentRefs(savedFiles) };
 }
 
-function usePanelPresence(open: boolean, delayMs = 110) {
+function usePanelPresence(open: boolean, delayMs = 220) {
   const [mounted, setMounted] = useState(open);
   const [hidden, setHidden] = useState(!open);
   useEffect(() => {
@@ -3796,12 +3796,12 @@ export default function Home() {
             ) : loadingChatId !== null &&
               loadingChatId === activeId &&
               !hasMessages ? (
-              <ChatLoadingPane opticalCenter={!sideWorkspace.open} />
+              <ChatLoadingPane opticalCenter={sidebarOpen && !sideWorkspace.open} />
             ) : hasMessages ? (
               <ChatPane
                 convId={activeId}
                 backend={activeConvBackend ?? pendingBackend}
-                opticalCenter={!sideWorkspace.open}
+                opticalCenter={sidebarOpen && !sideWorkspace.open}
                 draftKey={activeId ? `chat:${activeId}` : "chat:new"}
                 modelChoice={modelChoice}
                 onModelChange={onModelChange}
@@ -3853,8 +3853,8 @@ export default function Home() {
               <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
                 <GlyphBackdrop />
                 <div
-                  className={`relative z-10 w-full max-w-2xl space-y-6 ${
-                    sideWorkspace.open
+                  className={`relative z-10 w-full max-w-2xl space-y-6 panel-motion transition-[translate] ${
+                    !sidebarOpen || sideWorkspace.open
                       ? ""
                       : "xl:-translate-x-10 2xl:-translate-x-12"
                   }`}

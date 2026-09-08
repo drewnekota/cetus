@@ -264,7 +264,7 @@ export function ChatPane({
       <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <GlyphBackdrop />
         <div
-          className={`relative z-10 w-full max-w-2xl space-y-5 ${
+          className={`relative z-10 w-full max-w-2xl space-y-5 panel-motion transition-[translate] ${
             opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
           }`}
         >
@@ -318,7 +318,7 @@ export function ChatPane({
       </ArtifactNavProvider>
       <div className="relative z-10 bg-background px-4 pb-3 pt-2">
         <div
-          className={`mx-auto max-w-3xl space-y-2 ${
+          className={`mx-auto max-w-3xl space-y-2 panel-motion transition-[translate] ${
             opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
           }`}
         >
@@ -644,6 +644,9 @@ function MessageList({
   const [atBottom, setAtBottom] = useState(!restoreRef.current);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const atBottomRef = useRef(!restoreRef.current);
+  // User intent is separate from Virtuoso's throttled at-bottom callback so an
+  // upward gesture can stop streaming follow immediately.
+  const followTailRef = useRef(!restoreRef.current);
   // Topmost visible group index (from Virtuoso's rangeChanged) — drives the turn
   // navigator's active tick with no getBoundingClientRect scanning.
   const [topIndex, setTopIndex] = useState(0);
@@ -682,6 +685,7 @@ function MessageList({
     // publish the truth a frame later; until then the streaming follow (which
     // reads the ref, not the state) must not yank a restored position down.
     atBottomRef.current = !anchor;
+    followTailRef.current = !anchor;
     setAtBottom(!anchor);
     // Forget the previous conversation's tail: switching into a chat that ends
     // on a user turn must not read as "the user just sent" and seek to LAST.
@@ -832,6 +836,7 @@ function MessageList({
       lastKey !== prevLastKeyRef.current &&
       roles[roles.length - 1] === "user"
     ) {
+      followTailRef.current = true;
       virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end" });
     }
     prevLastKeyRef.current = lastKey;
@@ -948,34 +953,81 @@ function MessageList({
     };
   }, [scroller, convId]);
 
-  // Streaming follow. Virtuoso's followOutput only reacts to NEW items; a
-  // streaming reply grows an EXISTING item, so without help the view strands
-  // slightly above the growing tail. Watch the item list itself — its height
-  // tracks the content (the previously-observed viewport wrapper is height:100%
-  // and never fires) — and, while the reader is pinned to the bottom, chase the
-  // growth one rAF-paced write per frame.
+  // Release tail-following synchronously on upward intent. Waiting for
+  // atBottomStateChange is too late: Virtuoso throttles that callback, and a
+  // token-driven resize can otherwise pull the reader back down first.
+  useEffect(() => {
+    if (!scroller) return;
+
+    let previousScrollTop = scroller.scrollTop;
+    let touchY: number | null = null;
+    const releaseTail = () => {
+      followTailRef.current = false;
+    };
+    const onScroll = () => {
+      const nextScrollTop = scroller.scrollTop;
+      const movedUp = nextScrollTop < previousScrollTop - 1;
+      if (movedUp) releaseTail();
+      const distanceFromBottom =
+        scroller.scrollHeight - nextScrollTop - scroller.clientHeight;
+      if (!movedUp && distanceFromBottom <= STICKY_BOTTOM_PX) {
+        followTailRef.current = true;
+      }
+      previousScrollTop = nextScrollTop;
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) releaseTail();
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY ?? null;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY;
+      if (touchY != null && nextY != null && nextY > touchY) releaseTail();
+      touchY = nextY ?? touchY;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") {
+        releaseTail();
+      }
+    };
+
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("wheel", onWheel, { passive: true });
+    scroller.addEventListener("touchstart", onTouchStart, { passive: true });
+    scroller.addEventListener("touchmove", onTouchMove, { passive: true });
+    scroller.addEventListener("keydown", onKeyDown);
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("wheel", onWheel);
+      scroller.removeEventListener("touchstart", onTouchStart);
+      scroller.removeEventListener("touchmove", onTouchMove);
+      scroller.removeEventListener("keydown", onKeyDown);
+    };
+  }, [scroller]);
+
+  // A streamed reply grows an existing Virtuoso row. Follow that growth only
+  // while the reader has not explicitly released the tail.
   useEffect(() => {
     if (!scroller || !isStreaming) return;
     const content = scroller.querySelector('[data-testid="virtuoso-item-list"]');
     if (!content) return;
 
     let frame: number | null = null;
-    const scrollIfPinned = () => {
-      // While ⌘F is open the reader is looking at a match, not at the tail —
-      // chasing streaming growth would drag them off it mid-read.
-      if (findOpenRef.current) return;
-      if (!atBottomRef.current) return;
-      if (frame != null) return;
+    const scrollIfFollowing = () => {
+      if (findOpenRef.current || !followTailRef.current || frame != null) return;
       frame = requestAnimationFrame(() => {
         frame = null;
-        if (atBottomRef.current) scroller.scrollTop = scroller.scrollHeight;
+        if (followTailRef.current && !findOpenRef.current) {
+          scroller.scrollTop = scroller.scrollHeight;
+        }
       });
     };
 
-    const ro = new ResizeObserver(scrollIfPinned);
-    ro.observe(content);
+    const observer = new ResizeObserver(scrollIfFollowing);
+    observer.observe(content);
     return () => {
-      ro.disconnect();
+      observer.disconnect();
       if (frame != null) cancelAnimationFrame(frame);
     };
   }, [isStreaming, scroller]);
@@ -1024,7 +1076,7 @@ function MessageList({
         return (
           <div className={MESSAGE_ROW_GUTTER_CLASS}>
             <div
-              className={`mx-auto max-w-3xl ${
+              className={`mx-auto max-w-3xl panel-motion transition-[translate] ${
                 opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
               }`}
             >
@@ -1037,7 +1089,7 @@ function MessageList({
         return (
           <div className={MESSAGE_ROW_GUTTER_CLASS}>
             <div
-              className={`mx-auto max-w-3xl ${
+              className={`mx-auto max-w-3xl panel-motion transition-[translate] ${
                 opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
               }`}
             >
@@ -1087,7 +1139,7 @@ function MessageList({
         // nodes without knowing anything about the bubbles inside it.
         <div className={MESSAGE_ROW_GUTTER_CLASS} data-find-row={index}>
           <div
-            className={`mx-auto max-w-3xl ${
+            className={`mx-auto max-w-3xl panel-motion transition-[translate] ${
               opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
             }`}
           >
@@ -1154,7 +1206,9 @@ function MessageList({
         // bottom of the empty viewport. The initial index already opens an
         // overflowing history at its newest turn, while short chats keep the
         // normal top-down IM layout.
-        followOutput={(isAtBottom) => (isAtBottom ? "auto" : false)}
+        followOutput={(isAtBottom) =>
+          followTailRef.current && !findOpenRef.current && isAtBottom ? "auto" : false
+        }
         atBottomThreshold={STICKY_BOTTOM_PX}
         atBottomStateChange={setAtBottomState}
         rangeChanged={(range) => {
@@ -1186,6 +1240,9 @@ function MessageList({
         show={showScrollToBottom}
         virtuosoRef={virtuosoRef}
         opticalCenter={opticalCenter}
+        onFollowTail={() => {
+          followTailRef.current = true;
+        }}
       />
     </div>
   );
@@ -1313,20 +1370,23 @@ function ScrollToBottomButton({
   show,
   virtuosoRef,
   opticalCenter,
+  onFollowTail,
 }: {
   show: boolean;
   virtuosoRef: RefObject<VirtuosoHandle | null>;
   opticalCenter: boolean;
+  onFollowTail: () => void;
 }) {
   const { t } = useTranslation("chat");
 
   const scrollToBottom = useCallback(() => {
+    onFollowTail();
     virtuosoRef.current?.scrollToIndex({
       index: "LAST",
       align: "end",
       behavior: "smooth",
     });
-  }, [virtuosoRef]);
+  }, [onFollowTail, virtuosoRef]);
 
   return (
     <button
@@ -1334,7 +1394,7 @@ function ScrollToBottomButton({
       aria-label={t("pane.scrollToBottom")}
       title={t("pane.scrollToBottom")}
       onClick={scrollToBottom}
-      className={`fade-layer absolute bottom-4 right-[max(1rem,calc((100%-48rem)/2))] z-30 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] transition-all duration-150 hover:bg-muted ${
+      className={`fade-layer absolute bottom-4 right-[max(1rem,calc((100%-48rem)/2))] z-30 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] transition-all panel-motion hover:bg-muted ${
         opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
       } ${
         show

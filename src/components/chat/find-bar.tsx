@@ -47,7 +47,7 @@ export function FindBar({
 
   return (
     <div
-      className={`absolute right-[max(1rem,calc((100%-48rem)/2))] top-3 z-30 flex items-center gap-1 rounded-lg border border-border bg-popover/95 px-1.5 py-1 shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] backdrop-blur ${
+      className={`absolute right-[max(1rem,calc((100%-48rem)/2))] top-3 z-30 flex items-center gap-1 rounded-lg border border-border bg-popover/95 px-1.5 py-1 shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] backdrop-blur panel-motion transition-[translate] ${
         opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
       }`}
       // The list below owns ⌘F/Esc globally; keep ordinary typing (and the

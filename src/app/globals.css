@@ -518,3 +518,37 @@ html.no-perma-layers [data-message-hover-target] > [data-message-actions] {
     animation: none;
   }
 }
+
+/* Shared shell motion: keep the sidebar, dock, and chat column in step. */
+.panel-motion {
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.panel-animation {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.workspace-side-panel {
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  border-left-width: 0;
+  transition-property: width, opacity;
+}
+
+.workspace-side-panel[data-expanded="true"] {
+  width: min(50%, 48rem);
+  opacity: 1;
+  border-left-width: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-motion {
+    transition-duration: 0s;
+  }
+  .panel-animation {
+    animation-duration: 0s;
+  }
+}

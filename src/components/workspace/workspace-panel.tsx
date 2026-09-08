@@ -154,6 +154,18 @@ export function WorkspacePanel({
   const panelRef = useRef<HTMLElement>(null);
   const [bottomHeight, setBottomHeight] = useState<number | null>(loadBottomPanelHeight);
   const [resizing, setResizing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (motionState !== "open") {
+      setExpanded(false);
+      return;
+    }
+    // Give a newly mounted dock a collapsed frame before expanding it.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => setExpanded(true));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [motionState]);
   const resizeDragRef = useRef<{
     pointerId: number;
     panelBottom: number;
@@ -233,21 +245,19 @@ export function WorkspacePanel({
       style={layout === "bottom" && bottomHeight != null ? { height: bottomHeight } : undefined}
       className={cn(
         "flex flex-col bg-background",
-        hidden && "hidden",
+        hidden && (layout === "side" ? "invisible" : "hidden"),
         layout === "side"
-          ? "h-full w-1/2 min-w-[min(420px,50%)] max-w-3xl border-l border-border"
+          ? "workspace-side-panel panel-motion h-full shrink-0 overflow-hidden border-border"
           : "relative h-[32vh] max-h-[80vh] min-h-56 w-full border-t border-border",
-        motionState === "open" &&
-          (layout === "side"
-            ? "animate-in fade-in-0 slide-in-from-right-6 duration-120 ease-out"
-            : "animate-in fade-in-0 slide-in-from-bottom-6 duration-120 ease-out"),
-        motionState === "closed" &&
-          (layout === "side"
-            ? "animate-out fade-out-0 slide-out-to-right-4 duration-100 ease-in"
-            : "animate-out fade-out-0 slide-out-to-bottom-4 duration-100 ease-in"),
+        layout === "bottom" && motionState === "open" &&
+          "animate-in fade-in-0 slide-in-from-bottom-6 panel-animation",
+        layout === "bottom" && motionState === "closed" &&
+          "animate-out fade-out-0 slide-out-to-bottom-4 panel-animation",
       )}
       data-testid="workspace-panel"
       data-layout={layout}
+      data-expanded={expanded}
+      inert={motionState === "closed"}
       data-state={motionState}
     >
       {layout === "bottom" && (
