@@ -1,0 +1,16 @@
+{
+  "name": "cetus-website",
+  "account_id": "b975c9806857f9f5024bfcbd3a373fbf",
+  "compatibility_date": "2026-09-08",
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./dist"
+  },
+  "routes": [
+    {
+      "pattern": "cetus.run/*",
+      "zone_name": "cetus.run"
+    }
+  ]
+}

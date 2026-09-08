@@ -2,6 +2,8 @@
 
 <h1 align="center">Cetus</h1>
 
+<p align="center"><a href="https://cetus.run">Official website · cetus.run</a></p>
+
 <p align="center"><strong>Turn your favorite agent runtime into an always-on desktop assistant.</strong></p>
 
 <p align="center">Keep Codex, Claude Code, DeepSeek Harness, or the built-in runtime at the core. Cetus adds the desktop layer around it: summon it over any app, schedule work for later, and give it context from what has been on your screen.</p>

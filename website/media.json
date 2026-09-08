@@ -1,0 +1,66 @@
+{
+  "quick-launcher": {
+    "src": "",
+    "alt": "Quick Launcher over another app"
+  },
+  "voice": {
+    "src": "",
+    "alt": "Voice input"
+  },
+  "screen-memory": {
+    "src": "",
+    "alt": "Screen memory settings"
+  },
+  "meetings": {
+    "src": "",
+    "alt": "Meeting memory"
+  },
+  "automations": {
+    "src": "",
+    "alt": "Scheduled tasks"
+  },
+  "quick-reply": {
+    "src": "",
+    "alt": "Quick Reply"
+  },
+  "dreaming": {
+    "src": "",
+    "alt": "Dreaming and persistent memory"
+  },
+  "workspace": {
+    "src": "",
+    "alt": "Conversations and workspaces"
+  },
+  "shortcuts": {
+    "src": "",
+    "alt": "Keyboard workflows"
+  },
+  "runtime-codex": {
+    "src": "",
+    "alt": "codex in Cetus"
+  },
+  "runtime-claude-code": {
+    "src": "",
+    "alt": "claude-code in Cetus"
+  },
+  "runtime-dsh": {
+    "src": "",
+    "alt": "dsh in Cetus"
+  },
+  "runtime-opencode": {
+    "src": "",
+    "alt": "opencode in Cetus"
+  },
+  "runtime-grok": {
+    "src": "",
+    "alt": "grok in Cetus"
+  },
+  "runtime-kimi": {
+    "src": "",
+    "alt": "kimi in Cetus"
+  },
+  "runtime-cetus": {
+    "src": "",
+    "alt": "cetus in Cetus"
+  }
+}

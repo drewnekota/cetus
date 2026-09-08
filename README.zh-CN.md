@@ -2,6 +2,8 @@
 
 <h1 align="center">Cetus</h1>
 
+<p align="center"><a href="https://cetus.run">官方网站 · cetus.run</a></p>
+
 <p align="center"><strong>把你惯用的 agent runtime，变成一个常驻桌面的智能助手。</strong></p>
 
 <p align="center">Codex、Claude Code、DeepSeek Harness 或内置 runtime 仍是核心；Cetus 在它们之外补上桌面助手这一层：从任何 app 随时唤起、定时安排工作，并理解你在屏幕上看过的内容。</p>
