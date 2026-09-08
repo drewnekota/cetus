@@ -107,3 +107,53 @@
 .demo-artifacts-empty{grid-column:1/-1;text-align:center;padding:48px 12px;color:var(--muted);font-size:13px}
 @media(max-width:700px){.demo-artifacts-grid{grid-template-columns:1fr 1fr;padding:16px}.demo-artifacts-dialog{width:calc(100vw - 24px);height:calc(100dvh - 48px)}}
 @media(max-width:450px){.demo-artifacts-grid{grid-template-columns:1fr}}
+
+/* Phone preview: readable content and touch targets instead of a shrunken desktop. */
+@media(max-width:700px){
+ .demo-scene-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:16px}
+ .demo-scene-tabs button{min-height:44px;padding:10px 12px;font-size:12px;background:var(--card)}
+ .demo-scroll{height:600px;aspect-ratio:auto;overflow:hidden}
+ .demo-app{width:100%;height:100%;zoom:1;display:flex;flex-direction:column;border-radius:12px}
+ .demo-sidebar{flex:none;display:flex;flex-direction:row;gap:6px;padding:10px;overflow-x:auto;scrollbar-width:thin}
+ .demo-sidebar>*:not(.demo-conversation){display:none}
+ .demo-conversation{height:44px;min-height:44px;flex:0 0 215px;padding:8px 10px;border:1px solid var(--app-border)}
+ .demo-conversation small{display:none}
+ .demo-workspace{flex:1;margin:0 6px 6px;border-radius:10px}
+ .demo-toolbar{height:36px;padding:0 12px;font-size:11px;gap:12px}
+ #demo-breadcrumb{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .demo-toolbar>div{gap:12px;flex:none}
+ .demo-welcome{width:100%;padding:16px;transform:none}
+ .demo-welcome h3{font-size:28px;line-height:1.2;margin-bottom:24px}
+ .demo-app .demo-glyph{width:490px;height:490px}
+ .demo-composer{padding:12px;border-radius:12px}
+ .demo-prompt{height:70px;font-size:14px}
+ .demo-composer-bar{height:auto;min-height:44px;gap:8px;flex-wrap:wrap}
+ .demo-composer-bar>.demo-icon{margin:0}
+ .demo-folder{font-size:11px}.demo-branch{display:none}
+ .demo-model{width:100%;order:2;font-size:11px;padding:4px 0}
+ .demo-app #demo-runtime-toggle{min-height:44px;padding:8px}
+ .demo-runtime-menu{left:auto;right:-40px;width:220px}
+ .demo-runtime-menu button{min-height:44px}
+ .demo-kanban{display:flex;overflow-x:auto;gap:12px;padding:12px;scroll-snap-type:x mandatory;overscroll-behavior-x:contain}
+ .demo-column{flex:0 0 88%;scroll-snap-align:center;overflow-y:auto}
+ .demo-task-open,.demo-app .demo-artifacts,.demo-review-actions button{min-height:44px}
+ .demo-automation-grid{grid-template-columns:1fr}
+ .demo-automations{padding:12px}.demo-auto-header{flex-wrap:wrap}
+ .demo-automation{padding:14px}.demo-automation h4{padding-right:45px}.demo-automation p{padding-right:0}
+ .demo-auto-history button{min-height:44px;margin-left:0;display:block}
+ .demo-chat-content{padding:18px 14px;font-size:14px}
+ .demo-user-message{margin-left:16px;padding:12px;margin-bottom:22px}
+ .demo-agent-message{font-size:14px}.demo-tool,.demo-completion{flex-wrap:wrap;font-size:11px}
+ .demo-chat-followup{margin:0 12px 12px;padding:12px;font-size:12px}
+ .demo-launcher{width:calc(100% - 28px);border-radius:12px}
+ .demo-launcher-body{padding:18px 14px;min-height:220px}
+ .demo-launcher-body>p{font-size:15px;padding:0}
+ .demo-quick-context{flex-wrap:wrap;gap:6px}
+ .demo-launcher-footer{height:auto;min-height:48px;flex-wrap:wrap;gap:7px;font-size:11px}
+ .demo-quick-keys{width:100%;justify-content:flex-end}
+ .demo-quick-hint{bottom:60px;font-size:12px;padding:0 20px;text-align:center}
+ .demo-file-dialog header button{min-width:44px;min-height:44px}
+ .demo-file-scroll>.demo-file-markdown{padding:24px 18px;font-size:14px}
+ .demo-file-scroll .demo-md-title{font-size:24px}
+ .demo-caption{line-height:1.6;padding:0 12px}
+}

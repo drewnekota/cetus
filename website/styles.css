@@ -52,3 +52,26 @@
 @media(max-width:700px){.section.thesis{margin-top:80px}.thesis-opening{grid-template-columns:1fr;gap:24px}.thesis-opening h2{font-size:29px}.thesis-opening p{font-size:14px}.thesis-essays{margin-top:32px}.thesis-essays article{grid-template-columns:1fr;gap:16px;padding:24px 0}.thesis-essays h3 br{display:none}.thesis-essays h3 em{margin-left:4px}.thesis-loop{grid-template-columns:1fr 1fr;gap:26px 22px}.thesis-closing{align-items:flex-start;flex-direction:column;gap:20px}.thesis-closing>span{max-width:350px}}
 
 .site-icon{display:block;width:16px;height:16px;flex:none;stroke-width:1.75}.thesis-loop-heading>.site-icon{color:var(--muted)}
+
+/* Mobile editorial rhythm, readable feature crops, and comfortable touch targets. */
+@media(max-width:700px){
+ main{padding:48px 20px 0}.hero-grain{inset:-48px -20px -48px}
+ .intro{max-width:100%}.app-icon{width:72px;height:72px}
+ .intro h1{margin-top:12px;line-height:1.5}.tagline{line-height:1.5;font-size:17px}
+ .intro-description{margin-top:22px;font-size:15px;line-height:1.65}
+ .actions{margin-top:24px;gap:10px}.button{min-height:46px}
+ .section{margin-top:80px}.section h2{font-size:22px;line-height:1.3}
+ .section.thesis{margin-top:72px}.thesis-opening h2{font-size:30px}
+ .feature-grid{grid-template-columns:1fr;gap:24px}.card-copy{padding:16px 20px 22px}
+ .section h3{font-size:15px}.card-copy p,.plain-features p{font-size:14px;line-height:1.65}
+ .thesis-loop{grid-template-columns:1fr;gap:24px}.thesis-loop p,.thesis-essays p{font-size:14px}
+ .thesis-loop-heading{margin-bottom:6px}.thesis-closing>span{font-size:13px}
+ .shortcut-list>div{gap:12px}.shortcut-list p{font-size:13px}
+ .runtime-options{grid-template-columns:1fr 1fr}.runtime-options button{min-height:64px;min-width:0}
+ .runtime-options button>span>span{display:none}
+ .footer{padding:0 20px 28px;margin-top:72px}.footer-grid{gap:24px;padding-top:28px}
+ .footer-grid>div:not(.footer-brand)>a{min-height:44px;display:flex;align-items:center;margin:0;font-size:13px}
+ .footer h3{margin-bottom:8px}.footer-bottom{align-items:flex-start;gap:12px;flex-wrap:wrap}
+ .theme-toggle{min-height:44px}.download-button{flex-wrap:wrap;max-width:100%}
+}
+@media(hover:none){.button:hover,.runtime-options button:hover{transform:none}}

@@ -60,9 +60,10 @@ function positionPicker() {
   menu.style.maxHeight = `${Math.max(0, Math.min(260, up ? above : below))}px`;
 }
 new ResizeObserver(() => {
-  scale = Math.max(stage.clientWidth, 700) / 1440;
+  const mobile = window.matchMedia("(max-width: 700px)").matches;
+  scale = mobile ? 1 : stage.clientWidth / 1440;
   app.style.zoom = String(scale);
-  stage.style.height = `${788 * scale}px`;
+  stage.style.height = mobile ? "" : `${788 * scale}px`;
   if (!menu.hidden) positionPicker();
 }).observe(stage);
 picker.addEventListener('click', () => {
