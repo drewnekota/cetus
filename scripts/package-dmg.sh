@@ -35,10 +35,21 @@ hdiutil create -volname "$VOLNAME" -srcfolder "$STAGE/src" -ov -format UDRW \
 # Mount under /Volumes so Finder registers it as a disk. If a volume named
 # "Cetus" is already mounted (e.g. the user has a Cetus dmg open), macOS picks
 # "Cetus 1" — so parse the real mount point instead of assuming the name.
-MOUNT_DIR="$(hdiutil attach "$RW_DMG" -noverify -noautoopen \
-  | grep -o '/Volumes/.*' | head -1)"
+ATTACH_OUT="$(hdiutil attach "$RW_DMG" -noverify -noautoopen)"
+# `set -o pipefail` is on, so nothing downstream of a pipe may exit early: an
+# `awk ... exit` or `head -1` closes the pipe, the writer dies of SIGPIPE, and
+# the pipeline reports failure even though the match succeeded. Every awk here
+# reads its input to the end and latches the first hit instead.
+MOUNT_DIR="$(printf '%s\n' "$ATTACH_OUT" \
+  | awk -F'\t' '$0 ~ /\/Volumes\// && !f { print $NF; f = 1 }')"
 [ -d "$MOUNT_DIR" ] || { echo "failed to mount $RW_DMG" >&2; exit 1; }
 MOUNTED_NAME="$(basename "$MOUNT_DIR")"
+# Detach by device node rather than mount path: a detach that unmounts the
+# volume but fails to eject the disk leaves the path gone, and a retry keyed on
+# the path then dies with ENOENT instead of finishing the eject.
+DEV_SLICE="$(printf '%s\n' "$ATTACH_OUT" \
+  | awk '$0 ~ /\/Volumes\// && !f { print $1; f = 1 }')"
+DEV_NODE="$(printf '%s' "$DEV_SLICE" | sed -E 's#s[0-9]+$##')"
 
 # Finder layout is best-effort: if AppleScript is unavailable (rare on CI) the
 # dmg still works, just without the pretty arrangement.
@@ -69,7 +80,27 @@ then
 fi
 sync
 
-hdiutil detach "$MOUNT_DIR" >/dev/null || { sleep 2; hdiutil detach "$MOUNT_DIR" -force >/dev/null; }
+# Spotlight and fseventsd keep indexing the freshly written volume after Finder
+# lets go of it, so a first detach often loses to "Resource busy" (this failed
+# the v0.3.93 release). Retry against the device node, escalating to -force, and
+# stop as soon as the disk is no longer attached.
+detached=0
+for attempt in 1 2 3 4 5; do
+  # Here-string, not `hdiutil info | grep -q`: with pipefail, grep -q exiting on
+  # the first match kills hdiutil with SIGPIPE and the pipeline reports failure,
+  # which reads as "already detached" exactly when the disk is still attached.
+  if ! grep -q "^${DEV_NODE}[[:space:]]" <<<"$(hdiutil info)"; then
+    detached=1
+    break
+  fi
+  if [ "$attempt" -eq 1 ]; then
+    hdiutil detach "$DEV_NODE" >/dev/null 2>&1 || true
+  else
+    hdiutil detach "$DEV_NODE" -force >/dev/null 2>&1 || true
+  fi
+  sleep 2
+done
+[ "$detached" = 1 ] || { echo "failed to detach $DEV_NODE ($MOUNT_DIR)" >&2; exit 1; }
 
 rm -f "$DMG"
 hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG" >/dev/null
