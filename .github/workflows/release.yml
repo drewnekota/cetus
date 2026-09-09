@@ -163,6 +163,13 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # Read-only reuse of the cache ci.yml warms on main. Actions caches
+          # are ref-scoped, so a cache saved here (under `refs/tags/vX`) could
+          # never be read by the next tag — saving it just costs ~44s per run.
+          # `shared-key` must stay identical to the ci.yml `release-cache` job:
+          # rust-cache otherwise folds the differing job ids into the key.
+          shared-key: release-macos-arm64
+          save-if: false
 
       - name: Install JS deps
         run: pnpm install --frozen-lockfile

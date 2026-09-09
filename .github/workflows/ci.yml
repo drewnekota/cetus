@@ -76,3 +76,36 @@ jobs:
       - name: Run tests
         working-directory: src-tauri
         run: cargo test
+
+  release-cache:
+    name: Rust · warm release cache
+    # Primes the `--release` dependency artifacts that release.yml reuses.
+    # Actions caches are ref-scoped: a cache written by `refs/tags/vX` is only
+    # readable by that same tag, so every tagged release used to compile the
+    # whole dependency tree from scratch (~9m44s in v0.3.92). Caches on the
+    # default branch, though, are readable from every ref — so main writes the
+    # cache here and release.yml only reads it (`save-if: false`).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          # rust-cache folds the job id into the key unless `shared-key` is set,
+          # so this must stay identical to the value in release.yml.
+          shared-key: release-macos-arm64
+
+      - name: Stub frontend + pi-install resource paths
+        # Same reason as the `rust` job above: tauri-build only checks that the
+        # paths exist. The stub bundle this produces is thrown away — only the
+        # cached dependency artifacts matter.
+        run: |
+          mkdir -p out
+          mkdir -p src-tauri/pi-install
+
+      - name: Build release dependencies
+        working-directory: src-tauri
+        run: cargo build --release
