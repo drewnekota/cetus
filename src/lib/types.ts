@@ -870,8 +870,10 @@ export interface Conversation {
 
 // pi message types we actually render. AgentMessage in pi can carry many roles;
 // we keep this loose and rely on `role` + `content` shape.
+export type AssistantTextPhase = "commentary" | "final_answer";
+
 export type PiContentBlock =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; phase?: AssistantTextPhase }
   | { type: "thinking"; thinking: string; signature?: string }
   // pi-ai's content-level tool call has type="toolCall" and field "arguments"
   // (not "tool_use" / "input"). Matters for inflating historical messages.
@@ -949,9 +951,9 @@ export type PiEvent =
 
 export type AssistantMessageEvent =
   | { type: "start" }
-  | { type: "text_start"; contentIndex: number }
+  | { type: "text_start"; contentIndex: number; phase?: AssistantTextPhase }
   | { type: "text_delta"; contentIndex: number; delta: string }
-  | { type: "text_end"; contentIndex: number; content: string }
+  | { type: "text_end"; contentIndex: number; content: string; phase?: AssistantTextPhase }
   | { type: "thinking_start"; contentIndex: number }
   | { type: "thinking_delta"; contentIndex: number; delta: string }
   | { type: "thinking_end"; contentIndex: number; content: string }
@@ -1087,7 +1089,7 @@ export type ExtensionUIResponseBody =
 export type RenderedBlock =
   // `mentions`: labels of the `@label` tokens a user prompt carried (from its
   // stripped <cetus-mentions> block) so the bubble can draw them as pills.
-  | { kind: "text"; text: string; streaming?: boolean; mentions?: string[] }
+  | { kind: "text"; text: string; streaming?: boolean; mentions?: string[]; phase?: AssistantTextPhase }
   | { kind: "thinking"; text: string; streaming?: boolean }
   // Local-only block for image previews on user messages. Persisted nowhere;
   // pi never sees this kind — actual image bytes are forwarded to the agent

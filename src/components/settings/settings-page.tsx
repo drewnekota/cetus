@@ -95,6 +95,7 @@ import {
   setPermaLayersEnabled,
 } from "@/lib/layer-prefs";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
+import { WallpaperSection } from "@/components/settings/wallpaper-section";
 import { SkinSection } from "@/components/settings/skin-section";
 import {
   DEFAULT_UI_FONT_SIZE,
@@ -2450,6 +2451,7 @@ function AppearanceSection() {
           />
         </div>
 
+        <WallpaperSection />
         <SkinSection />
       </div>
 

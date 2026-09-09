@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, CheckCircle2, AlertCircle } from "lucide-react";
-import type { RenderedBlock } from "@/lib/types";
+import { ChevronDown, ChevronRight, CheckCircle2, AlertCircle, CircleSlash } from "lucide-react";
+import type { ProcessBlock } from "@/lib/assistant-segments";
+import { toolActivityStatus } from "@/lib/tool-status";
 import { useTranslation } from "@/lib/i18n";
 import { useDisclosure } from "@/lib/disclosure";
 import { Spinner } from "@/components/ui/spinner";
@@ -11,7 +12,6 @@ import { TextBlock } from "./message-blocks";
 
 /** Steps foldable into the activity timeline: thinking, tool calls, and
  *  intermediate narration text the agent emitted between tool runs. */
-type ProcessBlock = Extract<RenderedBlock, { kind: "thinking" | "tool_use" | "text" }>;
 
 /** Render a run of the agent's work (thinking + tool calls + intermediate
  *  narration) as a single collapsible activity. Collapsed by default — while
@@ -27,6 +27,10 @@ export function ActivityGroup({
   startedAt,
   active,
   plain = false,
+  defaultOpen = false,
+  relatedIds,
+  stepIds,
+  showTurnEnded = false,
 }: {
   /** Stable id (conversation + turn) so the expanded state and the per-step
    *  expanders survive the virtualized list unmounting this turn. */
@@ -42,11 +46,19 @@ export function ActivityGroup({
   /** Settled whole-turn fold: render as a bare text disclosure line instead of
    *  the boxed live activity bar — no extra nesting chrome. */
   plain?: boolean;
+  /** Keep tool runs following the retained text visible when the turn ends. */
+  defaultOpen?: boolean;
+  /** Source-stable ids preserve choices when adjacent groups merge. */
+  relatedIds?: string[];
+  stepIds?: string[];
+  /** A tool/thinking tail is not a final reply; make the stopped turn explicit. */
+  showTurnEnded?: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const [open, toggle] = useDisclosure(id);
+  const [open, toggle] = useDisclosure(id, defaultOpen, relatedIds);
 
-  const running = active || steps.some((s) => s.kind !== "text" && s.streaming === true);
+  const statuses = steps.flatMap((s) => s.kind === "tool_use" ? [toolActivityStatus(s)] : []);
+  const running = active || statuses.includes("running") || steps.some((s) => s.kind === "thinking" && s.streaming);
 
   // Live elapsed timer while running; freezes into `durationMs` on settle.
   const [now, setNow] = useState(() => Date.now());
@@ -57,7 +69,9 @@ export function ActivityGroup({
     return () => clearInterval(timer);
   }, [running]);
   const liveDur = running && startedAt ? formatDuration(now - startedAt) : null;
-  const hasError = steps.some((s) => s.kind === "tool_use" && s.result?.isError);
+  const hasError = statuses.includes("error");
+  const incomplete = statuses.includes("incomplete");
+  const hasThinking = steps.some((s) => s.kind === "thinking");
   const toolCount = steps.reduce((n, s) => (s.kind === "tool_use" ? n + 1 : n), 0);
   const dur = formatDuration(durationMs);
 
@@ -66,19 +80,19 @@ export function ActivityGroup({
 
   const timeline = steps.map((s, i) =>
     s.kind === "thinking" ? (
-      <ThinkingBlock key={i} id={id ? `${id}:s${i}` : undefined} text={s.text} streaming={s.streaming} />
+      <ThinkingBlock key={stepIds?.[i] ?? i} id={stepIds?.[i] ?? (id ? `${id}:s${i}` : undefined)} text={s.text} streaming={s.streaming} />
     ) : s.kind === "text" ? (
       // Intermediate narration between tool runs — full markdown, but
       // muted so the timeline still reads as process, not answer.
-      <div key={i} className="px-2 py-1 text-muted-foreground">
+      <div key={stepIds?.[i] ?? i} className="px-2 py-1 text-muted-foreground">
         <TextBlock text={s.text} streaming={s.streaming} isUser={false} />
       </div>
     ) : (
-      <ToolUseCard key={i} id={id ? `${id}:s${i}` : undefined} block={s} />
+      <ToolUseCard key={stepIds?.[i] ?? i} id={stepIds?.[i] ?? (id ? `${id}:s${i}` : undefined)} block={s} />
     ),
   );
 
-  if (plain) {
+  if (plain && !running) {
     // Settled whole-turn fold: a bare "N steps · Xs" line, no card chrome —
     // expanding reveals the timeline inline, without adding a nesting level.
     const label =
@@ -87,14 +101,16 @@ export function ActivityGroup({
           (dur ? ` · ${dur}` : "")
         : dur
           ? t("activity.worked", { duration: dur })
-          : t("activity.thought");
+          : t(hasThinking ? "activity.thought" : "activity.updates");
     return (
       <div className="w-full max-w-[88%]">
         <button
           onClick={toggle}
+          aria-expanded={open}
           className="flex items-center gap-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
-          <span>{label}</span>
+          {hasError ? <AlertCircle className="h-3 w-3 text-warning" /> : incomplete ? <CircleSlash className="h-3 w-3" /> : null}
+          <span>{showTurnEnded ? `${t("activity.turnEnded")} · ` : ""}{label}{hasError ? ` · ${t("activity.hasErrors")}` : incomplete ? ` · ${t("activity.incomplete")}` : ""}</span>
           {open ? (
             <ChevronDown className="h-3 w-3 shrink-0" />
           ) : (
@@ -110,6 +126,7 @@ export function ActivityGroup({
     <div className="w-full max-w-[88%] rounded-md border border-border/60 bg-muted/30">
       <button
         onClick={toggle}
+        aria-expanded={open}
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         {open ? (
@@ -121,6 +138,8 @@ export function ActivityGroup({
           <Spinner className="size-3.5 text-muted-foreground" />
         ) : hasError ? (
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning" />
+        ) : incomplete ? (
+          <CircleSlash className="h-3.5 w-3.5 shrink-0" />
         ) : (
           <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
         )}
@@ -142,7 +161,7 @@ export function ActivityGroup({
             <span className="font-medium text-foreground">
               {toolCount > 0
                 ? t(toolCount === 1 ? "agent.step" : "agent.step_plural", { count: toolCount })
-                : t("activity.thought")}
+                : t(hasThinking ? "activity.thought" : "activity.updates")}
             </span>
             {dur && <span> · {dur}</span>}
           </span>
@@ -161,7 +180,7 @@ export function ActivityGroup({
 function currentAction(steps: ProcessBlock[]): string {
   // Narration text is content, not an action — skip it when picking the label.
   const procs = steps.filter((s) => s.kind !== "text");
-  const active = [...procs].reverse().find((s) => s.streaming === true) ?? procs[procs.length - 1];
+  const active = [...procs].reverse().find((s) => s.kind === "tool_use" ? toolActivityStatus(s) === "running" : s.streaming === true) ?? procs[procs.length - 1];
   if (!active) return "";
   if (active.kind === "thinking") return "thinking";
   // A running subagent (claude-code Task/Agent) streams its live status into

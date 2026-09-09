@@ -1,6 +1,7 @@
 "use client";
 import { memo, useMemo } from "react";
 import { ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle2, CircleSlash, Bot, Check, FileDiff, FileText } from "lucide-react";
+import { toolActivityStatus } from "@/lib/tool-status";
 import { invoke } from "@tauri-apps/api/core";
 import { Spinner } from "@/components/ui/spinner";
 import { AnsiText } from "@/components/ui/ansi-text";
@@ -388,7 +389,8 @@ function flattenResultContent(content: PiContentBlock[] | undefined): string {
 export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: string; block: ToolUse }) {
   const { t } = useTranslation("chat");
   const [open, toggle] = useDisclosure(id);
-  const isError = block.result?.isError;
+  const status = toolActivityStatus(block);
+  const isError = status === "error";
   // Read-style tools surface file contents; highlight the result by the file's
   // extension when we can pin a language, so a settled `read` shows colored
   // code instead of a plain dump. Skipped on errors (keep the warning tint).
@@ -430,11 +432,11 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
   const outputInfo = toolOutputInfo(block.result?.details);
   // Codex child threads may outlive the root turn, so agent_end can clear the
   // generic streaming bit while the structured subagent state is still live.
-  const isRunning = block.streaming === true || subagent?.status === "running";
+  const isRunning = status === "running";
   // A settled (non-streaming) tool call that never got a result was interrupted
   // — the run was aborted or pi died before the tool returned. Show a terminal
   // "interrupted" state instead of a spinner that never resolves.
-  const isIncomplete = !isRunning && !isError && block.result == null;
+  const isIncomplete = status === "incomplete";
   const cmd = useMemo(() => bashCommand(block.name, block.args), [block.name, block.args]);
   const editInfo = useMemo(() => editChanges(block.args), [block.args]);
   const editDiffs = useMemo(

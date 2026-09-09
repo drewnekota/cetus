@@ -1563,6 +1563,8 @@ pub struct EventTranslator {
     /// retaining them here lets the UI paint tokens immediately and lets an
     /// interrupted turn persist the partial text.
     codex_live_blocks: std::collections::HashMap<String, CodexLiveBlock>,
+    /// Optional message semantics from app-server; absent on older Codex.
+    codex_message_phases: std::collections::HashMap<String, String>,
     /// Coalesced command output waiting to be sent to the running tool card.
     /// Keeping only a bounded pending suffix prevents a noisy command from
     /// growing bridge messages quadratically.
@@ -1778,6 +1780,7 @@ impl EventTranslator {
             tool_names: std::collections::HashMap::new(),
             live_blocks: std::collections::HashMap::new(),
             codex_live_blocks: std::collections::HashMap::new(),
+            codex_message_phases: std::collections::HashMap::new(),
             codex_tool_output: std::collections::HashMap::new(),
             claude_streamed_content: false,
             saw_result: false,
@@ -1869,6 +1872,7 @@ impl EventTranslator {
         self.messages.clear();
         self.live_blocks.clear();
         self.codex_live_blocks.clear();
+        self.codex_message_phases.clear();
         self.codex_tool_output.clear();
         self.claude_streamed_content = false;
         self.saw_result = false;
@@ -2102,7 +2106,13 @@ impl EventTranslator {
                     buffer: String::new(),
                 },
             );
-            out.push(am(json!({ "type": start, "contentIndex": our_index })));
+            let mut event = json!({ "type": start, "contentIndex": our_index });
+            if start == "text_start" {
+                if let Some(phase) = self.codex_message_phases.get(item_id) {
+                    event["phase"] = json!(phase);
+                }
+            }
+            out.push(am(event));
         }
         let block = self
             .codex_live_blocks
@@ -2127,6 +2137,7 @@ impl EventTranslator {
     /// replaces the live buffer if a proposed/experimental delta stream did
     /// not concatenate to exactly the final item.
     fn close_codex_item(&mut self, item_id: &str, authoritative: Option<&str>) -> Vec<Value> {
+        let phase = self.codex_message_phases.remove(item_id);
         let mut keys: Vec<String> = self
             .codex_live_blocks
             .iter()
@@ -2146,7 +2157,7 @@ impl EventTranslator {
                     block.buffer = final_text.to_string();
                 }
             }
-            let (end, persisted) = match block.kind {
+            let (end, mut persisted) = match block.kind {
                 LiveKind::Text => ("text_end", json!({ "type": "text", "text": block.buffer })),
                 LiveKind::Thinking => (
                     "thinking_end",
@@ -2154,12 +2165,19 @@ impl EventTranslator {
                 ),
                 LiveKind::ToolUse => continue,
             };
-            self.assistant_blocks.push(persisted);
-            out.push(am(json!({
+            let mut event = json!({
                 "type": end,
                 "contentIndex": block.our_index,
                 "content": block.buffer,
-            })));
+            });
+            if end == "text_end" {
+                if let Some(phase) = &phase {
+                    persisted["phase"] = json!(phase);
+                    event["phase"] = json!(phase);
+                }
+            }
+            self.assistant_blocks.push(persisted);
+            out.push(am(event));
         }
         out
     }
@@ -2181,13 +2199,22 @@ impl EventTranslator {
 
     /// Emit a complete text block (start+delta+end) at a fresh index.
     fn emit_text(&mut self, text: &str) -> Vec<Value> {
+        self.emit_text_with_phase(text, None)
+    }
+
+    fn emit_text_with_phase(&mut self, text: &str, phase: Option<&str>) -> Vec<Value> {
         let i = self.alloc_index();
-        self.assistant_blocks
-            .push(json!({ "type": "text", "text": text }));
+        let mut block = json!({ "type": "text", "text": text });
+        let mut end = json!({ "type": "text_end", "contentIndex": i, "content": text });
+        if let Some(phase) = phase {
+            block["phase"] = json!(phase);
+            end["phase"] = json!(phase);
+        }
+        self.assistant_blocks.push(block);
         vec![
             am(json!({ "type": "text_start", "contentIndex": i })),
             am(json!({ "type": "text_delta", "contentIndex": i, "delta": text })),
-            am(json!({ "type": "text_end", "contentIndex": i, "content": text })),
+            am(end),
         ]
     }
 
@@ -3291,6 +3318,16 @@ impl EventTranslator {
                     None => return Vec::new(),
                 };
                 let item_ty = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if item_ty == "agent_message" {
+                    if let (Some(id), Some(phase)) = (
+                        item.get("id").and_then(Value::as_str),
+                        codex_text_phase(item),
+                    ) {
+                        self.codex_message_phases
+                            .insert(id.to_string(), phase.to_string());
+                    }
+                    return Vec::new();
+                }
                 if item_ty == "user_message" {
                     return self.splice_codex_steer();
                 }
@@ -3408,11 +3445,16 @@ impl EventTranslator {
                 match item_ty {
                     "agent_message" => {
                         let t = item.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                        if let Some(phase) = codex_text_phase(item) {
+                            self.codex_message_phases
+                                .insert(id.to_string(), phase.to_string());
+                        }
+                        let phase = self.codex_message_phases.get(id).cloned();
                         let streamed = self.close_codex_item(id, Some(t));
                         if !streamed.is_empty() {
                             streamed
                         } else if !t.is_empty() {
-                            self.emit_text(t)
+                            self.emit_text_with_phase(t, phase.as_deref())
                         } else {
                             Vec::new()
                         }
@@ -5274,6 +5316,12 @@ pub async fn probe_codex_skills(bin: &str, cwd: &Path, force_reload: bool) -> Re
     result
 }
 
+fn codex_text_phase(item: &Value) -> Option<&str> {
+    item.get("phase")
+        .and_then(Value::as_str)
+        .filter(|phase| matches!(*phase, "commentary" | "final_answer"))
+}
+
 fn normalize_codex_app_item(mut item: Value) -> Value {
     let Some(object) = item.as_object_mut() else {
         return item;
@@ -5364,15 +5412,53 @@ fn codex_context_event(params: &Value, transcript_bytes: usize) -> Option<Value>
 /// Adapt app-server's account quota snapshot to the small cross-runtime shape
 /// consumed by Cetus. Codex reports integer percentages while Claude reports a
 /// 0..1 utilization fraction.
-fn codex_rate_limit_event(params: &Value) -> Option<Value> {
+fn codex_rate_limit_event(params: &Value, cached: &mut Value) -> Option<Value> {
     let snapshot = params
         .get("rateLimits")
         .or_else(|| params.get("rate_limits"))?;
-    let window = snapshot.get("primary")?;
-    let used_percent = window
-        .get("usedPercent")
-        .or_else(|| window.get("used_percent"))?
-        .as_f64()?;
+    // The runtime-wide quota represents the standard Codex pool. Separate
+    // model pools must not overwrite it just because their update arrived last.
+    if snapshot
+        .get("limitId")
+        .or_else(|| snapshot.get("limit_id"))
+        .and_then(Value::as_str)
+        .is_some_and(|id| id != "codex")
+    {
+        return None;
+    }
+    if !cached.is_object() {
+        *cached = json!({});
+    }
+    // Rolling notifications are sparse: an unavailable window does not clear
+    // the last observation of it.
+    for key in ["primary", "secondary"] {
+        if let Some(window) = snapshot.get(key).filter(|w| w.is_object()) {
+            cached[key] = window.clone();
+        }
+    }
+    let (window, used_percent) = ["primary", "secondary"]
+        .iter()
+        .filter_map(|key| {
+            let window = cached.get(*key)?;
+            let used = window
+                .get("usedPercent")
+                .or_else(|| window.get("used_percent"))?
+                .as_f64()?;
+            Some((window, used))
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1))?;
+    let duration = window
+        .get("windowDurationMins")
+        .or_else(|| window.get("window_duration_mins"))
+        .and_then(Value::as_i64);
+    let window_label = match duration {
+        Some(300) => Some("five_hour".to_owned()),
+        Some(10080) => Some("seven_day".to_owned()),
+        Some(mins) if mins > 0 && mins % 1440 == 0 => Some(format!("{}d", mins / 1440)),
+        Some(mins) if mins > 0 && mins % 60 == 0 => Some(format!("{}h", mins / 60)),
+        Some(mins) if mins > 0 => Some(format!("{mins}m")),
+        _ => None,
+    };
     let status = if used_percent >= 100.0 {
         "rejected"
     } else if used_percent >= 80.0 {
@@ -5389,9 +5475,7 @@ fn codex_rate_limit_event(params: &Value) -> Option<Value> {
             "resetsAt": window
                 .get("resetsAt")
                 .or_else(|| window.get("resets_at")),
-            "rateLimitType": snapshot
-                .get("limitId")
-                .or_else(|| snapshot.get("limit_id")),
+            "rateLimitType": window_label,
         }
     }))
 }
@@ -5713,6 +5797,7 @@ pub fn spawn_codex_session(
         > = HashMap::new();
         let mut pending_auto_compact_requests = HashSet::new();
         let mut transcript_bytes = 0usize;
+        let mut codex_quota = json!({});
         let mut transcript_bytes_at_compaction = 0usize;
         let mut context_used = 0u64;
         let mut context_window = 0u64;
@@ -6224,7 +6309,7 @@ pub fn spawn_codex_session(
                             }
                         }
                         "account/rateLimits/updated" => {
-                            if let Some(event) = codex_rate_limit_event(&params) {
+                            if let Some(event) = codex_rate_limit_event(&params, &mut codex_quota) {
                                 emit(sink, vec![event]);
                             }
                         }
@@ -6840,21 +6925,112 @@ mod tests {
 
     #[test]
     fn codex_rate_limit_snapshot_maps_to_shared_quota_shape() {
-        let event = codex_rate_limit_event(&json!({
-            "rateLimits": {
-                "limitId": "codex",
-                "primary": {
-                    "usedPercent": 84,
-                    "resetsAt": 1_800_000_000
+        let event = codex_rate_limit_event(
+            &json!({
+                "rateLimits": {
+                    "limitId": "codex",
+                    "primary": {
+                        "usedPercent": 84,
+                        "resetsAt": 1_800_000_000
+                    }
                 }
-            }
-        }))
+            }),
+            &mut json!({}),
+        )
         .unwrap();
         assert_eq!(event["type"], json!("cli_rate_limit"));
         assert_eq!(event["backend"], json!("codex"));
         assert_eq!(event["info"]["status"], json!("allowed_warning"));
         assert_eq!(event["info"]["utilization"], json!(0.84));
         assert_eq!(event["info"]["resetsAt"], json!(1_800_000_000));
+    }
+
+    #[test]
+    fn codex_quota_keeps_weekly_limit_across_sparse_and_other_pool_updates() {
+        let mut cached = json!({});
+        let event = codex_rate_limit_event(
+            &json!({
+                "rateLimits": {
+                    "limitId": "codex",
+                    "primary": { "usedPercent": 0, "windowDurationMins": 300 },
+                    "secondary": {
+                        "usedPercent": 70,
+                        "windowDurationMins": 10080,
+                        "resetsAt": 1_800_000_000
+                    }
+                }
+            }),
+            &mut cached,
+        )
+        .unwrap();
+        assert_eq!(event["info"]["utilization"], json!(0.7));
+        assert_eq!(event["info"]["rateLimitType"], json!("seven_day"));
+        assert_eq!(event["info"]["resetsAt"], json!(1_800_000_000));
+        let before = cached.clone();
+        assert!(codex_rate_limit_event(
+            &json!({
+                "rateLimits": {
+                    "limitId": "codex_bengalfox",
+                    "primary": { "usedPercent": 0 },
+                    "secondary": { "usedPercent": 0 }
+                }
+            }),
+            &mut cached
+        )
+        .is_none());
+        assert_eq!(cached, before);
+        let sparse = codex_rate_limit_event(
+            &json!({
+                "rateLimits": {
+                    "limitId": "codex",
+                    "primary": { "usedPercent": 5, "windowDurationMins": 300 },
+                    "secondary": null
+                }
+            }),
+            &mut cached,
+        )
+        .unwrap();
+        assert_eq!(sparse["info"], event["info"]);
+        let exhausted = codex_rate_limit_event(
+            &json!({
+                "rateLimits": {
+                    "primary": { "usedPercent": 100, "windowDurationMins": 300 }
+                }
+            }),
+            &mut cached,
+        )
+        .unwrap();
+        assert_eq!(exhausted["info"]["status"], json!("rejected"));
+        assert_eq!(exhausted["info"]["rateLimitType"], json!("five_hour"));
+    }
+
+    #[test]
+    fn codex_quota_accepts_secondary_only_and_legacy_fields() {
+        let event = codex_rate_limit_event(
+            &json!({
+                "rate_limits": {
+                    "limit_id": null,
+                    "primary": null,
+                    "secondary": {
+                        "used_percent": 85,
+                        "window_duration_mins": 10080,
+                        "resets_at": 1_800_000_000
+                    }
+                }
+            }),
+            &mut json!({}),
+        )
+        .unwrap();
+        assert_eq!(event["info"]["utilization"], json!(0.85));
+        assert_eq!(event["info"]["status"], json!("allowed_warning"));
+        assert_eq!(event["info"]["rateLimitType"], json!("seven_day"));
+        assert!(codex_rate_limit_event(
+            &json!({
+                "rateLimits": { "primary": null, "secondary": null }
+            }),
+            &mut json!({})
+        )
+        .is_none());
     }
 
     #[test]
@@ -7340,6 +7516,77 @@ mod tests {
         .unwrap();
         assert_eq!(resp["response"]["request_id"], json!("r1"));
         assert_eq!(resp["response"]["response"]["behavior"], json!("allow"));
+    }
+
+    #[test]
+    fn codex_text_phase_survives_streaming_and_persistence() {
+        for phase in ["commentary", "final_answer"] {
+            let mut tr = EventTranslator::new(CliBackend::Codex);
+            tr.on_line(
+                &json!({ "type": "item.started", "item": {
+                    "id": "answer", "type": "agent_message", "phase": phase,
+                }})
+                .to_string(),
+            );
+            let events = tr.on_line(
+                r#"{"type":"item.agent_message.delta","item_id":"answer","delta":"Answer"}"#,
+            );
+            assert!(events
+                .iter()
+                .any(|e| e["assistantMessageEvent"]["type"] == "text_start"
+                    && e["assistantMessageEvent"]["phase"] == phase));
+            // Older/interrupted streams may omit phase at completion. Retain
+            // the item.started metadata in both the UI and saved transcript.
+            let events = tr.on_line(r#"{"type":"item.completed","item":{"id":"answer","type":"agent_message","text":"Answer"}}"#);
+            assert!(events
+                .iter()
+                .any(|e| e["assistantMessageEvent"]["phase"] == phase));
+            tr.finish(None);
+            let messages = tr.take_messages();
+            assert_eq!(messages[0]["content"][0]["phase"], phase);
+            assert!(tr.codex_message_phases.is_empty());
+        }
+    }
+
+    #[test]
+    fn codex_completed_only_phase_and_unknown_phase_are_safe() {
+        for phase in ["final_answer", "commentary", "future_phase"] {
+            let mut tr = EventTranslator::new(CliBackend::Codex);
+            let item = normalize_codex_app_item(json!({
+                "id": "answer", "type": "agentMessage", "text": "Answer", "phase": phase,
+            }));
+            let events = tr.on_line(&json!({ "type": "item.completed", "item": item }).to_string());
+            let expected = if phase == "future_phase" {
+                Value::Null
+            } else {
+                json!(phase)
+            };
+            assert_eq!(
+                events.last().unwrap()["assistantMessageEvent"]["phase"],
+                expected
+            );
+            tr.finish(None);
+            assert_eq!(tr.take_messages()[0]["content"][0]["phase"], expected);
+        }
+    }
+
+    #[test]
+    fn codex_partial_final_phase_survives_disconnect() {
+        let mut tr = EventTranslator::new(CliBackend::Codex);
+        tr.on_line(r#"{"type":"item.started","item":{"id":"answer","type":"agent_message","phase":"final_answer"}}"#);
+        tr.on_line(
+            r#"{"type":"item.agent_message.delta","item_id":"answer","delta":"Partial answer"}"#,
+        );
+        let events = tr.finish(Some("connection closed"));
+        assert!(events
+            .iter()
+            .any(|e| e["assistantMessageEvent"]["type"] == "text_end"
+                && e["assistantMessageEvent"]["phase"] == "final_answer"));
+        let messages = tr.take_messages();
+        assert_eq!(messages[0]["content"][0]["phase"], "final_answer");
+        assert!(messages[0]["content"][1].get("phase").is_none());
+        tr.begin_next_turn();
+        assert!(tr.codex_message_phases.is_empty());
     }
 
     #[test]
@@ -9539,58 +9786,65 @@ mod tests {
 
     #[test]
     fn acp_updates_translate_text_tools_and_commands() {
-        let mut tr = EventTranslator::new(CliBackend::OpenCode);
-        let mut events = tr.start();
-        events.extend(tr.on_acp_update(&json!({
-            "sessionUpdate": "agent_thought_chunk",
-            "content": { "type": "text", "text": "checking" }
-        })));
-        events.extend(tr.on_acp_update(&json!({
-            "sessionUpdate": "agent_message_chunk",
-            "content": { "type": "text", "text": "hello" }
-        })));
-        events.extend(tr.on_acp_update(&json!({
-            "sessionUpdate": "tool_call",
-            "toolCallId": "tool-1",
-            "title": "Read file",
-            "kind": "read",
-            "status": "in_progress",
-            "rawInput": { "path": "README.md" }
-        })));
-        events.extend(tr.on_acp_update(&json!({
-            "sessionUpdate": "tool_call_update",
-            "toolCallId": "tool-1",
-            "status": "completed",
-            "rawOutput": "contents"
-        })));
-        events.extend(tr.on_acp_update(&json!({
-            "sessionUpdate": "available_commands_update",
-            "availableCommands": [{
-                "name": "review",
-                "description": "Review changes",
-                "input": "[path]"
-            }]
-        })));
-        events.extend(tr.finish(None));
+        for backend in [
+            CliBackend::OpenCode,
+            CliBackend::Grok,
+            CliBackend::Kimi,
+            CliBackend::Dsh,
+        ] {
+            let mut tr = EventTranslator::new(backend);
+            let mut events = tr.start();
+            events.extend(tr.on_acp_update(&json!({
+                "sessionUpdate": "agent_thought_chunk",
+                "content": { "type": "text", "text": "checking" }
+            })));
+            events.extend(tr.on_acp_update(&json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "type": "text", "text": "hello" }
+            })));
+            events.extend(tr.on_acp_update(&json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tool-1",
+                "title": "Read file",
+                "kind": "read",
+                "status": "in_progress",
+                "rawInput": { "path": "README.md" }
+            })));
+            events.extend(tr.on_acp_update(&json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-1",
+                "status": "completed",
+                "rawOutput": "contents"
+            })));
+            events.extend(tr.on_acp_update(&json!({
+                "sessionUpdate": "available_commands_update",
+                "availableCommands": [{
+                    "name": "review",
+                    "description": "Review changes",
+                    "input": "[path]"
+                }]
+            })));
+            events.extend(tr.finish(None));
 
-        let event_types = types(&events);
-        assert!(event_types.contains(&"message_update:thinking_delta".to_string()));
-        assert!(event_types.contains(&"message_update:text_delta".to_string()));
-        assert!(event_types.contains(&"message_update:toolcall_end".to_string()));
-        assert!(event_types.contains(&"tool_execution_start".to_string()));
-        assert!(event_types.contains(&"tool_execution_end".to_string()));
-        assert!(event_types.contains(&"cli_commands".to_string()));
-        assert_eq!(
-            event_types.last().map(String::as_str),
-            Some("agent_settled")
-        );
-        let messages = tr.take_messages();
-        assert!(messages
-            .iter()
-            .any(|message| message.to_string().contains("hello")));
-        assert!(messages
-            .iter()
-            .any(|message| message.to_string().contains("contents")));
+            let event_types = types(&events);
+            assert!(event_types.contains(&"message_update:thinking_delta".to_string()));
+            assert!(event_types.contains(&"message_update:text_delta".to_string()));
+            assert!(event_types.contains(&"message_update:toolcall_end".to_string()));
+            assert!(event_types.contains(&"tool_execution_start".to_string()));
+            assert!(event_types.contains(&"tool_execution_end".to_string()));
+            assert!(event_types.contains(&"cli_commands".to_string()));
+            assert_eq!(
+                event_types.last().map(String::as_str),
+                Some("agent_settled")
+            );
+            let messages = tr.take_messages();
+            assert!(messages
+                .iter()
+                .any(|message| message.to_string().contains("hello")));
+            assert!(messages
+                .iter()
+                .any(|message| message.to_string().contains("contents")));
+        }
     }
 
     #[test]

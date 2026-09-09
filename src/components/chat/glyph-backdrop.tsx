@@ -20,7 +20,7 @@ export function GlyphBackdrop({ className }: { className?: string }) {
     <div
       aria-hidden
       className={cn(
-        "pointer-events-none absolute inset-0 overflow-hidden select-none",
+        "glyph-backdrop pointer-events-none absolute inset-0 overflow-hidden select-none",
         className,
       )}
     >

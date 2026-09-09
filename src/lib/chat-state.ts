@@ -148,7 +148,7 @@ function inflate(msg: PiMessage): RenderedMessage {
         // live turn did, not raw XML.
         blocks.push(...userPromptBlocks(c.text));
       } else {
-        blocks.push({ kind: "text", text: c.text });
+        blocks.push({ kind: "text", text: c.text, ...(c.phase ? { phase: c.phase } : {}) });
       }
     } else if (c.type === "thinking") blocks.push({ kind: "thinking", text: c.thinking });
     else if (c.type === "toolCall")
@@ -397,7 +397,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       }
       return {
         ...state,
-        messages,
+        messages: stopTurnStreams(messages),
         toolIndex,
         isStreaming: false,
         awaitingAssistant: false,
@@ -475,11 +475,23 @@ function assistantHasVisibleContent(m: RenderedMessage): boolean {
   );
 }
 
-/** End the active run: stop streaming and, if the turn produced NO visible
- *  answer (empty/degenerate completion — see assistantHasVisibleContent),
- *  surface a recoverable hint instead of leaving the user on a blank bubble.
- *  The inline error row provides the Retry action.
- *  Shared by `agent_end` and `agent_settled` so both settle identically. */
+/** Clear transient streaming flags in the current user turn. Background task
+ * metadata is left intact, and prior turns retain their object identity. */
+function stopTurnStreams(original: RenderedMessage[]): RenderedMessage[] {
+  let messages = original;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "user") break;
+    if (!m.blocks.some((b) => "streaming" in b && b.streaming)) continue;
+    if (messages === original) messages = [...messages];
+    messages[i] = { ...m, blocks: m.blocks.map((b) => "streaming" in b ? { ...b, streaming: false } : b) };
+  }
+  return messages;
+}
+
+/** Settle the active run and surface a recoverable hint for an empty answer.
+ * Shared by agent_end and agent_settled; a settled turn need not mean the
+ * user's task is complete. */
 function settleRun(state: ChatState): ChatState {
   // Judge the whole turn, not just the final API message. An agent turn that
   // ends on a tool whose result says "nothing more to do this turn" (e.g. a
@@ -495,8 +507,12 @@ function settleRun(state: ChatState): ChatState {
     hasContent = assistantHasVisibleContent(m);
   }
   const emptyAnswer = sawAssistant && !hasContent;
+  // Some runtimes end without message_end (or lose it on disconnect). Clear
+  // transient flags throughout this turn, including tools in earlier API
+  // messages. Structured background-subagent status remains authoritative.
   return {
     ...state,
+    messages: stopTurnStreams(state.messages),
     isStreaming: false,
     awaitingAssistant: false,
     activeAssistantIdx: null,
@@ -628,9 +644,12 @@ function reduceAssistantDelta(state: ChatState, e: AssistantMessageEvent): ChatS
   };
 
   switch (e.type) {
-    case "text_start":
+    case "text_start": {
       ensureBlock(e.contentIndex, { kind: "text", text: "", streaming: true });
+      const b = m.blocks[e.contentIndex];
+      if (b.kind === "text" && e.phase) m.blocks[e.contentIndex] = { ...b, phase: e.phase };
       break;
+    }
     case "text_delta": {
       ensureBlock(e.contentIndex, { kind: "text", text: "", streaming: true });
       const b = m.blocks[e.contentIndex];
@@ -639,7 +658,9 @@ function reduceAssistantDelta(state: ChatState, e: AssistantMessageEvent): ChatS
     }
     case "text_end": {
       const b = m.blocks[e.contentIndex];
-      if (b && b.kind === "text") m.blocks[e.contentIndex] = { ...b, text: e.content, streaming: false };
+      if (b && b.kind === "text") m.blocks[e.contentIndex] = {
+        ...b, text: e.content, streaming: false, ...(e.phase ? { phase: e.phase } : {}),
+      };
       break;
     }
     case "thinking_start":

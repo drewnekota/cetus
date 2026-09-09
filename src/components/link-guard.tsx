@@ -13,8 +13,12 @@
 //  - the native context menu's "Open Link" bypasses DOM events entirely.
 //
 // This component closes the first two from the page and suppresses the third
-// by dropping the native menu on external links. The Rust `on_page_load`
-// recovery net remains behind it for anything else that slips through.
+// by dropping the native menu everywhere except where it is actually useful
+// (editable fields and selected text). Keeping the menu off elsewhere also
+// removes its Back/Forward/Reload items, which navigate the app webview out of
+// the live UI — Back in particular tears down the running session view. The
+// Rust `on_page_load` recovery net remains behind it for anything else that
+// slips through.
 import { useEffect } from "react";
 
 import { openMarkdownLink } from "@/lib/markdown";
@@ -35,6 +39,15 @@ function isEditable(target: EventTarget | null): boolean {
   );
 }
 
+/** Whether the right click landed on text the user has selected. */
+function hasSelectionAt(target: EventTarget | null): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !(target instanceof Node)) {
+    return false;
+  }
+  return selection.containsNode(target, true);
+}
+
 export function LinkGuard() {
   useEffect(() => {
     // Bubble phase, so component-level handlers (which preventDefault and
@@ -53,8 +66,13 @@ export function LinkGuard() {
       e.preventDefault();
       openMarkdownLink(href);
     };
+    // The native menu is only worth showing where it offers editing or copy
+    // commands; anywhere else it is just Back/Forward/Reload/AutoFill, which
+    // can only navigate the app away from itself.
     const onContextMenu = (e: MouseEvent) => {
-      if (anchorHref(e.target)) e.preventDefault();
+      if (isEditable(e.target) && !anchorHref(e.target)) return;
+      if (hasSelectionAt(e.target)) return;
+      e.preventDefault();
     };
     // Cancelling `drop` cancels WebKit's default navigation to the dropped
     // URL. Editable targets keep their native drop (text into the composer);

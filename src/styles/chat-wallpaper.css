@@ -1,0 +1,8 @@
+.chat-wallpaper[data-wallpaper="true"] .glyph-backdrop {
+  display: none;
+}
+
+.chat-wallpaper[data-wallpaper="true"] .chat-message-scroll,
+.chat-wallpaper[data-wallpaper="true"] .chat-composer-dock {
+  background-color: transparent;
+}

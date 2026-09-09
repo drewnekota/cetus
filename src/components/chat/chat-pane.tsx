@@ -8,20 +8,17 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  Virtuoso,
-  type StateSnapshot,
-  type VirtuosoHandle,
-  type VirtuosoProps,
-} from "react-virtuoso";
+import { ChatVirtualList, type ChatListSnapshot, type ChatListHandle } from "./chat-virtual-list";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { ArtifactNavProvider } from "@/components/chat/artifact-view";
 import type { RuntimeSwitchTarget } from "@/components/chat/backend-picker";
 import { MessageListBoundary } from "@/components/chat/message-list-boundary";
 import { AssistantGroup } from "@/components/chat/assistant-turn";
+import { bindChatTailScroll } from "@/lib/chat-tail-scroll";
 import { clearHoverOwner } from "@/components/chat/hover-owner";
 import { AgentControlCard } from "@/components/chat/agent-control-card";
 import { CliControlCard } from "@/components/chat/cli-control-card";
+import { WallpaperFrame } from "@/components/chat/wallpaper-frame";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
 import {
   AlertTriangle,
@@ -261,7 +258,7 @@ export function ChatPane({
 
   if (!hasMessages) {
     return (
-      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
+      <WallpaperFrame className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <GlyphBackdrop />
         <div
           className={`relative z-10 w-full max-w-2xl space-y-5 panel-motion transition-[translate] ${
@@ -296,12 +293,12 @@ export function ChatPane({
             onRequestBackendSwitch={onRequestBackendSwitch}
           />
         </div>
-      </div>
+      </WallpaperFrame>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
+    <WallpaperFrame className="flex min-h-0 flex-1 flex-col bg-background">
       <ArtifactNavProvider convId={convId}>
         <MessageListBoundary key={convId ?? "new"}>
           <MessageList
@@ -316,7 +313,7 @@ export function ChatPane({
           />
         </MessageListBoundary>
       </ArtifactNavProvider>
-      <div className="relative z-10 bg-background px-4 pb-3 pt-2">
+      <div className="chat-composer-dock relative z-10 bg-background px-4 pb-3 pt-2">
         <div
           className={`mx-auto max-w-3xl space-y-2 panel-motion transition-[translate] ${
             opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
@@ -368,7 +365,7 @@ export function ChatPane({
           />
         </div>
       </div>
-    </div>
+    </WallpaperFrame>
   );
 }
 
@@ -482,24 +479,10 @@ function BackgroundAgentsBar({
   );
 }
 
-// Deadzone (px from the true bottom) within which the list counts as "at the
-// bottom" — drives stick-to-bottom follow and hides the scroll-to-bottom button.
-const STICKY_BOTTOM_PX = 32;
 // The elevator is intentionally less eager than sticky-bottom follow: a small
 // nudge away from the latest message should not summon a floating control.
 const SCROLL_TO_BOTTOM_BUTTON_MIN_PX = 360;
 const SCROLL_TO_BOTTOM_BUTTON_VIEWPORT_RATIO = 0.5;
-// Pre-render 800px above the viewport so older turns are ready during upward
-// reading, while keeping the streaming/bottom edge tight. Positive overscan can
-// let a single height correction during the open-at-end
-// seek (or a streaming growth spurt) mount whole extra turns in the same
-// commit; on conversations with huge turns those corrections chain into 50+
-// nested sync updates and React kills the tree ("Maximum update depth
-// exceeded" — the v0.3.14–v0.3.16 crash family). Every crashing configuration
-// observed had overscan > 0, so keep this asymmetric: pre-render history, but
-// do not add mounting pressure at the streaming/bottom edge.
-const OVERSCAN_PX = { top: 800, bottom: 0 } as const;
-
 // The turn navigator occupies the left 48px from `sm` upward. Before the
 // max-w-3xl reading column has enough viewport space to center itself clear of
 // that rail (896px), reserve the rail explicitly so its ticks never overlap
@@ -511,18 +494,18 @@ const MESSAGE_ROW_GUTTER_CLASS = "px-4 sm:pl-14 min-[896px]:px-4";
  *  reader scrolled AWAY from the bottom get an entry: sitting at the bottom is
  *  the default open position and must keep following new messages.
  *
- *  Virtuoso's own StateSnapshot is the unit here (scrollTop + the measured item
+ *  ChatListSnapshot is the unit here (scrollTop + the measured item
  *  sizes): a raw scrollTop alone restores wrong, because a remounted list only
  *  has height ESTIMATES for the turns it hasn't mounted yet. Deliberately
  *  in-memory (module scope, not IndexedDB): it is worth exactly one app session,
  *  and the message store already pays enough persistence cost. */
-const readingAnchors = new Map<string, StateSnapshot>();
+const readingAnchors = new Map<string, ChatListSnapshot>();
 const MAX_READING_ANCHORS = 64;
 // How long after opening a conversation scroll events are still treated as part
 // of the landing rather than as the reader moving.
 const OPEN_SETTLE_MS = 1000;
 
-function rememberReadingAnchor(convId: string, snapshot: StateSnapshot) {
+function rememberReadingAnchor(convId: string, snapshot: ChatListSnapshot) {
   // Delete-then-set so the Map's insertion order stays a true LRU.
   readingAnchors.delete(convId);
   readingAnchors.set(convId, snapshot);
@@ -537,7 +520,7 @@ type MessageGroup =
   | { kind: "assistant"; keys: string[] }
   | { kind: "single"; key: string };
 
-/** Everything Virtuoso can measure as a row. Transient tail UI must be a real
+/** Every visible element is a measured row. Transient tail UI must be a real
  * row rather than a Footer: scrollToIndex("LAST") cannot account for Footer
  * height, which made conversation-open alignment fight the streaming
  * scroll-to-bottom observer while Thinking was visible. */
@@ -602,60 +585,45 @@ function MessageList({
   const groups = useMemo(() => buildGroups(keys, roles), [keys, roles]);
   const awaiting = useAwaitingAssistant(convId);
   const hasError = !!useChatError(convId);
-  // Keep every visible tail inside Virtuoso's measured data. In particular,
-  // Thinking used to live in components.Footer, below the item addressed by
-  // scrollToIndex("LAST"). On conversation switch the initial seek/open settle
-  // aligned the last message while the streaming observer aligned the Footer,
-  // producing several visible jumps between the two positions.
+  // Thinking and errors are measured rows so every bottom seek uses the same
+  // edge as the streaming follow controller.
   const items = useMemo<MessageListItem[]>(() => {
     if (awaiting) return [...groups, { kind: "thinking" }];
     if (!isStreaming && hasError) return [...groups, { kind: "error" }];
     return groups;
   }, [groups, awaiting, isStreaming, hasError]);
 
-  // react-virtuoso owns the scroll container and does the hard parts natively:
-  // it measures each variable-height turn and corrects scroll in the SAME frame
-  // a turn grows (image/KaTeX/streaming), so content above the fold never shoves
-  // the viewport — that shove is exactly the jank the old hand-rolled
-  // ResizeObserver compensation fought (and lost). It also only mounts the
-  // visible window (+overscan), so a long history no longer parses every turn's
-  // markdown up front — retiring the content-visibility windowing this file
-  // used to hand-roll.
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
-  // The real scroll DOM node Virtuoso hands back — needed only by the quote
+  // Virtualization measures rows; the intent controller owns tail-following.
+  const listRef = useRef<ChatListHandle>(null);
+  // The real scroll DOM node the virtual list hands back — needed only by the quote
   // toolbar (selection root + scroll-to-dismiss). Held in state so its effects
   // re-run once the node exists.
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   // Keep the ref callback stable. An inline callback gets a new identity on
   // every render, so React clears the old ref with `null` and attaches the new
   // one again. Calling setState from both ref calls can recurse until React
-  // throws "Maximum update depth exceeded" while Virtuoso is settling a large
+  // throws "Maximum update depth exceeded" while the virtual list is settling a large
   // conversation (especially in the faster production build).
   const setScrollerRef = useCallback((el: HTMLElement | Window | null) => {
     const next = el instanceof HTMLElement ? el : null;
     setScroller((current) => (current === next ? current : next));
   }, []);
   // The reading position this open should land on, read ONCE per conversation
-  // switch (Virtuoso only honours it at mount). Undefined = land at the newest
+  // switch (the virtual list only honours it at mount). Undefined = land at the newest
   // turn, the default for a conversation last left at the bottom.
-  const restoreRef = useRef<StateSnapshot | undefined>(
+  const restoreRef = useRef<ChatListSnapshot | undefined>(
     convId ? readingAnchors.get(convId) : undefined,
   );
   const [atBottom, setAtBottom] = useState(!restoreRef.current);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const atBottomRef = useRef(!restoreRef.current);
-  // User intent is separate from Virtuoso's throttled at-bottom callback so an
+  // User intent is separate from the list's at-bottom reporting so an
   // upward gesture can stop streaming follow immediately.
   const followTailRef = useRef(!restoreRef.current);
-  // Topmost visible group index (from Virtuoso's rangeChanged) — drives the turn
+  const tailScrollRef = useRef<ReturnType<typeof bindChatTailScroll> | null>(null);
+  // Topmost visible group index (from the virtualizer's visible range) — drives the turn
   // navigator's active tick with no getBoundingClientRect scanning.
   const [topIndex, setTopIndex] = useState(0);
-  // A restored open must NOT run the settle-then-seek-to-LAST correction: that
-  // pass exists to nail the bottom landing, and here the whole point is not to
-  // be at the bottom.
-  const pendingInitialBottomRef = useRef<string | null>(
-    restoreRef.current ? null : convId,
-  );
   const prevLastKeyRef = useRef<string | null>(null);
   const setAtBottomState = useCallback((next: boolean) => {
     atBottomRef.current = next;
@@ -672,16 +640,13 @@ function MessageList({
   const findOpenRef = useRef(false);
   findOpenRef.current = findOpen;
 
-  // Re-arm the open settle DURING render on conversation switch (not in an
-  // effect): the keyed Virtuoso remounts — and starts its initial end seek —
-  // before any parent effect would run.
+  // Restore each conversation before mounting its virtual list.
   const [renderedConvId, setRenderedConvId] = useState(convId);
   if (renderedConvId !== convId) {
     setRenderedConvId(convId);
     const anchor = convId ? readingAnchors.get(convId) : undefined;
     restoreRef.current = anchor;
-    pendingInitialBottomRef.current = anchor ? null : convId;
-    // Seed the bottom state pessimistically for a restored open. Virtuoso will
+    // Seed the bottom state pessimistically for a restored open. The list will
     // publish the truth a frame later; until then the streaming follow (which
     // reads the ref, not the state) must not yank a restored position down.
     atBottomRef.current = !anchor;
@@ -693,7 +658,7 @@ function MessageList({
   }
 
   // User turns paired with their index in the group list, for the navigator's
-  // scroll-to-turn (Virtuoso scrollToIndex) and active-tick math.
+  // scroll-to-turn (the virtual list scrollToIndex) and active-tick math.
   const userTurns = useMemo(() => {
     const out: { key: string; index: number }[] = [];
     groups.forEach((g, i) => {
@@ -748,7 +713,7 @@ function MessageList({
   }, [findMatches]);
 
   // Scroll the active occurrence into view, then paint. The row may not be
-  // mounted in this frame — Virtuoso needs a tick to realise a row that was far
+  // mounted in this frame — the virtual list needs a tick to realise a row that was far
   // off-screen — so wait for it rather than painting a miss.
   const current = findMatches[findActive] ?? null;
   useEffect(() => {
@@ -757,7 +722,7 @@ function MessageList({
       clearFindHighlights();
       return;
     }
-    virtuosoRef.current?.scrollToIndex({ index: current.itemIndex, align: "center" });
+    listRef.current?.scrollToIndex({ index: current.itemIndex, align: "center" });
     let frames = 12;
     let frame = requestAnimationFrame(function step() {
       const range = paintFindHighlights(scroller, findQuery, current);
@@ -772,7 +737,7 @@ function MessageList({
     return () => cancelAnimationFrame(frame);
   }, [scroller, findOpen, findQuery, current]);
 
-  // Repaint when Virtuoso mounts or retires rows under an unchanged active
+  // Repaint when the virtual list mounts or retires rows under an unchanged active
   // match (ordinary scrolling while the bar is open).
   const repaintFind = useCallback(() => {
     if (!scroller || !findOpen || !current) return;
@@ -784,6 +749,8 @@ function MessageList({
   // the field rather than toggling the bar shut — the browser convention.
   useEffect(() => {
     const onFind = () => {
+      followTailRef.current = false;
+      listRef.current?.cancelScroll();
       setFindOpen(true);
       setFindFocusTick((n) => n + 1);
     };
@@ -824,8 +791,8 @@ function MessageList({
   );
 
   // Snap to the newest message when the user sends (even if scrolled up reading);
-  // followOutput then keeps the streaming reply pinned as long as we stay at the
-  // bottom. Keyed on the last message key so it fires once per send, not per
+  // The tail controller then keeps the streaming reply pinned until the reader
+  // scrolls away. Keyed on the last message key so it fires once per send, not per
   // token — and NOT on the first non-empty observation: when a restored
   // conversation happens to end on a user turn (agent never replied), hydration
   // must not count as "the user just sent" or the open position gets yanked.
@@ -837,59 +804,11 @@ function MessageList({
       roles[roles.length - 1] === "user"
     ) {
       followTailRef.current = true;
-      virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end" });
+      listRef.current?.scrollToIndex({ index: "LAST", align: "end" });
     }
     prevLastKeyRef.current = lastKey;
   }, [keys, roles]);
 
-
-  // Open settle. The initial end seek runs on estimated turn heights; once the
-  // landing holds still for a few frames, correct the residual offset exactly
-  // once through Virtuoso's own API. Everything is rAF-paced and read-only in
-  // between — no scroller.scrollTop writes, no overscan changes — because any
-  // extra mounting pressure during this window is what used to chain into the
-  // update-depth crash on conversations with huge turns.
-  useEffect(() => {
-    if (!scroller || !convId || pendingInitialBottomRef.current !== convId || items.length === 0) {
-      return;
-    }
-
-    let prevDist = Number.NaN;
-    let stable = 0;
-    let budget = 120; // frame cap
-    // Wall-clock cap. The scrollHeight probe forces a style resolve whenever
-    // style is dirty; on a conversation with a huge DOM that's hundreds of ms
-    // PER FRAME, so a frame budget alone lets this loop freeze the app for
-    // minutes. Past the deadline the residual-offset correction is cosmetic —
-    // give it up.
-    const deadline = performance.now() + 2000;
-    let frame = requestAnimationFrame(function step() {
-      if (--budget <= 0 || performance.now() > deadline) {
-        // Mark the open as done even though we never settled: leaving the ref
-        // armed re-runs this whole loop on every items.length change (streamed
-        // or hydrated items), which re-freezes a pathological conversation
-        // indefinitely.
-        pendingInitialBottomRef.current = null;
-        return;
-      }
-      if (stable < 3) {
-        // "Settled" = the distance to the bottom stopped moving — true both for
-        // the normal landing AND when the user immediately scrolled elsewhere.
-        const dist = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-        stable = Math.abs(dist - prevDist) <= 1 ? stable + 1 : 0;
-        prevDist = dist;
-        frame = requestAnimationFrame(step);
-        return;
-      }
-      pendingInitialBottomRef.current = null; // settled — this open is done
-      // Only correct when meaningfully off; a settled-at-bottom open (or a user
-      // who already scrolled away on purpose) needs no seek at all.
-      if (prevDist > 1 && atBottomRef.current) {
-        virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" });
-      }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [convId, items.length, scroller]);
 
   // Remember the reading position while the reader is away from the bottom, so
   // switching conversations (or to another view) and back resumes mid-history
@@ -898,7 +817,7 @@ function MessageList({
   // Only ARMED scrolls count. The open sequence, the send/elevator seeks and the
   // streaming follow all move the scroller programmatically; if those captured,
   // a conversation opened mid-history would immediately overwrite (or, once
-  // Virtuoso briefly reports at-bottom during the landing, erase) the very
+  // the list briefly reports at-bottom during the landing, erase) the very
   // anchor being restored. The arm is either a real pointer/keyboard scroll
   // gesture or simply "the open is long over".
   useEffect(() => {
@@ -915,13 +834,13 @@ function MessageList({
       frame = null;
       // At the bottom there is nothing to resume — drop any stale anchor so the
       // next open follows new messages as usual.
-      if (atBottomRef.current) {
+      if (followTailRef.current && atBottomRef.current) {
         readingAnchors.delete(convId);
         return;
       }
-      // getState reads Virtuoso's own size tree and scroll offset: no DOM
+      // getState reads the virtualizer's measured sizes and scroll offset: no DOM
       // measurement, so this stays off the forced-layout path.
-      virtuosoRef.current?.getState((snapshot) => {
+      listRef.current?.getState((snapshot) => {
         // scrollTop === 0 is a valid reading position: after deliberately
         // scrolling a long conversation to its first turn, switching away and
         // back must resume there. Fresh/short conversations do not create a
@@ -947,90 +866,28 @@ function MessageList({
       scroller.removeEventListener("pointerdown", arm);
       scroller.removeEventListener("keydown", arm);
       // Deliberately no final flush here: by the time this cleanup runs the
-      // keyed Virtuoso has already remounted for the NEXT conversation, so
+      // keyed virtual list has already remounted for the NEXT conversation, so
       // getState would file that list's position under this convId.
       if (frame != null) cancelAnimationFrame(frame);
     };
   }, [scroller, convId]);
 
-  // Release tail-following synchronously on upward intent. Waiting for
-  // atBottomStateChange is too late: Virtuoso throttles that callback, and a
-  // token-driven resize can otherwise pull the reader back down first.
+  // One cancellable owner for row growth, appended rows, and viewport resizing.
+  // Keep this active after streaming ends too (images and final markdown settle).
   useEffect(() => {
     if (!scroller) return;
-
-    let previousScrollTop = scroller.scrollTop;
-    let touchY: number | null = null;
-    const releaseTail = () => {
-      followTailRef.current = false;
-    };
-    const onScroll = () => {
-      const nextScrollTop = scroller.scrollTop;
-      const movedUp = nextScrollTop < previousScrollTop - 1;
-      if (movedUp) releaseTail();
-      const distanceFromBottom =
-        scroller.scrollHeight - nextScrollTop - scroller.clientHeight;
-      if (!movedUp && distanceFromBottom <= STICKY_BOTTOM_PX) {
-        followTailRef.current = true;
-      }
-      previousScrollTop = nextScrollTop;
-    };
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) releaseTail();
-    };
-    const onTouchStart = (event: TouchEvent) => {
-      touchY = event.touches[0]?.clientY ?? null;
-    };
-    const onTouchMove = (event: TouchEvent) => {
-      const nextY = event.touches[0]?.clientY;
-      if (touchY != null && nextY != null && nextY > touchY) releaseTail();
-      touchY = nextY ?? touchY;
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") {
-        releaseTail();
-      }
-    };
-
-    scroller.addEventListener("scroll", onScroll, { passive: true });
-    scroller.addEventListener("wheel", onWheel, { passive: true });
-    scroller.addEventListener("touchstart", onTouchStart, { passive: true });
-    scroller.addEventListener("touchmove", onTouchMove, { passive: true });
-    scroller.addEventListener("keydown", onKeyDown);
+    const binding = bindChatTailScroll(scroller, {
+      isFollowing: () => followTailRef.current,
+      setFollowing: (next) => { followTailRef.current = next; },
+      isSearching: () => findOpenRef.current,
+      onRelease: () => { listRef.current?.cancelScroll(); },
+    });
+    tailScrollRef.current = binding;
     return () => {
-      scroller.removeEventListener("scroll", onScroll);
-      scroller.removeEventListener("wheel", onWheel);
-      scroller.removeEventListener("touchstart", onTouchStart);
-      scroller.removeEventListener("touchmove", onTouchMove);
-      scroller.removeEventListener("keydown", onKeyDown);
+      tailScrollRef.current = null;
+      binding.dispose();
     };
   }, [scroller]);
-
-  // A streamed reply grows an existing Virtuoso row. Follow that growth only
-  // while the reader has not explicitly released the tail.
-  useEffect(() => {
-    if (!scroller || !isStreaming) return;
-    const content = scroller.querySelector('[data-testid="virtuoso-item-list"]');
-    if (!content) return;
-
-    let frame: number | null = null;
-    const scrollIfFollowing = () => {
-      if (findOpenRef.current || !followTailRef.current || frame != null) return;
-      frame = requestAnimationFrame(() => {
-        frame = null;
-        if (followTailRef.current && !findOpenRef.current) {
-          scroller.scrollTop = scroller.scrollHeight;
-        }
-      });
-    };
-
-    const observer = new ResizeObserver(scrollIfFollowing);
-    observer.observe(content);
-    return () => {
-      observer.disconnect();
-      if (frame != null) cancelAnimationFrame(frame);
-    };
-  }, [isStreaming, scroller]);
 
   // Any scroll invalidates the hovered turn: content moved under a stationary
   // pointer, and no pointer event will fire to hand the toolbar off or hide
@@ -1061,9 +918,14 @@ function MessageList({
     };
 
     updateVisibility();
+    const observer = new ResizeObserver(scheduleUpdate);
+    observer.observe(scroller);
+    const content = scroller.querySelector('[data-chat-list-content]');
+    if (content) observer.observe(content);
     scroller.addEventListener("scroll", scheduleUpdate, { passive: true });
     window.addEventListener("resize", scheduleUpdate);
     return () => {
+      observer.disconnect();
       scroller.removeEventListener("scroll", scheduleUpdate);
       window.removeEventListener("resize", scheduleUpdate);
       if (frame != null) cancelAnimationFrame(frame);
@@ -1131,7 +993,7 @@ function MessageList({
             }
           />
         );
-      // Center each turn on the reading column. Virtuoso measures the outer
+      // Center each turn on the reading column. The virtual list measures the outer
       // wrapper. Once the viewport can center max-w-3xl clear of the navigator,
       // this returns to the composer's px-4 geometry so both columns line up.
       return (
@@ -1162,60 +1024,29 @@ function MessageList({
     ],
   );
 
-  // Where this mount lands: the remembered reading position when the reader left
-  // mid-history, otherwise the LAST visible row aligned to the viewport's BOTTOM
-  // (Thinking and errors are rows too, so every bottom-follow path targets the
-  // same measured edge). restoreStateFrom also replays Virtuoso's measured item
-  // sizes, without which a scroll offset into a virtualized history — built on
-  // height ESTIMATES for unmounted turns — would land somewhere else entirely.
-  const openAnchor: Partial<
-    Pick<
-      VirtuosoProps<MessageListItem, unknown>,
-      "initialTopMostItemIndex" | "restoreStateFrom"
-    >
-  > = restoreRef.current
-    ? { restoreStateFrom: restoreRef.current }
-    : { initialTopMostItemIndex: { index: Math.max(0, items.length - 1), align: "end" } };
-
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <QuoteSelectionToolbar scroller={scroller} onQuote={onQuote} />
-      <Virtuoso
-        // Remount on conversation switch so the new chat lands at its own bottom
-        // (initialTopMostItemIndex only applies at mount), with no scroll
-        // position carried over from the previous conversation.
+      <ChatVirtualList
+        // Each conversation mounts with its own saved position or newest turn.
         key={convId ?? "new"}
-        ref={virtuosoRef}
+        ref={listRef}
         scrollerRef={setScrollerRef}
         data={items}
-        data-testid="message-list"
-        className="scrollbar-slim min-h-0 flex-1 overscroll-contain bg-background"
-        computeItemKey={(_i, item) => {
+        className="chat-message-scroll scrollbar-slim min-h-0 flex-1 overscroll-contain bg-background"
+        itemKey={(_i, item) => {
           if (item.kind === "assistant") return item.keys[0];
           if (item.kind === "single") return item.key;
           return `${convId ?? "new"}:tail:${item.kind}`;
         }}
         itemContent={itemContent}
-        components={{ Header: TopSpacer }}
-        // Exactly ONE of these two is passed. Virtuoso publishes props in a
-        // fixed order and initialTopMostItemIndex lands AFTER restoreStateFrom,
-        // so an explicit (even undefined) initialTopMostItemIndex would clobber
-        // the restored offset — hence a spread rather than two props.
-        {...openAnchor}
-        // Do not use alignToBottom: it pins a short/new conversation to the
-        // bottom of the empty viewport. The initial index already opens an
-        // overflowing history at its newest turn, while short chats keep the
-        // normal top-down IM layout.
-        followOutput={(isAtBottom) =>
-          followTailRef.current && !findOpenRef.current && isAtBottom ? "auto" : false
-        }
-        atBottomThreshold={STICKY_BOTTOM_PX}
-        atBottomStateChange={setAtBottomState}
-        rangeChanged={(range) => {
-          setTopIndex(range.startIndex);
+        initialState={restoreRef.current}
+        onHeightChange={() => tailScrollRef.current?.schedule()}
+        onBottomChange={setAtBottomState}
+        onRangeChange={(startIndex) => {
+          setTopIndex(startIndex);
           repaintFind();
         }}
-        increaseViewportBy={OVERSCAN_PX}
       />
       {findOpen && (
         <FindBar
@@ -1234,11 +1065,15 @@ function MessageList({
         userTurns={userTurns}
         topIndex={topIndex}
         atBottom={atBottom}
-        virtuosoRef={virtuosoRef}
+        listRef={listRef}
+        onNavigate={() => {
+          followTailRef.current = false;
+          listRef.current?.cancelScroll();
+        }}
       />
       <ScrollToBottomButton
         show={showScrollToBottom}
-        virtuosoRef={virtuosoRef}
+        listRef={listRef}
         opticalCenter={opticalCenter}
         onFollowTail={() => {
           followTailRef.current = true;
@@ -1247,9 +1082,6 @@ function MessageList({
     </div>
   );
 }
-
-/** Small breathing room above the first turn (Virtuoso Header slot). */
-const TopSpacer = () => <div className="h-4" />;
 
 /** Codex-style turn navigator: a thin gutter of ticks down the left edge, one
  *  per user turn. Ticks are evenly spaced and clustered together, vertically
@@ -1264,21 +1096,23 @@ function TurnNavigator({
   userTurns,
   topIndex,
   atBottom,
-  virtuosoRef,
+  listRef,
+  onNavigate,
 }: {
   convId: string | null;
   /** User turns paired with their index in the virtualized group list. */
   userTurns: { key: string; index: number }[];
-  /** Topmost visible group index, published by the list's rangeChanged. */
+  /** Topmost visible group index, published by the virtualizer. */
   topIndex: number;
   /** Whether the message list is currently pinned to its bottom edge. */
   atBottom: boolean;
-  virtuosoRef: RefObject<VirtuosoHandle | null>;
+  listRef: RefObject<ChatListHandle | null>;
+  onNavigate: () => void;
 }) {
   const [hover, setHover] = useState<number | null>(null);
 
   // At the bottom, the newest turn wins explicitly. During a conversation
-  // switch Virtuoso can briefly publish an intermediate range while its
+  // switch the virtual list can briefly publish an intermediate range while its
   // initial end seek settles; using that range alone leaves a middle tick
   // highlighted even though the viewport has already landed at the bottom.
   // Away from the bottom, keep tracking the last user turn at or above the
@@ -1310,13 +1144,13 @@ function TurnNavigator({
               <button
                 type="button"
                 aria-label={`Jump to message ${i + 1}`}
-                onClick={() =>
-                  virtuosoRef.current?.scrollToIndex({
+                onClick={() => {
+                  onNavigate();
+                  listRef.current?.scrollToIndex({
                     index: turn.index,
                     align: "start",
-                    behavior: "smooth",
-                  })
-                }
+                  });
+                }}
                 className="group flex h-1.5 items-center pl-3 pr-2"
               >
                 <span
@@ -1364,16 +1198,16 @@ function TurnPreview({
  *  scrolled up away from the bottom of the conversation, and jumps them back
  *  down in one click. Lives outside the scroll container (as a sibling overlay)
  *  so it stays pinned to the viewport instead of scrolling with the messages.
- *  Visibility is deliberately stricter than Virtuoso's atBottom state so short
+ *  Visibility is deliberately stricter than the list's atBottom state so short
  *  reading nudges do not summon a floating control. */
 function ScrollToBottomButton({
   show,
-  virtuosoRef,
+  listRef,
   opticalCenter,
   onFollowTail,
 }: {
   show: boolean;
-  virtuosoRef: RefObject<VirtuosoHandle | null>;
+  listRef: RefObject<ChatListHandle | null>;
   opticalCenter: boolean;
   onFollowTail: () => void;
 }) {
@@ -1381,12 +1215,11 @@ function ScrollToBottomButton({
 
   const scrollToBottom = useCallback(() => {
     onFollowTail();
-    virtuosoRef.current?.scrollToIndex({
+    listRef.current?.scrollToIndex({
       index: "LAST",
       align: "end",
-      behavior: "smooth",
     });
-  }, [onFollowTail, virtuosoRef]);
+  }, [onFollowTail, listRef]);
 
   return (
     <button
@@ -1411,7 +1244,7 @@ function QuoteSelectionToolbar({
   scroller,
   onQuote,
 }: {
-  /** The Virtuoso scroll element: selection root + scroll-to-dismiss source. */
+  /** The virtual list scroll element: selection root + scroll-to-dismiss source. */
   scroller: HTMLElement | null;
   onQuote: (text: string) => void;
 }) {

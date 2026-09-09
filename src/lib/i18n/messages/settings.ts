@@ -6,6 +6,17 @@ import type { NamespaceMessages } from "./types";
 // keyboard-shortcut letters are intentionally left untranslated.
 export const settings = {
   en: {
+    "appearance.wallpaper.label": "Background image",
+    "appearance.wallpaper.description": "Choose a local image for the home and chat background. JPG, PNG or WebP, up to 20 MB. Images stay on this device.",
+    "appearance.wallpaper.preview": "Chat background preview",
+    "appearance.wallpaper.upload": "Upload image",
+    "appearance.wallpaper.replace": "Replace image",
+    "appearance.wallpaper.remove": "Remove",
+    "appearance.wallpaper.saving": "Saving…",
+    "appearance.wallpaper.fade": "Fade background",
+    "appearance.wallpaper.uploadError": "Could not save this image. Choose a valid JPG, PNG or WebP under 20 MB and check available storage.",
+    "appearance.wallpaper.saveError": "Could not save the background setting. Please try again.",
+
     "models.model.reasoningHint": "Turn on Reasoning for models with an effort knob, then enable the levels your endpoint supports. Each level sends its own name by default — type a token to override (e.g. map cetus's levels onto an endpoint that only knows low/medium/high). Pick the effort format your vendor expects; disabled levels are clamped to the nearest enabled one.",
     "models.model.format": "Format",
     "models.model.reasoning": "Reasoning",
@@ -687,6 +698,17 @@ export const settings = {
     "skills.discovered.chooseFolder": "Choose folder",
   },
   zh: {
+    "appearance.wallpaper.label": "背景图片",
+    "appearance.wallpaper.description": "上传图片作为首页和聊天背景。支持 JPG、PNG、WebP，最大 20 MB，仅保存在本机。",
+    "appearance.wallpaper.preview": "聊天背景预览",
+    "appearance.wallpaper.upload": "上传图片",
+    "appearance.wallpaper.replace": "更换图片",
+    "appearance.wallpaper.remove": "移除",
+    "appearance.wallpaper.saving": "保存中…",
+    "appearance.wallpaper.fade": "背景淡化",
+    "appearance.wallpaper.uploadError": "图片保存失败。请选择 20 MB 以内的有效 JPG、PNG 或 WebP 图片，并检查可用存储空间。",
+    "appearance.wallpaper.saveError": "背景设置保存失败，请重试。",
+
     "models.model.reasoningHint": "有推理力度参数的模型请打开“推理”，然后勾选端点支持的档位。每个档位默认按档位名发送，也可填 token 覆盖（比如把档位映射到只认 low/medium/high 的端点）。“格式”选你的供应商期望的 effort 字段形态；未启用的档位会自动就近钳制到启用档。",
     "models.model.format": "格式",
     "models.model.reasoning": "推理",

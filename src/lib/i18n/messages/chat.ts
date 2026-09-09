@@ -218,6 +218,10 @@ export const chat = {
 
     // Activity group (collapsed tool/thinking timeline)
     "activity.working": "Working…",
+    "activity.updates": "Progress updates",
+    "activity.turnEnded": "Turn ended",
+    "activity.hasErrors": "Contains failed steps",
+    "activity.incomplete": "Result not received",
     "activity.thought": "Thought",
     "activity.worked": "Worked for {duration}",
 
@@ -460,6 +464,10 @@ export const chat = {
     "tool.earlierSteps": "还有 {count} 个更早的步骤",
 
     "activity.working": "处理中……",
+    "activity.updates": "进度记录",
+    "activity.turnEnded": "本轮已结束",
+    "activity.hasErrors": "包含失败操作",
+    "activity.incomplete": "未收到结果",
     "activity.thought": "已思考",
     "activity.worked": "已处理 {duration}",
 

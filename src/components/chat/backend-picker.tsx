@@ -590,15 +590,16 @@ function quotaLabel(
     q.utilization !== undefined
       ? `${Math.max(0, Math.round((1 - q.utilization) * 100))}% left`
       : null;
+  const window = q.rateLimitType?.replace("five_hour", "5h").replace("seven_day", "7d");
   const reset = q.resetsAt ? `resets ${formatReset(q.resetsAt)}` : null;
   if (q.status === "rejected")
-    return { text: ["limit reached", reset].filter(Boolean).join(" · "), warn: true };
+    return { text: [window, "limit reached", reset].filter(Boolean).join(" · "), warn: true };
   if (q.status === "allowed_warning")
     return {
-      text: [pct ?? "near limit", reset].filter(Boolean).join(" · "),
+      text: [window, pct ?? "near limit", reset].filter(Boolean).join(" · "),
       warn: true,
     };
-  return pct ? { text: pct, warn: false } : null;
+  return pct ? { text: [window, pct].filter(Boolean).join(" · "), warn: false } : null;
 }
 
 /** Self-contained picker: reads the conversation's current backend and holds a

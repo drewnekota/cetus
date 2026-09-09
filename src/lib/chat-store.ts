@@ -26,6 +26,11 @@ import {
   type ChatState,
 } from "./chat-state";
 import { artifactsFromDetails } from "./artifact";
+import {
+  forgetContextUsage,
+  loadContextUsage,
+  persistContextUsage,
+} from "./context-usage-store";
 import { isReviewRequestDetails, type ReviewRequestDetails } from "./review";
 import type {
   BashResult,
@@ -94,7 +99,9 @@ interface ChatsStore {
    *  these today; the runtime picker renders them as a quota line. */
   cliRateLimits: Record<string, CliRateLimitInfo>;
   setCliRateLimit: (backend: string, info: CliRateLimitInfo) => void;
-  /** Latest context-window occupancy per conversation. */
+  /** Latest context-window occupancy per conversation. Seeded from
+   *  localStorage and written through, so the last completed turn's reading
+   *  survives restarts and sidebar eviction (see context-usage-store). */
   cliContextUsage: Record<string, CliContextUsage>;
   setCliContextUsage: (id: string, usage: CliContextUsage) => void;
   clearCliContextUsage: (id: string) => void;
@@ -302,7 +309,7 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   backgroundTasks: {},
   cliCommands: {},
   cliRateLimits: {},
-  cliContextUsage: {},
+  cliContextUsage: loadContextUsage(),
   ensure: (id) => {
     flushPiEvents();
     set((s) => {
@@ -349,18 +356,14 @@ export const useChatStore = create<ChatsStore>()((set) => ({
         cliCommands = { ...cliCommands };
         delete cliCommands[id];
       }
-      let cliContextUsage = s.cliContextUsage;
-      if (id in cliContextUsage) {
-        cliContextUsage = { ...cliContextUsage };
-        delete cliContextUsage[id];
-      }
+      // cliContextUsage deliberately survives: drop runs on archive and
+      // eviction, and the reading is still valid when the thread comes back.
       return {
         chats: next,
         streamingIds: withoutStreaming(s.streamingIds, id),
         controlRequests,
         backgroundTasks,
         cliCommands,
-        cliContextUsage,
       };
     });
   },
@@ -415,9 +418,11 @@ export const useChatStore = create<ChatsStore>()((set) => ({
     set((s) => ({ cliRateLimits: { ...s.cliRateLimits, [backend]: info } }));
   },
   setCliContextUsage: (id, usage) => {
+    persistContextUsage(id, usage);
     set((s) => ({ cliContextUsage: { ...s.cliContextUsage, [id]: usage } }));
   },
   clearCliContextUsage: (id) => {
+    forgetContextUsage(id);
     set((s) => {
       if (!(id in s.cliContextUsage)) return s;
       const cliContextUsage = { ...s.cliContextUsage };
