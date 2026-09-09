@@ -103,5 +103,9 @@ done
 [ "$detached" = 1 ] || { echo "failed to detach $DEV_NODE ($MOUNT_DIR)" >&2; exit 1; }
 
 rm -f "$DMG"
-hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG" >/dev/null
+# ULFO (LZFSE) rather than UDZO at zlib-level=9: on a bundle this size the deflate
+# pass was the single slowest thing in the release job, and LZFSE compresses a
+# ~300 MB app tree in a fraction of the time at a comparable size. It needs
+# macOS 10.11+ to mount; the app itself requires 13.0.
+hdiutil convert "$RW_DMG" -format ULFO -o "$DMG" >/dev/null
 echo "✓ $DMG"

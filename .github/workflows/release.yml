@@ -199,16 +199,19 @@ jobs:
       - name: Build app bundle
         run: pnpm tauri build --bundles app
 
-      - name: Sign, notarize, and staple app bundle
+      # One Apple round-trip, not two. The notary service notarizes everything
+      # inside a submitted container, so submitting the dmg covers the .app it
+      # carries: the dmg gets stapled directly and the .app's ticket is then
+      # fetched by cdhash (`--staple-only`) for the updater tarball. Notarizing
+      # the .app first and the dmg second meant waiting on Apple twice, ~1m40s
+      # of it redundant.
+      - name: Sign and harden app bundle
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
-          scripts/macos-sign.sh "$APP" --notarize
+          scripts/macos-sign.sh "$APP" --harden
 
       - name: Package, sign, and notarize DMG
         env:
@@ -224,6 +227,12 @@ jobs:
           scripts/package-dmg.sh "$APP" "$DMG"
           scripts/macos-sign.sh "$DMG" --notarize
           echo "DMG=$DMG" >> "$GITHUB_ENV"
+
+      - name: Staple the app bundle
+        run: |
+          set -euo pipefail
+          APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
+          scripts/macos-sign.sh "$APP" --staple-only
 
       - name: Package and sign macOS updater
         env:

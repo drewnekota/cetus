@@ -44,8 +44,11 @@ env -u APPLE_SIGNING_IDENTITY pnpm tauri build --bundles app
 APP="$(/usr/bin/find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
 [ -n "$APP" ] || { echo "no .app produced" >&2; exit 1; }
 
-echo "→ Signing the app (${SIGN_FLAGS[*]})…"
-scripts/macos-sign.sh "$APP" "${SIGN_FLAGS[@]}"
+# Mirrors release.yml: the app is only hardened here, and the single Apple
+# submission is the dmg — which notarizes the .app it carries too, so the .app's
+# own ticket is then just fetched and stapled.
+echo "→ Signing the app (--harden)…"
+scripts/macos-sign.sh "$APP" --harden
 
 VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
 DMG="src-tauri/target/release/bundle/Cetus_${VERSION}_aarch64.dmg"
@@ -53,6 +56,10 @@ echo "→ Packaging $DMG"
 scripts/package-dmg.sh "$APP" "$DMG"
 echo "→ Signing the dmg (${SIGN_FLAGS[*]})…"
 scripts/macos-sign.sh "$DMG" "${SIGN_FLAGS[@]}"
+if [ "$NOTARIZE" = 1 ]; then
+  echo "→ Stapling the app…"
+  scripts/macos-sign.sh "$APP" --staple-only
+fi
 
 if [ "$INSTALL" = 1 ]; then
   echo "→ Installing to /Applications…"
