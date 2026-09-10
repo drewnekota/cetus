@@ -12,6 +12,7 @@ import {
   type ContinuationNoticeKind,
 } from "@/lib/continuation-prompts";
 import { cn } from "@/lib/utils";
+import { splitLeadingQuote } from "@/lib/user-quote";
 import { useTranslation } from "@/lib/i18n";
 
 interface Props {
@@ -165,17 +166,9 @@ function splitUserQuote(
   if (idx === -1) return null;
   const block = blocks[idx];
   if (block.kind !== "text") return null;
-  const lines = block.text.split("\n");
-  let end = 0;
-  while (end < lines.length && /^>(\s|$)/.test(lines[end])) end++;
-  if (end === 0) return null;
-  const quote = lines
-    .slice(0, end)
-    .map((line) => line.replace(/^> ?/, ""))
-    .join("\n")
-    .trim();
-  if (!quote) return null;
-  const rest = lines.slice(end).join("\n").trim();
+  const split = splitLeadingQuote(block.text);
+  if (!split) return null;
+  const { quote, text: rest } = split;
   const next = blocks.slice();
   if (rest) next[idx] = { ...block, text: rest };
   else next.splice(idx, 1);

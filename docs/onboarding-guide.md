@@ -86,7 +86,6 @@
 │  │  └─ cetus-extensions/  (自定义扩展，部署到 pi-install 目录)           │ │
 │  │     ├─ browser-use.ts      浏览器自动化                               │ │
 │  │     ├─ computer-use.ts     桌面自动化（macOS）                        │ │
-│  │     ├─ vision-bridge.ts    视觉 / 图片处理                            │ │
 │  │     ├─ web-search.ts       网络搜索                                   │ │
 │  │     ├─ mcp-bridge.ts       MCP 协议桥接                               │ │
 │  │     ├─ automation-tools.ts 自动化管理工具                             │ │
@@ -134,7 +133,6 @@
 | --- | --- |
 | `browser-use.ts`（~50KB）| 浏览器自动化工具集：`browser_open`、`browser_observe`、`browser_click`、`browser_type` 等，通过 numbered element list 操作（非像素坐标）。 |
 | `computer-use.ts`（~25KB）| 桌面自动化工具集：`computer_observe`、`computer_click`、`computer_type` 等，通过 macOS AX API 操作。 |
-| `vision-bridge.ts` | 视觉桥接：处理图片输入，调用 Gemini 视觉模型生成描述。 |
 | `web-search.ts` | 网络搜索：`web_search` 和 `web_fetch` 工具（Tavily / DDG）。 |
 | `mcp-bridge.ts` | MCP 协议桥接：读取 `CETUS_MCP_CONFIG`，通过 mcporter 连接各 MCP server 并注册其工具。 |
 | `automation-tools.ts` | 自动化管理：让 Agent 能读取/修改自身的 Automation 配置。 |
@@ -152,7 +150,7 @@
 用户在 Composer 输入 → 按 Enter
   │
   ├─ page.tsx 的 handleSend():
-  │   1. 拼接附件引用（read_document 路径块）
+  │   1. 拼接附件引用（本地文件路径块）
   │   2. chatStore.userSent(convId, text, images, files)
   │      → chatReducer 追加一条 role="user" 的 RenderedMessage
   │      → UI 立即渲染用户气泡（乐观更新）

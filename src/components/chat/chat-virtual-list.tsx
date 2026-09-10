@@ -97,7 +97,8 @@ export function ChatVirtualList<T>({
 
   return (
     <div ref={setRef} data-testid="message-list" tabIndex={0} className={className}
-      style={{ overflowY: "auto", overflowAnchor: "none", position: "relative", outline: "none" }}>
+      // `contain` still allows trackpad rubber-banding at the scroll boundary.
+      style={{ overflowY: "auto", overscrollBehaviorY: "none", overflowAnchor: "none", position: "relative", outline: "none" }}>
       <div data-chat-list-content style={{ height: totalHeight, position: "relative", width: "100%" }}>
         {rows.map(row => (
           <div key={row.key} ref={virtualizer.measureElement} data-index={row.index}

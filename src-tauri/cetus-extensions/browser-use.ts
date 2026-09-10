@@ -1,5 +1,5 @@
 /**
- * browser-use.ts — a pi extension that gives a TEXT-ONLY agent a real
+ * browser-use.ts — a pi extension that gives an agent a real
  * browser-use capability, driven entirely over the raw Chrome DevTools
  * Protocol (CDP) with ZERO npm dependencies.
  *
@@ -26,9 +26,8 @@
  * ---------------------------------------------------------------------------
  * WHY TEXT-ONLY / INDEX-BASED
  * ---------------------------------------------------------------------------
- * The agent driving this extension has no vision — it only reads strings. So
- * instead of pixels we hand it a compact, numbered list of the *interactive*
- * DOM elements on the page:
+ * For precise interaction we hand the agent a compact, numbered list of
+ * interactive DOM elements on the page:
  *
  *     [3]<button> "Save"
  *     [5]<input type=text name="Email">

@@ -91,7 +91,7 @@ APP_VERSION="$(node -e 'console.log(require(process.argv[1]).version)' "$REPO_RO
 PI_VERSION="$(node -e 'console.log(require(process.argv[1]).version)' "$DEST_DIR/package.json")"
 printf '%s\n' "cetus=$APP_VERSION pi=$PI_VERSION" > "$DEST_DIR/.cetus-runtime-version"
 
-# Overlay cetus's own pi extensions (vision-bridge, etc.). These live under
+# Overlay cetus's own pi extensions (native model registration, etc.). These live under
 # version control at src-tauri/cetus-extensions/ and must be re-deployed here on
 # every sidecar build because this whole tree is wiped (rm -rf above) and is
 # itself gitignored. pi loads `<bindir>/<EXT_DIR>/*.ts` at spawn time
@@ -214,14 +214,14 @@ echo "  install tree: $BEFORE_SZ → $(du -sh "$DEST_DIR" | awk '{print $1}')"
 # pi 0.82+ hides providers without configured credentials even for a local
 # catalog listing. Supply a non-secret placeholder so this command enumerates
 # the compiled registry; --list-models makes no API request.
-DEEPSEEK_MODELS="$(DEEPSEEK_API_KEY=cetus-build-check "$DEST_DIR/$PI_FILENAME" --list-models deepseek)"
+DEEPSEEK_MODELS="$(DEEPSEEK_API_KEY=cetus-build-check "$DEST_DIR/$PI_FILENAME" --extension "$DEST_DIR/cetus-extensions/deepseek-endpoint.ts" --list-models deepseek)"
 echo "$DEEPSEEK_MODELS"
-for MODEL in deepseek-v4-flash deepseek-v4-pro; do
+for MODEL in deepseek-flash; do
   if ! grep -q "$MODEL" <<< "$DEEPSEEK_MODELS"; then
     echo "Bundled pi runtime does not provide $MODEL" >&2
     exit 1
   fi
 done
-echo "→ Verified model registry: deepseek-v4-flash, deepseek-v4-pro"
+echo "→ Verified model registry: deepseek-flash"
 
 echo "✓ Done. $DEST_DIR ($(du -sh "$DEST_DIR" | awk '{print $1}'))"

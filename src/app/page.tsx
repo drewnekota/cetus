@@ -337,12 +337,12 @@ interface Outgoing {
   savedFiles: { name: string; path: string; mimeType: string; sizeBytes: number }[];
   /** ImageContent blocks for pi's `images` channel. */
   piImages: { type: "image"; data: string; mimeType: string }[];
-  /** Prompt text sent to pi, with the read_document path block appended. */
+  /** Prompt text sent to pi, with the local file-reading path block appended. */
   piMessage: string;
 }
 
-/** Split composer attachments into the image channel (→ pi images / vision-bridge)
- *  and on-disk files (→ read_document), writing the files out. Shared by every
+/** Split composer attachments into the image channel (→ pi images)
+ *  and on-disk files (→ local file-reading), writing the files out. Shared by every
  *  send path (main chat, create-task, detail dialog). */
 async function prepareOutgoing(
   convId: string,

@@ -41,6 +41,7 @@ pub const LEGACY_EXTENSION_DIRS: &[&str] = &["kott-extensions"];
 
 /// Extensions that must always load for the core bridge surface to work.
 pub const CORE_EXTENSIONS: &[&str] = &[
+    "deepseek-endpoint.ts",
     "automation-tools.ts",
     "memory.ts",
     "mcp-tools.ts",

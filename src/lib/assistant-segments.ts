@@ -25,7 +25,8 @@ function isProcess(b: RenderedBlock): b is Extract<ProcessBlock, { kind: "thinki
  * Explicit final-answer text is always retained. Without phase metadata,
  * keep the last text run and everything after it. Content chunks are not
  * necessarily separate answers, so adjacent text blocks stay together.
- * Artifacts and attention-needed tools are barriers: folding must never
+ * Failed attempts fold like successful steps. Artifacts and unfinished
+ * tools are barriers: folding must never
  * reorder activity across them. Keys follow source blocks, not live state. */
 export function buildAssistantSegments(messages: RenderedMessage[], live: boolean): AssistantSegment[] {
   const flat = messages.flatMap((m) => m.blocks.flatMap((b, index) => {
@@ -60,7 +61,8 @@ export function buildAssistantSegments(messages: RenderedMessage[], live: boolea
   for (let i = 0; i < flat.length; i++) {
     const { b, key, at } = flat[i];
     const process = isProcess(b);
-    const attention = b.kind === "tool_use" && toolActivityStatus(b) !== "settled";
+    const status = b.kind === "tool_use" ? toolActivityStatus(b) : null;
+    const attention = status === "running" || status === "incomplete";
     const keepText = b.kind === "text" && b.phase === "final_answer";
     const foldText = !live && hasProcess && i < boundary && b.kind === "text" && !keepText;
     if (!process && !foldText) {

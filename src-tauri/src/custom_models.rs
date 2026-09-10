@@ -56,7 +56,7 @@ pub struct CustomModel {
     /// Display name; empty = show the id.
     pub name: String,
     /// Whether the model accepts image input. When true, pi passes attached
-    /// images through natively and the vision-bridge transcription no-ops.
+    /// images through natively.
     pub vision: bool,
     /// Whether the model takes a reasoning-effort knob. When true,
     /// `thinking_levels` below selects which of pi's seven levels
@@ -202,7 +202,7 @@ pub fn utility_target(store: &Store) -> Option<UtilityTarget> {
         return Some(UtilityTarget {
             url: crate::provider::deepseek_chat_url(store),
             api_key: key,
-            model: DsModel::Pro.api_id().to_string(),
+            model: DsModel::Flash.api_id().to_string(),
             is_deepseek: true,
         });
     }

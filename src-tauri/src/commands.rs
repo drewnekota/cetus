@@ -2496,7 +2496,7 @@ pub async fn delete_api_key(state: State<'_, AppState>, provider: String) -> Cmd
 }
 
 /// Persist a composer attachment (any non-image file) to disk so the agent can
-/// read it via the `read_document` extension tool. Images keep riding the
+/// read it using local tools. Images keep riding the
 /// `send_prompt` images channel; this is for everything else.
 ///
 /// Files land in `<app_data>/attachments/<conv id>/<uuid>-<name>` — outside the
@@ -3210,7 +3210,7 @@ mod tests {
     #[test]
     fn title_source_hides_attachment_protocol() {
         let prompt = "按照文件里的 SOP 分析机会\n\n<cetus-attachments>\n\
-The user attached these files. Use the read_document tool on each path to read them:\n\
+The user attached these files. Read these paths using available tools. Extract document text locally; render scanned pages to images or use OCR when needed:\n\
 - guide.pdf → /tmp/guide.pdf\n</cetus-attachments>";
         assert_eq!(title_source(prompt), "按照文件里的 SOP 分析机会");
     }
@@ -3218,7 +3218,7 @@ The user attached these files. Use the read_document tool on each path to read t
     #[test]
     fn title_source_uses_file_names_for_attachment_only_messages() {
         let prompt = "\n\n<cetus-attachments>\n\
-The user attached these files. Use the read_document tool on each path to read them:\n\
+The user attached these files. Read these paths using available tools. Extract document text locally; render scanned pages to images or use OCR when needed:\n\
 - guide.pdf → /tmp/guide.pdf\n\
 - data.csv → /tmp/data.csv\n</cetus-attachments>";
         assert_eq!(title_source(prompt), "guide.pdf、data.csv");

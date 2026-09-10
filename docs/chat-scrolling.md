@@ -2,6 +2,8 @@
 
 The main chat page and the session detail dialog both use `ChatPane`, so they share the same scrolling policy.
 
+The shared list uses `overscroll-behavior-y: none` to disable vertical boundary bounce and scroll chaining. `contain` alone still permits macOS trackpad rubber-banding at the bottom of the chat.
+
 ## Regression and ownership
 
 Upward wheel input during a streaming response used to fight three independent mechanisms:

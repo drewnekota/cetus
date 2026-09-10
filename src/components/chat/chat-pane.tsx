@@ -1033,7 +1033,7 @@ function MessageList({
         ref={listRef}
         scrollerRef={setScrollerRef}
         data={items}
-        className="chat-message-scroll scrollbar-slim min-h-0 flex-1 overscroll-contain bg-background"
+        className="chat-message-scroll scrollbar-slim min-h-0 flex-1 bg-background"
         itemKey={(_i, item) => {
           if (item.kind === "assistant") return item.keys[0];
           if (item.kind === "single") return item.key;

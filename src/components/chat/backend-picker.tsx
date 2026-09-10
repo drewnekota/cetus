@@ -244,9 +244,7 @@ export const CLI_MODELS: Record<
     { id: "grok-4.5", label: "Grok 4.5" },
   ],
   dsh: [
-    { id: "deepseek-v4-flash", label: "DeepSeek-V4-Flash" },
-    { id: "deepseek-v4-pro", label: "DeepSeek-V4-Pro" },
-    { id: "deepseek-v4-flash-vision-exp", label: "DeepSeek-V4-Flash-Vision-Exp" },
+    { id: "deepseek-flash", label: "DeepSeek V4.1 Flash" },
   ],
 };
 
@@ -355,7 +353,7 @@ export function cliModelCatalog(
   backend: TunableBackendId,
   defaults: CliDefaults | null,
 ) {
-  return defaults?.models ?? CLI_MODELS[backend];
+  return backend === "dsh" ? CLI_MODELS.dsh : defaults?.models ?? CLI_MODELS[backend];
 }
 
 /** The catalog row a persisted override selects. Exact id first, then the
@@ -475,7 +473,7 @@ export function CliTuningMenu({
   const defaults = useCliDefaults(backend);
   const models = cliModelCatalog(backend, defaults);
   const efforts = CLI_EFFORTS[backend];
-  const curModel = resolveCliModel(model, models, defaults);
+  const curModel = backend === "dsh" ? CLI_MODELS.dsh[0] : resolveCliModel(model, models, defaults);
   const curEffort = resolveCliEffort(effort, efforts, defaults);
   // Two stored shapes can't be shown as-is and get rewritten to what's
   // checked, so the menu and the running session agree:
@@ -496,7 +494,9 @@ export function CliTuningMenu({
   useEffect(() => {
     if (!onMigrate || !defaults) return;
     let nextModel = model;
-    if (!model) {
+    if (backend === "dsh") {
+      nextModel = "deepseek-flash";
+    } else if (!model) {
       nextModel = curModel?.id ?? model;
     } else if (defaults.models && isStaleCandidate(backend, model)) {
       nextModel = findCatalogModel(model, defaults.models)?.id ?? model;

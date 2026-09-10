@@ -1,9 +1,8 @@
 //! Model + reasoning effort selection for the built-in pi runtime.
 //!
-//! cetus ships two DeepSeek V4 tiers — Flash (fast, cheap) and Pro (full
-//! capability) — plus any number of user-configured custom OpenAI-compatible
+//! Cetus ships DeepSeek V4.1 Flash plus user-configured OpenAI-compatible
 //! models (see `custom_models.rs`). A conversation's choice is persisted as a
-//! single string: `"flash"` / `"pro"` for the built-ins, or
+//! single string: `"flash"` (legacy `"pro"` maps to Flash), or
 //! `"<provider>/<model-id>"` for a custom model (custom provider ids always
 //! carry the `custom-` prefix, so the two forms can't collide). The
 //! per-conversation reasoning axis (off / high / max) applies to the DeepSeek
@@ -17,29 +16,26 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum DsModel {
     Flash,
-    Pro,
 }
 
 impl DsModel {
     /// Identifier accepted by the DeepSeek chat completions endpoint.
     pub fn api_id(self) -> &'static str {
         match self {
-            DsModel::Flash => "deepseek-v4-flash",
-            DsModel::Pro => "deepseek-v4-pro",
+            DsModel::Flash => "deepseek-flash",
         }
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
             DsModel::Flash => "flash",
-            DsModel::Pro => "pro",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "flash" => Some(DsModel::Flash),
-            "pro" => Some(DsModel::Pro),
+            "pro" => Some(DsModel::Flash),
             _ => None,
         }
     }
@@ -47,7 +43,7 @@ impl DsModel {
 
 /// Which model a conversation runs on: a built-in DeepSeek tier, or a
 /// user-configured custom provider's model. Serialized (both to the DB and
-/// over IPC) as the plain string form — `"pro"` or `"custom-foo/gpt-4o"` —
+/// over IPC) as the plain string form — `"flash"` or `"custom-foo/gpt-4o"` —
 /// so the frontend deals in strings and old persisted rows parse unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelRef {
@@ -57,7 +53,7 @@ pub enum ModelRef {
 
 impl ModelRef {
     /// Parse a persisted / IPC model string. Unknown values (a legacy or
-    /// out-of-catalog id) return None so callers fall back to the Pro default.
+    /// out-of-catalog id) return None so callers fall back to the Flash default.
     pub fn parse(s: &str) -> Option<Self> {
         if let Some(m) = DsModel::parse(s) {
             return Some(ModelRef::Builtin(m));
@@ -84,7 +80,7 @@ impl ModelRef {
 
 impl Default for ModelRef {
     fn default() -> Self {
-        ModelRef::Builtin(DsModel::Pro)
+        ModelRef::Builtin(DsModel::Flash)
     }
 }
 
@@ -199,7 +195,7 @@ pub struct ModelChoice {
 }
 
 impl Default for ModelChoice {
-    /// Pro with high thinking — the everyday default. Users can drop to Off
+    /// Flash with high thinking — the everyday default. Users can drop to Off
     /// (faster) or raise per conversation.
     fn default() -> Self {
         Self {
@@ -217,7 +213,7 @@ mod tests {
     fn parses_builtin_and_custom_forms() {
         assert_eq!(
             ModelRef::parse("pro"),
-            Some(ModelRef::Builtin(DsModel::Pro))
+            Some(ModelRef::Builtin(DsModel::Flash))
         );
         assert_eq!(
             ModelRef::parse("custom-openrouter/anthropic/claude-sonnet-4"),
@@ -246,7 +242,7 @@ mod tests {
 
     #[test]
     fn persist_round_trips() {
-        for s in ["flash", "pro", "custom-x/some/model"] {
+        for s in ["flash", "custom-x/some/model"] {
             assert_eq!(ModelRef::parse(s).unwrap().to_persist(), s);
         }
     }

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, Cpu, Server, Zap } from "lucide-react";
+import { Check, ChevronDown, Server, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { DsModel, ModelChoice, ReasoningLevel } from "@/lib/types";
 import { api, type CustomProviderView } from "@/lib/tauri";
@@ -30,12 +30,6 @@ const MODELS: { id: DsModel; labelKey: string; hintKey: string; icon: LucideIcon
     labelKey: "model.flash",
     hintKey: "model.flashHint",
     icon: Zap,
-  },
-  {
-    id: "pro",
-    labelKey: "model.pro",
-    hintKey: "model.proHint",
-    icon: Cpu,
   },
 ];
 
@@ -102,7 +96,7 @@ interface Props {
 
 /** Combined model + reasoning-effort menu for the built-in pi runtime, styled
  *  after CliTuningMenu (the claude-code/codex picker): one compact trigger
- *  ("Pro · High"), the reasoning levels flat on top (built-in tiers only), and
+ *  ("Flash · High"), the reasoning levels flat on top (built-in tiers only), and
  *  the model catalog — built-in tiers plus the user's custom providers from
  *  Settings → Models — in a cascading submenu. */
 export function ModelPicker({ value, onChange, disabled }: Props) {
@@ -117,13 +111,13 @@ export function ModelPicker({ value, onChange, disabled }: Props) {
       .catch(() => {});
   }, []);
 
-  const builtin = MODELS.find((m) => m.id === value.model);
+  const builtin = MODELS.find((m) => m.id === (value.model === "pro" ? "flash" : value.model));
   const customCur = custom.find((c) => c.value === value.model);
   const rawEffort =
     EFFORTS.find((e) => e.id === value.reasoning) ??
     EFFORTS.find((e) => e.id === "high")!;
   // A custom model not in the fetched list (deleted, or the list hasn't
-  // loaded yet) still shows its raw id rather than lying with "Pro".
+  // loaded yet) still shows its raw id rather than showing the built-in label.
   const modelLabel = builtin
     ? t(builtin.labelKey)
     : customCur?.label ?? value.model.split("/").slice(1).join("/") ?? value.model;

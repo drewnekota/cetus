@@ -61,7 +61,6 @@ describe("runtime-independent folding", () => {
 
   test.each([
     ["missing result", { result: null }, "incomplete"],
-    ["tool failure", { result: { content: [], isError: true } }, "error"],
     ["background agent", { result: { content: [], details: { subagent: { status: "running" } } } }, "running"],
     ["cancelled agent", { result: { content: [], details: { subagent: { status: "cancelled" } } } }, "incomplete"],
   ])("keeps %s visible even before a final reply", (_, overrides, status) => {
@@ -70,6 +69,24 @@ describe("runtime-independent folding", () => {
     const group = segments.find((s) => s.type === "activity" && s.steps.includes(block));
     expect(group.defaultOpen).toBe(true);
     expect(toolActivityStatus(block)).toBe(status);
+  });
+
+  test("failed attempts and retries stay in one collapsed history group", () => {
+    const failed = tool("failed", { result: { content: [], isError: true } });
+    const blocks = [tool("a"), failed, text("Retrying"), tool("retry"), text("Done", "final_answer")];
+    const segments = build(blocks);
+    expect(segments.map((s) => s.type)).toEqual(["activity", "answer"]);
+    expect(segments[0].defaultOpen).toBe(false);
+    expect(segments[0].steps).toEqual(blocks.slice(0, -1));
+    expect(toolActivityStatus(failed)).toBe("error");
+  });
+
+  test("failed tools after the latest text follow the ordinary tail policy", () => {
+    const failed = tool("failed", { result: { content: [], isError: true } });
+    const segments = build([text("Trying again"), tool("a"), failed, tool("retry")]);
+    expect(segments.map((s) => s.type)).toEqual(["answer", "activity"]);
+    expect(segments[1].defaultOpen).toBe(true);
+    expect(segments[1].steps.map((b) => b.id)).toEqual(["a", "failed", "retry"]);
   });
 
   test("stable block keys survive regrouping and do not collide across messages", () => {

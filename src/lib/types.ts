@@ -1,13 +1,10 @@
 // Shared types between Rust backend and React frontend.
 // pi event JSON is forwarded verbatim; we narrow it per event type below.
 
-// Built-in tiers: cetus ships the DeepSeek V4 tiers Flash and Pro; the
-// per-conversation knob is how hard it thinks (off / high / max). On top of
-// the built-ins, the user can configure custom OpenAI-compatible providers
-// (Settings -> Models); their models are addressed as "<provider-id>/<model-id>"
-// in the same `model` slot. Reasoning only applies to the built-ins.
-export type DsModel = "flash" | "pro";
-/** "flash" | "pro" | "<custom-provider-id>/<model-id>" */
+// The built-in model is DeepSeek V4.1 Flash. Legacy "pro" selections are
+// accepted and mapped to Flash by the host. Custom models use
+// "<provider-id>/<model-id>" in the same model slot.
+export type DsModel = "flash";
 export type ModelId = string;
 /** pi's full thinking-level axis. Older cetus persisted only
  *  "non_think" / "think_high" / "think_max" — `normalizeReasoningLevel`
@@ -467,7 +464,7 @@ export interface QuickLaunchPayload {
 }
 
 export const DEFAULT_MODEL_CHOICE: ModelChoice = {
-  model: "pro",
+  model: "flash",
   reasoning: "high",
 };
 
@@ -1096,7 +1093,7 @@ export type RenderedBlock =
   // via send_prompt's `images` argument (pi-ai ImageContent).
   | { kind: "image"; dataUrl: string; name?: string }
   // Local-only chip for a non-image attachment (docx/xlsx/pdf/…). The bytes are
-  // written to disk (save_attachment) and the agent reads them via read_document;
+  // written to disk (save_attachment) and the agent reads them via local file-reading;
   // this block only renders the filename in the bubble.
   | { kind: "file"; name: string; path: string; mimeType: string; sizeBytes: number }
   // Extension breadcrumb (custom message). Currently produced by vision-bridge

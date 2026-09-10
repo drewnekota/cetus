@@ -733,7 +733,9 @@ fn dsh_defaults(home: &Path) -> CliDefaults {
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".dsh"));
     let raw = std::fs::read_to_string(dsh_home.join("settings.yaml")).unwrap_or_default();
-    dsh_defaults_from_settings(&raw)
+    let mut defaults = dsh_defaults_from_settings(&raw);
+    defaults.model = Some("deepseek-flash".into());
+    defaults
 }
 
 fn dsh_defaults_from_settings(raw: &str) -> CliDefaults {
@@ -1110,11 +1112,9 @@ pub fn dispatch_turn(
     // Image attachments: claude takes them inline on the stdin user message
     // (native content blocks); codex ingests file paths via `-i`. Both get the
     // on-disk paths appended to the prompt (image_refs) for file-based reuse.
-    // dsh's ACP profile advertises no image prompt capability, so it also
-    // works from the on-disk paths (the vendored dsh-vision plugin views them).
+    // ACP runtimes, including dsh, receive native image content blocks.
     let is_codex = backend == cetus_bridge::cli_agent::CliBackend::Codex;
-    let is_dsh = backend == cetus_bridge::cli_agent::CliBackend::Dsh;
-    let image_blocks: Vec<(String, String)> = if is_codex || is_dsh {
+    let image_blocks: Vec<(String, String)> = if is_codex {
         Vec::new()
     } else {
         images
@@ -1142,7 +1142,11 @@ pub fn dispatch_turn(
     };
     // codex has no --append-system-prompt equivalent, so the Cetus hint rides
     // the first turn's prompt (resumed turns already have it in context).
-    if (is_codex || backend.is_acp()) && resume_before.is_empty() {
+    // Refresh dsh's CLI guidance on cold resumes as well: older sessions may
+    // still contain instructions to call the retired Cetus plugin tools.
+    let refresh_dsh_hint = backend == cetus_bridge::cli_agent::CliBackend::Dsh
+        && state.acp_session(&conv.id).is_none();
+    if ((is_codex || backend.is_acp()) && resume_before.is_empty()) || refresh_dsh_hint {
         prompt = format!(
             "<cetus-env>\n{}\n</cetus-env>\n\n{prompt}",
             crate::control::AGENT_HINT

@@ -181,7 +181,7 @@ export const chat = {
 
     // Model picker
     "model.flash": "Flash",
-    "model.flashHint": "DeepSeek V4 Flash — fast responses, lower cost",
+    "model.flashHint": "DeepSeek V4.1 Flash — fast responses, lower cost",
     "model.pro": "Pro",
     "model.proHint": "DeepSeek V4 Pro — full capability",
     "model.off": "Off",
@@ -431,7 +431,7 @@ export const chat = {
     "bubble.interruptedResume": "应用重启后已恢复运行",
 
     "model.flash": "Flash",
-    "model.flashHint": "DeepSeek V4 Flash · 快速响应，更低成本",
+    "model.flashHint": "DeepSeek V4.1 Flash · 快速响应，更低成本",
     "model.pro": "Pro",
     "model.proHint": "DeepSeek V4 Pro · 完整能力",
     "model.off": "关闭",
@@ -555,7 +555,7 @@ export const chat = {
     "bubble.interruptedResume": "アプリ再起動後に再開しました",
 
     "model.flash": "フラッシュ",
-    "model.flashHint": "DeepSeek V4 Flash · 高速応答、低コスト",
+    "model.flashHint": "DeepSeek V4.1 Flash · 高速応答、低コスト",
     "model.pro": "プロ",
     "model.proHint": "DeepSeek V4 Pro · フル機能",
     "model.off": "オフ",
@@ -667,7 +667,7 @@ export const chat = {
     "bubble.interruptedResume": "앱 재시작 후 재개됨",
 
     "model.flash": "플래시",
-    "model.flashHint": "DeepSeek V4 Flash · 빠른 응답, 저렴한 비용",
+    "model.flashHint": "DeepSeek V4.1 Flash · 빠른 응답, 저렴한 비용",
     "model.pro": "프로",
     "model.proHint": "DeepSeek V4 Pro · 전체 기능",
     "model.off": "끔",
@@ -779,7 +779,7 @@ export const chat = {
     "bubble.interruptedResume": "Reanudado tras un reinicio de la app",
 
     "model.flash": "Flash",
-    "model.flashHint": "DeepSeek V4 Flash · respuestas rápidas, menor costo",
+    "model.flashHint": "DeepSeek V4.1 Flash · respuestas rápidas, menor costo",
     "model.pro": "Pro",
     "model.proHint": "DeepSeek V4 Pro · capacidad completa",
     "model.off": "Apagado",
@@ -891,7 +891,7 @@ export const chat = {
     "bubble.interruptedResume": "Retomado após reinício do app",
 
     "model.flash": "Flash",
-    "model.flashHint": "DeepSeek V4 Flash · respostas rápidas, menor custo",
+    "model.flashHint": "DeepSeek V4.1 Flash · respostas rápidas, menor custo",
     "model.pro": "Pro",
     "model.proHint": "DeepSeek V4 Pro · capacidade completa",
     "model.off": "Desligado",
@@ -1003,7 +1003,7 @@ export const chat = {
     "bubble.interruptedResume": "Reprise après un redémarrage de l'app",
 
     "model.flash": "Flash",
-    "model.flashHint": "DeepSeek V4 Flash · réponses rapides, coût réduit",
+    "model.flashHint": "DeepSeek V4.1 Flash · réponses rapides, coût réduit",
     "model.pro": "Pro",
     "model.proHint": "DeepSeek V4 Pro · capacités complètes",
     "model.off": "Désactivé",
@@ -1115,7 +1115,7 @@ export const chat = {
     "bubble.interruptedResume": "Nach App-Neustart fortgesetzt",
 
     "model.flash": "Flash",
-    "model.flashHint": "DeepSeek V4 Flash · schnelle Antworten, geringere Kosten",
+    "model.flashHint": "DeepSeek V4.1 Flash · schnelle Antworten, geringere Kosten",
     "model.pro": "Pro",
     "model.proHint": "DeepSeek V4 Pro · volle Leistungsfähigkeit",
     "model.off": "Aus",
@@ -1227,7 +1227,7 @@ export const chat = {
     "bubble.interruptedResume": "Ripreso dopo il riavvio dell'app",
 
     "model.flash": "Flash",
-    "model.flashHint": "DeepSeek V4 Flash · risposte rapide, costo inferiore",
+    "model.flashHint": "DeepSeek V4.1 Flash · risposte rapide, costo inferiore",
     "model.pro": "Pro",
     "model.proHint": "DeepSeek V4 Pro · capacità complete",
     "model.off": "Spento",
@@ -1339,7 +1339,7 @@ export const chat = {
     "bubble.interruptedResume": "Возобновлено после перезапуска приложения",
 
     "model.flash": "Флэш",
-    "model.flashHint": "DeepSeek V4 Flash · быстрые ответы, низкая стоимость",
+    "model.flashHint": "DeepSeek V4.1 Flash · быстрые ответы, низкая стоимость",
     "model.pro": "Про",
     "model.proHint": "DeepSeek V4 Pro · полные возможности",
     "model.off": "Выкл",

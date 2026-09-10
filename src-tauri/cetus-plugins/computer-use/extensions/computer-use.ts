@@ -4,9 +4,8 @@
  *
  * WHY THIS EXISTS
  * ---------------
- * The base model is text-only: it cannot see a screen, move a mouse, or read
- * pixels. Yet a huge amount of real work lives behind native GUIs that have no
- * API. This extension closes that gap WITHOUT vision: instead of screenshots,
+ * Native GUI interactions need OS tools in addition to model vision.
+ * This extension provides precise controls through accessibility:
  * it exposes the live macOS Accessibility (AX) tree of the frontmost app as a
  * flat, NUMBERED list of actionable elements. The model "sees" the UI as text
  * ("[7] AXButton \"Send\" (enabled)") and acts by INDEX ("click [7]"). This is

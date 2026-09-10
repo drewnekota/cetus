@@ -19,7 +19,7 @@ export function buildAttachmentRefs(files: OutgoingFile[]): string {
   const lines = files.map((f) => `- ${f.name} → ${f.path}`).join("\n");
   return (
     `\n\n${ATTACHMENT_OPEN}\n` +
-    `The user attached these files. Use the read_document tool on each path to read them:\n` +
+    `The user attached these files. Read these paths using available tools. Extract document text locally; render scanned pages to images or use OCR when needed:\n` +
     `${lines}\n${ATTACHMENT_CLOSE}`
   );
 }

@@ -13,10 +13,8 @@
  * pattern as API-key changes), and the next spawn re-reads the file. Absent
  * or empty config → no-op.
  *
- * Models declaring `vision: true` register with `input: ["text", "image"]`,
- * which makes pi pass attached images through natively AND makes the
- * vision-bridge extension's transcription fallback skip itself (it checks
- * `ctx.model.input`).
+ * Models declaring `vision: true` register with `input: ["text", "image"]`
+ * so attachments reach the model directly.
  */
 import { readFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

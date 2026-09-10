@@ -70,7 +70,6 @@ mod text_input;
 mod titling;
 mod transcripts;
 mod updater;
-mod vision;
 mod voice;
 mod webview_health;
 mod window_geom;
@@ -1500,13 +1499,6 @@ pub fn run() {
             std::env::set_var("MCPORTER_CONFIG", &mcp_config);
             mcp::export_config(&app_data_dir, &app.state::<AppState>().store);
 
-            // Vision provider choice: publish `<app_data>/vision.json` + its
-            // path so the vision-bridge / document-bridge pi extensions know
-            // which VLM endpoint to try first. Re-read per call → no pi
-            // recycle needed on change (see vision.rs).
-            std::env::set_var("CETUS_VISION_CONFIG", vision::config_path(&app_data_dir));
-            vision::export_config(&app_data_dir, &app.state::<AppState>().store);
-
             // Custom model providers (Settings → Models): publish
             // `<app_data>/custom-models.json` + its path so the custom-models
             // pi extension registers each configured provider at spawn.
@@ -1833,8 +1825,6 @@ pub fn run() {
         slash_commands::list_slash_commands,
         slash_commands::upsert_slash_command,
         slash_commands::delete_slash_command,
-        vision::vision_get_config,
-        vision::vision_set_config,
         mcp::list_connectors,
         mcp::add_connector,
         mcp::update_connector,
@@ -2025,8 +2015,6 @@ pub fn run() {
         slash_commands::list_slash_commands,
         slash_commands::upsert_slash_command,
         slash_commands::delete_slash_command,
-        vision::vision_get_config,
-        vision::vision_set_config,
         mcp::list_connectors,
         mcp::add_connector,
         mcp::update_connector,

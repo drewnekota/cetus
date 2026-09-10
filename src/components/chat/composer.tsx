@@ -48,6 +48,7 @@ import {
   type MentionResolution,
 } from "@/lib/mentions";
 import { cn } from "@/lib/utils";
+import { splitLeadingQuote } from "@/lib/user-quote";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
 import { api } from "@/lib/tauri";
@@ -175,8 +176,8 @@ function detectMentionToken(
   return { start: i, query: value.slice(i + 1, caret) };
 }
 
-/** A composer attachment. Images ride pi's `images` channel (→ vision-bridge);
- *  every other file is written to disk and read by the agent via read_document. */
+/** A composer attachment. Images ride pi's `images` channel (→ native model input);
+ *  every other file is written to disk and read by the agent via local file-reading. */
 export type ComposerAttachment = ImageAttachment | FileAttachment;
 
 /** Runtime choice captured with a composed message. Selecting a runtime only
@@ -1160,7 +1161,9 @@ export function Composer({
     // peel it off and re-arm the pills from this session's ref cache.
     const { text: prose, labels } = extractMentionRefs(draftRequest.text);
     updateMentionRefs(recallRefs(labels));
-    updateText(prose);
+    const quoted = splitLeadingQuote(prose);
+    updateQuote(quoted?.quote ?? "");
+    updateText(quoted?.text ?? prose);
     updateAttachments((previous) => {
       previous.forEach((attachment) => {
         if (attachment.type === "image" && attachment.previewUrl.startsWith("blob:")) {
@@ -1186,7 +1189,7 @@ export function Composer({
       const pos = node.value.length;
       node.setSelectionRange(pos, pos);
     });
-  }, [disabled, draftRequest, updateAttachments, updateText, updateMentionRefs]);
+  }, [disabled, draftRequest, updateAttachments, updateText, updateMentionRefs, updateQuote]);
 
   useEffect(() => {
     if (disabled) return;

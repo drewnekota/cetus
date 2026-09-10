@@ -54,13 +54,6 @@ import type {
 
 export type { CustomProvider, CustomProviderView } from "@/lib/types";
 
-/** Mirrors vision.rs VisionConfig (serde camelCase). Empty provider = auto. */
-export interface VisionConfig {
-  provider: string;
-  model: string;
-  baseUrl: string;
-}
-
 export interface CaptureSettings {
   enabled: boolean;
   /** Fallback-timer cadence; event triggers (commit/switch/typing) fire on their own. */
@@ -317,7 +310,7 @@ export const api = {
   retryLastTurn: (id: string) =>
     invoke<{ text: string; messages: PiMessage[] }>("retry_last_turn", { id }),
   /** Persist a non-image attachment to disk; returns its absolute path so the
-   *  prompt can reference it for the read_document tool. */
+   *  prompt can reference it for local extraction tools. */
   saveAttachment: (id: string, name: string, data: string) =>
     invoke<string>("save_attachment", { id, name, data }),
   /** Absolute paths of any files on the clipboard (a Finder file copy). Empty on
@@ -417,11 +410,6 @@ export const api = {
   getDeepseekBaseUrl: () => invoke<string>("get_deepseek_base_url"),
   setDeepseekBaseUrl: (url: string) =>
     invoke<void>("set_deepseek_base_url_cmd", { url }),
-  /** Vision provider choice — which VLM transcribes attached images for the
-   *  text-only chat model (pi vision-bridge / document-bridge). */
-  getVisionConfig: () => invoke<VisionConfig>("vision_get_config"),
-  setVisionConfig: (config: VisionConfig) =>
-    invoke<void>("vision_set_config", { config }),
 
   // Automations ------------------------------------------------------------
   listAutomations: () => invoke<Automation[]>("list_automations"),

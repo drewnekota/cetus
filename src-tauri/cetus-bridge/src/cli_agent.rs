@@ -43,40 +43,29 @@ pub enum CliBackend {
 // DSH backend: dsh's `acp` profile is a standard ACP v1 stdio server, so a
 // conversation drives `dsh --profile acp` through the same `spawn_acp_session`
 // path as the other native ACP runtimes. What stays dsh-specific lives here:
-// the vendored plugins Cetus mounts into `$DSH_HOME` (companion tools, vision,
-// artifact delivery), the `.env` credential passthrough, the version gate
+// the Flash model overlay, legacy plugin cleanup, `.env` credential passthrough,
+// the version gate
 // (dsh < 0.1.2 has no `acp` profile), and the mapping from Cetus's model /
 // effort choice onto dsh's `session/set_config_option` catalog.
 // ===========================================================================
-const DSH_BRIDGE_JS: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../dsh-bridge/lib/index.js"
-));
-const DSH_BRIDGE_PACKAGE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../dsh-bridge/package.json"
-));
-const DSH_VISION_PACKAGE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../plugins/dsh-vision/package.json"
-));
-const DSH_VISION_INDEX: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../plugins/dsh-vision/lib/index.js"
-));
-const DSH_VISION_VLM: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../plugins/dsh-vision/lib/vlm.js"
-));
-const DSH_ARTIFACT_PACKAGE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../plugins/dsh-artifact/package.json"
-));
-const DSH_ARTIFACT_INDEX: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../plugins/dsh-artifact/lib/index.js"
-));
-
+// Applied only to Cetus-launched ACP processes, after user profile overlays.
+const DSH_FLASH_PATCH: &str = r#"- id: llm-deepseek
+  config:
+    models:
+      - id: deepseek-flash
+        name: DeepSeek V4.1 Flash
+        contextWindow: 1000000
+        maxTokens: 384000
+        inputModalities: [text, image]
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-flash
+- id: acp
+  config:
+    provider: deepseek-official
+    model: deepseek-flash
+"#;
 fn dsh_home() -> std::path::PathBuf {
     std::env::var("DSH_HOME")
         .map(std::path::PathBuf::from)
@@ -85,236 +74,28 @@ fn dsh_home() -> std::path::PathBuf {
         })
 }
 
-/// Materialize the embedded runtime plugins under DSH_HOME. Embedding keeps
-/// packaged Cetus builds independent of source-tree paths and makes upgrades
-/// atomic at the individual-file level.
-fn dsh_materialize_runtime() -> Result<std::path::PathBuf> {
-    let root = dsh_home().join("cetus-runtime");
-    let files = [
-        ("bridge/package.json", DSH_BRIDGE_PACKAGE),
-        ("bridge/lib/index.js", DSH_BRIDGE_JS),
-        ("plugins/dsh-vision/package.json", DSH_VISION_PACKAGE),
-        ("plugins/dsh-vision/lib/index.js", DSH_VISION_INDEX),
-        ("plugins/dsh-vision/lib/vlm.js", DSH_VISION_VLM),
-        ("plugins/dsh-artifact/package.json", DSH_ARTIFACT_PACKAGE),
-        ("plugins/dsh-artifact/lib/index.js", DSH_ARTIFACT_INDEX),
-    ];
-    for (relative, contents) in files {
-        let path = root.join(relative);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+/// Prepare only the model overlay. App capabilities are exposed through the
+/// shared Cetus CLI, not through dsh-specific plugins.
+fn dsh_prepare_runtime(home: &std::path::Path) -> Result<std::path::PathBuf> {
+    let config = home.join("cordis.patch.yml");
+    match std::fs::read_to_string(&config) {
+        Ok(text) => {
+            let (user, previous) = dsh_split_managed_block(&text);
+            if previous.is_some() {
+                std::fs::write(&config, user)
+                    .context("could not remove retired Cetus plugin mounts")?;
+            }
         }
-        if std::fs::read_to_string(&path).ok().as_deref() != Some(contents) {
-            std::fs::write(path, contents)?;
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("could not read dsh plugin overlay"),
+    }
+    let root = home.join("cetus-runtime");
+    std::fs::create_dir_all(&root)?;
+    let patch = root.join("flash.patch.yml");
+    if std::fs::read_to_string(&patch).ok().as_deref() != Some(DSH_FLASH_PATCH) {
+        std::fs::write(&patch, DSH_FLASH_PATCH)?;
     }
     Ok(root)
-}
-
-/// Companion-vendored plugins shipped alongside the bridge. Each mounts by id
-/// unless the user's config already mentions that id (their copy wins).
-const VENDORED_PLUGINS: &[&str] = &["dsh-vision", "dsh-artifact"];
-
-/// Host packages a vendored plugin may declare as peerDependencies, mapped to
-/// checkout paths for the marisa#2 symlink workaround.
-const DSH_HOST_PACKAGES: &[(&str, &str)] = &[
-    ("@deepseek-ai/cordis", "vendor/cordis"),
-    ("cordis", "vendor/cordis"),
-    ("cosmokit", "vendor/cosmokit"),
-    ("schemastery", "vendor/schemastery"),
-    ("@deepseek-ai/schemastery", "vendor/schemastery"),
-    ("@deepseek-ai/dsh-tools", "packages/core/tools"),
-    (
-        "@deepseek-ai/dsh-system-prompt",
-        "packages/core/system-prompt",
-    ),
-];
-
-/// Root of the dsh install behind `bin`: a monorepo checkout (has `packages/`
-/// and `apps/`) or the installed `@deepseek-ai/dsh` package. `bin` is either
-/// an explicit path or a name resolved on `PATH`.
-fn dsh_install_for_bin(bin: &str) -> Option<std::path::PathBuf> {
-    let launcher = if std::path::Path::new(bin).components().count() > 1 {
-        std::path::PathBuf::from(bin)
-    } else {
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        std::env::split_paths(&path)
-            .flat_map(|dir| {
-                [bin.to_string(), format!("{bin}.cmd"), format!("{bin}.exe")]
-                    .map(move |name| dir.join(name))
-            })
-            .find(|candidate| candidate.is_file())?
-    };
-    let real = std::fs::canonicalize(launcher).ok()?;
-    let mut cursor = real.as_path();
-    let mut package_root = None;
-    while let Some(parent) = cursor.parent() {
-        let is_checkout = parent.join("packages").is_dir() && parent.join("apps").is_dir();
-        let is_package = std::fs::read_to_string(parent.join("package.json"))
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .and_then(|json| json.get("name").and_then(Value::as_str).map(str::to_string))
-            .is_some_and(|name| name == "@deepseek-ai/dsh");
-        if is_checkout {
-            return Some(parent.to_path_buf());
-        }
-        if is_package {
-            package_root.get_or_insert_with(|| parent.to_path_buf());
-        }
-        cursor = parent;
-    }
-    package_root
-}
-
-/// marisa#2 workaround for a vendored plugin dir: link declared host packages.
-fn dsh_link_host_packages(plugin_dir: &std::path::Path, install: &std::path::Path) {
-    let Ok(text) = std::fs::read_to_string(plugin_dir.join("package.json")) else {
-        return;
-    };
-    let Ok(package) = serde_json::from_str::<Value>(&text) else {
-        return;
-    };
-    let names = package
-        .get("peerDependencies")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|object| object.keys())
-        .chain(
-            package
-                .get("dependencies")
-                .and_then(Value::as_object)
-                .into_iter()
-                .flat_map(|object| object.keys()),
-        );
-    for name in names {
-        let Some((_, rel)) = DSH_HOST_PACKAGES.iter().find(|(known, _)| known == name) else {
-            continue;
-        };
-        let Some(source) = dsh_host_package_source(install, rel, name) else {
-            continue;
-        };
-        let link = plugin_dir.join("node_modules").join(name);
-        // Re-point a link left behind by a previous dsh install; a real
-        // directory (the user's own copy) is left alone.
-        if let Ok(meta) = std::fs::symlink_metadata(&link) {
-            if meta.file_type().is_symlink()
-                && std::fs::read_link(&link).ok().as_deref() != Some(&source)
-            {
-                let _ = std::fs::remove_file(&link);
-            }
-        }
-        if !link.exists() {
-            if let Some(parent) = link.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            #[cfg(unix)]
-            let _ = std::os::unix::fs::symlink(&source, &link);
-        }
-    }
-}
-
-/// Where a host package lives for a given dsh install: the checkout's own
-/// package dir, else `node_modules/<name>` beside the install or in any
-/// ancestor `node_modules` (npm hoists `@deepseek-ai/dsh`'s dependencies above
-/// the package directory itself).
-fn dsh_host_package_source(
-    install: &std::path::Path,
-    checkout_rel: &str,
-    name: &str,
-) -> Option<std::path::PathBuf> {
-    let checkout = install.join(checkout_rel);
-    if checkout.exists() {
-        return Some(checkout);
-    }
-    let mut cursor = Some(install);
-    while let Some(dir) = cursor {
-        let candidate = dir.join("node_modules").join(name);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-        if dir.file_name().is_some_and(|n| n == "node_modules") {
-            let sibling = dir.join(name);
-            if sibling.exists() {
-                return Some(sibling);
-            }
-        }
-        cursor = dir.parent();
-    }
-    None
-}
-
-/// Where the vendored plugins live: env override, else the repo dir in dev.
-fn dsh_vendored_plugins_dir() -> std::path::PathBuf {
-    std::env::var("DSH_COMPANION_PLUGINS_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| dsh_home().join("cetus-runtime/plugins"))
-}
-
-/// Ensure the dsh home overlay (`$DSH_HOME/cordis.patch.yml`, applied to every
-/// profile including `acp`) mounts the companion tools plugin and the bundled
-/// plugins. Cetus owns the rows inside its marked block and rewrites them on
-/// every launch, so a stale path from a previous app version heals itself
-/// (dsh 0.1.2 fails the whole profile boot on one unloadable plugin). A row
-/// for the same id that the user wrote outside the block wins as long as the
-/// file it points at still exists.
-fn dsh_ensure_plugins_mounted(bin: &str) -> Result<()> {
-    let runtime = dsh_materialize_runtime()?;
-    let install = dsh_install_for_bin(bin);
-    let link = |plugin_dir: &std::path::Path| {
-        if let Some(install) = install.as_deref() {
-            dsh_link_host_packages(plugin_dir, install);
-        }
-    };
-    let home = dsh_home();
-    let config = home.join("cordis.patch.yml");
-    let (existing, previous_block) =
-        dsh_split_managed_block(&std::fs::read_to_string(&config).unwrap_or_default());
-    let lib = std::env::var("DSH_COMPANION_BRIDGE_LIB").unwrap_or_else(|_| {
-        runtime
-            .join("bridge/lib/index.js")
-            .to_string_lossy()
-            .into_owned()
-    });
-    let bridge_dir = std::path::Path::new(&lib)
-        .parent()
-        .and_then(std::path::Path::parent)
-        .context("invalid Dsh bridge path")?;
-    link(bridge_dir);
-    std::fs::create_dir_all(&home)?;
-    let mut rows = String::new();
-    if !dsh_user_row_is_live(&existing, "dsh-companion-bridge") {
-        rows.push_str(&format!(
-            "    - id: dsh-companion-bridge\n      name: '{lib}'\n"
-        ));
-    }
-    let plugins_dir = dsh_vendored_plugins_dir();
-    for id in VENDORED_PLUGINS {
-        if dsh_user_row_is_live(&existing, id) {
-            continue; // the user's own working mount of this plugin wins
-        }
-        let dir = plugins_dir.join(id);
-        let entry = dir.join("lib/index.js");
-        if entry.exists() {
-            link(&dir);
-            rows.push_str(&format!(
-                "    - id: {id}\n      name: '{}'\n",
-                entry.display()
-            ));
-        }
-    }
-    let block = if rows.is_empty() {
-        String::new()
-    } else {
-        format!("\n{DSH_MANAGED_BEGIN}\n- insert:\n{rows}{DSH_MANAGED_END}\n")
-    };
-    if previous_block.as_deref() == Some(block.as_str()) {
-        return Ok(());
-    }
-    std::fs::write(
-        &config,
-        format!("{}{block}", existing.trim_end_matches('\n')),
-    )?;
-    Ok(())
 }
 
 const DSH_MANAGED_BEGIN: &str = "# >>> dsh-companion managed block (do not edit)";
@@ -344,28 +125,6 @@ fn dsh_split_managed_block(text: &str) -> (String, Option<String>) {
     user.push_str(&text[end..]);
     let block = format!("\n{}", &text[begin..end]);
     (user, Some(block))
-}
-
-/// A row `- id: <id>` the user wrote themselves whose `name: '<path>'` still
-/// resolves to a file. Dead rows fall through so Cetus's own mount replaces
-/// the plugin (the dead row still needs the user's attention; dsh reports it).
-fn dsh_user_row_is_live(user_text: &str, id: &str) -> bool {
-    let marker = format!("- id: {id}");
-    let Some(at) = user_text.find(&marker) else {
-        return false;
-    };
-    let rest = &user_text[at + marker.len()..];
-    let Some(name_line) = rest.lines().nth(1) else {
-        return true; // not a plain file mount (a package name or a config-only row)
-    };
-    let Some(value) = name_line.trim().strip_prefix("name:") else {
-        return true;
-    };
-    let value = value.trim().trim_matches('\'').trim_matches('"');
-    if !std::path::Path::new(value).is_absolute() {
-        return true; // a package name: the loader resolves it
-    }
-    std::path::Path::new(value).exists()
 }
 
 /// Oldest dsh whose `acp` profile Cetus can drive. Earlier releases only had
@@ -437,7 +196,7 @@ async fn dsh_require_supported_version(bin: &str) -> Result<()> {
 }
 
 /// `$DSH_HOME/.env` is dsh's own credential file; hand it to the child so the
-/// vendored plugins (dsh-vision etc.) see their keys regardless of which shell
+/// native model adapters see their keys regardless of which shell
 /// rc files a non-interactive login shell reads. Caller-supplied env is applied
 /// afterwards and wins.
 fn dsh_dotenv() -> Vec<(String, String)> {
@@ -611,7 +370,7 @@ mod dsh_tests {
     }
 
     #[test]
-    fn dsh_managed_block_round_trips_and_heals_stale_rows() {
+    fn dsh_legacy_managed_block_isolated_from_user_config() {
         let user = "- id: dsh-gal\n  name: '/nowhere/dsh-gal/lib/index.js'\n";
         let block = format!(
             "\n{DSH_MANAGED_BEGIN}\n- insert:\n    - id: dsh-vision\n      name: '/old/app/dsh-vision/lib/index.js'\n{DSH_MANAGED_END}\n"
@@ -626,45 +385,29 @@ mod dsh_tests {
         let (rest, previous) = dsh_split_managed_block(&middle);
         assert_eq!(rest, "- id: after\n  name: '@scope/pkg'\n");
         assert!(previous.is_some());
-        // A user row for a managed id only wins while its file exists; a stale
-        // row (the 2026-08-24 boot failure) no longer blocks Cetus's mount.
-        assert!(!dsh_user_row_is_live(user, "dsh-gal"));
-        assert!(!dsh_user_row_is_live(user, "dsh-vision"));
-        assert!(dsh_user_row_is_live(
-            "- id: dsh-vision\n  name: '@dsh-external/dsh-vision'\n",
-            "dsh-vision"
-        ));
-        let live = std::env::temp_dir().join(format!("cetus-dsh-live-row-{}", std::process::id()));
-        std::fs::write(&live, b"").unwrap();
-        assert!(dsh_user_row_is_live(
-            &format!("- id: dsh-vision\n  name: '{}'\n", live.display()),
-            "dsh-vision"
-        ));
-        let _ = std::fs::remove_file(live);
     }
 
     #[test]
-    fn dsh_host_packages_resolve_through_hoisted_node_modules() {
-        let root = std::env::temp_dir().join(format!("cetus-dsh-hoist-{}", std::process::id()));
-        let install = root.join("node_modules/@deepseek-ai/dsh");
-        let hoisted = root.join("node_modules/@deepseek-ai/dsh-tools");
-        std::fs::create_dir_all(&install).unwrap();
-        std::fs::create_dir_all(&hoisted).unwrap();
+    fn dsh_upgrade_removes_only_managed_plugins_and_is_idempotent() {
+        let home = std::env::temp_dir().join(format!("cetus-dsh-migration-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let config = home.join("cordis.patch.yml");
+        let user = "- id: user-plugin\n  name: '@scope/plugin'\n";
+        std::fs::write(&config, format!("{user}\n{DSH_MANAGED_BEGIN}\n- insert:\n    - id: dsh-companion-bridge\n      name: '/old/bridge.js'\n    - id: dsh-artifact\n      name: '/old/artifact.js'\n{DSH_MANAGED_END}\n")).unwrap();
+        let runtime = dsh_prepare_runtime(&home).unwrap();
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
         assert_eq!(
-            dsh_host_package_source(&install, "packages/core/tools", "@deepseek-ai/dsh-tools"),
-            Some(hoisted)
+            std::fs::read_to_string(runtime.join("flash.patch.yml")).unwrap(),
+            DSH_FLASH_PATCH
         );
-        assert_eq!(
-            dsh_host_package_source(&install, "vendor/x", "@deepseek-ai/missing"),
-            None
-        );
-        let checkout = root.join("checkout");
-        std::fs::create_dir_all(checkout.join("packages/core/tools")).unwrap();
-        assert_eq!(
-            dsh_host_package_source(&checkout, "packages/core/tools", "@deepseek-ai/dsh-tools"),
-            Some(checkout.join("packages/core/tools"))
-        );
-        let _ = std::fs::remove_dir_all(root);
+        dsh_prepare_runtime(&home).unwrap();
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+        // User-managed plugin rows outside our old marker are preserved.
+        let own = "- id: dsh-artifact\n  name: '@custom/artifact'\n";
+        std::fs::write(&config, own).unwrap();
+        dsh_prepare_runtime(&home).unwrap();
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), own);
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     #[test]
@@ -674,12 +417,9 @@ mod dsh_tests {
         assert!(dsh_config_updates(&Value::Null, Some("deepseek-v4-pro"), None).is_empty());
     }
 
-    /// dsh-artifact's `send_artifact` answers with Cetus's `CETUS_ARTIFACT:`
-    /// marker in the visible tool result, because the ACP tool lifecycle
-    /// carries no presentation meta. The generic ACP translator must promote
-    /// it into a file card exactly like a `cetus artifact` bash call.
+    /// CLI artifact markers in bash output must become file cards over ACP.
     #[test]
-    fn dsh_send_artifact_marker_is_promoted_over_acp() {
+    fn dsh_cli_artifact_marker_is_promoted_over_acp() {
         let dir =
             std::env::temp_dir().join(format!("cetus-dsh-acp-artifact-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -690,10 +430,10 @@ mod dsh_tests {
         let mut events = translator.on_acp_update(&json!({
             "sessionUpdate": "tool_call",
             "toolCallId": "call-1",
-            "title": "send_artifact",
-            "kind": "other",
+            "title": "bash",
+            "kind": "execute",
             "status": "in_progress",
-            "rawInput": { "path": file.to_string_lossy() }
+            "rawInput": { "command": format!("cetus artifact {}", file.display()) }
         }));
         let marker = format!(
             "CETUS_ARTIFACT:{}",
@@ -718,10 +458,11 @@ mod dsh_tests {
     }
 
     /// Drive a real `dsh --profile acp` end to end through the generic ACP
-    /// session path: version gate, plugin mount, model selection, one turn,
+    /// session path: version gate, model selection, native images and CLI tools,
     /// then a resume of the same session in a fresh process.
     /// `cargo test -p cetus-bridge live_dsh_acp -- --ignored --nocapture`;
     /// `CETUS_TEST_DSH_BIN` picks the binary (default `dsh` on PATH).
+    /// Requires `cetus` on PATH and a running app for read-only CLI checks.
     #[tokio::test]
     #[ignore]
     async fn live_dsh_acp_smoke() {
@@ -748,9 +489,14 @@ mod dsh_tests {
         std::env::set_var("DSH_HOME", &isolated_home);
         let cwd = std::env::temp_dir().join("cetus-live-dsh-acp-cwd");
         std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(
+            cwd.join("cli-test-report.txt"),
+            "Cetus CLI delivery smoke test",
+        )
+        .unwrap();
         let env: Vec<(String, String)> = std::env::vars().collect();
 
-        let run = |resume: Option<String>, prompt: &str| {
+        let run = |resume: Option<String>, prompt: &str, images: Vec<(String, String)>| {
             let sink = Arc::new(Sink(std::sync::Mutex::new(Vec::new())));
             let session = spawn_acp_session(
                 CliBackend::Dsh,
@@ -769,7 +515,7 @@ mod dsh_tests {
             )
             .unwrap();
             let receiver = session
-                .start_turn(prompt.to_string(), Vec::new(), sink.clone())
+                .start_turn(prompt.to_string(), images, sink.clone())
                 .unwrap();
             async move {
                 let outcome = tokio::time::timeout(Duration::from_secs(240), receiver)
@@ -781,7 +527,12 @@ mod dsh_tests {
             }
         };
 
-        let (first, sink) = run(None, "Reply with exactly CETUS_DSH_OK. Do not use tools.").await;
+        let (first, sink) = run(
+            None,
+            "Reply with exactly CETUS_DSH_OK. Do not use tools.",
+            Vec::new(),
+        )
+        .await;
         assert!(first.error.is_none(), "{:?}", first.error);
         let messages = serde_json::to_string(&first.messages).unwrap();
         assert!(messages.contains("CETUS_DSH_OK"), "{messages}");
@@ -793,11 +544,13 @@ mod dsh_tests {
         }));
         let session_id = first.resume_id.clone().expect("dsh session id");
 
-        // The plugins mounted: list_automations is a Cetus tool, and a fresh
-        // process resumes the persisted session with its context intact.
+        // The native bash tool uses the same CLI as other runtimes. Queries
+        // are read-only and discard private contents; artifact output is caught
+        // by this test's sink rather than delivered to a real conversation.
         let (second, sink) = run(
             Some(session_id.clone()),
-            "What exact token did I ask you to reply with a moment ago? Answer with just that token. Then call the list_automations tool once and reply DONE.",
+            "What exact token did I ask you to reply with a moment ago? Repeat that token. Then use your native bash tool to run these Cetus CLI commands: `cetus cron list >/dev/null`, `cetus context timeline --last 1m >/dev/null`, `cetus context search cetus-test --last 1m >/dev/null`, and `cetus artifact cli-test-report.txt`. Keep the artifact command output visible. Do not use any Cetus plugin tools. Reply DONE after all commands succeed.",
+            Vec::new(),
         )
         .await;
         assert!(second.error.is_none(), "{:?}", second.error);
@@ -807,7 +560,38 @@ mod dsh_tests {
             messages.contains("CETUS_DSH_OK"),
             "resume lost context: {messages}"
         );
+        let (vision, _) = run(
+            Some(session_id.clone()),
+            "What is the solid color of this image? Reply with just the English color name. Do not use tools.",
+            vec![("image/png".into(), "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR4nO3NsQ0AAAzCMP5/un0CNkuZ41wybXsHAAAAAAAAAAAAxR4yw/wuPL6QkAAAAABJRU5ErkJggg==".into())],
+        ).await;
+        assert!(vision.error.is_none(), "{:?}", vision.error);
+        let vision_messages = serde_json::to_string(&vision.messages).unwrap();
+        assert!(
+            vision_messages.to_lowercase().contains("red"),
+            "{vision_messages}"
+        );
         let events = sink.0.lock().unwrap();
+        let recorded = serde_json::to_string(&*events).unwrap();
+        for command in [
+            "cetus cron list",
+            "cetus context timeline",
+            "cetus context search",
+            "cetus artifact",
+        ] {
+            assert!(recorded.contains(command), "CLI command missing: {command}");
+        }
+        assert!(
+            events
+                .iter()
+                .any(|event| event.pointer("/result/details/name")
+                    == Some(&json!("cli-test-report.txt"))),
+            "CLI artifact was not promoted to a file card: {recorded}"
+        );
+        assert!(
+            !isolated_home.join("cordis.patch.yml").exists(),
+            "must not mount Cetus plugins"
+        );
         assert!(
             events.iter().any(|event| event
                 .pointer("/assistantMessageEvent/type")
@@ -4536,11 +4320,8 @@ pub fn spawn_acp_session(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     if backend == CliBackend::Dsh {
-        // dsh reads `$DSH_HOME/cordis.patch.yml` for every profile, so the
-        // companion tools / vision / artifact plugins mount into `acp` too.
-        if let Err(error) = dsh_ensure_plugins_mounted(bin) {
-            tracing::warn!("dsh: could not mount the Cetus plugins: {error:#}");
-        }
+        let runtime = dsh_prepare_runtime(&dsh_home())?;
+        command.arg("--patch").arg(runtime.join("flash.patch.yml"));
         for (key, value) in dsh_dotenv() {
             command.env(key, value);
         }
@@ -4774,13 +4555,25 @@ pub fn spawn_acp_session(
             }
         }
 
-        if backend == CliBackend::Dsh && (opts.model.is_some() || opts.effort.is_some()) {
+        if backend == CliBackend::Dsh {
             let catalog = session_result
                 .get("configOptions")
                 .cloned()
                 .unwrap_or(Value::Null);
             let updates =
-                dsh_config_updates(&catalog, opts.model.as_deref(), opts.effort.as_deref());
+                dsh_config_updates(&catalog, Some("deepseek-flash"), opts.effort.as_deref());
+            if !updates.iter().any(|(id, _)| id == "model") {
+                fail_queued_acp_turns(
+                    &mut rx,
+                    backend,
+                    artifact_dir.as_deref(),
+                    &translator_cwd,
+                    &conversation_id,
+                    "dsh does not expose deepseek-flash; check its model settings or update dsh.",
+                );
+                let _ = child.start_kill();
+                return;
+            }
             for (index, (config_id, value)) in updates.into_iter().enumerate() {
                 let params = json!({
                     "sessionId": session_id,
@@ -4797,6 +4590,18 @@ pub fn spawn_acp_session(
                 .await
                 {
                     tracing::warn!("dsh ACP session/set_config_option {config_id} failed: {error}");
+                    if config_id == "model" {
+                        fail_queued_acp_turns(
+                            &mut rx,
+                            backend,
+                            artifact_dir.as_deref(),
+                            &translator_cwd,
+                            &conversation_id,
+                            &format!("Could not select DeepSeek Flash: {error}"),
+                        );
+                        let _ = child.start_kill();
+                        return;
+                    }
                 }
             }
         }
