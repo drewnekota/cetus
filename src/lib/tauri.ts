@@ -354,6 +354,8 @@ export const api = {
     ),
   readWorkspaceTextFile: (workspaceDir: string, path: string) =>
     invoke<WorkspaceTextPreview>("read_workspace_text_file", { workspaceDir, path }),
+  writeWorkspaceTextFile: (workspaceDir: string, path: string, text: string, expectedText: string) =>
+    invoke<void>("write_workspace_text_file", { workspaceDir, path, text, expectedText }),
   revealInFinder: (path: string) => invoke<void>("reveal_in_finder", { path }),
   /** Open an http(s)/mailto link in the user's default browser. */
   openExternal: (url: string) => invoke<void>("open_external", { url }),

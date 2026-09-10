@@ -2663,7 +2663,7 @@ pub async fn read_workspace_text_file(
             .map_err(err)?;
         let bytes = output.stdout.get(split + 1..).unwrap_or_default();
         return Ok(WorkspaceTextPreview {
-            text: String::from_utf8_lossy(bytes).to_string(),
+            text: decode_workspace_text(bytes, total_bytes > MAX_BYTES)?,
             truncated: total_bytes > MAX_BYTES,
             total_bytes,
         });
@@ -2680,10 +2680,77 @@ pub async fn read_workspace_text_file(
         .read_to_end(&mut bytes)
         .map_err(err)?;
     Ok(WorkspaceTextPreview {
-        text: String::from_utf8_lossy(&bytes).to_string(),
+        text: decode_workspace_text(&bytes, meta.len() > MAX_BYTES)?,
         truncated: meta.len() > MAX_BYTES,
         total_bytes: meta.len(),
     })
+}
+
+// Never expose lossy-decoded binary data as editable text. A bounded preview
+// may end in the middle of an otherwise valid UTF-8 character.
+fn decode_workspace_text(bytes: &[u8], truncated: bool) -> CmdResult<String> {
+    if bytes
+        .iter()
+        .any(|byte| *byte < 32 && !matches!(*byte, 9 | 10 | 12 | 13))
+    {
+        return Err("This file contains binary data and cannot be edited as text.".into());
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) => Ok(text.to_string()),
+        Err(error) if truncated && error.error_len().is_none() => {
+            Ok(std::str::from_utf8(&bytes[..error.valid_up_to()])
+                .unwrap()
+                .to_string())
+        }
+        Err(_) => Err("This file is not UTF-8 text and cannot be edited as text.".into()),
+    }
+}
+
+#[tauri::command]
+pub async fn write_workspace_text_file(
+    workspace_dir: String,
+    path: String,
+    text: String,
+    expected_text: String,
+) -> CmdResult<()> {
+    if cetus_bridge::remote::parse_remote_workspace(&workspace_dir).is_some() {
+        return Err("Editing remote files is not supported yet.".into());
+    }
+    const MAX_BYTES: u64 = 1024 * 1024;
+    if text.len() as u64 > MAX_BYTES {
+        return Err("File exceeds the 1 MB editing limit.".into());
+    }
+    decode_workspace_text(text.as_bytes(), false)?;
+    let (root, target) = checked_local_workspace_entry(&workspace_dir, &path)?;
+    let target = target.canonicalize().map_err(err)?;
+    if !target.starts_with(&root) {
+        return Err("file symlink points outside the workspace".into());
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&target)
+        .map_err(err)?;
+    if !file.metadata().map_err(err)?.is_file() || file.metadata().map_err(err)?.len() > MAX_BYTES {
+        return Err("File is not a complete editable text file.".into());
+    }
+    let mut current = Vec::new();
+    (&mut file)
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut current)
+        .map_err(err)?;
+    let current = decode_workspace_text(&current, false)?;
+    if current != expected_text {
+        return Err(
+            "File changed on disk. Reopen it and reconcile your edits before saving.".into(),
+        );
+    }
+    use std::io::{Seek, Write};
+    file.rewind().map_err(err)?;
+    file.write_all(text.as_bytes()).map_err(err)?;
+    file.set_len(text.len() as u64).map_err(err)?;
+    file.sync_all().map_err(err)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -3352,6 +3419,110 @@ The user attached these files. Read these paths using available tools. Extract d
         }
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn workspace_editor_reads_dotfiles_and_saves_without_clobbering_external_changes() {
+        let root = std::env::temp_dir().join(format!("cetus-editor-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let workspace = root.to_string_lossy().to_string();
+        for name in [
+            ".env.local",
+            ".gitignore",
+            "LICENSE",
+            "config.custom",
+            "next.config.mjs",
+        ] {
+            let path = root.join(name);
+            let path_string = path.to_string_lossy().to_string();
+            let original = "# 配置\r\nVALUE=old\r\n";
+            std::fs::write(&path, original).unwrap();
+            let preview = read_workspace_text_file(workspace.clone(), path_string.clone())
+                .await
+                .unwrap();
+            assert_eq!(preview.text, original);
+            assert!(!preview.truncated);
+            write_workspace_text_file(
+                workspace.clone(),
+                path_string.clone(),
+                "VALUE=new\r\n".into(),
+                preview.text,
+            )
+            .await
+            .unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "VALUE=new\r\n");
+            std::fs::write(&path, "external edit").unwrap();
+            let result = write_workspace_text_file(
+                workspace.clone(),
+                path_string,
+                "overwrite".into(),
+                "VALUE=new\r\n".into(),
+            )
+            .await;
+            assert!(result.unwrap_err().contains("changed on disk"));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "external edit");
+        }
+        let binary = root.join("binary.custom");
+        std::fs::write(&binary, b"abc\0def").unwrap();
+        assert!(
+            read_workspace_text_file(workspace.clone(), binary.to_string_lossy().into())
+                .await
+                .is_err()
+        );
+        assert!(write_workspace_text_file(
+            workspace.clone(),
+            binary.to_string_lossy().into(),
+            "abc".into(),
+            "abc\0def".into()
+        )
+        .await
+        .is_err());
+        assert_eq!(std::fs::read(&binary).unwrap(), b"abc\0def");
+        let large = root.join("large");
+        std::fs::write(&large, vec![b'x'; 1024 * 1024 + 1]).unwrap();
+        assert!(write_workspace_text_file(
+            workspace.clone(),
+            large.to_string_lossy().into(),
+            "short".into(),
+            "x".repeat(1024 * 1024)
+        )
+        .await
+        .is_err());
+        assert_eq!(std::fs::metadata(&large).unwrap().len(), 1024 * 1024 + 1);
+        #[cfg(unix)]
+        {
+            let outside = root.with_extension("outside");
+            std::fs::write(&outside, "original").unwrap();
+            let link = root.join("link");
+            std::os::unix::fs::symlink(&outside, &link).unwrap();
+            assert!(write_workspace_text_file(
+                workspace,
+                link.to_string_lossy().into(),
+                "overwrite".into(),
+                "original".into()
+            )
+            .await
+            .unwrap_err()
+            .contains("outside the workspace"));
+            assert_eq!(std::fs::read_to_string(&outside).unwrap(), "original");
+            std::fs::remove_file(outside).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn workspace_text_detection_is_lossless_at_preview_boundary() {
+        assert!(decode_workspace_text(&[0xff, 0xfe], false).is_err());
+        assert!(decode_workspace_text(b"SQLite format 3\0", false).is_err());
+        assert_eq!(
+            decode_workspace_text(&[b'a', 0xe4, 0xb8], true).unwrap(),
+            "a"
+        );
+        assert!(decode_workspace_text(&[b'a', 0xe4, 0xb8], false).is_err());
+        assert_eq!(
+            decode_workspace_text("\u{feff}你好\r\n".as_bytes(), false).unwrap(),
+            "\u{feff}你好\r\n"
+        );
     }
 
     #[tokio::test]

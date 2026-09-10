@@ -37,6 +37,7 @@ import {
   Video,
   X,
 } from "lucide-react";
+import { TextFileEditor } from "./text-file-editor";
 import { Spinner } from "@/components/ui/spinner";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -907,6 +908,7 @@ function FilePreview({
 }) {
   const { t } = useTranslation("chat");
   const [text, setText] = useState<string | null>(null);
+  const [loadedPath, setLoadedPath] = useState<string | null>(null);
   const [textError, setTextError] = useState<string | null>(null);
   const [textTruncated, setTextTruncated] = useState<number | null>(null);
   const [modeByPath, setModeByPath] = useState<Record<string, "preview" | "source">>({});
@@ -919,6 +921,7 @@ function FilePreview({
   useEffect(() => {
     let alive = true;
     setText(null);
+    setLoadedPath(null);
     setTextError(null);
     setTextTruncated(null);
     if (!file || !needsText(kind, mode, ext)) return;
@@ -926,6 +929,7 @@ function FilePreview({
       .readWorkspaceTextFile(workspaceDir, file.path)
       .then((value) => {
         if (alive) {
+          setLoadedPath(file.path);
           setText(value.text);
           setTextTruncated(value.truncated ? value.totalBytes : null);
         }
@@ -1003,8 +1007,10 @@ function FilePreview({
         {isRemote && !needsText(kind, mode, ext) ? (
           <FileDetails file={file} ext={ext} kind={kind} />
         ) : mode === "source" ? (
-          <TextPreview text={text} error={textError}>
-            {(value) => <SourcePreview text={value} ext={ext} />}
+          <TextPreview text={loadedPath === file.path ? text : null} error={textError}>
+            {(value) => isRemote || textTruncated != null
+              ? <SourcePreview text={value} ext={ext} />
+              : <TextFileEditor key={`${workspaceDir}:${file.path}`} workspaceDir={workspaceDir} path={file.path} text={value} />}
           </TextPreview>
         ) : kind === "image" ? (
           <div className="grid min-h-full place-items-center bg-muted/20 p-4">
@@ -1026,7 +1032,7 @@ function FilePreview({
             className="h-full min-h-[480px] w-full"
           />
         ) : kind === "markdown" ? (
-          <TextPreview text={text} error={textError}>
+          <TextPreview text={loadedPath === file.path ? text : null} error={textError}>
             {(value) => (
               <div className="prose prose-sm dark:prose-invert max-w-none px-5 py-4 prose-pre:bg-secondary prose-pre:text-foreground">
                 <ReactMarkdown
@@ -1040,12 +1046,14 @@ function FilePreview({
             )}
           </TextPreview>
         ) : kind === "csv" ? (
-          <TextPreview text={text} error={textError}>
+          <TextPreview text={loadedPath === file.path ? text : null} error={textError}>
             {(value) => <CsvPreview text={value} />}
           </TextPreview>
         ) : kind === "text" ? (
-          <TextPreview text={text} error={textError}>
-            {(value) => <SourcePreview text={value} ext={ext} />}
+          <TextPreview text={loadedPath === file.path ? text : null} error={textError}>
+            {(value) => isRemote || textTruncated != null
+              ? <SourcePreview text={value} ext={ext} />
+              : <TextFileEditor key={`${workspaceDir}:${file.path}`} workspaceDir={workspaceDir} path={file.path} text={value} />}
           </TextPreview>
         ) : kind === "office" && canPreviewOffice(ext) ? (
           <OfficePreview file={file} assetUrl={assetUrl} ext={ext} />
@@ -1310,44 +1318,13 @@ function previewKind(name: string): PreviewKind {
   if (["md", "markdown", "mdx"].includes(ext)) return "markdown";
   if (["csv", "tsv"].includes(ext)) return "csv";
   if (["doc", "docx", "xls", "xlsx", "ppt", "pptx", "numbers", "pages", "key"].includes(ext)) return "office";
-  if (
-    [
-      "txt",
-      "json",
-      "jsonl",
-      "js",
-      "jsx",
-      "ts",
-      "tsx",
-      "css",
-      "scss",
-      "xml",
-      "yml",
-      "yaml",
-      "toml",
-      "rs",
-      "py",
-      "go",
-      "java",
-      "c",
-      "cc",
-      "cpp",
-      "h",
-      "hpp",
-      "sh",
-      "zsh",
-      "bash",
-      "sql",
-      "log",
-    ].includes(ext)
-  ) {
-    return "text";
-  }
-  return "binary";
+  // Unknown extensions and extensionless/dotfiles are probed as text by the
+  // backend, which rejects binary or unsupported encodings without data loss.
+  return "text";
 }
 
 function canToggleSource(kind: PreviewKind, ext: string): boolean {
-  return kind === "markdown" || kind === "html" || ext === "svg";
+  return kind === "markdown" || kind === "html" || kind === "csv" || ext === "svg";
 }
 
 function needsText(kind: PreviewKind, mode: "preview" | "source", ext: string): boolean {
