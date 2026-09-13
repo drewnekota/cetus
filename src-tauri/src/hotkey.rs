@@ -741,13 +741,10 @@ async fn run_voice_worker(
             crate::voice::prewarm(&app.state::<crate::AppState>()).await;
         });
     }
-    loop {
-        let Some(cmd) = (match pending.take() {
-            Some(cmd) => Some(cmd),
-            None => rx.recv().await,
-        }) else {
-            break;
-        };
+    while let Some(cmd) = match pending.take() {
+        Some(cmd) => Some(cmd),
+        None => rx.recv().await,
+    } {
         let state = app.state::<crate::AppState>();
         match cmd {
             VoiceCmd::StartPtt if kind == quick::SESSION_NONE => {
