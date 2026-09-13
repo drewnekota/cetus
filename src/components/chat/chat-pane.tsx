@@ -52,6 +52,8 @@ import {
   useMessageRoles,
   useRunningSubagents,
 } from "@/lib/chat-store";
+import { toast } from "sonner";
+import { findQuoteSource, quoteRange } from "@/lib/quote-navigation";
 import { FindBar } from "@/components/chat/find-bar";
 import {
   clearFindHighlights,
@@ -932,6 +934,63 @@ function MessageList({
     };
   }, [scroller, items.length]);
 
+  const quoteCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => quoteCleanupRef.current?.(), [convId]);
+  const { t: quoteT } = useTranslation("chat");
+  const jumpToQuote = useCallback((messageKey: string, quote: string) => {
+    if (!convId || !scroller) return;
+    const byKey = useChatStore.getState().chats[convId]?.byKey;
+    if (!byKey) return;
+    const source = findQuoteSource(keys.map((key) => byKey[key]), keys.indexOf(messageKey), quote);
+    const sourceKey = keys[source];
+    const rowIndex = groups.findIndex((group) => group.kind === "assistant"
+      ? group.keys.includes(sourceKey) : group.key === sourceKey);
+    if (source < 0 || rowIndex < 0) {
+      toast(quoteT("quote.sourceNotFound"));
+      return;
+    }
+    quoteCleanupRef.current?.();
+    setFindOpen(false);
+    followTailRef.current = false;
+    listRef.current?.cancelScroll();
+    listRef.current?.scrollToIndex({ index: rowIndex, align: "center" });
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let animation: Animation | undefined;
+    const highlights = (globalThis.CSS as unknown as {
+      highlights?: { set: (name: string, value: unknown) => void; delete: (name: string) => void };
+    })?.highlights;
+    const Highlight = (globalThis as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
+    let frame = requestAnimationFrame(function reveal() {
+      const row = scroller.querySelector<HTMLElement>(`[data-find-row="${rowIndex}"]`);
+      // Allow virtual row measurements to settle before refining the position.
+      if (++attempts < 3 || !row) {
+        if (attempts < 60) frame = requestAnimationFrame(reveal);
+        return;
+      }
+      listRef.current?.cancelScroll();
+      const range = quoteRange(row, quote);
+      if (range) {
+        revealRange(scroller, range);
+        if (highlights && Highlight) highlights.set("cetus-quote", new Highlight(range));
+      }
+      if (!range || !highlights || !Highlight) {
+        animation = row.animate([
+          { backgroundColor: "transparent" },
+          { backgroundColor: "rgba(160, 140, 255, 0.22)" },
+          { backgroundColor: "transparent" },
+        ], { duration: 1800 });
+      }
+      timer = setTimeout(() => highlights?.delete("cetus-quote"), 2400);
+    });
+    quoteCleanupRef.current = () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      animation?.cancel();
+      highlights?.delete("cetus-quote");
+    };
+  }, [convId, scroller, keys, groups, quoteT]);
+
   const itemContent = useCallback(
     (index: number, item: MessageListItem) => {
       if (item.kind === "thinking") {
@@ -986,6 +1045,7 @@ function MessageList({
           <MessageBubble
             convId={convId}
             messageKey={g.key}
+            onQuoteClick={(quote) => jumpToQuote(g.key, quote)}
             onFork={
               onForkMessage && messageIndex >= 0
                 ? () => onForkMessage(forkMessageKey, messageIndex)
@@ -1021,6 +1081,7 @@ function MessageList({
       onRetry,
       retrying,
       opticalCenter,
+      jumpToQuote,
     ],
   );
 

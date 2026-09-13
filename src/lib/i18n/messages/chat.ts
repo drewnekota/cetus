@@ -175,6 +175,8 @@ export const chat = {
       "Something in this conversation crashed the message view. You can retry, or switch to another chat — the rest of the app is unaffected.",
     "pane.renderError.retry": "Retry",
     "quote.addToChat": "Add to chat",
+    "quote.goToSource": "Go to original text",
+    "quote.sourceNotFound": "Original text was not found in this conversation",
 
     // Message bubble
     "bubble.attachment": "attachment",
@@ -435,6 +437,8 @@ export const chat = {
       "该对话中的内容导致消息视图崩溃。可以重试，或切换到其他对话——应用的其余部分不受影响。",
     "pane.renderError.retry": "重试",
     "quote.addToChat": "添加到对话",
+    "quote.goToSource": "跳转到原文",
+    "quote.sourceNotFound": "未在当前对话中找到原文",
 
     "bubble.attachment": "附件",
     "bubble.expandImage": "点击放大",
@@ -559,6 +563,8 @@ export const chat = {
     "pane.saveEdit": "保存",
     "pane.cancelEdit": "キャンセル",
     "quote.addToChat": "チャットに追加",
+    "quote.goToSource": "元のテキストに移動",
+    "quote.sourceNotFound": "このチャット内に元のテキストが見つかりません",
 
     "bubble.attachment": "添付ファイル",
     "bubble.expandImage": "クリックで拡大",

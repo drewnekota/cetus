@@ -22,6 +22,10 @@ USAGE
   cetus cron rm <id>
   cetus cron enable <id> | disable <id>
   cetus cron run <id>                  Fire now (does not shift the schedule)
+  cetus context now [--shot]           What the user is looking at right now: the
+                                       app they were in before switching to Cetus,
+                                       its title/URL, selected + visible text;
+                                       --shot adds a viewable window image
   cetus context status                 Screen memory collectors: on/off + data span
   cetus context timeline [flags]       What the user did: per-app time rollup +
                                        window-level timeline with durations
@@ -32,12 +36,17 @@ USAGE
   cetus ping | version | help
 
 WHEN TO REACH FOR WHAT
+  The user says "this", "here", "the doc/error/message I have open", or the
+  request is ambiguous without seeing their screen → `cetus context now` FIRST
   The user asks what they did / read / worked on earlier → `cetus context`
   The user refers to something said in a meeting or call → `cetus meeting`
   You made or fetched a file the user should receive    → `cetus artifact`
   Recurring or scheduled work                           → `cetus cron`
 
-CONTEXT — Cetus's opt-in ambient screen memory, unified over its two collectors
+CONTEXT — `now` is a live probe of the user's current window (no collector
+needed): when Cetus itself is frontmost it reads the app the user was in just
+before, by pid, so the switch to chat does not hide it. The rest is Cetus's
+opt-in ambient screen memory, unified over its two collectors
 (AX text sampling and screenshot+OCR capture; either may be enabled). To answer
 "what did I do today?": start with `timeline` (add --text for excerpts), then
 `search`/`get` to drill into specifics. ⏎×N on a timeline row counts commit
@@ -157,6 +166,18 @@ fn run_inner(args: &[String]) -> Result<String, String> {
 fn context_cmd(rest: &[&str]) -> Result<String, String> {
     match rest {
         ["status"] => request(&json!({ "op": "context.status" })).map(text_field),
+        ["now", flags @ ..] => {
+            let mut shot = false;
+            for f in flags {
+                match *f {
+                    "--shot" => shot = true,
+                    other => {
+                        return Err(format!("unknown flag {other:?} — `now` takes only --shot"))
+                    }
+                }
+            }
+            request(&json!({ "op": "context.now", "shot": shot })).map(text_field)
+        }
         ["get", id] => request(&json!({ "op": "context.get", "id": id })).map(text_field),
         ["timeline", flags @ ..] => {
             let (positional, params) = parse_context_flags(flags)?;

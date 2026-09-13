@@ -484,6 +484,8 @@ export const AppSidebar = memo(function AppSidebar({
               <SidebarGroup>
                 <PinnedGroupView
                   items={pinnedGroup.items}
+                  collapsed={collapsedWorkspaceDirs.has(PINNED_GROUP_DIR)}
+                  onToggleCollapse={toggleCollapsed}
                   expanded={expandedWorkspaceDirs.has(PINNED_GROUP_DIR)}
                   onToggleExpanded={onToggleWorkspaceExpanded}
                   activeId={activeId}
@@ -615,11 +617,13 @@ const ROW_ACTION_CLASS =
   "hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring " +
   "group-hover/project-row:opacity-100 group-has-[[data-state=open]]/project-row:opacity-100 group-has-[:focus-visible]/project-row:opacity-100";
 
-/** The global "Pinned" section: a plain label (no collapse, no folder actions)
- *  over the pinned chats, newest pin first. Rendered inside a <SidebarGroup>
- *  by the caller, and only when something is pinned. */
+/** The global "Pinned" section: a collapsible label (no folder actions) over
+ *  the pinned chats, newest pin first. Rendered inside a <SidebarGroup> by the
+ *  caller, and only when something is pinned. */
 function PinnedGroupView({
   items,
+  collapsed,
+  onToggleCollapse,
   expanded,
   onToggleExpanded,
   activeId,
@@ -632,6 +636,8 @@ function PinnedGroupView({
   onRename,
 }: {
   items: Conversation[];
+  collapsed: boolean;
+  onToggleCollapse: (dir: string) => void;
   expanded: boolean;
   onToggleExpanded: (dir: string) => void;
   activeId: string | null;
@@ -646,44 +652,69 @@ function PinnedGroupView({
   const { t } = useTranslation("sidebar");
   return (
     <>
-      <SidebarGroupLabel className="select-none">
-        <Pin className="mr-1.5 !size-3" />
-        <span className="truncate">{t("section.pinned")}</span>
-      </SidebarGroupLabel>
-      <SidebarMenu>
-        {visibleGroupItems(items, expanded).map((c) => (
-          <ConversationRow
-            key={c.id}
-            conversation={c}
-            active={c.id === activeId}
-            streaming={streamingIds.has(c.id)}
-            unreadCompleted={unreadCompletedIds.has(c.id)}
-            onSelect={onSelect}
-            onArchive={onArchive}
-            onTogglePin={onTogglePin}
-            onRename={onRename}
-            archiveShortcut={archiveShortcut}
-            inPinnedGroup
-          />
-        ))}
-        {items.length > WORKSPACE_VISIBLE_LIMIT && (
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => onToggleExpanded(PINNED_GROUP_DIR)}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              {expanded ? <ChevronDown className="rotate-180" /> : <ChevronDown />}
-              <span>
-                {expanded
-                  ? t("chats.showLess")
-                  : t("chats.showMore", {
-                      count: items.length - WORKSPACE_VISIBLE_LIMIT,
-                    })}
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        )}
-      </SidebarMenu>
+      <div className="group/project-row relative">
+        <SidebarGroupLabel
+          role="button"
+          tabIndex={0}
+          aria-expanded={!collapsed}
+          onClick={() => onToggleCollapse(PINNED_GROUP_DIR)}
+          onKeyDown={(e: ReactKeyboardEvent) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onToggleCollapse(PINNED_GROUP_DIR);
+            }
+          }}
+          className={cn("cursor-pointer select-none", ROW_ACCENT_CLASS)}
+        >
+          {/* Same affordance as a workspace header: folded keeps the chevron
+              visible, expanded swaps the pin glyph for one on hover. */}
+          {collapsed ? (
+            <ChevronRight className="mr-1.5 !size-3" />
+          ) : (
+            <>
+              <Pin className="mr-1.5 !size-3 group-hover/project-row:hidden" />
+              <ChevronDown className="mr-1.5 hidden !size-3 group-hover/project-row:block" />
+            </>
+          )}
+          <span className="truncate">{t("section.pinned")}</span>
+        </SidebarGroupLabel>
+      </div>
+      {!collapsed && (
+        <SidebarMenu>
+          {visibleGroupItems(items, expanded).map((c) => (
+            <ConversationRow
+              key={c.id}
+              conversation={c}
+              active={c.id === activeId}
+              streaming={streamingIds.has(c.id)}
+              unreadCompleted={unreadCompletedIds.has(c.id)}
+              onSelect={onSelect}
+              onArchive={onArchive}
+              onTogglePin={onTogglePin}
+              onRename={onRename}
+              archiveShortcut={archiveShortcut}
+              inPinnedGroup
+            />
+          ))}
+          {items.length > WORKSPACE_VISIBLE_LIMIT && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => onToggleExpanded(PINNED_GROUP_DIR)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                {expanded ? <ChevronDown className="rotate-180" /> : <ChevronDown />}
+                <span>
+                  {expanded
+                    ? t("chats.showLess")
+                    : t("chats.showMore", {
+                        count: items.length - WORKSPACE_VISIBLE_LIMIT,
+                      })}
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
+        </SidebarMenu>
+      )}
     </>
   );
 }
@@ -1261,8 +1292,9 @@ const ConversationRow = memo(function ConversationRow({
   onTogglePin: (c: Conversation) => void;
   onRename: (c: Conversation, title: string) => void;
   archiveShortcut: string;
-  /** Rendered inside the global "Pinned" section: swap the redundant pin glyph
-   *  for a chat glyph (the section label already says "pinned"). */
+  /** Rendered inside the global "Pinned" section: drop the redundant pin glyph
+   *  (the section label already says "pinned") so the row reads like any other
+   *  chat. */
   inPinnedGroup?: boolean;
 }) {
   const { t } = useTranslation("sidebar");
@@ -1385,12 +1417,8 @@ const ConversationRow = memo(function ConversationRow({
                 "group-hover/menu-item:bg-sidebar-accent group-hover/menu-item:text-sidebar-accent-foreground",
             )}
           >
-            {inPinnedGroup ? (
-              <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
-            ) : (
-              pinned && (
-                <Pin className="size-3.5 shrink-0 text-muted-foreground" />
-              )
+            {!inPinnedGroup && pinned && (
+              <Pin className="size-3.5 shrink-0 text-muted-foreground" />
             )}
             {conversation.sourceAutomationId && (
               <Clock className="size-3.5 shrink-0 text-muted-foreground" />

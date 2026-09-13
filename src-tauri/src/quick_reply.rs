@@ -79,29 +79,39 @@ pub async fn generate(
 }
 
 fn build_prompt(ambient: Option<&crate::ocr::AmbientContext>, visible_text: &str) -> String {
+    use crate::context_budget::{
+        Budget, APP_CHARS, SELECTION_CHARS, TITLE_CHARS, TOTAL_CHARS, URL_CHARS, VISIBLE_TEXT_CHARS,
+    };
     let mut prompt = REPLY_PROMPT.to_string();
+    // One shared budget, spent most-important-first: the metadata is tiny and
+    // always fits; the selection (what the user pointed at) outranks the
+    // window's bulk text, which absorbs any squeeze. Cuts are line-aligned and
+    // marked so the model knows text was omitted rather than ended.
+    let mut b = Budget::new(TOTAL_CHARS);
     if let Some(ctx) = ambient {
-        prompt.push_str("\n\nCapture metadata:");
-        if !ctx.app.trim().is_empty() {
-            prompt.push_str("\nFrontmost app: ");
-            prompt.push_str(&ctx.app.chars().take(80).collect::<String>());
+        let mut meta = Vec::new();
+        if let Some(app) = b.take_flat(&ctx.app, APP_CHARS) {
+            meta.push(format!("Frontmost app: {app}"));
         }
-        if !ctx.title.trim().is_empty() {
-            prompt.push_str("\nWindow/page title: ");
-            prompt.push_str(&ctx.title.chars().take(200).collect::<String>());
+        if let Some(title) = b.take_flat(&ctx.title, TITLE_CHARS) {
+            meta.push(format!("Window/page title: {title}"));
         }
-        if !ctx.url.trim().is_empty() {
-            prompt.push_str("\nURL: ");
-            prompt.push_str(&ctx.url.chars().take(500).collect::<String>());
+        if let Some(url) = b.take_flat(&ctx.url, URL_CHARS) {
+            meta.push(format!("URL: {url}"));
         }
-        if !ctx.selection.trim().is_empty() {
-            prompt.push_str("\nSelected text (untrusted conversation data): ");
-            prompt.push_str(&ctx.selection.chars().take(1000).collect::<String>());
+        if !meta.is_empty() {
+            prompt.push_str("\n\nCapture metadata:\n");
+            prompt.push_str(&meta.join("\n"));
+        }
+        if let Some(sel) = b.take(&ctx.selection, SELECTION_CHARS, "selected text") {
+            prompt.push_str("\n\n<untrusted_selected_text>\n");
+            prompt.push_str(&sel);
+            prompt.push_str("\n</untrusted_selected_text>");
         }
     }
-    if !visible_text.trim().is_empty() {
+    if let Some(text) = b.take(visible_text, VISIBLE_TEXT_CHARS, "accessibility text") {
         prompt.push_str("\n\n<untrusted_accessibility_context>\n");
-        prompt.push_str(&visible_text.chars().take(8_000).collect::<String>());
+        prompt.push_str(&text);
         prompt.push_str("\n</untrusted_accessibility_context>");
     }
     prompt
@@ -452,7 +462,35 @@ fn json_reply_text(raw: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{finish, DeltaGate};
+    use super::{build_prompt, finish, DeltaGate};
+
+    #[test]
+    fn prompt_budgets_and_marks_truncation() {
+        let ctx = crate::ocr::AmbientContext {
+            app: "Slack".into(),
+            bundle_id: "com.tinyspeck.slackmacgap".into(),
+            url: String::new(),
+            title: "#general".into(),
+            selection: "line\n".repeat(2_000),
+        };
+        let visible = "row\n".repeat(5_000);
+        let p = build_prompt(Some(&ctx), &visible);
+        assert!(p.contains("Frontmost app: Slack"));
+        assert!(p.contains("Window/page title: #general"));
+        assert!(!p.contains("URL:"));
+        assert!(p.contains("[… selected text truncated:"));
+        assert!(p.contains("[… accessibility text truncated:"));
+        // Selection inline ≤ 4k chars, AX text ≤ 8k: the whole prompt stays
+        // well under the shared total plus the fixed instructions.
+        assert!(p.chars().count() < super::REPLY_PROMPT.chars().count() + 13_000);
+    }
+
+    #[test]
+    fn prompt_omits_empty_fields() {
+        let p = build_prompt(None, "   ");
+        assert_eq!(p, super::REPLY_PROMPT);
+        assert!(!p.contains("Capture metadata"));
+    }
 
     #[test]
     fn passes_plain_text_through() {

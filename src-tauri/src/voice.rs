@@ -11,6 +11,9 @@
 //!
 //! macOS only. On other platforms every command is a graceful no-op/error.
 
+#[path = "voice_session.rs"]
+pub(crate) mod session;
+
 use crate::AppState;
 use serde::Serialize;
 use std::sync::Arc;
@@ -51,6 +54,8 @@ pub struct DictationState {
 
 #[cfg(target_os = "macos")]
 struct Active {
+    session: session::Session,
+    tasks: Vec<tokio::task::AbortHandle>,
     child: tokio::process::Child,
     stdin: tokio::process::ChildStdin,
     /// Resolved by the stdout reader once the helper prints its `final` line, so
@@ -67,6 +72,26 @@ struct Active {
     group_leader: bool,
 }
 
+// Dropping capture ownership (including a cancelled stop future) tears down
+// all work. PTT completion never clears a shared slot from a detached callback.
+#[cfg(target_os = "macos")]
+impl Drop for Active {
+    fn drop(&mut self) {
+        self.session.cancel();
+        for task in &self.tasks {
+            task.abort();
+        }
+        if self.group_leader {
+            if let Some(pid) = self.child.id() {
+                unsafe {
+                    libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+                }
+            }
+        }
+        let _ = self.child.start_kill();
+    }
+}
+
 /// A parked standby helper (see [`DictationState::warm`]).
 #[cfg(target_os = "macos")]
 struct Warm {
@@ -81,6 +106,40 @@ struct Warm {
 #[allow(dead_code)]
 struct Active {
     _final_rx: Option<oneshot::Receiver<String>>,
+}
+
+#[cfg(target_os = "macos")]
+struct SessionEmitter {
+    app: AppHandle,
+    session: session::Session,
+}
+#[cfg(target_os = "macos")]
+impl Clone for SessionEmitter {
+    fn clone(&self) -> Self {
+        Self {
+            app: self.app.clone(),
+            session: self.session.clone(),
+        }
+    }
+}
+#[cfg(target_os = "macos")]
+impl SessionEmitter {
+    fn new(app: &AppHandle, session: &session::Session) -> Self {
+        Self {
+            app: app.clone(),
+            session: session.clone(),
+        }
+    }
+    fn emit(&self, event: &str, mut payload: serde_json::Value) -> tauri::Result<()> {
+        if !self.session.is_live() {
+            return Ok(());
+        }
+        if event == "voice-error" {
+            self.session.fail();
+        }
+        payload["sessionId"] = self.session.id().into();
+        self.app.emit(event, payload)
+    }
 }
 
 // ---- Helper resolution (lazy swiftc compile, mirrors ocr.rs) --------------
@@ -449,6 +508,7 @@ pub async fn start_internal(
     state: &AppState,
     app: &AppHandle,
     target: String,
+    session: session::Session,
 ) -> Result<(), String> {
     use tokio::process::Command;
 
@@ -506,16 +566,21 @@ pub async fn start_internal(
         let speech_seen = Arc::new(std::sync::atomic::AtomicBool::new(true));
 
         // Stream task: run the Doubao session, emit partials + final, hand the
-        // final back to the (global) stop caller, clear Active. History recording
+        // final back to the (global) stop caller. History recording
         // happens downstream in finish_ptt, AFTER cleanup — so history, dialog
         // continuity, and hotword learning all see the same text the user got.
-        let app_s = app.clone();
+        let app_s = SessionEmitter::new(app, &session);
         let target_s = target.clone();
-        let inner_s = state.dictation.inner.clone();
+        let stream_session = session.clone();
         let speech_s = speech_seen.clone();
         let partial_s = last_partial.clone();
-        tokio::spawn(async move {
-            let corpus = corpus_task.await.unwrap_or_default();
+        let stream_task = tokio::spawn(async move {
+            let corpus = tokio::time::timeout(std::time::Duration::from_millis(300), corpus_task)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
+            stream_session.mark("context_ready");
             tracing::info!(
                 "doubao asr (push-to-talk) starting: resource_id={resource}, hotwords={}, context={}, recent={}, table={}",
                 corpus.hotwords.len(),
@@ -526,25 +591,41 @@ pub async fn start_internal(
             let on_partial = {
                 let app = app_s.clone();
                 let target = target_s.clone();
+                let session = stream_session.clone();
+                let first = std::sync::atomic::AtomicBool::new(true);
                 move |txt: &str| {
+                    if !session.is_live() {
+                        return;
+                    }
+                    if first.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                        session.mark("first_result");
+                    }
                     if let Ok(mut p) = partial_s.lock() {
                         *p = txt.to_string();
                     }
                     let _ = app.emit("voice-partial", json_payload(&target, "text", txt));
                 }
             };
-            let mut final_text =
-                match crate::doubao::stream(&key, &resource, corpus, pcm_rx, on_partial).await {
-                    Ok(t) => t,
-                    Err(e) => {
-                        tracing::warn!("doubao stream failed: {e}");
-                        let _ = app_s.emit(
-                            "voice-error",
-                            json_payload(&target_s, "message", "Doubao recognition failed"),
-                        );
-                        String::new()
-                    }
-                };
+            let mut final_text = match crate::doubao::stream(
+                &key,
+                &resource,
+                corpus,
+                pcm_rx,
+                on_partial,
+                stream_session.clone(),
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!("doubao stream failed: {e}");
+                    let _ = app_s.emit(
+                        "voice-error",
+                        json_payload(&target_s, "message", "Doubao recognition failed"),
+                    );
+                    String::new()
+                }
+            };
             // Gate discard on BOTH signals agreeing: the RMS gate says silence
             // AND the transcript is short (noise hallucinations are brief). A
             // long coherent transcript is stronger evidence of speech than the
@@ -566,26 +647,38 @@ pub async fn start_internal(
                 final_text.chars().count(),
                 preview(&final_text)
             );
+            if !stream_session.is_live() {
+                return;
+            }
+            stream_session.mark("asr_final");
             let _ = app_s.emit("voice-final", json_payload(&target_s, "text", &final_text));
             let _ = final_tx.send(final_text);
-            *inner_s.lock().await = None;
         });
 
         // Reader task: parse the helper's JSONL → forward PCM to the stream,
         // re-emit level/ready, and on `pcm_end`/EOF drop `pcm_tx` so the Doubao
         // session sees end-of-audio and finalizes.
-        let app_r = app.clone();
+        let app_r = SessionEmitter::new(app, &session);
         let target_r = target.clone();
         let speech_r = speech_seen.clone();
-        tokio::spawn(async move {
+        let reader_session = session.clone();
+        let reader_task = tokio::spawn(async move {
             use tokio::io::{AsyncBufReadExt, BufReader};
+            let mut first_pcm = true;
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                if !reader_session.is_live() {
+                    break;
+                }
                 let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
                     continue;
                 };
                 if let Some(p) = v.get("pcm").and_then(|x| x.as_str()) {
                     if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(p) {
+                        if first_pcm {
+                            reader_session.mark("first_pcm");
+                            first_pcm = false;
+                        }
                         if pcm_tx.send(bytes).await.is_err() {
                             break;
                         }
@@ -596,6 +689,7 @@ pub async fn start_internal(
                         serde_json::json!({ "target": target_r, "level": l }),
                     );
                 } else if v.get("ready").is_some() {
+                    reader_session.mark("capture_ready");
                     let _ = app_r.emit("voice-ready", serde_json::json!({ "target": target_r }));
                 } else if let Some(s) = v.get("speech").and_then(|x| x.as_bool()) {
                     speech_r.store(s, std::sync::atomic::Ordering::Relaxed);
@@ -610,6 +704,8 @@ pub async fn start_internal(
         });
 
         *guard = Some(Active {
+            session,
+            tasks: vec![stream_task.abort_handle(), reader_task.abort_handle()],
             child,
             stdin,
             final_rx: Some(final_rx),
@@ -658,15 +754,16 @@ pub async fn start_internal(
         });
     }
 
-    // Parse the JSONL stream → Tauri events. On EOF the helper has exited, so
-    // clear the active slot.
-    let app_for_reader = app.clone();
+    // Parse JSONL. Keep completed PTT state until stop takes ownership, so an
+    // early final is not lost before the user releases the trigger.
+    let app_for_reader = SessionEmitter::new(app, &session);
     let target_for_reader = target.clone();
-    let inner = state.dictation.inner.clone();
+    let reader_session = session.clone();
     let last_partial = Arc::new(std::sync::Mutex::new(String::new()));
     let partial_w = last_partial.clone();
-    tokio::spawn(async move {
+    let reader_task = tokio::spawn(async move {
         use tokio::io::{AsyncBufReadExt, BufReader};
+        let mut first_partial = true;
         let mut final_tx = Some(final_tx);
         // Track whether the helper ever went live and whether it reported a
         // terminal outcome (a final transcript or an explicit error). If it
@@ -678,6 +775,9 @@ pub async fn start_internal(
         let mut saw_terminal = false;
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
+            if !reader_session.is_live() {
+                break;
+            }
             let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
                 continue;
             };
@@ -689,6 +789,10 @@ pub async fn start_internal(
                     serde_json::json!({ "target": target_for_reader, "level": l }),
                 );
             } else if let Some(p) = v.get("partial").and_then(|x| x.as_str()) {
+                if first_partial {
+                    reader_session.mark("first_result");
+                    first_partial = false;
+                }
                 if let Ok(mut lp) = partial_w.lock() {
                     *lp = p.to_string();
                 }
@@ -696,6 +800,7 @@ pub async fn start_internal(
                     .emit("voice-partial", json_payload(&target_for_reader, "text", p));
             } else if let Some(f) = v.get("final").and_then(|x| x.as_str()) {
                 saw_terminal = true;
+                reader_session.mark("asr_final");
                 let final_text = f.to_string();
                 tracing::info!(
                     "apple asr final [{}]: {} chars: {:?}",
@@ -714,6 +819,7 @@ pub async fn start_internal(
                 // downstream consumers see the same text the user received.
             } else if v.get("ready").is_some() {
                 saw_ready = true;
+                reader_session.mark("capture_ready");
                 let _ = app_for_reader.emit(
                     "voice-ready",
                     serde_json::json!({ "target": target_for_reader }),
@@ -747,10 +853,11 @@ pub async fn start_internal(
                 json_payload(&target_for_reader, "message", &msg),
             );
         }
-        *inner.lock().await = None;
     });
 
     *guard = Some(Active {
+        session,
+        tasks: vec![reader_task.abort_handle()],
         child,
         stdin,
         final_rx: Some(final_rx),
@@ -763,39 +870,35 @@ pub async fn start_internal(
 /// Finalize the running dictation (newline → helper stdin), wait for the final
 /// transcript, and return it. "" if nothing is running.
 #[cfg(target_os = "macos")]
-pub async fn stop_internal(state: &AppState) -> String {
+pub async fn stop_internal(state: &AppState) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
 
-    let (rx, last_partial) = {
-        let mut guard = state.dictation.inner.lock().await;
-        let Some(active) = guard.as_mut() else {
-            return String::new();
-        };
-        let _ = active.stdin.write_all(b"\n").await;
-        let _ = active.stdin.flush().await;
-        (active.final_rx.take(), active.last_partial.clone())
+    // Move ownership into this future. Drop on cancellation/timeout kills the
+    // helper and all network tasks, without touching any later session's slot.
+    let Some(mut active) = state.dictation.inner.lock().await.take() else {
+        return Ok(String::new());
     };
-    match rx {
-        // Covers the Doubao stream finalizing after the helper signals
-        // end-of-audio (~tens of ms, sometimes a beat longer under load). Kept
-        // tight (8s, not tens of seconds) because the voice worker awaits this
-        // call serially — a long wait would stall the next gesture's command
-        // behind it. A hung session falls back to the last streaming partial:
-        // imperfect text beats silently discarding the whole utterance.
+    let _ = active.stdin.write_all(b"\n").await;
+    let _ = active.stdin.flush().await;
+    let text = match active.final_rx.take() {
         Some(rx) => match tokio::time::timeout(std::time::Duration::from_secs(8), rx).await {
             Ok(Ok(text)) => text,
             _ => {
-                let partial = last_partial.lock().map(|p| p.clone()).unwrap_or_default();
-                if !partial.trim().is_empty() {
-                    tracing::warn!(
-                        "dictation final timed out; falling back to last partial ({} chars)",
-                        partial.chars().count()
-                    );
-                }
-                partial
+                active.session.mark("asr_timeout");
+                active
+                    .last_partial
+                    .lock()
+                    .map(|p| p.clone())
+                    .unwrap_or_default()
             }
         },
         None => String::new(),
+    };
+    // Capture lifetime ends here; post-processing uses a separate worker owner.
+    if text.trim().is_empty() && active.session.failed() {
+        Err("dictation failed".into())
+    } else {
+        Ok(text)
     }
 }
 
@@ -820,22 +923,7 @@ pub async fn await_slot_free(state: &AppState, timeout: std::time::Duration) {
 /// Abort dictation immediately, discarding any transcript.
 #[cfg(target_os = "macos")]
 pub async fn cancel_internal(state: &AppState) {
-    let mut guard = state.dictation.inner.lock().await;
-    if let Some(mut active) = guard.take() {
-        // When shimmed, the helper runs disclaimed in the shim's process group;
-        // SIGKILL the whole group so the helper dies too (not just the shim).
-        if active.group_leader {
-            if let Some(pid) = active.child.id() {
-                // Safe: killpg just signals; an already-dead group is a no-op.
-                unsafe {
-                    libc::killpg(pid as libc::pid_t, libc::SIGKILL);
-                }
-            }
-        }
-        // Reap the (now-dead) shim, or SIGKILL the helper directly in the
-        // no-shim fallback.
-        let _ = active.child.kill().await;
-    }
+    drop(state.dictation.inner.lock().await.take());
 }
 
 // ---- Hands-free dictation (continuous, tap-to-toggle) ---------------------
@@ -847,7 +935,7 @@ pub async fn cancel_internal(state: &AppState) {
 /// insertion happens live per sentence rather than once on release. Requires the
 /// Doubao key; returns an error otherwise (the caller stays on push-to-talk).
 #[cfg(target_os = "macos")]
-pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Result<(), String> {
+pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Result<u64, String> {
     use base64::Engine as _;
     use std::sync::atomic::Ordering;
     use tokio::process::Command;
@@ -860,6 +948,7 @@ pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Resu
         return Err("a dictation is already running".into());
     }
 
+    let session = session::Session::new();
     let key = crate::secrets::get("doubao")
         .ok()
         .flatten()
@@ -900,16 +989,21 @@ pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Resu
     // Stream task: each completed sentence is inserted into the focused app and
     // recorded to history. Insertion is synchronous so sentences land in order;
     // the brief block only stalls reading the next (already-buffered) frame.
-    let app_s = app.clone();
+    let app_s = SessionEmitter::new(app, &session);
     let inner_s = state.dictation.inner.clone();
     let app_data = state.app_data_dir.clone();
-    tokio::spawn(async move {
+    let stream_session = session.clone();
+    let stream_task = tokio::spawn(async move {
         // Last char of the previous insertion, for sentence joining below.
         let prev_end = std::sync::Mutex::new(None::<char>);
         let on_sentence = {
             let app = app_s.clone();
             let app_data = app_data.clone();
+            let session = stream_session.clone();
             move |sentence: &str| {
+                if !session.is_live() {
+                    return;
+                }
                 let normalized = crate::titling::normalize_zh_en_spacing(sentence.trim());
                 if normalized.is_empty() {
                     return;
@@ -965,13 +1059,19 @@ pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Resu
         }
         // Session ended (toggled off / helper exited): clear the HUD transcript.
         let _ = app_s.emit("voice-final", json_payload("global", "text", ""));
-        *inner_s.lock().await = None;
+        let mut slot = inner_s.lock().await;
+        if slot
+            .as_ref()
+            .is_some_and(|active| active.session.id() == stream_session.id())
+        {
+            *slot = None;
+        }
     });
 
     // Reader task: forward PCM, re-emit level/ready; `pcm_end`/EOF drops `pcm_tx`
     // so the Doubao session finalizes the trailing sentence and ends.
-    let app_r = app.clone();
-    tokio::spawn(async move {
+    let app_r = SessionEmitter::new(app, &session);
+    let reader_task = tokio::spawn(async move {
         use tokio::io::{AsyncBufReadExt, BufReader};
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -1001,14 +1101,17 @@ pub async fn start_handsfree_internal(state: &AppState, app: &AppHandle) -> Resu
         // pcm_tx is dropped as this task ends → Doubao sees end-of-audio.
     });
 
+    let id = session.id();
     *guard = Some(Active {
+        session,
+        tasks: vec![stream_task.abort_handle(), reader_task.abort_handle()],
         child,
         stdin,
         final_rx: None,
         last_partial: Arc::new(std::sync::Mutex::new(String::new())),
         group_leader,
     });
-    Ok(())
+    Ok(id)
 }
 
 /// Stop a hands-free session gracefully: newline → helper stdin makes it flush
@@ -1123,7 +1226,7 @@ static HUD_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new
 /// Float the dictation HUD over the current Space without stealing key focus
 /// from the app the user is dictating into. macOS only.
 #[cfg(target_os = "macos")]
-pub fn show_hud(app: &AppHandle) {
+pub fn show_hud(app: &AppHandle, session_id: u64) {
     HUD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     // Stamp before ANY event/sound/window work. Some of those operations can make
     // macOS deliver a spurious Dock-`Reopen`; the handler must see this as a
@@ -1135,7 +1238,10 @@ pub fn show_hud(app: &AppHandle) {
     // The HUD webview persists hidden between sessions, so the previous
     // dictation's transcript/spinner state would flash on re-show — reset it
     // before the window appears.
-    let _ = app.emit("voice-reset", serde_json::json!({ "target": "global" }));
+    let _ = app.emit(
+        "voice-reset",
+        serde_json::json!({ "target": "global", "sessionId": session_id }),
+    );
     if app
         .state::<AppState>()
         .quick
@@ -1228,6 +1334,35 @@ pub fn hide_hud(app: &AppHandle) {
     }
 }
 
+/// Recovery text lives in the HUD's memory, including when history is off.
+/// Only transient notices auto-hide; a blocked insertion waits for user action.
+#[cfg(target_os = "macos")]
+pub fn show_notice(app: &AppHandle, code: &str, text: Option<&str>) {
+    let gen = HUD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let _ = app.emit(
+        "voice-notice",
+        serde_json::json!({"target": "global", "code": code, "text": text}),
+    );
+    let ui = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(win) = ui.get_webview_window("voice") {
+            if let Ok(ptr) = win.ns_window() {
+                crate::panel::bottom_center_on_mouse_screen(ptr);
+                crate::panel::present_inactive(ptr);
+            }
+        }
+    });
+    if text.is_none() {
+        let app = app.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            if HUD_GEN.load(std::sync::atomic::Ordering::Relaxed) == gen {
+                hide_hud(&app);
+            }
+        });
+    }
+}
+
 /// Flip the HUD from its live waveform to a spinner while post-release processing
 /// (the cloud transcript finalizing + the AI cleanup pass) is in flight, so the
 /// user can see it's still working between release and insertion. The HUD is
@@ -1238,6 +1373,24 @@ pub fn show_transcribing(app: &AppHandle) {
         "voice-transcribing",
         serde_json::json!({ "target": "global" }),
     );
+}
+
+/// Native clipboard write: the non-key HUD cannot rely on WebKit's focused-
+/// document requirement for navigator.clipboard. Invoked only by its Copy button.
+#[tauri::command]
+pub fn copy_voice_result(window: tauri::WebviewWindow, text: String) -> Result<(), String> {
+    if window.label() != "voice" {
+        return Err("voice window required".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        crate::text_input::pbcopy(&text)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = text;
+        Err("unsupported".into())
+    }
 }
 
 // ---- Text injection (global dictation) ------------------------------------
@@ -1255,5 +1408,66 @@ pub async fn insert_text(text: String, mode: Option<String>) -> Result<(), Strin
     {
         let _ = (text, mode);
         Err("text insertion is only available on macOS".into())
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod lifecycle_tests {
+    use super::*;
+
+    async fn capture(session: session::Session) -> (Active, tokio::process::ChildStdout) {
+        let mut child = tokio::process::Command::new("/bin/cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stdin = child.stdin.take().unwrap();
+        (
+            Active {
+                session,
+                tasks: vec![],
+                child,
+                stdin,
+                final_rx: None,
+                last_partial: Default::default(),
+                group_leader: false,
+            },
+            stdout,
+        )
+    }
+
+    #[tokio::test]
+    async fn voice_cancel_kills_capture_and_prevents_late_clear_of_new_slot() {
+        use tokio::io::AsyncReadExt;
+        let old = session::Session::new();
+        let (mut active, mut stdout) = capture(old.clone()).await;
+        let slot: Arc<Mutex<Option<Active>>> = Default::default();
+        let late_slot = slot.clone();
+        let (unblock, blocked) = oneshot::channel::<()>();
+        let late = tokio::spawn(async move {
+            let _ = blocked.await;
+            *late_slot.lock().await = None;
+        });
+        active.tasks.push(late.abort_handle());
+        *slot.lock().await = Some(active);
+        drop(slot.lock().await.take());
+        let new = session::Session::new();
+        let (next, _next_stdout) = capture(new.clone()).await;
+        *slot.lock().await = Some(next);
+        let _ = unblock.send(());
+        assert!(late.await.unwrap_err().is_cancelled());
+        assert_eq!(slot.lock().await.as_ref().unwrap().session.id(), new.id());
+        assert!(!old.is_live());
+        assert!(new.is_live());
+        let mut output = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            stdout.read_to_end(&mut output),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        drop(slot.lock().await.take());
     }
 }

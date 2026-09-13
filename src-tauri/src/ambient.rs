@@ -131,6 +131,15 @@ pub fn spawn(store: Arc<Store>, own_bundle_id: String) {
         loop {
             let settings = load_settings(&store);
 
+            // Remember the last non-Cetus frontmost app for `cetus context now`
+            // — NSWorkspace only, so it runs whether or not collection is on.
+            {
+                let own = own_bundle_id.clone();
+                let _ =
+                    tokio::task::spawn_blocking(move || crate::ax::note_foreign_frontmost(&own))
+                        .await;
+            }
+
             // Retention pruning runs whether or not collection is on — turning
             // the collector off must not turn the retention promise off with it.
             if last_prune.elapsed().as_secs() >= PRUNE_INTERVAL_SECS {

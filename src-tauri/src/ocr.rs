@@ -41,12 +41,15 @@ impl AmbientContext {
     }
 }
 
-/// Cap on the selected-text field so a huge selection can't bloat the prompt.
-pub(crate) const MAX_SELECTION_CHARS: usize = 4000;
+/// Hard cap on the selected-text field as *captured*. Prompt-side budgets
+/// (`context_budget::SELECTION_CHARS`) decide how much rides inline; the
+/// launcher externalizes the rest as a text attachment, so capture keeps
+/// more than the inline budget — bounded only so a select-all on a huge
+/// document can't stall the pasteboard read or the IPC payload.
+pub(crate) const MAX_SELECTION_CHARS: usize = 40_000;
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::AppInfo;
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::sync::OnceLock;
@@ -121,28 +124,6 @@ mod imp {
         }
     }
 
-    pub fn frontmost_app(app_data: &Path) -> Option<AppInfo> {
-        let bin = helper(app_data)?;
-        let out = Command::new(bin).arg("frontapp").output().ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let text = String::from_utf8_lossy(&out.stdout);
-        let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;
-        Some(AppInfo {
-            app: v
-                .get("app")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string(),
-            bundle_id: v
-                .get("bundleId")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string(),
-        })
-    }
-
     pub fn recognize(app_data: &Path, image_path: &Path) -> Option<String> {
         let bin = helper(app_data)?;
         let out = Command::new(bin).arg("ocr").arg(image_path).output().ok()?;
@@ -156,16 +137,11 @@ mod imp {
 
 #[cfg(not(target_os = "macos"))]
 mod imp {
-    use super::AppInfo;
     use std::path::Path;
-
-    pub fn frontmost_app(_app_data: &Path) -> Option<AppInfo> {
-        None
-    }
 
     pub fn recognize(_app_data: &Path, _image_path: &Path) -> Option<String> {
         None
     }
 }
 
-pub use imp::{frontmost_app, recognize};
+pub use imp::recognize;

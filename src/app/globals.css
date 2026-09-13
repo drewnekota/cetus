@@ -553,3 +553,8 @@ html.no-perma-layers [data-message-hover-target] > [data-message-actions] {
     animation-duration: 0s;
   }
 }
+
+::highlight(cetus-quote) {
+  background-color: rgba(160, 140, 255, 0.35);
+  color: inherit;
+}

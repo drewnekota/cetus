@@ -379,6 +379,7 @@ pub async fn stream(
     corpus: Corpus,
     mut pcm_rx: mpsc::Receiver<Vec<u8>>,
     on_partial: impl Fn(&str) + Send + Sync + 'static,
+    session: crate::voice::session::Session,
 ) -> Result<String> {
     use std::sync::atomic::Ordering;
 
@@ -389,7 +390,7 @@ pub async fn stream(
     let buffer: std::sync::Arc<tokio::sync::Mutex<Vec<Vec<u8>>>> = Default::default();
     let (tx1, rx1) = mpsc::channel::<Vec<u8>>(64);
     let pump_buffer = buffer.clone();
-    let pump = tokio::spawn(async move {
+    let pump = crate::voice::session::Task::spawn(async move {
         while let Some(chunk) = pcm_rx.recv().await {
             pump_buffer.lock().await.push(chunk.clone());
             let _ = tx1.send(chunk).await;
@@ -406,6 +407,7 @@ pub async fn stream(
         two_pass,
         &on_partial,
         &|_| {},
+        Some(&session),
     )
     .await;
     let Some(e) = err else {
@@ -430,7 +432,7 @@ pub async fn stream(
         return Ok(text);
     }
     let (tx2, rx2) = mpsc::channel::<Vec<u8>>(chunks.len().max(1));
-    tokio::spawn(async move {
+    let _replay = crate::voice::session::Task::spawn(async move {
         for c in chunks {
             if tx2.send(c).await.is_err() {
                 break;
@@ -451,6 +453,7 @@ pub async fn stream(
         false,
         &on_partial,
         &|_| {},
+        Some(&session),
     )
     .await;
     match err2 {
@@ -503,6 +506,7 @@ pub async fn stream_hands_free(
             false,
             &on_partial,
             &on_sentence,
+            None,
         )
         .await;
         return match err {
@@ -529,7 +533,7 @@ pub async fn stream_hands_free(
     let (tx1, rx1) = mpsc::channel::<Vec<u8>>(64);
     let (swap_tx, mut swap_rx) = tokio::sync::oneshot::channel::<mpsc::Sender<Vec<u8>>>();
     let pump_first_sentence = first_sentence.clone();
-    let pump = tokio::spawn(async move {
+    let pump = crate::voice::session::Task::spawn(async move {
         let mut out = tx1;
         let mut buf: Vec<Vec<u8>> = Vec::new();
         let mut buf_bytes = 0usize;
@@ -588,6 +592,7 @@ pub async fn stream_hands_free(
         true,
         &on_partial,
         &on_sentence,
+        None,
     )
     .await;
     let Some(e) = err else {
@@ -623,6 +628,7 @@ pub async fn stream_hands_free(
         false,
         &on_partial,
         &on_sentence,
+        None,
     )
     .await;
     pump.abort();
@@ -648,6 +654,7 @@ async fn run(
     two_pass: bool,
     on_partial: &(impl Fn(&str) + Send + Sync),
     on_sentence: &(impl Fn(&str) + Send + Sync),
+    session: Option<&crate::voice::session::Session>,
 ) -> (String, Option<anyhow::Error>) {
     let started = std::time::Instant::now();
     let acc = std::sync::Mutex::new(String::new());
@@ -662,6 +669,7 @@ async fn run(
         &acc,
         on_partial,
         on_sentence,
+        session,
     )
     .await
     .err();
@@ -691,6 +699,7 @@ async fn run_session(
     acc: &std::sync::Mutex<String>,
     on_partial: &(impl Fn(&str) + Send + Sync),
     on_sentence: &(impl Fn(&str) + Send + Sync),
+    session: Option<&crate::voice::session::Session>,
 ) -> Result<()> {
     let mut req = url.into_client_request()?;
     {
@@ -701,7 +710,14 @@ async fn run_session(
         h.insert("X-Api-Sequence", "-1".parse()?);
         h.insert("X-Api-Connect-Id", Uuid::new_v4().to_string().parse()?);
     }
-    let (ws, _resp) = tokio_tungstenite::connect_async(req).await?;
+    let (ws, _resp) = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio_tungstenite::connect_async(req),
+    )
+    .await??;
+    if let Some(s) = session {
+        s.mark("websocket_ready");
+    }
     tracing::debug!(
         "doubao: websocket connected (url={url}, resource_id={resource_id}, hands_free={hands_free}, two_pass={two_pass})"
     );
@@ -715,21 +731,35 @@ async fn run_session(
             hands_free, corpus, two_pass,
         )))
         .await?;
-    let send = tokio::spawn(async move {
+    let send_session = session.cloned();
+    let send = crate::voice::session::Task::spawn(async move {
         let mut prev: Option<Vec<u8>> = None;
         let mut total_bytes = 0usize;
+        let mut first_sent = false;
         while let Some(chunk) = pcm_rx.recv().await {
             total_bytes += chunk.len();
             if let Some(p) = prev.replace(chunk) {
                 write
                     .send(Message::Binary(audio_request(&p, false)))
                     .await?;
+                if !first_sent {
+                    if let Some(s) = &send_session {
+                        s.mark("first_audio_sent");
+                    }
+                    first_sent = true;
+                }
             }
         }
         let last = prev.unwrap_or_default();
         write
             .send(Message::Binary(audio_request(&last, true)))
             .await?;
+        if let Some(s) = &send_session {
+            if !first_sent {
+                s.mark("first_audio_sent");
+            }
+            s.mark("audio_end_sent");
+        }
         // 16 kHz mono s16le → 32000 bytes/s; handy for spotting a dead mic.
         tracing::debug!(
             "doubao: end-of-audio sent ({total_bytes} bytes ≈ {:.1}s)",

@@ -15,6 +15,8 @@ mod capture;
 pub mod cli;
 mod cli_backend;
 mod commands;
+mod context_budget;
+mod context_now;
 #[cfg(unix)]
 mod control;
 #[cfg(not(unix))]
@@ -1865,6 +1867,7 @@ pub fn run() {
         voice::request_voice_permissions,
         voice::open_microphone_settings,
         voice::insert_text,
+        voice::copy_voice_result,
         agent::get_agent_settings,
         agent::set_agent_settings,
         agent::agent_stop,
@@ -2056,6 +2059,7 @@ pub fn run() {
         voice::request_voice_permissions,
         voice::open_microphone_settings,
         voice::insert_text,
+        voice::copy_voice_result,
         agent::get_agent_settings,
         agent::set_agent_settings,
         agent::agent_stop,

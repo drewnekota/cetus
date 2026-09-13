@@ -238,6 +238,16 @@ async fn dispatch(app: &AppHandle, req: &Value) -> Value {
             })
             .await
         }
+        "context.now" => {
+            let store = app.state::<AppState>().store.clone();
+            let own_bundle = app.config().identifier.clone();
+            let shot = req.get("shot").and_then(|v| v.as_bool()).unwrap_or(false);
+            blocking_text(move || {
+                let excluded = crate::ambient::load_settings(&store).excluded_apps;
+                crate::context_now::context_now(&own_bundle, &excluded, shot)
+            })
+            .await
+        }
         "context.get" => {
             let store = app.state::<AppState>().store.clone();
             let entry_id = str_arg(req, "id");

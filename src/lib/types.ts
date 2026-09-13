@@ -486,6 +486,8 @@ export interface VoicePermissions {
  *  `voice-error` / `voice-level` events Rust emits while a dictation runs. */
 export interface VoiceEventPayload {
   target: VoiceTarget;
+  code?: string;
+  sessionId?: number;
   text?: string;
   message?: string;
   /** Live mic amplitude 0…1 (on `voice-level`), for the waveform indicator. */

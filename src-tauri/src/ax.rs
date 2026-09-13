@@ -319,7 +319,7 @@ pub fn gather_reply_details(pid: i32, bundle: &str) -> ReplyDetails {
 /// gets pixels and nothing to read, which is precisely when it can't find a
 /// conversation to reply to.
 #[cfg(target_os = "macos")]
-fn settled_visible_text(pid: i32) -> String {
+pub(crate) fn settled_visible_text(pid: i32) -> String {
     let first = visible_text(pid, REPLY_TEXT_CHARS).unwrap_or_default();
     if first.chars().count() >= COLD_TREE_CHARS {
         return first;
@@ -376,7 +376,7 @@ pub(crate) fn frontmost_identity() -> Option<(String, String, i32)> {
 /// Reads via the app element (frontmost pid) rather than the system-wide element
 /// — more direct, and lets us wake an Electron app's AX tree first.
 #[cfg(target_os = "macos")]
-fn focused_selected_text(pid: i32) -> Option<String> {
+pub(crate) fn focused_selected_text(pid: i32) -> Option<String> {
     use accessibility_sys::{
         kAXErrorSuccess, AXIsProcessTrusted, AXUIElementCopyAttributeValue,
         AXUIElementCreateApplication, AXUIElementRef,
@@ -788,4 +788,112 @@ pub fn visible_text(_pid: i32, _max_chars: usize) -> Option<String> {
 #[cfg(not(target_os = "macos"))]
 pub fn seconds_since_last_input() -> f64 {
     0.0
+}
+
+// ---- "now" support: last foreign frontmost app + window-id lookup ----------
+//
+// `cetus context now` (context_now.rs) runs while Cetus itself is usually
+// frontmost, so it needs the app the user was in *before* switching to chat.
+// The ambient loop notes every non-Cetus frontmost app it sees on its cheap
+// tick (NSWorkspace only, no IPC into the app, no permission), whether or not
+// the collector is enabled.
+
+/// The most recent non-Cetus frontmost app seen by [`note_foreign_frontmost`].
+#[derive(Debug, Clone)]
+pub struct ForeignFrontmost {
+    pub app: String,
+    pub bundle: String,
+    pub pid: i32,
+    /// When it was last seen frontmost (epoch ms).
+    pub ts: i64,
+}
+
+static LAST_FOREIGN: std::sync::Mutex<Option<ForeignFrontmost>> = std::sync::Mutex::new(None);
+
+/// Record the frontmost app if it is not Cetus. Cheap; safe to call every tick.
+pub fn note_foreign_frontmost(own_bundle: &str) {
+    let Some((app, bundle, pid)) = frontmost_identity() else {
+        return;
+    };
+    if pid <= 0 || (!own_bundle.is_empty() && bundle == own_bundle) {
+        return;
+    }
+    if let Ok(mut slot) = LAST_FOREIGN.lock() {
+        *slot = Some(ForeignFrontmost {
+            app,
+            bundle,
+            pid,
+            ts: crate::store::now_ms(),
+        });
+    }
+}
+
+pub fn last_foreign_frontmost() -> Option<ForeignFrontmost> {
+    LAST_FOREIGN.lock().ok().and_then(|s| s.clone())
+}
+
+/// Whether this process holds the Accessibility grant.
+#[cfg(target_os = "macos")]
+pub fn is_trusted() -> bool {
+    unsafe { accessibility_sys::AXIsProcessTrusted() }
+}
+#[cfg(not(target_os = "macos"))]
+pub fn is_trusted() -> bool {
+    false
+}
+
+/// CGWindowID of `pid`'s largest on-screen normal-layer window, for
+/// `screencapture -l` — which captures a window by id even when it sits behind
+/// Cetus. Window ids/owners/bounds are readable without Screen Recording
+/// (only titles/pixels need it).
+#[cfg(target_os = "macos")]
+pub fn largest_window_id(pid: i32) -> Option<u32> {
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::CFString;
+    use core_graphics::window::{
+        copy_window_info, kCGNullWindowID, kCGWindowListExcludeDesktopElements,
+        kCGWindowListOptionOnScreenOnly,
+    };
+    if pid <= 0 {
+        return None;
+    }
+    let list = copy_window_info(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+        kCGNullWindowID,
+    )?;
+    let num = |d: &CFDictionary<CFString, CFType>, key: &str| -> Option<f64> {
+        d.find(CFString::new(key))
+            .and_then(|v| v.downcast::<CFNumber>())
+            .and_then(|n| n.to_f64())
+    };
+    let mut best: Option<(f64, u32)> = None;
+    for i in 0..list.len() {
+        let Some(item) = list.get(i) else { continue };
+        let dict: CFDictionary<CFString, CFType> =
+            unsafe { CFDictionary::wrap_under_get_rule(*item as CFDictionaryRef) };
+        if num(&dict, "kCGWindowOwnerPID").map(|p| p as i32) != Some(pid) {
+            continue;
+        }
+        if num(&dict, "kCGWindowLayer").unwrap_or(0.0) != 0.0 {
+            continue;
+        }
+        let Some(id) = num(&dict, "kCGWindowNumber") else {
+            continue;
+        };
+        let area = dict
+            .find(CFString::new("kCGWindowBounds"))
+            .and_then(|v| v.downcast::<CFDictionary>())
+            .map(|b| {
+                let b: CFDictionary<CFString, CFType> =
+                    unsafe { CFDictionary::wrap_under_get_rule(b.as_concrete_TypeRef()) };
+                num(&b, "Width").unwrap_or(0.0) * num(&b, "Height").unwrap_or(0.0)
+            })
+            .unwrap_or(0.0);
+        if best.map(|(a, _)| area > a).unwrap_or(true) {
+            best = Some((area, id as u32));
+        }
+    }
+    best.map(|(_, id)| id)
 }

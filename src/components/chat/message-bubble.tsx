@@ -23,6 +23,7 @@ interface Props {
   message?: RenderedMessage;
   /** Copy this conversation through this message into a new conversation. */
   onFork?: () => void;
+  onQuoteClick?: (quote: string) => void;
 }
 
 /** Renders a single non-assistant message — user input or a custom extension
@@ -33,13 +34,14 @@ export function MessageBubble({
   messageKey,
   message: directMessage,
   onFork,
+  onQuoteClick,
 }: Props) {
   // Pull from the store when we got a key — fine-grained re-renders during
   // streaming. Otherwise fall through to whatever the caller passed in.
   const subscribed = useMessage(convId, messageKey ?? "");
   const message = directMessage ?? subscribed;
   if (!message) return null;
-  return <MessageBubbleView message={message} onFork={onFork} />;
+  return <MessageBubbleView message={message} onFork={onFork} onQuoteClick={onQuoteClick} />;
 }
 
 /** Concatenate a message's text blocks (markdown source) for the clipboard. */
@@ -54,9 +56,11 @@ function messageText(message: RenderedMessage): string {
 function MessageBubbleView({
   message,
   onFork,
+  onQuoteClick,
 }: {
   message: RenderedMessage;
   onFork?: () => void;
+  onQuoteClick?: (quote: string) => void;
 }) {
   const { t } = useTranslation("chat");
   const isUser = message.role === "user";
@@ -125,12 +129,20 @@ function MessageBubbleView({
           </div>
         )}
         {quoteSplit && (
-          <div className="flex max-w-full items-start gap-1.5 px-1 text-md leading-relaxed text-muted-foreground">
+          <button
+            type="button"
+            data-quote-link
+            onClick={() => onQuoteClick?.(quoteSplit.quote)}
+            disabled={!onQuoteClick}
+            title={t("quote.goToSource")}
+            aria-label={t("quote.goToSource")}
+            className="flex max-w-full items-start gap-1.5 rounded px-1 text-left text-md leading-relaxed text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default"
+          >
             <CornerDownRight className="mt-1 size-3.5 shrink-0 opacity-70" />
             <span className="line-clamp-2 min-w-0 whitespace-pre-wrap break-words">
               {quoteSplit.quote}
             </span>
-          </div>
+          </button>
         )}
         {blocks.length > 0 && (
           <div

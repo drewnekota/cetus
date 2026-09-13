@@ -1,7 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { BookPlus } from "lucide-react";
+import { BookPlus, Copy, X } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import type {
   VoiceDictionaryEventPayload,
@@ -34,6 +36,9 @@ export function VoiceHud() {
   const { t } = useTranslation("quick");
   // True between release and insertion (cloud finalize + AI cleanup).
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [recovery, setRecovery] = useState<string[]>([]);
+  const [dismissed, setDismissed] = useState(false);
   const [learnedTerms, setLearnedTerms] = useState<string[]>([]);
   // Mirror for the event closures: lets voice-level read the busy phase
   // without re-subscribing on every state change.
@@ -70,6 +75,7 @@ export function VoiceHud() {
   useEffect(() => {
     let cancelled = false;
     const unlisteners: Array<() => void> = [];
+    let sessionId = 0;
     let raf = 0;
     let running = false;
     const t0 = performance.now();
@@ -108,12 +114,17 @@ export function VoiceHud() {
     ) => {
       const un = await listen<VoiceEventPayload>(name, (e) => {
         if (e.payload.target !== "global") return;
+        if (e.payload.sessionId != null) {
+          if (e.payload.sessionId < sessionId) return;
+          sessionId = e.payload.sessionId;
+        }
         handler(e.payload);
       });
       if (cancelled) un();
       else unlisteners.push(un);
     };
     sub("voice-ready", () => {
+      if (busyRef.current) return;
       setLearnedTerms([]);
       markBusy(false);
       targetRef.current = 0;
@@ -123,6 +134,8 @@ export function VoiceHud() {
     // hidden between sessions, so the previous dictation's spinner state
     // must be wiped before it can flash.
     sub("voice-reset", () => {
+      setDismissed(false);
+      setNotice("");
       setLearnedTerms([]);
       markBusy(false);
       targetRef.current = 0;
@@ -145,8 +158,25 @@ export function VoiceHud() {
       targetRef.current = Math.min(1, Math.max(0, p.level ?? 0));
       startLoop(); // wake the loop if it parked during silence
     });
+    sub("voice-error", () => {
+      markBusy(false);
+      targetRef.current = 0;
+      setNotice("failed");
+      setDismissed(false);
+    });
+    sub("voice-notice", (p) => {
+      markBusy(false);
+      targetRef.current = 0;
+      setLearnedTerms([]);
+      setNotice(p.code ?? "failed");
+      setDismissed(false);
+      const text = p.text;
+      if (text) setRecovery((items) => [...items, text]);
+    });
     void listen<VoiceDictionaryEventPayload>("voice-dictionary-added", (e) => {
       if (e.payload.target !== "global") return;
+      setDismissed(false);
+      setNotice("");
       markBusy(false);
       targetRef.current = 0;
       setLearnedTerms(e.payload.terms);
@@ -161,11 +191,15 @@ export function VoiceHud() {
     };
   }, []);
 
+  if (dismissed) return null;
+
   return (
     // A clean black capsule, centered in the transparent voice window.
     <div className="flex h-screen w-screen items-center justify-center">
       <div className="flex h-7 max-w-[368px] items-center justify-center gap-2 rounded-full bg-black px-3 shadow-[0_2px_10px_rgba(0,0,0,0.45)]">
-        {learnedTerms.length > 0 ? (
+        {notice ? (
+          <span className="truncate text-xs text-white">{t(`dictation.${notice}`)}</span>
+        ) : learnedTerms.length > 0 ? (
           <>
             <BookPlus className="size-3.5 shrink-0 text-emerald-300" />
             <span className="truncate text-xs font-medium tracking-[0.01em] text-white">
@@ -191,6 +225,38 @@ export function VoiceHud() {
               />
             ))}
           </span>
+        )}
+        {recovery.length > 0 && (
+          <button
+            className="flex shrink-0 items-center gap-1 text-xs text-white"
+            title={t("dictation.copyResult")}
+            onClick={async () => {
+              try {
+                await invoke("copy_voice_result", { text: recovery[0] });
+                setRecovery((items) => items.slice(1));
+                setNotice("copied");
+              } catch {
+                setNotice("copyFailed");
+              }
+            }}
+          >
+            <Copy className="size-3" />
+            {t("dictation.copyResult")}
+            {recovery.length > 1 ? ` (${recovery.length})` : ""}
+          </button>
+        )}
+        {notice && (
+          <button
+            className="shrink-0 text-white"
+            aria-label={t("footer.dismiss")}
+            onClick={() => {
+              setDismissed(true);
+              setNotice("");
+              void getCurrentWindow().hide();
+            }}
+          >
+            <X className="size-3" />
+          </button>
         )}
       </div>
     </div>

@@ -13,6 +13,43 @@ const FENCE_OPEN = '<context source="cetus-quick">';
 const AMBIENT_FENCE_OPEN = '<context source="cetus-ambient">';
 const FENCE_CLOSE = "</context>";
 
+/** Inline budget for the selected text inside the fence. Mirrors Rust's
+ *  `context_budget::SELECTION_CHARS`; Rust captures up to a much larger hard
+ *  cap so the overflow can ride along as a text attachment instead of being
+ *  silently dropped. */
+export const INLINE_SELECTION_CHARS = 4_000;
+
+/** Line-aligned truncation with an explicit marker (same rule as Rust's
+ *  `context_budget::clip_lines`): back up to the last newline when one sits in
+ *  the final 20% of the budget, and say how much was cut. */
+export function clipLines(text: string, maxChars: number, label: string): string {
+  const chars = Array.from(text);
+  if (chars.length <= maxChars) return text;
+  let head = chars.slice(0, maxChars).join("");
+  const nl = head.lastIndexOf("\n");
+  if (nl !== -1 && Array.from(head.slice(0, nl)).length >= maxChars - Math.floor(maxChars / 5)) {
+    head = head.slice(0, nl);
+  }
+  head = head.trimEnd();
+  const omitted = chars.length - Array.from(head).length;
+  return head ? `${head}\n[… ${label} truncated: ${omitted} characters omitted]` : `[… ${label} truncated: ${omitted} characters omitted]`;
+}
+
+/** Split an oversized selection into the inline (clipped, marked) part and the
+ *  full text to attach as a file. `overflow` is null when it fits inline. */
+export function splitSelectionOverflow(
+  ctx: QuickContext | null | undefined,
+): { inline: QuickContext | null; overflow: string | null } {
+  if (!ctx) return { inline: null, overflow: null };
+  if (Array.from(ctx.selection).length <= INLINE_SELECTION_CHARS) {
+    return { inline: ctx, overflow: null };
+  }
+  return {
+    inline: { ...ctx, selection: clipLines(ctx.selection, INLINE_SELECTION_CHARS, "selected text") },
+    overflow: ctx.selection,
+  };
+}
+
 /** True when at least one field carries something worth attaching. */
 export function hasContext(ctx: QuickContext | null | undefined): boolean {
   return !!ctx && !!(ctx.app || ctx.url || ctx.title || ctx.selection);
@@ -26,7 +63,12 @@ export function buildContextFence(ctx: QuickContext | null | undefined): string 
   if (c.app) lines.push(`Active app: ${c.app}`);
   if (c.url) lines.push(`Browser URL: ${c.url}`);
   if (c.title) lines.push(`Page title: ${c.title}`);
-  if (c.selection) lines.push(`Selected text:\n${c.selection}`);
+  if (c.selection) {
+    lines.push(`Selected text:\n${c.selection}`);
+    if (c.selection.includes("[… selected text truncated:")) {
+      lines.push("(full selection attached as selection.txt)");
+    }
+  }
   return `${FENCE_OPEN}\n${lines.join("\n")}\n${FENCE_CLOSE}`;
 }
 

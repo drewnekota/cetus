@@ -458,7 +458,8 @@ async fn cleanup_call(
         "temperature": 0.0,
     });
 
-    let client = reqwest::Client::new();
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client = CLIENT.get_or_init(reqwest::Client::new);
     let resp = client
         .post(ARK_URL)
         .bearer_auth(ark_key)

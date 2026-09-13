@@ -13,6 +13,9 @@
 //!
 //! Both require the Accessibility trust the launcher gesture already needs.
 
+#[path = "voice_target.rs"]
+pub(crate) mod voice_target;
+
 use std::ffi::c_void;
 use std::io::Write;
 
@@ -418,7 +421,7 @@ fn pbpaste() -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-fn pbcopy(text: &str) -> Result<(), String> {
+pub(crate) fn pbcopy(text: &str) -> Result<(), String> {
     let mut command = utf8_pasteboard_command("/usr/bin/pbcopy");
     let mut child = command
         .stdin(std::process::Stdio::piped())

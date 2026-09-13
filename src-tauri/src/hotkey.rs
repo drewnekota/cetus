@@ -23,9 +23,14 @@ use core_graphics::event::{
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
+
+// Monotonic signals only: no key contents are retained. They protect the
+// insertion baseline, and let Escape cancel even after the trigger is released.
+static VOICE_INPUT_REVISION: AtomicU64 = AtomicU64::new(0);
+static VOICE_CANCEL_REVISION: AtomicU64 = AtomicU64::new(0);
 
 const LCMD: u64 = 0x0000_0008; // NX_DEVICELCMDKEYMASK
 const RCMD: u64 = 0x0000_0010; // NX_DEVICERCMDKEYMASK
@@ -253,6 +258,9 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
             CGEventType::KeyDown,
             // KeyUp is only consulted for the Caps Lock (F18) release edge.
             CGEventType::KeyUp,
+            CGEventType::LeftMouseDown,
+            CGEventType::RightMouseDown,
+            CGEventType::OtherMouseDown,
         ],
         move |_proxy, event_type, event| {
             // Re-arm if the system disabled us — do this regardless of the
@@ -291,6 +299,24 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
                 was_both_opt.set((bits & DEV_LALT != 0) && (bits & DEV_RALT != 0));
                 tracing::warn!("cetus: event tap was disabled by the OS; re-armed and resynced");
                 return None;
+            }
+            if matches!(
+                event_type,
+                CGEventType::LeftMouseDown
+                    | CGEventType::RightMouseDown
+                    | CGEventType::OtherMouseDown
+            ) {
+                VOICE_INPUT_REVISION.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
+            if matches!(event_type, CGEventType::KeyDown) {
+                let key = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                if key != crate::caps_remap::REMAPPED_KEYCODE {
+                    VOICE_INPUT_REVISION.fetch_add(1, Ordering::Relaxed);
+                }
+                if key == 53 {
+                    VOICE_CANCEL_REVISION.fetch_add(1, Ordering::Relaxed);
+                }
             }
             if matches!(event_type, CGEventType::KeyDown) {
                 // Feed the screen-context capture's trigger clock (commit /
@@ -603,6 +629,7 @@ pub fn spawn_voice_monitor(app: AppHandle, runtime: QuickRuntime) {
 }
 
 fn run_voice_monitor(runtime: QuickRuntime, tx: tokio::sync::mpsc::UnboundedSender<VoiceCmd>) {
+    let mut cancel_revision = VOICE_CANCEL_REVISION.load(Ordering::Relaxed);
     let mut press_start: Option<Instant> = None; // PTT hold timer
     let mut ptt_engaged = false; // StartPtt sent; awaiting release/chord
     let mut last_gen = runtime.voice_hf_gen.load(Ordering::Relaxed);
@@ -635,6 +662,16 @@ fn run_voice_monitor(runtime: QuickRuntime, tx: tokio::sync::mpsc::UnboundedSend
             continue;
         }
         disabled_idle = false;
+
+        let cancel_now = VOICE_CANCEL_REVISION.load(Ordering::Relaxed);
+        if cancel_now != cancel_revision {
+            cancel_revision = cancel_now;
+            let _ = tx.send(VoiceCmd::CancelPtt);
+            // Do not restart a cancelled recording until the trigger is released.
+            if ptt_engaged {
+                runtime.ptt_dirty.store(true, Ordering::Relaxed);
+            }
+        }
 
         // Each double-tap the event tap classified since the last poll is exactly
         // one toggle command. Sending the integer delta (not a "changed" flag)
@@ -695,84 +732,129 @@ async fn run_voice_worker(
     runtime: QuickRuntime,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<VoiceCmd>,
 ) {
-    use std::time::Duration as Dur;
-    let free = Dur::from_secs(3);
     let mut kind = quick::SESSION_NONE;
-    // Park a standby speech helper so the first dictation's mic comes up fast.
-    // Spawned: the first prewarm may compile the helper (seconds of swiftc),
-    // and the command loop must start consuming immediately.
+    let mut context = None;
+    let mut pending = None;
     {
-        let app_pw = app.clone();
+        let app = app.clone();
         tokio::spawn(async move {
-            crate::voice::prewarm(&app_pw.state::<crate::AppState>()).await;
+            crate::voice::prewarm(&app.state::<crate::AppState>()).await;
         });
     }
-    while let Some(cmd) = rx.recv().await {
+    loop {
+        let Some(cmd) = (match pending.take() {
+            Some(cmd) => Some(cmd),
+            None => rx.recv().await,
+        }) else {
+            break;
+        };
         let state = app.state::<crate::AppState>();
-        tracing::debug!("voice worker: {cmd:?} (session kind={kind})");
         match cmd {
-            VoiceCmd::StartPtt => {
-                if kind == quick::SESSION_NONE {
-                    crate::voice::await_slot_free(&state, free).await;
-                    match crate::voice::start_internal(&state, &app, "global".to_string()).await {
-                        Ok(()) => {
-                            crate::voice::show_hud(&app);
-                            kind = quick::SESSION_PTT;
-                        }
-                        Err(e) => tracing::warn!("voice dictation start failed: {e}"),
+            VoiceCmd::StartPtt if kind == quick::SESSION_NONE => {
+                // Capture identity immediately; AX runs alongside mic startup.
+                let session = crate::voice::session::Session::new();
+                session.mark("trigger");
+                let revision = VOICE_INPUT_REVISION.load(Ordering::Relaxed);
+                let identity = crate::ax::frontmost_identity();
+                let target = tokio::task::spawn_blocking(move || {
+                    identity.and_then(|id| {
+                        crate::ax::wake_app(id.2);
+                        crate::text_input::voice_target::Target::capture(id, revision)
+                    })
+                });
+                match crate::voice::start_internal(&state, &app, "global".into(), session.clone())
+                    .await
+                {
+                    Ok(()) => {
+                        crate::voice::show_hud(&app, session.id());
+                        context = Some((session, target));
+                        kind = quick::SESSION_PTT;
+                    }
+                    Err(e) => {
+                        tracing::warn!("voice start failed: {e}");
+                        crate::voice::show_notice(&app, "failed", None);
                     }
                 }
             }
-            VoiceCmd::StopPttInsert => {
-                if kind == quick::SESSION_PTT {
-                    finish_ptt(&app, &runtime).await;
-                    kind = quick::SESSION_NONE;
+            VoiceCmd::StopPttInsert if kind == quick::SESSION_PTT => {
+                kind = quick::SESSION_NONE;
+                // A new hold can be detected while cleanup is pending. Dropping
+                // finish_ptt cancels its owned capture and HTTP futures before
+                // the next command starts; insertion never runs detached.
+                runtime.voice_session_kind.store(kind, Ordering::Relaxed);
+                if let Some((session, target)) = context.take() {
+                    session.mark("released");
+                    let outcome = finish_or_interrupt(
+                        &mut rx,
+                        finish_ptt(&app, &runtime, session.clone(), target),
+                    )
+                    .await;
+                    // Also covers cancellation before stop_internal was polled.
+                    crate::voice::cancel_internal(&state).await;
+                    if let FinishOutcome::Interrupted(cmd) = outcome {
+                        session.mark("cancelled");
+                        crate::voice::hide_hud(&app);
+                        if cmd.is_none() {
+                            break;
+                        }
+                        pending = cmd;
+                    }
                 }
             }
-            VoiceCmd::CancelPtt => {
-                if kind == quick::SESSION_PTT {
+            VoiceCmd::CancelPtt | VoiceCmd::StopAll => {
+                context = None;
+                crate::voice::cancel_internal(&state).await;
+                crate::voice::hide_hud(&app);
+                kind = quick::SESSION_NONE;
+            }
+            VoiceCmd::ToggleHandsFree => {
+                if kind == quick::SESSION_NONE {
+                    match crate::voice::start_handsfree_internal(&state, &app).await {
+                        Ok(id) => {
+                            crate::voice::show_hud(&app, id);
+                            kind = quick::SESSION_HANDSFREE;
+                        }
+                        Err(e) => {
+                            tracing::warn!("hands-free start failed: {e}");
+                            crate::voice::show_notice(&app, "failed", None);
+                        }
+                    }
+                } else if kind == quick::SESSION_HANDSFREE {
+                    crate::voice::stop_handsfree_internal(&state).await;
+                    crate::voice::await_slot_free(&state, Duration::from_secs(3)).await;
                     crate::voice::cancel_internal(&state).await;
                     crate::voice::hide_hud(&app);
                     kind = quick::SESSION_NONE;
                 }
             }
-            VoiceCmd::ToggleHandsFree => match kind {
-                quick::SESSION_NONE => {
-                    crate::voice::await_slot_free(&state, free).await;
-                    match crate::voice::start_handsfree_internal(&state, &app).await {
-                        Ok(()) => {
-                            crate::voice::show_hud(&app);
-                            kind = quick::SESSION_HANDSFREE;
-                        }
-                        Err(e) => tracing::warn!("hands-free start failed: {e}"),
-                    }
-                }
-                quick::SESSION_HANDSFREE => {
-                    crate::voice::stop_handsfree_internal(&state).await;
-                    crate::voice::await_slot_free(&state, free).await;
-                    crate::voice::hide_hud(&app);
-                    kind = quick::SESSION_NONE;
-                }
-                // A double-tap during push-to-talk (you're mid-hold) is ignored.
-                _ => {}
-            },
-            VoiceCmd::StopAll => {
-                match kind {
-                    quick::SESSION_PTT => {
-                        crate::voice::cancel_internal(&state).await;
-                        crate::voice::hide_hud(&app);
-                    }
-                    quick::SESSION_HANDSFREE => {
-                        crate::voice::stop_handsfree_internal(&state).await;
-                        crate::voice::await_slot_free(&state, free).await;
-                        crate::voice::hide_hud(&app);
-                    }
-                    _ => {}
-                }
-                kind = quick::SESSION_NONE;
-            }
+            _ => {}
         }
         runtime.voice_session_kind.store(kind, Ordering::Relaxed);
+    }
+    crate::voice::cancel_internal(&app.state::<crate::AppState>()).await;
+}
+
+enum FinishOutcome {
+    Complete,
+    Interrupted(Option<VoiceCmd>),
+}
+
+/// Own the future here: an interrupt drops every capture/network owner before
+/// returning the next command to the worker. Duplicate releases are harmless.
+async fn finish_or_interrupt(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<VoiceCmd>,
+    finish: impl std::future::Future<Output = ()>,
+) -> FinishOutcome {
+    tokio::pin!(finish);
+    loop {
+        tokio::select! {
+            biased;
+            cmd = rx.recv() => match cmd {
+                Some(VoiceCmd::StopPttInsert) => continue,
+                other => return FinishOutcome::Interrupted(other),
+            },
+            _ = &mut finish => return FinishOutcome::Complete,
+        }
     }
 }
 
@@ -780,69 +862,76 @@ async fn run_voice_worker(
 /// apply learned corrections, then type/paste it into the focused app — and
 /// watch the field afterwards to learn from the user's edits. Runs inside the
 /// serialized worker.
-async fn finish_ptt(app: &AppHandle, runtime: &QuickRuntime) {
-    let t0 = std::time::Instant::now();
+async fn finish_ptt(
+    app: &AppHandle,
+    runtime: &QuickRuntime,
+    session: crate::voice::session::Session,
+    target_task: tokio::task::JoinHandle<Option<crate::text_input::voice_target::Target>>,
+) {
     let state = app.state::<crate::AppState>();
-    let mode_code = runtime.voice_insert_mode.load(Ordering::Relaxed);
-    let cleanup = runtime.voice_cleanup.load(Ordering::Relaxed);
     let settings = crate::quick::load_settings(&state.store);
-    // The frontmost app names the tone target for cleanup (email vs chat vs
-    // IDE). Fetched concurrently with the ASR finalize — it spawns a helper.
-    let app_data_for_front = state.app_data_dir.clone();
-    let front_task =
-        tokio::task::spawn_blocking(move || crate::ocr::frontmost_app(&app_data_for_front));
-    // The cleanup corpus (AX read of the focused field, file IO, jieba) is also
-    // assembled concurrently with the finalize. When the field is AX-unreadable
-    // (Electron/canvas UIs) we fall back to OCR-ing the screen — Wispr-style —
-    // so cleanup still sees what the user is writing into. Both reads share the
-    // context-biasing opt-in (build_corpus_with returns empty without it).
-    let corpus_task = cleanup.then(|| {
-        let ad = state.app_data_dir.clone();
-        let settings = settings.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut corpus = crate::voice::build_corpus_with(&ad, &settings);
-            if settings.voice_context_biasing && corpus.context.is_none() {
-                if let Some(screen) = crate::capture::ocr_screen_now(&ad) {
-                    // Tail of the OCR text in reading order ≈ the bottom of the
-                    // window — where chat composers and fresh prose live.
-                    let flat = screen.split_whitespace().collect::<Vec<_>>().join(" ");
-                    let tail: Vec<char> = flat.chars().rev().take(400).collect();
-                    let tail: String = tail.into_iter().rev().collect();
-                    if !tail.is_empty() {
-                        tracing::debug!(
-                            "voice context: focused field AX-unreadable; screen-OCR fallback ({} chars)",
-                            tail.chars().count()
-                        );
-                        corpus.context = Some(tail);
-                    }
-                }
-            }
-            corpus
-        })
-    });
-    // Keep the HUD up but swap its waveform for a spinner: the user has released,
-    // so what follows (stream finalize + the cloud cleanup pass) is loading time
-    // they're waiting on. The HUD is hidden once that's done, just before insert.
     crate::voice::show_transcribing(app);
-    let mut text = crate::voice::stop_internal(&state).await;
-    let asr_ms = t0.elapsed().as_millis();
-    let app_name = front_task.await.ok().flatten().map(|i| i.app);
-    tracing::debug!("voice context: frontmost app = {:?}", app_name);
-    let t_clean = std::time::Instant::now();
-    if cleanup && !text.trim().is_empty() {
-        if let Ok(Some(key)) = crate::secrets::get("volc_ark") {
-            // Hand the cleanup pass the same biasing we gave ASR (hotwords +
-            // focused-field text, or its screen-OCR stand-in) so it fixes
-            // proper-noun spelling and zh/en boundaries the same way — plus the
-            // frontmost app for tone and the previous dictation for continuity.
-            // Mostly empty when context biasing is off.
-            let corpus = match corpus_task {
-                Some(task) => task.await.unwrap_or_default(),
-                None => crate::doubao::Corpus::default(),
-            };
-            match crate::titling::cleanup_transcript(
+    let raw = match crate::voice::stop_internal(&state).await {
+        Ok(text) => text,
+        Err(_) => {
+            crate::voice::show_notice(app, "failed", None);
+            return;
+        }
+    };
+    session.mark("asr_stop_complete");
+    if raw.trim().is_empty() {
+        crate::voice::hide_hud(app);
+        return;
+    }
+    let target = tokio::time::timeout(Duration::from_millis(600), target_task)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten();
+    let app_name = target.as_ref().map(|t| t.app.clone());
+    let mut text = raw.clone();
+    let mut raw_fallback = false;
+    if runtime.voice_cleanup.load(Ordering::Relaxed) {
+        session.mark("cleanup_started");
+        let cleaned = crate::voice::session::within_cleanup_budget(async {
+            let key =
+                tokio::task::spawn_blocking(|| crate::secrets::get("volc_ark").ok().flatten())
+                    .await
+                    .ok()
+                    .flatten();
+            let key = key?;
+            let ad = state.app_data_dir.clone();
+            let settings = settings.clone();
+            // Context has its own small budget inside the overall cleanup
+            // deadline. A slow AX/OCR read must not consume the model budget.
+            let corpus = tokio::time::timeout(
+                Duration::from_millis(200),
+                tokio::task::spawn_blocking(move || {
+                    let mut corpus = crate::voice::build_corpus_with(&ad, &settings);
+                    if settings.voice_context_biasing && corpus.context.is_none() {
+                        if let Some(screen) = crate::capture::ocr_screen_now(&ad) {
+                            let flat = screen.split_whitespace().collect::<Vec<_>>().join(" ");
+                            corpus.context = Some(
+                                flat.chars()
+                                    .rev()
+                                    .take(400)
+                                    .collect::<Vec<_>>()
+                                    .into_iter()
+                                    .rev()
+                                    .collect(),
+                            );
+                        }
+                    }
+                    corpus
+                }),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default();
+            crate::titling::cleanup_transcript(
                 &key,
-                &text,
+                &raw,
                 corpus.context.as_deref(),
                 &corpus.hotwords,
                 app_name.as_deref(),
@@ -850,78 +939,85 @@ async fn finish_ptt(app: &AppHandle, runtime: &QuickRuntime) {
                 None,
             )
             .await
-            {
-                Ok(clean) => {
-                    tracing::info!(
-                        "voice cleanup applied: {} → {} chars: {:?}",
-                        text.chars().count(),
-                        clean.chars().count(),
-                        crate::voice::preview(&clean)
-                    );
-                    text = clean;
-                }
-                Err(e) => tracing::warn!("voice cleanup failed, using raw transcript: {e}"),
+            .ok()
+        })
+        .await
+        .flatten();
+        match cleaned {
+            Some(clean) => {
+                text = clean;
+                session.mark("cleanup_complete");
             }
-        } else {
-            tracing::info!("voice cleanup enabled but no volc_ark key — using raw transcript");
+            None => {
+                raw_fallback = true;
+                session.mark("cleanup_raw_fallback");
+            }
         }
     }
-    let cleanup_ms = t_clean.elapsed().as_millis();
-    // User-confirmed corrections ("Deep Seek"→"DeepSeek") outrank both ASR and
-    // the cleanup model — the user's own edits are ground truth.
     if settings.voice_context_biasing {
-        let before = text.clone();
-        text = crate::corrections::apply(&state.app_data_dir, &text);
-        if text != before {
-            tracing::info!(
-                "voice corrections changed the transcript: {:?} → {:?}",
-                crate::voice::preview(&before),
-                crate::voice::preview(&text)
-            );
+        let ad = state.app_data_dir.clone();
+        let input = text.clone();
+        if let Ok(Ok(corrected)) = tokio::time::timeout(
+            Duration::from_millis(100),
+            tokio::task::spawn_blocking(move || crate::corrections::apply(&ad, &input)),
+        )
+        .await
+        {
+            text = corrected;
         }
     }
     text = crate::titling::normalize_zh_en_spacing(&text);
-    crate::voice::hide_hud(app);
-    if text.trim().is_empty() {
+    // Perform the bounded AX check off the runtime, then recheck the user-input
+    // revision immediately before synchronous injection (no 90 ms focus gap).
+    let revision = VOICE_INPUT_REVISION.load(Ordering::Relaxed);
+    let expected_identity = target.as_ref().map(|t| t.identity());
+    let valid = if let Some(target) = target {
+        tokio::time::timeout(
+            Duration::from_millis(600),
+            tokio::task::spawn_blocking(move || target.still_focused(revision)),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or(false)
+    } else {
+        false
+    };
+    session.mark("target_checked");
+    if !valid
+        || revision != VOICE_INPUT_REVISION.load(Ordering::Relaxed)
+        || expected_identity != crate::ax::frontmost_identity().map(|(_, b, p)| (b, p))
+    {
+        session.mark("target_changed");
+        crate::voice::show_notice(app, "targetChanged", Some(&text));
         return;
     }
-    // Record what the user actually received: history, dialog continuity, and
-    // hotword learning all key off this one final text (the raw/cleaned split
-    // used to bias future recognition toward pre-cleanup errors).
-    {
-        let (ad, rec) = (state.app_data_dir.clone(), text.clone());
-        tokio::task::spawn_blocking(move || crate::transcripts::record(&ad, &rec, "global"));
-    }
-    // Learn the user's distinctive terms from what they actually accepted, so
-    // future recognition leans toward them. Only when context biasing is on.
-    if settings.voice_context_biasing {
-        let ad = state.app_data_dir.clone();
-        let learned = text.clone();
-        tokio::task::spawn_blocking(move || crate::biasing::harvest(&ad, &learned));
-    }
-    tracing::info!(
-        "voice insert ({:?} mode, asr {asr_ms}ms + cleanup {cleanup_ms}ms): {} chars: {:?}",
-        if mode_code == quick::INSERT_PASTE {
-            "paste"
-        } else {
-            "type"
-        },
-        text.chars().count(),
-        crate::voice::preview(&text)
-    );
-    // Let key focus return to the target app after the HUD orders out.
-    tokio::time::sleep(Duration::from_millis(90)).await;
-    let mode = if mode_code == quick::INSERT_PASTE {
+    let mode = if runtime.voice_insert_mode.load(Ordering::Relaxed) == quick::INSERT_PASTE {
         crate::text_input::InsertMode::Paste
     } else {
         crate::text_input::InsertMode::Type
     };
     if let Err(e) = crate::text_input::insert_text(&text, mode) {
-        tracing::warn!("voice insert failed: {e}");
-    } else if settings.voice_context_biasing {
-        // Re-read the field in a few seconds and mine the user's manual fixes
-        // (the correction-learning loop). Shares the screen-reading opt-in.
-        crate::corrections::watch_insertion(app.clone(), state.app_data_dir.clone(), text.clone());
+        tracing::warn!(session_id = session.id(), "voice insert failed: {e}");
+        crate::voice::show_notice(app, "insertFailed", Some(&text));
+        return;
+    }
+    // Posting events is not an acknowledgment from the host. This stage is
+    // explicitly named insert_posted rather than claiming confirmed delivery.
+    session.mark("insert_posted");
+    if raw_fallback {
+        crate::voice::show_notice(app, "rawFallback", None);
+    } else {
+        crate::voice::hide_hud(app);
+    }
+    let ad = state.app_data_dir.clone();
+    let rec = text.clone();
+    tokio::task::spawn_blocking(move || crate::transcripts::record(&ad, &rec, "global"));
+    if settings.voice_context_biasing {
+        let ad = state.app_data_dir.clone();
+        let learned = text.clone();
+        tokio::task::spawn_blocking(move || crate::biasing::harvest(&ad, &learned));
+        crate::corrections::watch_insertion(app.clone(), state.app_data_dir.clone(), text);
     }
 }
 
@@ -931,6 +1027,57 @@ mod tests {
     use crate::quick;
     use std::cell::RefCell;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+    #[tokio::test]
+    async fn voice_new_hold_cancels_cleanup_before_another_session_starts() {
+        use super::{finish_or_interrupt, FinishOutcome, VoiceCmd};
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (began, started) = tokio::sync::oneshot::channel();
+        let (owned, released) = tokio::sync::oneshot::channel::<()>();
+        let (insert, mut inserted) = tokio::sync::oneshot::channel();
+        let finish = async move {
+            let _capture_owner = owned;
+            let _ = began.send(());
+            std::future::pending::<()>().await;
+            let _ = insert.send(());
+        };
+        let worker = tokio::spawn(async move { finish_or_interrupt(&mut rx, finish).await });
+        started.await.unwrap();
+        tx.send(VoiceCmd::StopPttInsert).unwrap(); // duplicate release must not finalize twice
+        tx.send(VoiceCmd::StartPtt).unwrap();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), worker)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            result,
+            FinishOutcome::Interrupted(Some(VoiceCmd::StartPtt))
+        ));
+        assert!(released.await.is_err()); // capture dropped BEFORE accepting new start
+        assert!(inserted.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn voice_escape_wins_over_ready_insertion_and_closed_monitor_cancels() {
+        use super::{finish_or_interrupt, FinishOutcome, VoiceCmd};
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(VoiceCmd::CancelPtt).unwrap();
+        let inserted = std::cell::Cell::new(false);
+        let outcome = finish_or_interrupt(&mut rx, async {
+            inserted.set(true);
+        })
+        .await;
+        assert!(matches!(
+            outcome,
+            FinishOutcome::Interrupted(Some(VoiceCmd::CancelPtt))
+        ));
+        assert!(!inserted.get());
+        drop(tx);
+        assert!(matches!(
+            finish_or_interrupt(&mut rx, std::future::pending()).await,
+            FinishOutcome::Interrupted(None)
+        ));
+    }
 
     fn tap(
         handsfree_shortcut: bool,

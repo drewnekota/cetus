@@ -115,7 +115,7 @@ import {
 } from "@/components/chat/backend-picker";
 import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
 import { loadBackendChoice, saveBackendChoice } from "@/lib/backend-choice";
-import { composeWithContext } from "@/lib/quick-context";
+import { composeWithContext, splitSelectionOverflow } from "@/lib/quick-context";
 import { useConversationAutoSort } from "@/lib/conversation-order";
 import {
   loadCollapsedWorkspaceDirs,
@@ -339,6 +339,17 @@ interface Outgoing {
   piImages: { type: "image"; data: string; mimeType: string }[];
   /** Prompt text sent to pi, with the local file-reading path block appended. */
   piMessage: string;
+}
+
+/** Base64 of a UTF-8 string (bare, no `data:` prefix), matching what
+ *  `saveAttachment` expects for file attachments. */
+function utf8ToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
 }
 
 /** Split composer attachments into the image channel (→ pi images)
@@ -578,6 +589,14 @@ export default function Home() {
   useEffect(() => {
     if (activeId !== null) return;
     setModelChoice(mergeStoredModelChoice(DEFAULT_MODEL_CHOICE));
+    // Existing-chat CLI picks update the stored per-runtime tuning. Refresh
+    // the hero too, otherwise it keeps the values from before that chat.
+    const savedBackend = loadBackendChoice();
+    if (savedBackend) {
+      setPendingBackend(savedBackend.backend);
+      setPendingCliModel(savedBackend.cliModel);
+      setPendingCliEffort(savedBackend.cliEffort);
+    }
   }, [activeId]);
   const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
   const [defaultWorkspace, setDefaultWorkspace] = useState<string>("");
@@ -2824,7 +2843,19 @@ export default function Home() {
   // optimistic user bubble, so route the payload through the normal send path.
   async function quickLaunch(p: QuickLaunchPayload) {
     setView("chat");
+    // A huge selection rides inline only up to its budget; the full text goes
+    // along as a file so nothing is lost and the fence stays readable.
+    const { inline: context, overflow } = splitSelectionOverflow(p.context);
     const attachments: ComposerAttachment[] = [
+      ...(overflow
+        ? [{
+            type: "file" as const,
+            data: utf8ToBase64(overflow),
+            mimeType: "text/plain",
+            name: "selection.txt",
+            sizeBytes: new TextEncoder().encode(overflow).length,
+          }]
+        : []),
       ...(p.image
         ? [{
             type: "image" as const,
@@ -2893,7 +2924,7 @@ export default function Home() {
     // Fold any ambient context into a fenced block ahead of the prompt — the
     // model reads it as environment data, the bubble renders it as a chip. One
     // composed string drives both the optimistic render and the model send.
-    const composed = composeWithContext(p.text, p.context);
+    const composed = composeWithContext(p.text, context);
     let out: Awaited<ReturnType<typeof prepareOutgoing>>;
     try {
       out = await prepareOutgoing(convId, composed, attachments);
