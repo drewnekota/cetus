@@ -223,6 +223,30 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Apple-style continuous corners on everything that has a border-radius.
+     `corner-shape` only ships behind WebKit's CSSCornerShapeEnabled flag,
+     which src-tauri/src/webkit_prefs.rs turns on per webview; elsewhere the
+     @supports gate leaves the corners plain round. superellipse(1) = round,
+     2 = squircle; 1.6 sits close to iOS/macOS continuous corners. Note the
+     curve visually reads tighter than a round corner of the same radius.
+     Circles and pills (`rounded-full`) stay geometric — a superellipse would
+     turn avatars and badges into rounded squares. Components can opt out
+     with the `[corner-shape:round]` utility (utilities beat this base layer). */
+  :root {
+    --corner-shape: superellipse(1.6);
+  }
+  @supports (corner-shape: superellipse(1.6)) {
+    *,
+    *::before,
+    *::after {
+      corner-shape: var(--corner-shape);
+    }
+    .rounded-full,
+    .rounded-full::before,
+    .rounded-full::after {
+      corner-shape: round;
+    }
+  }
   html,
   body,
   #__next {

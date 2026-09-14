@@ -73,6 +73,7 @@ mod titling;
 mod transcripts;
 mod updater;
 mod voice;
+mod webkit_prefs;
 mod webview_health;
 mod window_geom;
 
@@ -910,6 +911,7 @@ pub fn run() {
         .init();
 
     let builder = tauri::Builder::default()
+        .plugin(webkit_prefs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())

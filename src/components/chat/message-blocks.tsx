@@ -115,9 +115,9 @@ function CopyablePre({
         // Opaque background rather than translucent + backdrop-blur: the blur
         // promoted a compositing layer over a scrollable <pre> for no visual
         // gain, and solid keeps the label readable over scrolled code.
-        // `fade-layer` because the hover opacity transition would otherwise
-        // make WebKit promote/demote the button and nudge the icon a subpixel.
-        className="not-prose fade-layer absolute right-1.5 top-1.5 flex h-6 items-center gap-1 rounded-md border border-border/60 bg-background px-1.5 text-xs text-muted-foreground opacity-70 shadow-sm transition-[color,background-color,opacity] hover:bg-background hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        // Fully opaque: a translucent button let the code underneath show
+        // through the label, which read as a rendering glitch on long lines.
+        className="not-prose absolute right-1.5 top-1.5 flex h-6 items-center gap-1 rounded-md border border-border/60 bg-background px-1.5 text-xs text-muted-foreground shadow-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
         <span>{label}</span>

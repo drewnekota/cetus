@@ -14,7 +14,7 @@
 //
 // This component closes the first two from the page and suppresses the third
 // by dropping the native menu everywhere except where it is actually useful
-// (editable fields and selected text). Keeping the menu off elsewhere also
+// (images, editable fields and selected text). Keeping the menu off elsewhere also
 // removes its Back/Forward/Reload items, which navigate the app webview out of
 // the live UI — Back in particular tears down the running session view. The
 // Rust `on_page_load` recovery net remains behind it for anything else that
@@ -66,10 +66,11 @@ export function LinkGuard() {
       e.preventDefault();
       openMarkdownLink(href);
     };
-    // The native menu is only worth showing where it offers editing or copy
-    // commands; anywhere else it is just Back/Forward/Reload/AutoFill, which
-    // can only navigate the app away from itself.
+    // Keep native image copying available for both inline thumbnails and
+    // full-size previews. Elsewhere, only editing and selected-text copy need
+    // the native menu; its navigation commands can leave the live app UI.
     const onContextMenu = (e: MouseEvent) => {
+      if (e.target instanceof HTMLImageElement) return;
       if (isEditable(e.target) && !anchorHref(e.target)) return;
       if (hasSelectionAt(e.target)) return;
       e.preventDefault();
