@@ -4,6 +4,9 @@ import type { NamespaceMessages } from "./types";
 // workspace pickers, tool-use / thinking / vision / artifact cards).
 export const chat = {
   en: {
+    "diagram.view": "Diagram",
+    "diagram.code": "Code",
+    "diagram.error": "Couldn't render this diagram, showing the source instead.",
     "model.minimal": "Minimal",
     "model.minimalHint": "Barely thinks — fastest reasoning tier.",
     "model.low": "Low",
@@ -281,6 +284,9 @@ export const chat = {
     "artifacts.emptySuffix": ".",
   },
   zh: {
+    "diagram.view": "图表",
+    "diagram.code": "代码",
+    "diagram.error": "无法渲染此图表，已改为显示源码。",
     "model.minimal": "极简",
     "model.minimalHint": "几乎不思考——最快的推理档。",
     "model.low": "低",
@@ -528,6 +534,9 @@ export const chat = {
     "artifacts.emptySuffix": " 时把生成的文件放到这里。",
   },
   ja: {
+    "diagram.view": "図",
+    "diagram.code": "コード",
+    "diagram.error": "この図を描画できないため、ソースを表示しています。",
     "model.minimal": "最小",
     "model.minimalHint": "ほぼ思考しない、最速の推論レベル。",
     "model.low": "低",
@@ -642,6 +651,9 @@ export const chat = {
     "artifacts.emptySuffix": " を使うと、生成したファイルがここに表示されます。",
   },
   ko: {
+    "diagram.view": "다이어그램",
+    "diagram.code": "코드",
+    "diagram.error": "이 다이어그램을 렌더링할 수 없어 소스를 표시합니다.",
     "model.minimal": "최소",
     "model.minimalHint": "거의 생각하지 않는 가장 빠른 추론 단계.",
     "model.low": "낮음",
@@ -754,6 +766,9 @@ export const chat = {
     "artifacts.emptySuffix": "을(를) 사용하면 생성된 파일이 여기에 표시됩니다.",
   },
   es: {
+    "diagram.view": "Diagrama",
+    "diagram.code": "Código",
+    "diagram.error": "No se pudo renderizar este diagrama; se muestra el código.",
     "model.minimal": "Mínimo",
     "model.minimalHint": "Apenas razona: el nivel más rápido.",
     "model.low": "Bajo",
@@ -866,6 +881,9 @@ export const chat = {
     "artifacts.emptySuffix": ".",
   },
   pt: {
+    "diagram.view": "Diagrama",
+    "diagram.code": "Código",
+    "diagram.error": "Não foi possível renderizar este diagrama; exibindo o código.",
     "model.minimal": "Mínimo",
     "model.minimalHint": "Quase não raciocina — o nível mais rápido.",
     "model.low": "Baixo",
@@ -978,6 +996,9 @@ export const chat = {
     "artifacts.emptySuffix": ".",
   },
   fr: {
+    "diagram.view": "Diagramme",
+    "diagram.code": "Code",
+    "diagram.error": "Impossible d'afficher ce diagramme ; affichage du code.",
     "model.minimal": "Minimal",
     "model.minimalHint": "Réfléchit à peine — le niveau le plus rapide.",
     "model.low": "Faible",
@@ -1090,6 +1111,9 @@ export const chat = {
     "artifacts.emptySuffix": ".",
   },
   de: {
+    "diagram.view": "Diagramm",
+    "diagram.code": "Code",
+    "diagram.error": "Dieses Diagramm konnte nicht gerendert werden; der Quelltext wird angezeigt.",
     "model.minimal": "Minimal",
     "model.minimalHint": "Denkt kaum — schnellste Stufe.",
     "model.low": "Niedrig",
@@ -1202,6 +1226,9 @@ export const chat = {
     "artifacts.emptySuffix": " verwendet.",
   },
   it: {
+    "diagram.view": "Diagramma",
+    "diagram.code": "Codice",
+    "diagram.error": "Impossibile visualizzare questo diagramma; viene mostrato il codice.",
     "model.minimal": "Minimo",
     "model.minimalHint": "Ragiona appena: il livello più veloce.",
     "model.low": "Basso",
@@ -1314,6 +1341,9 @@ export const chat = {
     "artifacts.emptySuffix": ".",
   },
   ru: {
+    "diagram.view": "Диаграмма",
+    "diagram.code": "Код",
+    "diagram.error": "Не удалось отобразить диаграмму; показан исходный код.",
     "model.minimal": "Минимум",
     "model.minimalHint": "Почти не рассуждает — самый быстрый уровень.",
     "model.low": "Низкий",

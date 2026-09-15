@@ -226,7 +226,9 @@
   /* Apple-style continuous corners on everything that has a border-radius.
      `corner-shape` only ships behind WebKit's CSSCornerShapeEnabled flag,
      which src-tauri/src/webkit_prefs.rs turns on per webview; elsewhere the
-     @supports gate leaves the corners plain round. superellipse(1) = round,
+     @supports gate leaves the corners plain round. That file also keeps the
+     flag off on WebKits that parse superellipse() but paint it as a square
+     (macOS 27), which is the only reason this rule can be trusted here. superellipse(1) = round,
      2 = squircle; 1.6 sits close to iOS/macOS continuous corners. Note the
      curve visually reads tighter than a round corner of the same radius.
      Circles and pills (`rounded-full`) stay geometric — a superellipse would

@@ -9,9 +9,24 @@
 //! didFinish). The frontend gates its `corner-shape` rule behind `@supports`,
 //! so on WebKits without the flag (or without the feature at all) everything
 //! silently stays on plain round corners.
+//!
+//! macOS 27 regressed that implementation: the flag and the parser are still
+//! there (`CSS.supports` says yes, `round` still serializes as
+//! `superellipse(1)`), but painting only handles the exact endpoints —
+//! `superellipse(1)` (round) and the square/`notch` extremes. Every other
+//! superellipse, `squircle` and `bevel` included, paints as a plain rectangle,
+//! so our global `superellipse(1.6)` wiped out *every* border-radius in the
+//! app (verified 2026-09-15 on macOS 27.0 / build 26A428 with a standalone
+//! WKWebView snapshot). Since the CSS is `@supports`-gated, simply not
+//! flipping the flag there puts the whole UI back on plain round corners.
 
 #[cfg(target_os = "macos")]
 const EXPERIMENTAL_FEATURES: &[&str] = &["CSSCornerShapeEnabled"];
+
+/// macOS majors whose WebKit paints `corner-shape: superellipse()` correctly.
+/// Re-test and widen this when a later WebKit fixes the painting regression.
+#[cfg(target_os = "macos")]
+const CORNER_SHAPE_MACOS_MAJORS: std::ops::RangeInclusive<i64> = 26..=26;
 
 /// Inline plugin: enables [`EXPERIMENTAL_FEATURES`] on every webview as it
 /// comes up. No-op off macOS.
@@ -28,6 +43,15 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg(target_os = "macos")]
 fn enable_experimental_features<R: tauri::Runtime>(webview: &tauri::Webview<R>) {
+    let major = macos_major_version();
+    if !CORNER_SHAPE_MACOS_MAJORS.contains(&major) {
+        tracing::debug!(
+            "webview {}: macOS {major} paints corner-shape superellipses as squares, leaving \
+             WebKit experimental features off",
+            webview.label()
+        );
+        return;
+    }
     let label = webview.label().to_owned();
     let sent = webview.with_webview(move |pw| {
         let enabled = unsafe { set_experimental_features(pw.inner() as *mut _) };
@@ -88,4 +112,14 @@ unsafe fn set_experimental_features(wk: *mut objc2::runtime::AnyObject) -> Vec<&
         }
     }
     enabled
+}
+
+/// Major version of the running macOS (e.g. `27` for 27.0), or `-1` if
+/// `NSProcessInfo` is somehow unreachable — which keeps us on the safe,
+/// feature-off path.
+#[cfg(target_os = "macos")]
+fn macos_major_version() -> i64 {
+    objc2_foundation::NSProcessInfo::processInfo()
+        .operatingSystemVersion()
+        .majorVersion as i64
 }

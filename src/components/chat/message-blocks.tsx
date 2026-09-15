@@ -3,7 +3,7 @@
 // out of message-bubble.tsx so both a single bubble (user / custom) and a
 // grouped assistant turn (assistant-turn.tsx) render text, attachments, and the
 // hover toolbar identically.
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -27,6 +27,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { RenderedBlock } from "@/lib/types";
 import { ArtifactView } from "./artifact-view";
 import { ContextCard } from "./context-card";
+import { DiagramBlock, MarkdownStreamingContext, detectDiagramLanguage } from "./diagram-block";
 import { artifactsFromDetails, formatBytes } from "@/lib/artifact";
 import { findMentionSpans } from "@/lib/mentions";
 import { formatTimeHM, formatFullDateTime } from "@/lib/format";
@@ -71,6 +72,37 @@ function CopyablePre({
   node: _node,
   ...props
 }: React.ComponentProps<"pre"> & { node?: unknown }) {
+  const fence = fenceOf(children);
+  const diagram = fence ? detectDiagramLanguage(fence.language, fence.source) : null;
+  if (diagram) {
+    return (
+      <DiagramBlock
+        source={fence!.source}
+        language={diagram}
+        code={<pre {...props}>{children}</pre>}
+      />
+    );
+  }
+  return <CopyablePreInner {...props}>{children}</CopyablePreInner>;
+}
+
+/** Language tag and raw text of a fenced block, read off the <code> child
+ *  react-markdown produces. Null for anything that is not that exact shape. */
+function fenceOf(children: ReactNode): { language: string | null; source: string } | null {
+  if (!isValidElement<{ className?: string; children?: ReactNode }>(children)) return null;
+  const inner = children.props.children;
+  const source = Array.isArray(inner)
+    ? inner.every((part) => typeof part === "string") ? inner.join("") : null
+    : typeof inner === "string" ? inner : null;
+  if (source == null) return null;
+  const language = /(?:^|\s)language-([\w+-]+)/.exec(children.props.className ?? "")?.[1] ?? null;
+  return { language: language?.toLowerCase() ?? null, source: source.replace(/\n$/, "") };
+}
+
+function CopyablePreInner({
+  children,
+  ...props
+}: React.ComponentProps<"pre">) {
   const { t } = useTranslation("common");
   const preRef = useRef<HTMLPreElement>(null);
   const resetTimerRef = useRef<number | null>(null);
@@ -245,10 +277,14 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
       {cut > 0 ? (
         <>
           <RawMarkdown text={text.slice(0, cut)} />
-          <RawMarkdown text={tail} />
+          <MarkdownStreamingContext.Provider value={!!streaming}>
+            <RawMarkdown text={tail} />
+          </MarkdownStreamingContext.Provider>
         </>
       ) : (
-        <RawMarkdown text={tail} />
+        <MarkdownStreamingContext.Provider value={!!streaming}>
+          <RawMarkdown text={tail} />
+        </MarkdownStreamingContext.Provider>
       )}
     </div>
   );
