@@ -14,12 +14,12 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 export const KATEX_OPTIONS = { strict: "ignore" as const, throwOnError: false };
 
 /**
- * Shared remark-math options. Single-dollar math is OFF: chat text routinely
+ * Keep remark-math's unrestricted single-dollar parsing OFF: chat routinely
  * contains currency ("$1", "-$0.10"), and remark-math pairs those bare `$`
  * signs into one giant inline "formula" spanning whole sentences — which KaTeX
  * then renders as an unwrappable nowrap span that forces a horizontal
- * scrollbar. Real math still works: models emit `\( … \)` / `\[ … \]`, which
- * normalizeMath rewrites to the double-dollar form below.
+ * scrollbar. normalizeMath promotes bounded single-dollar formulas to double
+ * dollars, alongside the LaTeX delimiters, without pairing currency amounts.
  */
 export const REMARK_MATH_OPTIONS = { singleDollarTextMath: false };
 
@@ -53,6 +53,17 @@ export function normalizeMath(text: string): string {
               // punctuation — including full-width CJK marks like （ and ，.
               /(\*{1,3})(https?:\/\/[^\s<*]+?)\1(?=\s|$|\p{P})/giu,
               "$1[$2]($2)$1",
+            )
+            // Dollar math must touch its content on both sides, stay on one
+            // line, and not close immediately before a digit (as in $5–$10).
+            // Leave existing double-dollar math alone. Pure amounts such as
+            // $5$ are ambiguous; prefer displaying them literally.
+            .replace(
+              /\$\$[\s\S]*?\$\$|(?<![\\$])\$(?![$\s])((?:\\[^\r\n]|[^$\\\r\n])+?)(?<!\s)\$(?![$\d])/g,
+              (whole, body: string | undefined) =>
+                body === undefined || /^[+-]?[\d,.]+$/.test(body)
+                  ? whole
+                  : `$$${body}$$`,
             )
             .replace(/\\\[([\s\S]+?)\\\]/g, (_, body) => `$$${body}$$`)
             .replace(/\\\(([\s\S]+?)\\\)/g, (_, body) => `$$${body}$$`),

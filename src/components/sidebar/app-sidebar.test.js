@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { groupByWorkspace } from "./app-sidebar.tsx";
+import { groupByWorkspace, PINNED_GROUP_DIR } from "./workspace-grouping.tsx";
 
 const DEFAULT = "/Users/x/cetus";
 
@@ -55,7 +55,7 @@ describe("workspace grouping", () => {
     expect(groupByWorkspace([], [], [], "")).toEqual([]);
   });
 
-  test("pinned chats float to the top of their group, newest pin first", () => {
+  test("pinned chats occupy a global group, newest pin first", () => {
     const chats = [
       { id: "recent", workspaceDir: DEFAULT, createdAt: 4, pinnedAt: null },
       { id: "old-pin", workspaceDir: DEFAULT, createdAt: 3, pinnedAt: 100 },
@@ -63,11 +63,12 @@ describe("workspace grouping", () => {
       { id: "new-pin", workspaceDir: DEFAULT, createdAt: 1, pinnedAt: 200 },
     ];
     const groups = groupByWorkspace(chats, [], [], DEFAULT);
-    expect(groups[0].items.map((c) => c.id)).toEqual([
-      "new-pin",
-      "old-pin",
-      "recent",
-      "plain",
+    expect(groups.map((group) => ({
+      dir: group.dir,
+      ids: group.items.map((c) => c.id),
+    }))).toEqual([
+      { dir: PINNED_GROUP_DIR, ids: ["new-pin", "old-pin"] },
+      { dir: DEFAULT, ids: ["recent", "plain"] },
     ]);
   });
 });

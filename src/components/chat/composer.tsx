@@ -1,35 +1,22 @@
 "use client";
-import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from "react";
+
 import {
-  ArrowUp,
-  Square,
-  Paperclip,
-  X,
-  File as FileIcon,
-  Terminal,
-  Radar,
-  CornerDownRight,
-} from "lucide-react";
-import { Textarea } from "@/components/ui/textarea";
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useCallback,
+} from "react";
 import { artifactsFromDetails, formatBytes } from "@/lib/artifact";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { ModelPicker } from "@/components/chat/model-picker";
 import {
-  BackendPicker,
-  nextRuntimeTarget,
   useRuntimeCatalog,
   type RuntimeSwitchTarget,
 } from "@/components/chat/backend-picker";
 import { useChatStore, useCliCommands } from "@/lib/chat-store";
-import { WorkspacePicker } from "@/components/chat/workspace-picker";
-import { SlashMenu, type SlashItem } from "@/components/chat/slash-menu";
-import {
-  SlashCommandDialog,
-  type EditableSlashCommand,
-} from "@/components/chat/slash-command-dialog";
-import { MentionMenu, nextMentionTab, type MentionTab } from "@/components/chat/mention-menu";
-import { MentionHighlight } from "@/components/chat/mention-highlight";
+import { type SlashItem } from "@/components/chat/slash-menu";
+import { type EditableSlashCommand } from "@/components/chat/slash-command-dialog";
+import { type MentionTab } from "@/components/chat/mention-menu";
 import {
   FUNCTION_MENTIONS,
   buildMentionRefs,
@@ -47,7 +34,6 @@ import {
   type MentionRef,
   type MentionResolution,
 } from "@/lib/mentions";
-import { cn } from "@/lib/utils";
 import { splitLeadingQuote } from "@/lib/user-quote";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
@@ -71,110 +57,23 @@ import type {
   ModelChoice,
   WorkspaceFileEntry,
 } from "@/lib/types";
-import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import { toast } from "sonner";
-
-function GitBranchIndicator({
-  conversationId,
-  workspaceDir,
-  defaultWorkspace,
-  streaming,
-}: {
-  conversationId: string | null;
-  workspaceDir: string | null;
-  defaultWorkspace: string;
-  streaming: boolean;
-}) {
-  const [git, setGit] = useState<{ branch: string; path: string } | null>(null);
-  const workspace = workspaceDir ?? defaultWorkspace;
-
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        if (conversationId) {
-          const worktree = await api.conversationWorktree(conversationId);
-          if (worktree?.exists) {
-            if (!cancelled) setGit({ branch: worktree.branch, path: worktree.path });
-            return;
-          }
-        }
-        const branch = workspace ? await api.workspaceGitBranch(workspace) : null;
-        if (!cancelled) setGit(branch ? { branch, path: workspace } : null);
-      } catch {
-        if (!cancelled) setGit(null);
-      }
-    };
-    void refresh();
-    const refreshVisible = () => {
-      if (document.visibilityState === "visible") void refresh();
-    };
-    // Branches can also be switched from Cetus's terminal, which does not
-    // blur/refocus the app window. Keep the small label honest without polling
-    // while the app is in the background.
-    const poll = window.setInterval(refreshVisible, 5_000);
-    window.addEventListener("focus", refreshVisible);
-    document.addEventListener("visibilitychange", refreshVisible);
-    return () => {
-      cancelled = true;
-      window.clearInterval(poll);
-      window.removeEventListener("focus", refreshVisible);
-      document.removeEventListener("visibilitychange", refreshVisible);
-    };
-  }, [conversationId, workspace, streaming]);
-
-  if (!git) return null;
-  return (
-    <span
-      title={`${git.branch}\n${git.path}`}
-      className="inline-flex min-w-0 items-center gap-1 text-muted-foreground/70"
-    >
-      <span aria-hidden="true">/</span>
-      <span className="max-w-28 truncate">{git.branch}</span>
-    </span>
-  );
-}
-
-/** Walk back from the caret to find an open `/<token>` the user is typing: a `/`
- *  at line start or after whitespace, with no whitespace between it and the
- *  caret. Returns the slash index + the text after it, or null when the caret
- *  isn't inside such a token. */
-function detectSlashToken(
-  value: string,
-  caret: number,
-): { start: number; query: string } | null {
-  let i = caret - 1;
-  while (i >= 0) {
-    const ch = value[i];
-    if (ch === "/") break;
-    if (/\s/.test(ch)) return null; // hit whitespace before a slash → not a token
-    i--;
-  }
-  if (i < 0 || value[i] !== "/") return null;
-  const before = i > 0 ? value[i - 1] : "";
-  if (before && !/\s/.test(before)) return null; // `/` must start a word
-  return { start: i, query: value.slice(i + 1, caret) };
-}
-
-/** Same walk-back as {@link detectSlashToken} but for an open `@<token>`: an `@`
- *  at line start or after whitespace, with no whitespace up to the caret. Powers
- *  the `@`-mention menu (`@goal`). */
-function detectMentionToken(
-  value: string,
-  caret: number,
-): { start: number; query: string } | null {
-  let i = caret - 1;
-  while (i >= 0) {
-    const ch = value[i];
-    if (ch === "@") break;
-    if (/\s/.test(ch)) return null; // hit whitespace before an `@` → not a token
-    i--;
-  }
-  if (i < 0 || value[i] !== "@") return null;
-  const before = i > 0 ? value[i - 1] : "";
-  if (before && !/\s/.test(before)) return null; // `@` must start a word (not an email)
-  return { start: i, query: value.slice(i + 1, caret) };
-}
+import {
+  quoteKey,
+  RUNTIME_CATALOG_REFRESH_MS,
+  escapeRegExp,
+  CLAUDE_CLI_COMMANDS,
+  CODEX_CLI_COMMANDS,
+  describeSchedule,
+  detectSlashToken,
+  detectMentionToken,
+  cleanQuoteText,
+  FOCUS_TRIGGER_CHARS,
+  MAX_FILE_BYTES,
+  fileToBase64,
+  formatQuoteMarkdown,
+} from "./composer-utils";
+import { renderComposer } from "./composer-view";
 
 /** A composer attachment. Images ride pi's `images` channel (→ native model input);
  *  every other file is written to disk and read by the agent via local file-reading. */
@@ -296,88 +195,6 @@ interface Props {
   onRequestBackendSwitch?: (target: RuntimeSwitchTarget) => void;
 }
 
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/** Claude Code built-in slash commands that work headless (verified against
- *  CLI 2.1.199: handled locally, zero model tokens; /status, /model etc. are
- *  TUI-only and refuse in -p mode). Offered in the slash menu for claude-code
- *  conversations; the picked token is passed through to the CLI verbatim. */
-const CLAUDE_CLI_COMMANDS: SlashItem[] = [
-  {
-    kind: "command",
-    id: "cli:usage",
-    name: "usage",
-    description: "Claude subscription usage and limits",
-    prompt: "/usage ",
-  },
-  {
-    kind: "command",
-    id: "cli:cost",
-    name: "cost",
-    description: "Token spend and usage for this session",
-    prompt: "/cost ",
-  },
-  {
-    kind: "command",
-    id: "cli:context",
-    name: "context",
-    description: "Context window usage breakdown",
-    prompt: "/context ",
-  },
-  {
-    kind: "command",
-    id: "cli:compact",
-    name: "compact",
-    description: "Compact conversation history to free up context",
-    prompt: "/compact ",
-  },
-];
-
-const CODEX_CLI_COMMANDS: SlashItem[] = [
-  {
-    kind: "command",
-    id: "codex:status",
-    name: "status",
-    description: "Show chat ID, model, reasoning, and context usage",
-    prompt: "/status",
-  },
-  {
-    kind: "command",
-    id: "codex:model",
-    name: "model",
-    description: "Choose the model for this chat",
-    prompt: "/model",
-  },
-  {
-    kind: "command",
-    id: "codex:reasoning",
-    name: "reasoning",
-    description: "Choose the reasoning effort for this chat",
-    prompt: "/reasoning",
-  },
-  {
-    kind: "command",
-    id: "codex:compact",
-    name: "compact",
-    description: "Compact the Codex thread and free context",
-    prompt: "/compact ",
-  },
-];
-
-// Skills rarely change, so a recently checked catalog can serve repeated menu
-// opens without spawning another vendor CLI process.
-const RUNTIME_CATALOG_REFRESH_MS = 30_000;
-
-const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB — docx/xlsx/pdf etc., read on disk by the agent
-
-/** Text pastes longer than this become a `pasted.txt` attachment instead of
- *  entering the textarea. A controlled textarea holding megabytes (a crash log,
- *  a terminal dump) wedges the webview: WebKit re-lays-out and spellchecks the
- *  whole run on every render, and the draft write-through rewrites it all to
- *  localStorage on each keystroke. */
-const LONG_PASTE_CHARS = 20_000;
-const FOCUS_TRIGGER_CHARS = new Set(["/", "、", "／"]);
-
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
@@ -430,7 +247,9 @@ export function Composer({
   // style: shown as a dismissable bar above the textarea and only merged into
   // the outgoing message (as a Markdown blockquote) at send time. Persisted
   // under a derived draft key so it survives view/conversation switches.
-  const [quote, setQuote] = useState(() => (draftKey ? readDraft(quoteKey(draftKey)) : ""));
+  const [quote, setQuote] = useState(() =>
+    draftKey ? readDraft(quoteKey(draftKey)) : "",
+  );
   const updateQuote = useCallback(
     (v: string) => {
       setQuote(v);
@@ -475,12 +294,16 @@ export function Composer({
     setText(draftKey ? readDraft(draftKey) : "");
     setQuote(draftKey ? readDraft(quoteKey(draftKey)) : "");
     setAttachments(restoreAttachments(draftKey));
-    setMentionRefs(draftKey ? parseRefs(readDraft(mentionDraftKey(draftKey))) : []);
+    setMentionRefs(
+      draftKey ? parseRefs(readDraft(mentionDraftKey(draftKey))) : [],
+    );
   }, [draftKey, restoreAttachments]);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>(() =>
     restoreAttachments(draftKey),
   );
-  const [previewImage, setPreviewImage] = useState<ImageAttachment | null>(null);
+  const [previewImage, setPreviewImage] = useState<ImageAttachment | null>(
+    null,
+  );
 
   // Attachment bytes live in IndexedDB across a renderer recovery. Hydrate
   // them asynchronously, but never overwrite a newer in-memory user edit.
@@ -584,7 +407,10 @@ export function Composer({
   // session behind them (new chat, or a conversation whose CLI hasn't booted).
   // Keyed by the runtime it was probed for, so switching runtimes in the
   // composer can't leave the previous one's commands on the menu.
-  const [probed, setProbed] = useState<{ backend: BackendId; commands: CliSlashCommand[] }>({
+  const [probed, setProbed] = useState<{
+    backend: BackendId;
+    commands: CliSlashCommand[];
+  }>({
     backend: "pi",
     commands: [],
   });
@@ -612,7 +438,8 @@ export function Composer({
   // form), a row's pencil edits that command.
   const [commandDialogOpen, setCommandDialogOpen] = useState(false);
   const [newCommandSeed, setNewCommandSeed] = useState("");
-  const [editingCommand, setEditingCommand] = useState<EditableSlashCommand | null>(null);
+  const [editingCommand, setEditingCommand] =
+    useState<EditableSlashCommand | null>(null);
 
   // ---- @-mention menu (goal, …) -------------------------------------------
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -630,7 +457,8 @@ export function Composer({
     (next: MentionRef[] | ((prev: MentionRef[]) => MentionRef[])) => {
       setMentionRefs((prev) => {
         const value = typeof next === "function" ? next(prev) : next;
-        if (draftKey) writeDraft(mentionDraftKey(draftKey), serializeRefs(value));
+        if (draftKey)
+          writeDraft(mentionDraftKey(draftKey), serializeRefs(value));
         return value;
       });
     },
@@ -642,13 +470,20 @@ export function Composer({
     const live = mentionsInText(text, mentionRefs);
     if (live.length !== mentionRefs.length) updateMentionRefs(live);
   }, [text, mentionRefs, updateMentionRefs]);
-  const mentionLabels = useMemo(() => mentionRefs.map((r) => r.label), [mentionRefs]);
+  const mentionLabels = useMemo(
+    () => mentionRefs.map((r) => r.label),
+    [mentionRefs],
+  );
   const highlightRef = useRef<HTMLDivElement>(null);
   // Menu data sources, loaded when the menu opens (cheap SQL / a snapshot of the
   // resident message list) — never subscribed to, so streaming tokens don't
   // re-render the composer.
-  const [mentionAutomations, setMentionAutomations] = useState<Automation[]>([]);
-  const [mentionConversations, setMentionConversations] = useState<Conversation[]>([]);
+  const [mentionAutomations, setMentionAutomations] = useState<Automation[]>(
+    [],
+  );
+  const [mentionConversations, setMentionConversations] = useState<
+    Conversation[]
+  >([]);
   const [mentionArtifacts, setMentionArtifacts] = useState<MentionItem[]>([]);
   const [mentionFiles, setMentionFiles] = useState<WorkspaceFileEntry[]>([]);
   const [mentionFilesLoading, setMentionFilesLoading] = useState(false);
@@ -669,20 +504,24 @@ export function Composer({
     let alive = true;
     (async () => {
       try {
-        const [commands, skillState, discovered, discovery, cachedNative] = await Promise.all([
-          api.listSlashCommands(),
-          api.listSkills(),
-          api.listDiscoveredSkills(),
-          api.getDiscoverySettings(),
-          conversationId ? api.getCliCommands(conversationId) : Promise.resolve([]),
-        ]);
+        const [commands, skillState, discovered, discovery, cachedNative] =
+          await Promise.all([
+            api.listSlashCommands(),
+            api.listSkills(),
+            api.listDiscoveredSkills(),
+            api.getDiscoverySettings(),
+            conversationId
+              ? api.getCliCommands(conversationId)
+              : Promise.resolve([]),
+          ]);
         if (!alive) return;
         // cli_commands is also streamed live, but the Rust-side snapshot
         // survives renderer/HMR reloads and closes the startup-listener race.
         if (
           conversationId &&
           cachedNative.length > 0 &&
-          (useChatStore.getState().cliCommands[conversationId]?.length ?? 0) === 0
+          (useChatStore.getState().cliCommands[conversationId]?.length ?? 0) ===
+            0
         ) {
           useChatStore.getState().setCliCommands(conversationId, cachedNative);
         }
@@ -697,15 +536,24 @@ export function Composer({
             commandId: c.id,
           })),
         );
-        const libs = skillState.enabled ? skillState.entries.filter((e) => e.enabled) : [];
+        const libs = skillState.enabled
+          ? skillState.entries.filter((e) => e.enabled)
+          : [];
         const seen = new Set<string>();
         const skills: SlashItem[] = [];
-        const loadedDiscovered = discovery.skillsLoadDiscovered ? discovered : [];
+        const loadedDiscovered = discovery.skillsLoadDiscovered
+          ? discovered
+          : [];
         for (const s of [...libs, ...loadedDiscovered]) {
           const key = s.name.toLowerCase();
           if (seen.has(key)) continue;
           seen.add(key);
-          skills.push({ kind: "skill", id: s.id, name: s.name, description: s.description });
+          skills.push({
+            kind: "skill",
+            id: s.id,
+            name: s.name,
+            description: s.description,
+          });
         }
         setSlashSkills(skills);
       } catch {
@@ -728,7 +576,11 @@ export function Composer({
       const checkedAt = catalogCheckedAtRef.current.get(key) ?? 0;
       const forceRefresh =
         refreshIfStale && Date.now() - checkedAt >= RUNTIME_CATALOG_REFRESH_MS;
-      const request = api.probeCliCommands(backend, cwd || undefined, forceRefresh);
+      const request = api.probeCliCommands(
+        backend,
+        cwd || undefined,
+        forceRefresh,
+      );
       catalogProbeRef.current = { key, request };
       void request
         .then((commands) => {
@@ -829,7 +681,10 @@ export function Composer({
     });
     if (backend === "claude-code") {
       const runtimeItems = native.length > 0 ? native : CLAUDE_CLI_COMMANDS;
-      return byKind([...runtimeItems.filter(match), ...slashCommands.filter(match)]);
+      return byKind([
+        ...runtimeItems.filter(match),
+        ...slashCommands.filter(match),
+      ]);
     }
     if (backend === "codex") {
       return byKind([
@@ -841,7 +696,10 @@ export function Composer({
     if (backend !== "pi") {
       return byKind([...native.filter(match), ...slashCommands.filter(match)]);
     }
-    return byKind([...slashCommands.filter(match), ...slashSkills.filter(match)]);
+    return byKind([
+      ...slashCommands.filter(match),
+      ...slashSkills.filter(match),
+    ]);
   }, [slashCommands, slashSkills, slashQuery, backend, nativeCommands, probed]);
 
   const slashVisible = slashOpen && slashItems.length > 0;
@@ -864,7 +722,7 @@ export function Composer({
       .catch(() => {});
     // Artifacts the agent delivered in this conversation, newest first.
     const messages = conversationId
-      ? useChatStore.getState().chats[conversationId]?.messages ?? []
+      ? (useChatStore.getState().chats[conversationId]?.messages ?? [])
       : [];
     const seen = new Set<string>();
     const artifacts: MentionItem[] = [];
@@ -894,7 +752,8 @@ export function Composer({
 
   // Files: root listing (folders first) for an empty query, else a debounced
   // workspace search that includes folders. Only when the tab can show them.
-  const filesWanted = mentionOpen && (mentionTab === "all" || mentionTab === "file");
+  const filesWanted =
+    mentionOpen && (mentionTab === "all" || mentionTab === "file");
   useEffect(() => {
     if (!filesWanted) return;
     const ws = workspaceDir || defaultWorkspace;
@@ -926,7 +785,8 @@ export function Composer({
       !q || fields.some((f) => f?.toLowerCase().includes(q));
     const all = mentionTab === "all";
     const want = (k: MentionItem["kind"]) => all || mentionTab === k;
-    const cap = (rows: MentionItem[], n: number) => (all ? rows.slice(0, n) : rows);
+    const cap = (rows: MentionItem[], n: number) =>
+      all ? rows.slice(0, n) : rows;
     const out: MentionItem[] = [];
     if (want("function")) {
       out.push(...FUNCTION_MENTIONS.filter((f) => hit(f.label, f.subtitle)));
@@ -945,14 +805,21 @@ export function Composer({
       out.push(...cap(rows, 3));
     }
     if (want("artifact")) {
-      out.push(...cap(mentionArtifacts.filter((a) => hit(a.title, a.subtitle)), 3));
+      out.push(
+        ...cap(
+          mentionArtifacts.filter((a) => hit(a.title, a.subtitle)),
+          3,
+        ),
+      );
     }
     if (want("file")) {
       const rows = mentionFiles
         .filter((f) => hit(f.relativePath, f.name))
         .map<MentionItem>((f) => ({
           kind: "file",
-          label: f.isDir ? `${f.relativePath.replace(/\/$/, "")}/` : f.relativePath,
+          label: f.isDir
+            ? `${f.relativePath.replace(/\/$/, "")}/`
+            : f.relativePath,
           id: f.path,
           path: f.path,
           isDir: f.isDir,
@@ -992,7 +859,10 @@ export function Composer({
   ]);
 
   const mentionVisible = mentionOpen;
-  const mentionIdx = Math.max(0, Math.min(mentionActive, mentionItems.length - 1));
+  const mentionIdx = Math.max(
+    0,
+    Math.min(mentionActive, mentionItems.length - 1),
+  );
 
   function closeMention() {
     setMentionOpen(false);
@@ -1014,7 +884,12 @@ export function Composer({
       if (slashOpen) setSlashOpen(false);
       return;
     }
-    if (slashOpen && detected.start === slashStart && detected.query === slashQuery) return;
+    if (
+      slashOpen &&
+      detected.start === slashStart &&
+      detected.query === slashQuery
+    )
+      return;
     setSlashStart(detected.start);
     setSlashQuery(detected.query);
     setSlashActive(0);
@@ -1083,7 +958,12 @@ export function Composer({
       if (mentionOpen) setMentionOpen(false);
       return;
     }
-    if (mentionOpen && detected.start === mentionStart && detected.query === mentionQuery) return;
+    if (
+      mentionOpen &&
+      detected.start === mentionStart &&
+      detected.query === mentionQuery
+    )
+      return;
     setMentionStart(detected.start);
     setMentionQuery(detected.query);
     setMentionActive(0);
@@ -1097,7 +977,12 @@ export function Composer({
     if (!item) return;
     const el = taRef.current;
     const caret = el?.selectionStart ?? text.length;
-    const { title: _title, subtitle: _subtitle, archived: _archived, ...base } = item;
+    const {
+      title: _title,
+      subtitle: _subtitle,
+      archived: _archived,
+      ...base
+    } = item;
     const label = uniqueLabel(item.label, mentionRefs, base);
     const ref: MentionRef = { ...base, label };
     rememberRef(ref);
@@ -1125,7 +1010,8 @@ export function Composer({
     if (!el) return;
     const scrollTop = el.scrollTop;
     el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, variant === "hero" ? 320 : 240) + "px";
+    el.style.height =
+      Math.min(el.scrollHeight, variant === "hero" ? 320 : 240) + "px";
     el.scrollTop = scrollTop;
     if (highlightRef.current) highlightRef.current.scrollTop = el.scrollTop;
   }, [text, variant]);
@@ -1135,7 +1021,8 @@ export function Composer({
     // yet (e.g. the user clicked "Steer now"), so this is a real focus change.
     // Without preventScroll the browser scrolls the focused textarea into view,
     // which yanks the message list — the steer-jumps-to-top bug.
-    if (focusToken !== undefined && !disabled) taRef.current?.focus({ preventScroll: true });
+    if (focusToken !== undefined && !disabled)
+      taRef.current?.focus({ preventScroll: true });
   }, [focusToken, disabled]);
 
   useEffect(() => {
@@ -1155,7 +1042,8 @@ export function Composer({
   }, [disabled, quoteRequest, updateQuote]);
 
   useEffect(() => {
-    if (!draftRequest || draftRequest.id === lastDraftRequestIdRef.current) return;
+    if (!draftRequest || draftRequest.id === lastDraftRequestIdRef.current)
+      return;
     lastDraftRequestIdRef.current = draftRequest.id;
     // A queued message comes back with its mention block already appended;
     // peel it off and re-arm the pills from this session's ref cache.
@@ -1166,7 +1054,10 @@ export function Composer({
     updateText(quoted?.text ?? prose);
     updateAttachments((previous) => {
       previous.forEach((attachment) => {
-        if (attachment.type === "image" && attachment.previewUrl.startsWith("blob:")) {
+        if (
+          attachment.type === "image" &&
+          attachment.previewUrl.startsWith("blob:")
+        ) {
           URL.revokeObjectURL(attachment.previewUrl);
         }
       });
@@ -1189,7 +1080,14 @@ export function Composer({
       const pos = node.value.length;
       node.setSelectionRange(pos, pos);
     });
-  }, [disabled, draftRequest, updateAttachments, updateText, updateMentionRefs, updateQuote]);
+  }, [
+    disabled,
+    draftRequest,
+    updateAttachments,
+    updateText,
+    updateMentionRefs,
+    updateQuote,
+  ]);
 
   useEffect(() => {
     if (disabled) return;
@@ -1210,7 +1108,9 @@ export function Composer({
       const el = taRef.current;
       if (!root || !el) return;
       const openDialogs = Array.from(
-        document.querySelectorAll<HTMLElement>("[role='dialog'][data-state='open']"),
+        document.querySelectorAll<HTMLElement>(
+          "[role='dialog'][data-state='open']",
+        ),
       );
       const topDialog = openDialogs.at(-1);
       if (topDialog && !topDialog.contains(root)) return;
@@ -1231,7 +1131,9 @@ export function Composer({
   // Revoke preview URLs on unmount so we don't leak object URLs.
   useEffect(() => {
     return () => {
-      attachments.forEach((a) => a.type === "image" && URL.revokeObjectURL(a.previewUrl));
+      attachments.forEach(
+        (a) => a.type === "image" && URL.revokeObjectURL(a.previewUrl),
+      );
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1240,7 +1142,10 @@ export function Composer({
    *  name to its real on-disk path (from a Finder copy); when a file is too big
    *  to inline, we reference that path in the message instead of skipping it —
    *  graceful degradation matching how a terminal agent takes a pasted path. */
-  async function addFiles(files: FileList | File[], pathHints?: Map<string, string>) {
+  async function addFiles(
+    files: FileList | File[],
+    pathHints?: Map<string, string>,
+  ) {
     setAttachError(null);
     const next: ComposerAttachment[] = [];
     const referenced: string[] = [];
@@ -1314,7 +1219,8 @@ export function Composer({
       requestAnimationFrame(() => taRef.current?.focus());
     };
     window.addEventListener("cetus-insert-file-paths", onInsertFilePaths);
-    return () => window.removeEventListener("cetus-insert-file-paths", onInsertFilePaths);
+    return () =>
+      window.removeEventListener("cetus-insert-file-paths", onInsertFilePaths);
     // insertPaths intentionally tracks the current draft/caret.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
@@ -1324,7 +1230,10 @@ export function Composer({
    *  pipeline; folders and anything too big to inline get named in the draft
    *  instead, which is what the agent needs to open them off disk anyway. */
   async function addPaths(paths: string[]) {
-    const { files, hints, referenced } = await readDroppedFiles(paths, MAX_FILE_BYTES);
+    const { files, hints, referenced } = await readDroppedFiles(
+      paths,
+      MAX_FILE_BYTES,
+    );
     if (files.length) await addFiles(files, hints);
     if (referenced.length) insertPaths(referenced);
   }
@@ -1352,7 +1261,8 @@ export function Composer({
 
   function removeAttachment(i: number) {
     const removed = attachments[i];
-    if (removed?.type === "image" && previewImage === removed) setPreviewImage(null);
+    if (removed?.type === "image" && previewImage === removed)
+      setPreviewImage(null);
     updateAttachments((prev) => {
       const dropped = prev[i];
       if (dropped?.type === "image") URL.revokeObjectURL(dropped.previewUrl);
@@ -1375,24 +1285,35 @@ export function Composer({
     const trimmedText = text.trim();
     if (backend === "codex" && attachments.length === 0) {
       if (trimmedText === "/status") {
-        const model = conversationId ? cliTuning.model : (pendingCliModel ?? "");
-        const effort = conversationId ? cliTuning.effort : (pendingCliEffort ?? "");
+        const model = conversationId
+          ? cliTuning.model
+          : (pendingCliModel ?? "");
+        const effort = conversationId
+          ? cliTuning.effort
+          : (pendingCliEffort ?? "");
         const context = contextUsage?.contextWindow
           ? `${Math.round((contextUsage.usedTokens / contextUsage.contextWindow) * 100)}% (${contextUsage.usedTokens.toLocaleString()} / ${contextUsage.contextWindow.toLocaleString()} tokens)`
           : "Not available until the first turn";
-        const quota = codexRateLimit?.utilization !== undefined
-          ? [
-              `${Math.round(codexRateLimit.utilization * 100)}% used`,
-              codexRateLimit.resetsAt
-                ? `resets ${new Date(codexRateLimit.resetsAt * 1000).toLocaleString()}`
-                : null,
-            ].filter(Boolean).join(" · ")
-          : "Not available yet";
+        const quota =
+          codexRateLimit?.utilization !== undefined
+            ? [
+                `${Math.round(codexRateLimit.utilization * 100)}% used`,
+                codexRateLimit.resetsAt
+                  ? `resets ${new Date(codexRateLimit.resetsAt * 1000).toLocaleString()}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : "Not available yet";
         toast.info("Codex status", {
           description: (
             <div className="space-y-0.5">
-              <div className="break-all">Chat: {conversationId ?? "New chat"}</div>
-              <div>Model: {model || "Default"} · Reasoning: {effort || "Default"}</div>
+              <div className="break-all">
+                Chat: {conversationId ?? "New chat"}
+              </div>
+              <div>
+                Model: {model || "Default"} · Reasoning: {effort || "Default"}
+              </div>
               <div>Context: {context}</div>
               <div>Rate limit: {quota}</div>
             </div>
@@ -1433,7 +1354,8 @@ export function Composer({
     // Pending quote leads the message as a Markdown blockquote — the bubble
     // renderer splits it back out into the quote header above the bubble.
     const quoteMarkdown = quote ? formatQuoteMarkdown(quote) : "";
-    if (quoteMarkdown) outgoing = outgoing ? `${quoteMarkdown}\n\n${outgoing}` : quoteMarkdown;
+    if (quoteMarkdown)
+      outgoing = outgoing ? `${quoteMarkdown}\n\n${outgoing}` : quoteMarkdown;
     if (!outgoing && attachments.length === 0) {
       // Only a truly blank draft triggers the queue shortcut. A visible token
       // that happens to expand to nothing should remain a no-op.
@@ -1446,7 +1368,10 @@ export function Composer({
     // fetch sends the bare prompt.
     if (ambientOn && ambientAvailable && outgoing) {
       try {
-        outgoing = composeWithAmbient(outgoing, await api.ambientRecentSummary());
+        outgoing = composeWithAmbient(
+          outgoing,
+          await api.ambientRecentSummary(),
+        );
       } catch {
         // bare prompt
       }
@@ -1458,7 +1383,9 @@ export function Composer({
       ? {
           backend,
           cliModel: conversationId ? cliTuning.model : (pendingCliModel ?? ""),
-          cliEffort: conversationId ? cliTuning.effort : (pendingCliEffort ?? ""),
+          cliEffort: conversationId
+            ? cliTuning.effort
+            : (pendingCliEffort ?? ""),
         }
       : undefined;
     if (streaming && onQueue) onQueue(outgoing, attachments, runtime);
@@ -1468,7 +1395,9 @@ export function Composer({
     closeMention();
     // Drop refs to revoke after send completes — onSend may consume async.
     updateAttachments((prev) => {
-      prev.forEach((a) => a.type === "image" && URL.revokeObjectURL(a.previewUrl));
+      prev.forEach(
+        (a) => a.type === "image" && URL.revokeObjectURL(a.previewUrl),
+      );
       return [];
     });
     updateText("");
@@ -1476,616 +1405,90 @@ export function Composer({
     updateMentionRefs([]);
     setAttachError(null);
   }
-
-  return (
-    <div
-      ref={rootRef}
-      data-chat-composer
-      // Claims drops made anywhere in the window; FileDropHost delivers them
-      // here. There are no HTML5 drag handlers on purpose — the Tauri runtime
-      // answers the OS drag itself, so `drop` never fires on the webview.
-      data-file-drop-target
-      data-streaming={streaming && !bashMode ? "true" : undefined}
-      data-backend={backend}
-      style={{
-        ...runtimeThemeStyle(backend),
-        ...(!bashMode
-          ? { borderColor: "color-mix(in oklab, var(--runtime-color) 60%, transparent)" }
-          : {}),
-      }}
-      className={cn(
-        "relative rounded-2xl border border-border",
-        // Soft, wide, low-opacity shadow (large blur, ~6% alpha) for a premium
-        // subtle lift rather than a hard drop shadow. Constant across focus.
-        // Matches the layered-shadow convention used by artifact cards.
-        "shadow-[0_4px_24px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)]",
-        isDragging && "ring-2 ring-primary ring-offset-2",
-        // Bash mode: tint the frame so it's unmistakably "running a command",
-        // not "messaging the agent".
-        bashMode && "border-primary/60 ring-1 ring-primary/40",
-        // Runtime identity is supplied by the shared theme registry. Bash
-        // mode intentionally replaces it with the primary command tint.
-        variant === "hero" ? "bg-card p-2" : "bg-card p-1.5",
-      )}
-    >
-      {isDragging && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-primary/10 text-xs font-medium text-primary">
-          {t("composer.dropFiles")}
-        </div>
-      )}
-
-      {slashVisible && (
-        <SlashMenu
-          items={slashItems}
-          activeIndex={slashIdx}
-          onSelect={applySlash}
-          onHover={setSlashActive}
-          onCreateCommand={() => {
-            setEditingCommand(null);
-            setNewCommandSeed(slashQuery);
-            setCommandDialogOpen(true);
-            closeSlash();
-          }}
-          onEditCommand={(item) => {
-            setEditingCommand({
-              id: item.commandId!,
-              name: item.name,
-              description: item.description,
-              prompt: item.prompt,
-            });
-            setCommandDialogOpen(true);
-            closeSlash();
-          }}
-        />
-      )}
-
-      <SlashCommandDialog
-        open={commandDialogOpen}
-        onOpenChange={setCommandDialogOpen}
-        command={editingCommand}
-        initialName={newCommandSeed}
-        onSaved={(command, created) => {
-          if (created) {
-            // Drop the user straight into the command they just wrote: the
-            // token that opened the menu expands to the new prompt, same as
-            // picking it. The token's own end (not the live caret, which the
-            // dialog may have moved) bounds the replacement.
-            const tokenEnd = Math.min(slashStart + 1 + slashQuery.length, text.length);
-            const insert = command.prompt;
-            const next = text.slice(0, slashStart) + insert + text.slice(tokenEnd);
-            const pos = slashStart + insert.length;
-            updateText(next);
-            requestAnimationFrame(() => {
-              const node = taRef.current;
-              if (!node) return;
-              node.focus({ preventScroll: true });
-              node.setSelectionRange(pos, pos);
-            });
-            return;
-          }
-          // An edit leaves the message alone and drops back into the menu,
-          // which refetches on open and so shows the updated row.
-          slashSuppress.current = false;
-          setSlashOpen(true);
-          requestAnimationFrame(() => taRef.current?.focus({ preventScroll: true }));
-        }}
-      />
-
-      {mentionVisible && !slashVisible && (
-        <MentionMenu
-          tab={mentionTab}
-          onTabChange={(k) => {
-            setMentionTab(k);
-            setMentionActive(0);
-          }}
-          items={mentionItems}
-          activeIndex={mentionIdx}
-          loading={filesWanted && mentionFilesLoading}
-          onSelect={applyMention}
-          onHover={setMentionActive}
-        />
-      )}
-
-      {quote && !bashMode && (
-        <div
-          className={cn(
-            // Flush with the card's top edge (cancel the container padding) so
-            // the quote reads as its own section above the input, ChatGPT-style.
-            "mb-1 flex items-center gap-2 rounded-t-[15px] border-b border-border/50 bg-muted/30 px-3 pb-2 pt-2.5",
-            variant === "hero" ? "-mx-2 -mt-2" : "-mx-1.5 -mt-1.5",
-          )}
-        >
-          <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            &ldquo;{quote.replace(/\s+/g, " ")}&rdquo;
-          </span>
-          <button
-            type="button"
-            onClick={() => updateQuote("")}
-            className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-            aria-label={t("composer.removeQuote")}
-          >
-            <X className="size-3.5" />
-          </button>
-        </div>
-      )}
-
-      {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-1.5 pb-1.5 pt-1">
-          {attachments.map((a, i) => (
-            <div key={i} className="group relative">
-              {a.type === "image" ? (
-                <button
-                  type="button"
-                  onClick={() => setPreviewImage(a)}
-                  title={t("bubble.expandImage")}
-                  className="fade-layer block cursor-zoom-in rounded-md transition-opacity hover:opacity-90"
-                >
-                  <img
-                    src={a.previewUrl}
-                    alt={a.name}
-                    className="size-14 rounded-md border border-border object-cover"
-                  />
-                </button>
-              ) : (
-                <div
-                  title={a.name}
-                  className="flex h-14 max-w-44 items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5"
-                >
-                  <FileIcon className="size-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <div className="truncate text-xs font-medium">{a.name}</div>
-                    <div className="text-2xs text-muted-foreground">{formatBytes(a.sizeBytes)}</div>
-                  </div>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => removeAttachment(i)}
-                className="fade-layer absolute -right-1.5 -top-1.5 rounded-full bg-foreground text-background opacity-0 transition-opacity group-hover:opacity-100"
-                aria-label={t("composer.removeAttachment", { name: a.name })}
-              >
-                <X className="size-3.5 p-0.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <Dialog open={previewImage !== null} onOpenChange={(open) => !open && setPreviewImage(null)}>
-        <DialogContent
-          className="grid max-h-[90vh] max-w-[90vw] place-items-center border-none bg-transparent p-0 ring-0 sm:max-w-[90vw]"
-          showCloseButton={false}
-        >
-          <DialogTitle className="sr-only">
-            {previewImage?.name ?? t("bubble.attachment")}
-          </DialogTitle>
-          {previewImage && (
-            <img
-              src={previewImage.previewUrl}
-              alt={previewImage.name}
-              className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-xl"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {bashMode && (
-        <div className="flex items-center gap-1.5 px-2.5 pt-1.5 text-xs font-medium text-primary">
-          <Terminal className="size-3" />
-          <span>{t("composer.bashHint")}</span>
-        </div>
-      )}
-
-      <div className="relative">
-      <MentionHighlight
-        ref={highlightRef}
-        text={text}
-        labels={mentionLabels}
-        // Mirror the textarea's type ramp exactly (the shared Textarea adds
-        // md:text-sm) — the pills only line up if both layers wrap alike.
-        className={cn(
-          "min-h-14 text-base md:text-sm",
-          variant === "hero" ? "px-3 py-3" : "px-2.5 py-2",
-        )}
-      />
-      <Textarea
-        ref={taRef}
-        value={text}
-        onScroll={(e) => {
-          const layer = highlightRef.current;
-          if (layer) layer.scrollTop = e.currentTarget.scrollTop;
-        }}
-        onChange={(e) => {
-          slashSuppress.current = false; // a fresh edit re-arms the menu
-          mentionSuppress.current = false;
-          updateText(e.target.value);
-          syncSlash();
-          syncMention();
-        }}
-        onClick={() => {
-          syncSlash();
-          syncMention();
-        }}
-        onKeyUp={(e) => {
-          // Re-detect on caret moves (arrows/home/end/click); typing is already
-          // covered by onChange. Skip keys the slash/mention-nav handler consumes.
-          if (["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) return;
-          syncSlash();
-          syncMention();
-        }}
-        onPaste={(e) => {
-          const files: File[] = [];
-          for (const item of Array.from(e.clipboardData?.items ?? [])) {
-            if (item.kind === "file") {
-              const f = item.getAsFile();
-              if (f) files.push(f);
-            }
-          }
-          const pastedText = e.clipboardData?.getData("text/plain") ?? "";
-          const textAsFile =
-            pastedText.length > LONG_PASTE_CHARS
-              ? new File([pastedText], "pasted.txt", { type: "text/plain" })
-              : null;
-          // No files and reasonably-sized text → let the browser paste normally.
-          if (!files.length && !textAsFile) return;
-          // Mixed paste (image + text): hijack the event so the images become
-          // attachments, but don't drop the accompanying text — insert it at
-          // the caret ourselves since preventDefault cancels the native paste.
-          e.preventDefault();
-          if (textAsFile) files.push(textAsFile);
-          // A Finder file copy carries the real path on the pasteboard; resolve
-          // it first so addFiles can reference a too-large file by path instead
-          // of skipping it. Best-effort — falls back to the byte path on any
-          // failure or off macOS.
-          api
-            .readClipboardFilePaths()
-            .then((paths) => {
-              const hints = new Map<string, string>();
-              for (const p of paths) {
-                const base = p.split("/").pop();
-                if (base) hints.set(base, p);
-              }
-              return addFiles(files, hints);
-            })
-            .catch(() => addFiles(files));
-          if (pastedText && !textAsFile) insertTextAtCaret(pastedText);
-        }}
-        onKeyDown={(e) => {
-          const composing = e.nativeEvent.isComposing || e.keyCode === 229;
-          // Backspace right after a mention pill removes the whole token (plus
-          // the space that follows it) instead of nibbling the label.
-          if (e.key === "Backspace" && !composing && mentionRefs.length > 0) {
-            const el = e.currentTarget;
-            const caret = el.selectionStart ?? 0;
-            if (caret > 0 && caret === el.selectionEnd) {
-              const head = text.slice(0, caret);
-              const tokens = mentionRefs
-                .map((r) => mentionToken(r.label))
-                .sort((a, b) => b.length - a.length);
-              for (const token of tokens) {
-                const trailing = head.endsWith(`${token} `) ? 1 : head.endsWith(token) ? 0 : -1;
-                if (trailing < 0) continue;
-                const start = head.length - token.length - trailing;
-                const before = start > 0 ? text[start - 1] : "";
-                if (before && !/\s/.test(before)) continue;
-                e.preventDefault();
-                const next = text.slice(0, start) + text.slice(caret);
-                updateText(next);
-                requestAnimationFrame(() => {
-                  const node = taRef.current;
-                  if (!node) return;
-                  node.setSelectionRange(start, start);
-                  syncMention();
-                });
-                return;
-              }
-            }
-          }
-          // Slash menu owns the navigation keys while it's open. Guard against
-          // IME composition so candidate selection isn't stolen.
-          if (slashVisible && !composing) {
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setSlashActive((i) => (i + 1) % slashItems.length);
-              return;
-            }
-            if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setSlashActive((i) => (i - 1 + slashItems.length) % slashItems.length);
-              return;
-            }
-            if (e.key === "Enter" || e.key === "Tab") {
-              e.preventDefault();
-              applySlash(slashItems[slashIdx]);
-              return;
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              e.stopPropagation();
-              slashSuppress.current = true;
-              closeSlash();
-              return;
-            }
-          }
-          // The @-mention menu owns the same nav keys when it's open (and the
-          // slash menu isn't — they're mutually exclusive per caret token).
-          if (mentionVisible && !slashVisible && !composing) {
-            const n = Math.max(1, mentionItems.length);
-            // Clamp at the ends instead of wrapping — pressing ↑ on the first
-            // row (or ↓ on the last) is a no-op.
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setMentionActive((i) => Math.min(i + 1, n - 1));
-              return;
-            }
-            if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setMentionActive((i) => Math.max(i - 1, 0));
-              return;
-            }
-            // Tab / ⇧Tab walk the kind tabs (All → Functions → … → Chats);
-            // ⏎ picks the highlighted row.
-            if (e.key === "Tab" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-              e.preventDefault();
-              setMentionTab((k) => nextMentionTab(k, e.shiftKey ? -1 : 1));
-              setMentionActive(0);
-              return;
-            }
-            if (e.key === "Enter") {
-              // Nothing to pick (e.g. an email-like `@word`): close the menu and
-              // let Enter fall through to send as usual.
-              if (mentionItems.length === 0) {
-                mentionSuppress.current = true;
-                closeMention();
-              } else {
-                e.preventDefault();
-                applyMention(mentionItems[mentionIdx]);
-                return;
-              }
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              e.stopPropagation();
-              mentionSuppress.current = true;
-              closeMention();
-              return;
-            }
-          }
-          // Tab cycles the runtime rows — runtimes and presets in the picker
-          // order — matching the quick launcher and the task dialog. The slash
-          // menu above already consumed Tab when open, so here it's free to
-          // repurpose. Only a bare Tab, though — Ctrl/Cmd+Tab must fall through
-          // to the window handler (Ctrl+Tab = switch to previous view) instead
-          // of being swallowed here.
-          if (
-            e.key === "Tab" &&
-            !e.shiftKey &&
-            !e.ctrlKey &&
-            !e.metaKey &&
-            !e.altKey &&
-            !composing &&
-            onRequestBackendSwitch
-          ) {
-            e.preventDefault();
-            onRequestBackendSwitch(
-              nextRuntimeTarget(runtimeEntries, enabledBackendIds, {
-                backend,
-                model: conversationId ? cliTuning.model : pendingCliModel,
-                effort: conversationId ? cliTuning.effort : pendingCliEffort,
-              }),
-            );
-            return;
-          }
-          // Don't intercept Enter while an IME is composing — Chinese / Japanese
-          // / Korean users press Enter to commit candidates, and a naive check
-          // would steal that keystroke and send a half-typed prompt.
-          // `nativeEvent.isComposing` is the spec; `keyCode === 229` is the
-          // legacy fallback for browsers that drop isComposing during commit.
-          if (e.key === "Enter" && !e.shiftKey) {
-            if (composing) return;
-            e.preventDefault();
-            submit();
-          }
-        }}
-        placeholder={
-          bashMode
-            ? t("composer.bashPlaceholder")
-            : withFocusHint(
-                placeholder ??
-                  (streaming
-                    ? onQueue
-                      ? t("composer.placeholderQueue")
-                      : t("composer.placeholderRunning")
-                    : variant === "hero"
-                      ? heroPlaceholder
-                      : t("composer.placeholderDocked")),
-              )
-        }
-        rows={1}
-        disabled={disabled}
-        className={cn(
-          "relative min-h-14 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent",
-          variant === "hero" ? "px-3 py-3 text-base" : "px-2.5 py-2 text-base",
-        )}
-      />
-      </div>
-      {attachError && (
-        <div className="px-2 pb-1 text-xs text-destructive">{attachError}</div>
-      )}
-      <div className="flex items-center justify-between gap-2 px-1 pb-1 pt-0.5">
-        {/* min-w-0 lets the picker cluster shrink (each trigger truncates) so
-            the send button never overflows the frame in a narrow chat pane. */}
-        <div className="flex min-w-0 items-center gap-1">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files?.length) addFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled}
-            title={t("composer.attachFile")}
-          >
-            <Paperclip className="size-3 text-muted-foreground" />
-          </Button>
-          <WorkspacePicker
-            workspaceDir={workspaceDir}
-            defaultWorkspace={defaultWorkspace}
-            onChange={onWorkspaceChange}
-            disabled={disabled}
-            context={
-              <GitBranchIndicator
-                conversationId={conversationId ?? null}
-                workspaceDir={workspaceDir}
-                defaultWorkspace={defaultWorkspace}
-                streaming={!!streaming}
-              />
-            }
-          />
-          {/* Runtime on the left, its model/effort tuning on the right — the
-              BackendPicker renders the CLI tuning menu itself; the pi model
-              picker follows for the built-in runtime. */}
-          <BackendPicker
-            conversationId={conversationId ?? null}
-            disabled={disabled}
-            pendingValue={pendingBackend}
-            pendingModel={pendingCliModel}
-            pendingEffort={pendingCliEffort}
-            onPendingTuningChange={onPendingTuningChange}
-            backendSwitch={backendSwitch}
-            tuningMenuOpen={cliTuningOpen}
-            onTuningMenuOpenChange={setCliTuningOpen}
-            onTuningChange={onRuntimeTuningChange}
-            onBackendChange={(b) => {
-              setBackend(b);
-              setRuntimeReady(true);
-              if (!conversationId) onPendingBackendChange?.(b);
-            }}
-          />
-          {backend === "pi" && (
-            <ModelPicker
-              value={modelChoice}
-              onChange={onModelChange}
-              disabled={disabled}
-            />
-          )}
-          {ambientAvailable && (
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              onClick={toggleAmbient}
-              disabled={disabled}
-              title={t(ambientOn ? "composer.ambientOn" : "composer.ambientOff")}
-              aria-pressed={ambientOn}
-            >
-              <Radar
-                className={cn(
-                  "size-3",
-                  ambientOn ? "text-primary" : "text-muted-foreground",
-                )}
-              />
-            </Button>
-          )}
-        </div>
-        {bashMode ? (
-          // Terminal commands are independent of the agent stream, so always
-          // offer a Run button here (never the abort affordance).
-          <Button
-            type="button"
-            size="icon-sm"
-            className="shrink-0"
-            onClick={submit}
-            disabled={disabled || !bashCommand}
-            title={t("composer.runBash")}
-          >
-            <Terminal className="h-4 w-4" />
-          </Button>
-        ) : streaming ? (
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="destructive"
-            className="shrink-0"
-            onClick={onAbort}
-            title={t("composer.abort")}
-          >
-            <Square className="h-3.5 w-3.5" />
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            size="icon-sm"
-            className="shrink-0"
-            onClick={submit}
-            disabled={disabled || (!text.trim() && !quote && attachments.length === 0)}
-            title={t("composer.send")}
-          >
-            <ArrowUp className="h-4 w-4" />
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** Draft-store key for the pending quote attached to a composer draft. */
-function quoteKey(draftKey: string): string {
-  return `${draftKey}#quote`;
-}
-
-/** One-line schedule summary for the model's view of an `@automation`. */
-function describeSchedule(a: Automation): string {
-  const s = a.schedule;
-  switch (s.kind) {
-    case "once":
-      return `runs once at ${new Date(s.atMs).toISOString()}`;
-    case "interval":
-      return `runs every ${s.everyMinutes} minutes`;
-    case "daily":
-      return `runs daily at ${s.time}`;
-    case "cron":
-      return `cron ${s.expr}`;
-    default:
-      return "scheduled";
-  }
-}
-
-function cleanQuoteText(text: string): string {
-  return text
-    .replace(/\r\n?/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-/** The wire format for a quote: a leading `>` blockquote the bubble renderer
- *  recognizes and lifts back out as the quote header. */
-function formatQuoteMarkdown(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => `> ${line}`)
-    .join("\n");
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      // result is "data:<mime>;base64,<payload>" — keep just the payload.
-      const comma = result.indexOf(",");
-      resolve(comma >= 0 ? result.slice(comma + 1) : result);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
-    reader.readAsDataURL(file);
+  return renderComposer({
+    rootRef,
+    streaming,
+    bashMode,
+    backend,
+    isDragging,
+    variant,
+    t,
+    slashVisible,
+    slashItems,
+    slashIdx,
+    applySlash,
+    setSlashActive,
+    setEditingCommand,
+    setNewCommandSeed,
+    slashQuery,
+    setCommandDialogOpen,
+    closeSlash,
+    commandDialogOpen,
+    editingCommand,
+    newCommandSeed,
+    slashStart,
+    text,
+    updateText,
+    taRef,
+    slashSuppress,
+    setSlashOpen,
+    mentionVisible,
+    mentionTab,
+    setMentionTab,
+    setMentionActive,
+    mentionItems,
+    mentionIdx,
+    filesWanted,
+    mentionFilesLoading,
+    applyMention,
+    quote,
+    updateQuote,
+    attachments,
+    setPreviewImage,
+    removeAttachment,
+    previewImage,
+    highlightRef,
+    mentionLabels,
+    mentionSuppress,
+    syncSlash,
+    syncMention,
+    addFiles,
+    insertTextAtCaret,
+    mentionRefs,
+    closeMention,
+    onRequestBackendSwitch,
+    runtimeEntries,
+    enabledBackendIds,
+    conversationId,
+    cliTuning,
+    pendingCliModel,
+    pendingCliEffort,
+    submit,
+    withFocusHint,
+    placeholder,
+    onQueue,
+    heroPlaceholder,
+    disabled,
+    attachError,
+    fileInputRef,
+    workspaceDir,
+    defaultWorkspace,
+    onWorkspaceChange,
+    pendingBackend,
+    onPendingTuningChange,
+    backendSwitch,
+    cliTuningOpen,
+    setCliTuningOpen,
+    onRuntimeTuningChange,
+    setBackend,
+    setRuntimeReady,
+    onPendingBackendChange,
+    modelChoice,
+    onModelChange,
+    ambientAvailable,
+    toggleAmbient,
+    ambientOn,
+    bashCommand,
+    onAbort,
   });
 }

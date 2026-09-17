@@ -1,71 +1,14 @@
 "use client";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import dynamic from "next/dynamic";
-import { Inbox, PanelBottom, PanelLeft, PanelRight } from "lucide-react";
 import {
-  Composer,
   type ComposerAttachment,
   type ComposerRuntimeSelection,
-  type FileAttachment,
-  type ImageAttachment,
-  type QueuedMessage,
 } from "@/components/chat/composer";
-import { ChatPane } from "@/components/chat/chat-pane";
-import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
-import { CommandPalette } from "@/components/command-palette";
-import { FIND_IN_CHAT_EVENT } from "@/components/chat/find-highlight";
-import { AppSidebar, groupByWorkspace } from "@/components/sidebar/app-sidebar";
-import type { SidebarView } from "@/components/sidebar/view-toggle";
-import { BoardView } from "@/components/board/board-view";
-import { CreateTaskDialog } from "@/components/board/create-task-dialog";
-import { AutomationsView } from "@/components/automation/automations-view";
-import { AutomationDialog } from "@/components/automation/automation-dialog";
-import {
-  WorkspacePanel,
-  createTerminalViewState,
-  type WorkspaceTab,
-  type WorkspaceTabKind,
-  type WorkspaceLayout,
-  type TerminalRunRequest,
-  type TerminalViewState,
-} from "@/components/workspace/workspace-panel";
-import {
-  createBrowserViewState,
-  type BrowserViewState,
-} from "@/components/browser/browser-view";
-import { SessionDetailDialog } from "@/components/board/session-detail-dialog";
-import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
-import { REVIEW_TOOL_NAME } from "@/lib/review";
-import { DialogHost } from "@/components/extension-ui/dialog-host";
-import { ZoomHud } from "@/components/zoom-hud";
-import { TestHook } from "@/components/devtest/test-hook";
-import { ScreenHistoryPage } from "@/components/screen-history/screen-history-page";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Kbd } from "@/components/ui/kbd";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
+import { api, onUpdateReady } from "@/lib/tauri";
 import {
-  api,
-  onAppEvent,
-  onUpdateReady,
-  type Screenshot,
-} from "@/lib/tauri";
-import {
-  useChatStore,
-  useChatError,
-  useIsStreaming,
-  useHasArtifacts,
-  useHasMessages,
-  useActivityIds,
-  useStreamingIds,
-  copyCachedMessages,
   installChatPersistence,
   loadCachedMessages,
   loadLastActive,
@@ -73,371 +16,54 @@ import {
   saveLastActive,
 } from "@/lib/chat-store";
 import { useZoom } from "@/hooks/use-zoom";
-import { dispatchNotification, refreshPermission } from "@/lib/notifications";
-import { tt, useLocale, useTranslation } from "@/lib/i18n";
-import { flavorHeadline } from "@/lib/chat-flavor";
-import { buildAttachmentRefs } from "@/lib/attachments";
+import { refreshPermission } from "@/lib/notifications";
 import {
   INTERRUPTED_RESUME_PROMPT,
   renderStartsMidConversation,
 } from "@/lib/continuation-prompts";
 import { installWebviewHealthMonitor } from "@/lib/webview-health";
 import {
-  DEFAULT_MODEL_CHOICE,
-  type AppEvent,
   type Automation,
   type AutomationInput,
-  type CliBackgroundTask,
-  type CliControlRequest,
-  type CliRateLimitInfo,
-  type CliSlashCommand,
   type Conversation,
-  type ExtensionUIRequest,
   type ModelChoice,
-  type PiEvent,
-  type PiMessage,
   type QuickLaunchPayload,
-  type RunState,
   type BackendId,
-  type UpdateDownloadProgress,
-  backendSupportsSteer,
 } from "@/lib/types";
-import {
-  OPEN_RUNTIME_SETTINGS_EVENT,
-  matchRuntimePreset,
-  useCliAgentSettings,
-} from "@/lib/runtime-settings";
-import {
-  runtimeForShortcut,
-  runtimeSwitchTarget,
-  useRuntimeSlots,
-  type RuntimeSwitchTarget,
-} from "@/components/chat/backend-picker";
-import { mergeStoredModelChoice, saveModelChoice } from "@/lib/model-choice";
-import { loadBackendChoice, saveBackendChoice } from "@/lib/backend-choice";
-import { composeWithContext, splitSelectionOverflow } from "@/lib/quick-context";
+import { OPEN_RUNTIME_SETTINGS_EVENT } from "@/lib/runtime-settings";
+import { useRuntimeSlots } from "@/components/chat/backend-picker";
+import { saveModelChoice } from "@/lib/model-choice";
 import { useConversationAutoSort } from "@/lib/conversation-order";
-import {
-  loadCollapsedWorkspaceDirs,
-  loadExpandedWorkspaceDirs,
-  nextConversationIdInWorkspace,
-  persistCollapsedWorkspaceDirs,
-  persistExpandedWorkspaceDirs,
-  visibleConversationIds,
-} from "@/lib/collapsed-workspaces";
-import {
-  KEYBOARD_SHORTCUTS_EVENT,
-  KEYBOARD_SHORTCUTS_STORAGE_KEY,
-  matchesShortcut,
-  readKeyboardShortcuts,
-  shortcutDisplay,
-  shortcutPlatform,
-} from "@/lib/keyboard-shortcuts";
+import { nextConversationIdInWorkspace } from "@/lib/collapsed-workspaces";
 import {
   HIDDEN_WORKSPACES_STORAGE_KEY,
-  hideWorkspace,
   loadHiddenWorkspaces,
   loadRecentWorkspaces,
   RECENT_WORKSPACES_CHANGED,
   RECENT_WORKSPACES_STORAGE_KEY,
   reconcileTemporaryWorkspaces,
-  reorderRecentWorkspaces,
 } from "@/lib/recent-workspaces";
-
-// The settings UI is a ~3900-line client component (plus react-markdown for the
-// skill previews). Code-split it so its chunk only loads the first time the user
-// opens Settings, keeping it out of the cold-start bundle. ssr:false is safe —
-// this is a static-export Tauri SPA with no server render. Gated on
-// `settingsEverOpened` below so the mount (and thus the chunk fetch) is deferred
-// until first open; it then stays mounted so reopen is instant.
-const SettingsPage = dynamic(
-  () => import("@/components/settings/settings-page").then((m) => m.SettingsPage),
-  { ssr: false },
-);
-
-// First-run welcome + permission setup. Self-gating (a localStorage flag), so
-// it's safe to always mount; renders nothing once dismissed. ssr:false for the
-// same reason as SettingsPage — static-export SPA, no server render.
-const Onboarding = dynamic(
-  () => import("@/components/onboarding/onboarding").then((m) => m.Onboarding),
-  { ssr: false },
-);
-
-const APP_VIEW_STATE_KEY = "cetus:viewState";
-const SIDEBAR_OPEN_KEY = "cetus:sidebarOpen";
-
-interface PersistedAppViewState {
-  view?: SidebarView;
-  settingsOpen?: boolean;
-  historyOpen?: boolean;
-  detailId?: string | null;
-  boardWorkspaceFilter?: string | null;
-}
-
-/** Stable transcript-shaped placeholder for a cold conversation switch. It
- * mirrors ChatPane's message/composer split so hydration changes content, not
- * the page's overall geometry. */
-function ChatLoadingPane({ opticalCenter }: { opticalCenter: boolean }) {
-  const columnShift = opticalCenter
-    ? "xl:-translate-x-10 2xl:-translate-x-12"
-    : "";
-  return (
-    <div
-      className="flex min-h-0 flex-1 flex-col bg-background"
-      aria-busy="true"
-      aria-label="Loading conversation"
-    >
-      <div className="min-h-0 flex-1 overflow-hidden px-4 pt-4">
-        <div className={`mx-auto flex w-full max-w-3xl flex-col gap-6 panel-motion transition-[translate] ${columnShift}`}>
-          <div className="flex justify-end">
-            <Skeleton className="h-10 w-2/5 rounded-2xl" />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Skeleton className="h-2.5 w-14" />
-            <Skeleton className="h-3 w-11/12" />
-            <Skeleton className="h-3 w-4/5" />
-            <Skeleton className="h-3 w-2/3" />
-          </div>
-          <div className="flex justify-end">
-            <Skeleton className="h-10 w-1/3 rounded-2xl" />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Skeleton className="h-2.5 w-14" />
-            <Skeleton className="h-3 w-10/12" />
-            <Skeleton className="h-3 w-3/5" />
-          </div>
-        </div>
-      </div>
-      <div className="shrink-0 bg-background px-4 pb-3 pt-2">
-        <div className={`mx-auto w-full max-w-3xl panel-motion transition-[translate] ${columnShift}`}>
-          <Skeleton className="h-[92px] w-full rounded-2xl" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function isSidebarView(value: unknown): value is SidebarView {
-  return value === "chat" || value === "board" || value === "automations";
-}
-
-function readAppViewState(): PersistedAppViewState {
-  if (typeof window === "undefined") return {};
-  const readLegacyView = (): SidebarView | undefined => {
-    try {
-      const v = window.localStorage.getItem("cetus:lastView");
-      return isSidebarView(v) ? v : undefined;
-    } catch {
-      return undefined;
-    }
-  };
-  try {
-    const raw = window.localStorage.getItem(APP_VIEW_STATE_KEY);
-    if (!raw) return { view: readLegacyView() };
-    const parsed = JSON.parse(raw) as PersistedAppViewState;
-    return {
-      view: isSidebarView(parsed.view) ? parsed.view : readLegacyView(),
-      settingsOpen: typeof parsed.settingsOpen === "boolean" ? parsed.settingsOpen : undefined,
-      historyOpen: typeof parsed.historyOpen === "boolean" ? parsed.historyOpen : undefined,
-      detailId:
-        typeof parsed.detailId === "string" || parsed.detailId === null
-          ? parsed.detailId
-          : undefined,
-      boardWorkspaceFilter:
-        typeof parsed.boardWorkspaceFilter === "string" ||
-        parsed.boardWorkspaceFilter === null
-          ? parsed.boardWorkspaceFilter
-          : undefined,
-    };
-  } catch {
-    return { view: readLegacyView() };
-  }
-}
-
-/** Replace an automation by id, or prepend if new. Keeps server ordering. */
-function mergeAutomation(list: Automation[], a: Automation): Automation[] {
-  return list.some((x) => x.id === a.id)
-    ? list.map((x) => (x.id === a.id ? a : x))
-    : [a, ...list];
-}
-
-/** Replace a conversation by id, or prepend if new (a freshly-fired run). */
-function mergeConversation(list: Conversation[], c: Conversation): Conversation[] {
-  return list.some((x) => x.id === c.id)
-    ? list.map((x) => (x.id === c.id ? c : x))
-    : [c, ...list];
-}
-
-/** True when retry_last_turn failed only because the backend session has no
- *  user turn to fork from (the send never committed). Lets onRetry fall back to
- *  resubmitting the optimistic bubble instead of surfacing the raw error. */
-function isNothingToRetry(e: unknown): boolean {
-  return String(e).includes("nothing to retry");
-}
-
-/** Concatenated text of the most recent user message in the rendered store, or
- *  null if there isn't one. Used as the resubmit source when the backend has
- *  nothing to fork. */
-function lastUserText(convId: string): string | null {
-  const msgs = useChatStore.getState().chats[convId]?.messages;
-  if (!msgs) return null;
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role !== "user") continue;
-    const text = msgs[i].blocks
-      .map((b) => ("text" in b ? b.text : ""))
-      .join("")
-      .trim();
-    return text || null;
-  }
-  return null;
-}
-
-interface BrowserAnnotationEvent {
-  url: string;
-  title?: string;
-  xPct?: number;
-  yPct?: number;
-  note: string;
-  selector?: string | null;
-  element?: string | null;
-  text?: string | null;
-  rect?: { x: number; y: number; width: number; height: number } | null;
-}
-
-interface BrowserControlEvent {
-  conversationId?: string;
-  op: "open";
-  url: string;
-}
-
-function browserAnnotationMessage(p: BrowserAnnotationEvent): string {
-  const lines = [
-    "@Browser 页面批注",
-    "",
-    `URL: ${p.url}`,
-  ];
-  if (p.title) lines.push(`页面标题: ${p.title}`);
-  if (p.selector || p.element) lines.push(`页面元素: ${p.selector || p.element}`);
-  if (p.text) lines.push(`元素文本: ${p.text}`);
-  if (p.rect) {
-    lines.push(
-      `元素区域: ${Math.round(p.rect.width)}×${Math.round(p.rect.height)} at (${Math.round(p.rect.x)}, ${Math.round(p.rect.y)})`,
-    );
-  } else if (typeof p.xPct === "number" && typeof p.yPct === "number") {
-    lines.push(`位置: x=${p.xPct.toFixed(1)}%, y=${p.yPct.toFixed(1)}%`);
-  }
-  lines.push("", p.note);
-  return lines.join("\n");
-}
-
-interface Outgoing {
-  /** Image previews for the user bubble (data URLs). */
-  localImages: { dataUrl: string; name?: string }[];
-  /** Non-image attachments written to disk — chips for the bubble. */
-  savedFiles: { name: string; path: string; mimeType: string; sizeBytes: number }[];
-  /** ImageContent blocks for pi's `images` channel. */
-  piImages: { type: "image"; data: string; mimeType: string }[];
-  /** Prompt text sent to pi, with the local file-reading path block appended. */
-  piMessage: string;
-}
-
-/** Base64 of a UTF-8 string (bare, no `data:` prefix), matching what
- *  `saveAttachment` expects for file attachments. */
-function utf8ToBase64(text: string): string {
-  const bytes = new TextEncoder().encode(text);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(bin);
-}
-
-/** Split composer attachments into the image channel (→ pi images)
- *  and on-disk files (→ local file-reading), writing the files out. Shared by every
- *  send path (main chat, create-task, detail dialog). */
-async function prepareOutgoing(
-  convId: string,
-  text: string,
-  attachments: ComposerAttachment[],
-): Promise<Outgoing> {
-  const images = attachments.filter((a): a is ImageAttachment => a.type === "image");
-  const files = attachments.filter((a): a is FileAttachment => a.type === "file");
-  const localImages = images.map((a) => ({
-    dataUrl: `data:${a.mimeType};base64,${a.data}`,
-    name: a.name,
-  }));
-  const savedFiles = await Promise.all(
-    files.map(async (f) => ({
-      name: f.name,
-      path: await api.saveAttachment(convId, f.name, f.data),
-      mimeType: f.mimeType,
-      sizeBytes: f.sizeBytes,
-    })),
-  );
-  const piImages = images.map((a) => ({
-    type: "image" as const,
-    data: a.data,
-    mimeType: a.mimeType,
-  }));
-  return { localImages, savedFiles, piImages, piMessage: text + buildAttachmentRefs(savedFiles) };
-}
-
-function usePanelPresence(open: boolean, delayMs = 220) {
-  const [mounted, setMounted] = useState(open);
-  const [hidden, setHidden] = useState(!open);
-  useEffect(() => {
-    if (open) {
-      setMounted(true);
-      setHidden(false);
-      return;
-    }
-    if (!mounted) {
-      setHidden(true);
-      return;
-    }
-    const timer = window.setTimeout(() => setHidden(true), delayMs);
-    return () => window.clearTimeout(timer);
-  }, [open, delayMs, mounted]);
-  return { mounted, hidden };
-}
-
-interface WorkspaceDockState {
-  open: boolean;
-  tabs: WorkspaceTab[];
-  activeId: string | null;
-}
-
-type WorkspaceDocksState = Record<WorkspaceLayout, WorkspaceDockState>;
-type WorkspaceDocksByChatState = Record<string, WorkspaceDocksState>;
-
-
-const NEW_CHAT_WORKSPACE_KEY = "__new_chat__";
-
-function createInitialWorkspaceDocks(): WorkspaceDocksState {
-  return {
-    side: {
-      open: false,
-      tabs: [{ id: "files-1", kind: "files", title: "Files" }],
-      activeId: "files-1",
-    },
-    bottom: {
-      open: false,
-      tabs: [
-        {
-          id: "terminal-1",
-          kind: "terminal",
-          title: "Terminal",
-          terminalState: createTerminalViewState(),
-        },
-      ],
-      activeId: "terminal-1",
-    },
-  };
-}
-
-function createInitialWorkspaceDocksByChat(): WorkspaceDocksByChatState {
-  return { [NEW_CHAT_WORKSPACE_KEY]: createInitialWorkspaceDocks() };
-}
+import {
+  PersistedAppViewState,
+  readAppViewState,
+  mergeConversation,
+  BrowserControlEvent,
+  BrowserAnnotationEvent,
+  browserAnnotationMessage,
+  Outgoing,
+  prepareOutgoing,
+  mergeAutomation,
+} from "./home/home-utils";
+import { useAppEvents } from "./home/use-app-events";
+import { useHomeKeyboardShortcuts } from "./home/use-home-keyboard-shortcuts";
+import { useWorkspaceActions } from "./home/use-workspace-actions";
+import { useMessageActions } from "./home/use-message-actions";
+import { useQuickLaunch } from "./home/use-quick-launch";
+import { useDetailActions } from "./home/use-detail-actions";
+import { useConversationActions } from "./home/use-conversation-actions";
+import { renderHome } from "./home/home-view";
+import { useHomeState } from "./home/use-home-state";
+import { useConversationSelection } from "./home/use-conversation-selection";
 
 export default function Home() {
   useZoom();
@@ -447,505 +73,134 @@ export default function Home() {
   if (initialViewStateRef.current === null) {
     initialViewStateRef.current = readAppViewState();
   }
-  const initialViewState = initialViewStateRef.current;
-  const { t } = useTranslation("chat");
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [conversationsLoaded, setConversationsLoaded] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(() =>
-    initialViewState.view === "chat" ? loadLastActive() : null,
-  );
-  // A selected conversation can be absent from the in-memory LRU and need an
-  // IndexedDB/backend round-trip before its messages exist. Keep that distinct
-  // from a genuinely empty/new chat so the pane never flashes the hero between
-  // two populated conversations.
-  const [loadingChatId, setLoadingChatId] = useState<string | null>(null);
-  const [piReady, setPiReady] = useState(false);
-  // Store actions are pulled via getState() inside callbacks so we never
-  // subscribe page.tsx to chat-store ticks.
-  const chatStore = useChatStore;
-  const error = useChatError(activeId);
-  const isStreaming = useIsStreaming(activeId);
-  const hasMessages = useHasMessages(activeId);
-  // Aggregated artifacts gallery for the active chat — parity with the board
-  // detail dialog's Artifacts button (opens the same ArtifactsDialog).
-  const activeHasArtifacts = useHasArtifacts(activeId);
-  const [chatArtifactsOpen, setChatArtifactsOpen] = useState(false);
-  // Backend serving the active conversation (null for a not-yet-persisted new
-  // chat). Drives steer-capability gating for the follow-up queue.
-  const activeConvBackend = useMemo<BackendId | null>(
-    () =>
-      (conversations.find((c) => c.id === activeId)?.backend as
-        | BackendId
-        | undefined) ?? null,
-    [conversations, activeId],
-  );
-  // Interrupted-run banner: the active conversation's last CLI turn was cut
-  // down mid-run (persisted run_state, swept at boot/exit) and nothing has
-  // started since. ChatPane additionally hides the banner while streaming.
-  const activeConvInterrupted = useMemo(
-    () =>
-      conversations.find((c) => c.id === activeId)?.runState === "interrupted",
-    [conversations, activeId],
-  );
-  const streamingIds = useStreamingIds();
-  const activityIds = useActivityIds();
-  const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-  // Mirror of the set, so markUnread can dedupe (and skip the write) without
-  // doing I/O inside a setState updater — which React may run twice.
-  const unreadIdsRef = useRef<Set<string>>(unreadCompletedIds);
-  /** Guards the one-shot hydration in refreshList (which runs on every send). */
-  const unreadHydratedRef = useRef(false);
-  /** Flip a chat's unread dot and persist it (conversations.unreadAt). The
-   *  renderer decides *when* — it sees agent_end, retries, and whether the chat
-   *  was on screen — while the row is what survives a restart and what the
-   *  auto-archive sweep checks before filing a chat away. */
-  const markUnread = useCallback((cid: string, unread: boolean) => {
-    if (unreadIdsRef.current.has(cid) === unread) return;
-    const next = new Set(unreadIdsRef.current);
-    if (unread) next.add(cid);
-    else next.delete(cid);
-    unreadIdsRef.current = next;
-    setUnreadCompletedIds(next);
-    api.setConversationUnread(cid, unread).catch(console.error);
-  }, []);
-  const [modelChoice, setModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
-  // Backend + CLI model/effort chosen on the hero composer before a
-  // conversation exists; applied to the conversation minted on first send.
-  // Sticky across sessions (shared with the quick launcher) via
-  // "cetus:lastBackendChoice".
-  const [pendingBackend, setPendingBackend] = useState<BackendId>("pi");
-  const [pendingCliModel, setPendingCliModel] = useState("");
-  const [pendingCliEffort, setPendingCliEffort] = useState("");
-  const onPendingTuningChange = useCallback((model: string, effort: string) => {
-    setPendingCliModel(model);
-    setPendingCliEffort(effort);
-  }, []);
-  // ⌃1…⌃9 runtime selection: the request rides a token down to the
-  // BackendPicker, which holds it as pending composer state until send, using
-  // the same token pattern as focusToken/quoteRequest. Preset slots carry
-  // their fixed model/effort along.
-  const [backendSwitch, setBackendSwitch] = useState<
-    ({ token: number } & RuntimeSwitchTarget) | null
-  >(null);
-  const backendSwitchToken = useRef(0);
-  const requestBackendSwitch = useCallback((target: RuntimeSwitchTarget) => {
-    backendSwitchToken.current += 1;
-    setBackendSwitch({ token: backendSwitchToken.current, ...target });
-  }, []);
-  useEffect(() => {
-    setModelChoice(mergeStoredModelChoice);
-    const savedBackend = loadBackendChoice();
-    if (savedBackend) {
-      setPendingBackend(savedBackend.backend);
-      setPendingCliModel(savedBackend.cliModel);
-      setPendingCliEffort(savedBackend.cliEffort);
-    }
-  }, []);
-  // Persist the new-chat runtime choice on every change past hydration (the
-  // same skip-first-run dance as modelChoice below). A selection that matches
-  // a preset is saved as that preset, so it never overwrites the runtime's
-  // own sticky tuning — the plain runtime row keeps its separate choice.
-  const cliAgentSettings = useCliAgentSettings();
-  const backendChoiceHydrated = useRef(false);
-  useEffect(() => {
-    if (!backendChoiceHydrated.current) {
-      backendChoiceHydrated.current = true;
-      return;
-    }
-    // The settings arriving async also re-run this effect; skip no-op saves
-    // so re-hydrated values aren't misclassified before the preset list loads.
-    const stored = loadBackendChoice();
-    if (
-      stored?.backend === pendingBackend &&
-      stored.cliModel === pendingCliModel &&
-      stored.cliEffort === pendingCliEffort
-    ) {
-      return;
-    }
-    saveBackendChoice(
-      {
-        backend: pendingBackend,
-        cliModel: pendingCliModel,
-        cliEffort: pendingCliEffort,
-      },
-      matchRuntimePreset(
-        cliAgentSettings.runtimePresets,
-        pendingBackend,
-        pendingCliModel,
-        pendingCliEffort,
-      )?.id,
-    );
-  }, [pendingBackend, pendingCliModel, pendingCliEffort, cliAgentSettings]);
-  // The sticky new-chat model/reasoning choice ("cetus:lastModelChoice",
-  // shared with the quick launcher) only follows *explicit* picks — the
-  // composer picker (onModelChange) and the launcher's own picker. Opening an
-  // existing conversation adopts that conversation's model into the composer
-  // but must not overwrite the sticky choice, otherwise the last chat the user
-  // happened to look at (or the one restored on launch) would silently become
-  // the default for every new chat. Landing back on the new-chat hero restores
-  // the sticky choice for the same reason.
-  useEffect(() => {
-    if (activeId !== null) return;
-    setModelChoice(mergeStoredModelChoice(DEFAULT_MODEL_CHOICE));
-    // Existing-chat CLI picks update the stored per-runtime tuning. Refresh
-    // the hero too, otherwise it keeps the values from before that chat.
-    const savedBackend = loadBackendChoice();
-    if (savedBackend) {
-      setPendingBackend(savedBackend.backend);
-      setPendingCliModel(savedBackend.cliModel);
-      setPendingCliEffort(savedBackend.cliEffort);
-    }
-  }, [activeId]);
-  const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
-  const [defaultWorkspace, setDefaultWorkspace] = useState<string>("");
-  const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
-  const [hiddenWorkspaces, setHiddenWorkspaces] = useState<string[]>([]);
-  // A hidden workspace can still receive a fresh automation conversation.
-  // Surface it for as long as that workspace has active chats, without changing
-  // the user's persisted recent/hidden workspace preferences.
-  const [temporaryWorkspaces, setTemporaryWorkspaces] = useState<string[]>([]);
-  const [storedProviders, setStoredProviders] = useState<string[]>([]);
-
-  // ---- Smart routing (experimental) ---------------------------------------
-  // Roster the entry composers hand to the router: recent conversations plus
-  // their cached last-reply previews (board card cache — best-effort). Reloaded
-  // only when the top-of-list ids actually change, not on every updated_at bump.
-  // Once the last active chat in a temporary workspace is archived, remove the
-  // empty folder from the sidebar naturally.
-  useEffect(() => {
-    setTemporaryWorkspaces((dirs) =>
-      reconcileTemporaryWorkspaces(dirs, conversations),
-    );
-  }, [conversations]);
-  const [settingsOpen, setSettingsOpen] = useState(
-    initialViewState.settingsOpen === true,
-  );
-  // Latches true on first open so the code-split SettingsPage mounts (and its
-  // chunk loads) lazily, then stays mounted for instant reopen.
-  const [settingsEverOpened, setSettingsEverOpened] = useState(
-    initialViewState.settingsOpen === true,
-  );
-  useEffect(() => {
-    if (settingsOpen) setSettingsEverOpened(true);
-  }, [settingsOpen]);
-  const [historyOpen, setHistoryOpen] = useState(
-    initialViewState.historyOpen === true,
-  );
-  const [historyQuery, setHistoryQuery] = useState("");
-  const [historyFrame, setHistoryFrame] = useState<Screenshot | null>(null);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  /** Bumped on every "New chat" click; threaded into Composer so it can pull
-   *  focus back even when the hero is already on screen and nothing remounts. */
-  const [focusToken, setFocusToken] = useState(0);
-  // Random greeting for the landing hero, re-rolled per new chat (focusToken
-  // bumps on "New chat") + on language switch. Stays put across keystrokes.
-  const { locale } = useLocale();
-  const heroHeadline = useMemo(
-    () => flavorHeadline(locale),
-    [locale, focusToken],
-  );
-  // Restore the last sidebar view across reloads (⌘R). Lazy initializer (guarded
-  // for the static-export prerender, where window is absent) so a reload paints
-  // the right page straight away instead of flashing the chat hero first.
-  const [view, setView] = useState<SidebarView>(() => {
-    if (initialViewState.view) return initialViewState.view;
-    if (typeof window === "undefined") return "chat";
-    try {
-      const v = localStorage.getItem("cetus:lastView");
-      if (v === "chat" || v === "board" || v === "automations") return v;
-    } catch {}
-    return "chat";
-  });
-  // Collapsed sidebar = focus mode: only the conversation stays. Persisted
-  // like the view so a reload keeps the layout you chose.
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    try {
-      return localStorage.getItem(SIDEBAR_OPEN_KEY) !== "0";
-    } catch {}
-    return true;
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(SIDEBAR_OPEN_KEY, sidebarOpen ? "1" : "0");
-    } catch {}
-  }, [sidebarOpen]);
-  // This is shared with the sidebar because folded chat rows are not navigation
-  // targets either: archive fallback and keyboard switching must only walk rows
-  // the user can currently see.
-  const [collapsedWorkspaceDirs, setCollapsedWorkspaceDirs] = useState(
-    loadCollapsedWorkspaceDirs,
-  );
-  const toggleWorkspaceCollapsed = useCallback((dir: string) => {
-    setCollapsedWorkspaceDirs((current) => {
-      const next = new Set(current);
-      if (!next.delete(dir)) next.add(dir);
-      persistCollapsedWorkspaceDirs(next);
-      return next;
-    });
-  }, []);
-  // Same sharing rationale as collapsed dirs: rows truncated behind a group's
-  // "Show more" are not navigation targets either.
-  const [expandedWorkspaceDirs, setExpandedWorkspaceDirs] = useState(
-    loadExpandedWorkspaceDirs,
-  );
-  const toggleWorkspaceExpanded = useCallback((dir: string) => {
-    setExpandedWorkspaceDirs((current) => {
-      const next = new Set(current);
-      if (!next.delete(dir)) next.add(dir);
-      persistExpandedWorkspaceDirs(next);
-      return next;
-    });
-  }, []);
-  const [keyboardShortcuts, setKeyboardShortcuts] = useState(readKeyboardShortcuts);
-  useEffect(() => {
-    const reload = () => setKeyboardShortcuts(readKeyboardShortcuts());
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === null || e.key === KEYBOARD_SHORTCUTS_STORAGE_KEY) reload();
-    };
-    window.addEventListener(KEYBOARD_SHORTCUTS_EVENT, reload);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener(KEYBOARD_SHORTCUTS_EVENT, reload);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem("cetus:lastView", view);
-    } catch {}
-  }, [view]);
-  // Browser-style page history for ⌘[ / ⌘]. A "page" is the sidebar view, the
-  // active chat within it, plus whether Settings covers it; every change lands
-  // on the stack, and applying an entry sets navApplyingRef so the recorder
-  // effect below doesn't re-push the state it just restored.
-  type NavEntry = { view: SidebarView; activeId: string | null; settings: boolean };
-  const currentNavEntry = useCallback(
-    (): NavEntry => ({
-      view,
-      // A chat is only a distinct page inside the chat view; elsewhere the
-      // active chat is incidental, so collapse it to null to avoid spurious
-      // page switches.
-      activeId: view === "chat" ? activeId : null,
-      settings: settingsOpen,
-    }),
-    [view, activeId, settingsOpen],
-  );
-  const sameNavEntry = (a: NavEntry | null | undefined, b: NavEntry) =>
-    !!a && a.view === b.view && a.activeId === b.activeId && a.settings === b.settings;
-  // Ctrl+Tab is MRU page switching: it toggles the last complete page, not just
-  // the last sidebar view. That makes separate chats and Settings participate.
-  const previousPageRef = useRef<NavEntry | null>(null);
-  const committedPageRef = useRef<NavEntry>(currentNavEntry());
-  useEffect(() => {
-    const next = currentNavEntry();
-    if (!sameNavEntry(committedPageRef.current, next)) {
-      previousPageRef.current = committedPageRef.current;
-      committedPageRef.current = next;
-    }
-  }, [currentNavEntry]);
-  const navHistoryRef = useRef<NavEntry[]>([]);
-  const navIndexRef = useRef(0);
-  const navApplyingRef = useRef(false);
-  useEffect(() => {
-    if (navApplyingRef.current) {
-      navApplyingRef.current = false;
-      return;
-    }
-    const hist = navHistoryRef.current;
-    const current = hist[navIndexRef.current];
-    const entry = currentNavEntry();
-    if (sameNavEntry(current, entry))
-      return;
-    // A new page after going back forks the timeline: drop the forward entries.
-    hist.splice(navIndexRef.current + 1);
-    hist.push(entry);
-    if (hist.length > 100) hist.splice(0, hist.length - 100);
-    navIndexRef.current = hist.length - 1;
-  }, [currentNavEntry]);
-  const applyNavEntry = useCallback((entry: NavEntry) => {
-    navApplyingRef.current = true;
-    setView(entry.view);
-    if (entry.view === "chat") setActiveId(entry.activeId);
-    setSettingsOpen(entry.settings);
-  }, []);
-  const switchToPreviousPage = useCallback(() => {
-    const prev = previousPageRef.current;
-    if (prev && !sameNavEntry(committedPageRef.current, prev)) applyNavEntry(prev);
-  }, [applyNavEntry]);
-  const navigateBack = useCallback(() => {
-    if (navIndexRef.current <= 0) return;
-    navIndexRef.current -= 1;
-    applyNavEntry(navHistoryRef.current[navIndexRef.current]);
-  }, [applyNavEntry]);
-  const navigateForward = useCallback(() => {
-    if (navIndexRef.current >= navHistoryRef.current.length - 1) return;
-    navIndexRef.current += 1;
-    applyNavEntry(navHistoryRef.current[navIndexRef.current]);
-  }, [applyNavEntry]);
-  const [workspaceDocksByChat, setWorkspaceDocksByChat] =
-    useState<WorkspaceDocksByChatState>(
-      createInitialWorkspaceDocksByChat,
-    );
-  const workspaceDocksByChatRef =
-    useRef<WorkspaceDocksByChatState>(workspaceDocksByChat);
-  const workspaceKey = activeId ?? NEW_CHAT_WORKSPACE_KEY;
-  const workspaceDocks =
-    workspaceDocksByChat[workspaceKey] ?? createInitialWorkspaceDocks();
-  const sideWorkspace = workspaceDocks.side;
-  const bottomWorkspace = workspaceDocks.bottom;
-  const sideWorkspacePresence = usePanelPresence(sideWorkspace.open);
-  const bottomWorkspacePresence = usePanelPresence(bottomWorkspace.open);
-  const [boardWorkspaceFilter, setBoardWorkspaceFilter] = useState<string | null>(
-    initialViewState.boardWorkspaceFilter ?? null,
-  );
-  const [newTaskOpen, setNewTaskOpen] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(
-    initialViewState.detailId ?? null,
-  );
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        APP_VIEW_STATE_KEY,
-        JSON.stringify({
-          view,
-          settingsOpen,
-          historyOpen,
-          detailId,
-          boardWorkspaceFilter,
-        } satisfies PersistedAppViewState),
-      );
-    } catch {}
-  }, [view, settingsOpen, historyOpen, detailId, boardWorkspaceFilter]);
-  const [detailModelChoice, setDetailModelChoice] = useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
-  const [detailWorkspaceDir, setDetailWorkspaceDir] = useState<string | null>(null);
-  const [detailFocusToken, setDetailFocusToken] = useState(0);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [automations, setAutomations] = useState<Automation[]>([]);
-  const [automationDialogOpen, setAutomationDialogOpen] = useState(false);
-  const [editingAutomation, setEditingAutomation] = useState<Automation | null>(null);
-  /** Per-conversation follow-up queue: messages typed while the agent is mid-run.
-   *  They sit above the composer and are delivered one-at-a-time as the run ends
-   *  (follow-up), unless the user promotes one to a steer ("Steer now"). */
-  const [queued, setQueued] = useState<Record<string, QueuedMessage[]>>({});
-  /** True while a retry (fork + resubmit) is in flight, to disable the button. */
-  const [retrying, setRetrying] = useState(false);
-  /** Synchronous reentrancy guard. The `retrying` useState value is captured in
-   *  onRetry's closure and stays stale across a rapid double-fire (two clicks, or
-   *  a re-render that re-invokes onRetry before setRetrying commits), which would
-   *  let a second retry fork away the message the first just re-sent and then hit
-   *  "nothing to retry". This ref flips synchronously, so the second call bails. */
-  const retryingRef = useRef(false);
-  /** Synchronous guards for optimistic archive mutations. The row disappears
-   *  before React commits the next render, so a rapid shortcut repeat could
-   *  otherwise dispatch the same backend mutation twice. */
-  const archivingIdsRef = useRef(new Set<string>());
-  const archivingWorkspacesRef = useRef(new Set<string>());
-
-  // Refs that mirror state for the global app-event handler. That handler
-  // subscribes once (deps: [chatStore]) and would otherwise close over stale
-  // values — refs keep notification decisions reading the live state.
-  const conversationsRef = useRef<Conversation[]>([]);
-  const activeIdRef = useRef<string | null>(null);
-  /** Latest conversation the user *intends* to view. Captured synchronously on
-   *  click (before any await) so a slower in-flight select for a previous chat
-   *  can't clobber the newer one's state when its async work resolves late. */
-  const pendingSelectRef = useRef<string | null>(null);
-  const viewRef = useRef<SidebarView>("chat");
-  /** Per-conversation run state, so the trailing agent_end can tell a clean
-   *  finish from a failed/aborted one. `running` gates the whole thing so
-   *  out-of-order or orphan events can't fire a spurious/double notification:
-   *  an agent_end with no live run is ignored, a late stderr pi_error can't
-   *  corrupt the next run's outcome, and a crash (pi_exited) closes the run so
-   *  a trailing agent_end stays quiet. */
-  const runStatusRef = useRef<
-    Record<string, { running: boolean; outcome: "ok" | "errored" | "aborted" }>
-  >({});
-  conversationsRef.current = conversations;
-  activeIdRef.current = activeId;
-  viewRef.current = view;
-  workspaceDocksByChatRef.current = workspaceDocksByChat;
-  // Visible chat ids in the sidebar's visual order (workspace groups flattened),
-  // mirrored into a ref so archive fallback and the identity-stable switchChat
-  // handler both skip rows hidden by a folded workspace.
-  const orderedChatIds = useMemo(() => {
-    const groups = groupByWorkspace(
-      conversations,
-      [...recentWorkspaces, ...temporaryWorkspaces],
-      hiddenWorkspaces.filter((dir) => !temporaryWorkspaces.includes(dir)),
-      defaultWorkspace,
-      autoSortConversations,
-    );
-    return visibleConversationIds(
-      groups,
-      collapsedWorkspaceDirs,
-      expandedWorkspaceDirs,
-    );
-  }, [
+  const {
     conversations,
-    recentWorkspaces,
-    hiddenWorkspaces,
-    temporaryWorkspaces,
+    detailId,
+    chatStore,
+    setQueued,
+    queuedRef,
+    conversationsLoaded,
+    conversationsRef,
+    activeIdRef,
+    setSettingsOpen,
+    setConversations,
+    setStoredProviders,
+    setDefaultWorkspace,
+    setRecentWorkspaces,
+    setHiddenWorkspaces,
+    setPiReady,
+    viewRef,
+    runStatusRef,
+    markUnread,
+    t,
+    setAutomations,
+    setTemporaryWorkspaces,
+    unreadHydratedRef,
+    unreadIdsRef,
+    setUnreadCompletedIds,
+    setConversationsLoaded,
+    setHistoryQuery,
+    setHistoryFrame,
+    setHistoryOpen,
+    archivingIdsRef,
+    orderedChatIdsRef,
+    selectChatRef,
+    pendingSelectRef,
+    setView,
+    setWorkspaceDir,
+    setActiveId,
+    setFocusToken,
+    setDetailId,
+    activeId,
+    setLoadingChatId,
+    setModelChoice,
+    view,
+    keyboardShortcuts,
+    setPaletteOpen,
+    automationDialogOpen,
+    newTaskOpen,
+    navigateBack,
+    navigateForward,
+    switchToPreviousPage,
+    settingsOpen,
+    historyOpen,
+    sideWorkspace,
+    setSidebarOpen,
+    boardWorkspaceFilter,
     defaultWorkspace,
-    autoSortConversations,
+    setNewTaskOpen,
+    requestBackendSwitch,
+    setWorkspaceDocksByChat,
+    workspaceDocksByChatRef,
+    workspaceDocks,
+    sideWorkspacePresence,
+    bottomWorkspacePresence,
+    workspaceDir,
+    onSendRef,
+    modelChoice,
+    retryingRef,
+    setRetrying,
+    pendingBackend,
+    pendingCliModel,
+    pendingCliEffort,
+    setDetailModelChoice,
+    setDetailWorkspaceDir,
+    setDetailFocusToken,
+    setDetailLoading,
+    archivingWorkspacesRef,
+    setBoardWorkspaceFilter,
+    setEditingAutomation,
+    setAutomationDialogOpen,
+    sidebarOpen,
+    paletteOpen,
+    detailLoading,
+    detailModelChoice,
+    detailWorkspaceDir,
+    detailFocusToken,
+    retrying,
+    queued,
+    chatArtifactsOpen,
+    activeHasArtifacts,
+    setChatArtifactsOpen,
+    setPendingBackend,
+    onPendingTuningChange,
+    editingAutomation,
+    settingsEverOpened,
+    storedProviders,
+    historyQuery,
+    historyFrame,
+    activityIds,
+    unreadCompletedIds,
+    recentWorkspaces,
+    temporaryWorkspaces,
+    hiddenWorkspaces,
     collapsedWorkspaceDirs,
     expandedWorkspaceDirs,
-  ]);
-  const orderedChatIdsRef = useRef<string[]>([]);
-  orderedChatIdsRef.current = orderedChatIds;
-  const selectChatRef = useRef<(id: string) => void>(() => {});
-
-  // Mirror the live queue + send fn so the flush effect (deps: streaming sig
-  // only) never reads stale closures. onSend is a hoisted function declaration.
-  const queuedRef = useRef(queued);
-  queuedRef.current = queued;
-  const onSendRef = useRef<typeof onSend>(undefined as unknown as typeof onSend);
-  onSendRef.current = onSend; // onSend is hoisted (function declaration)
-  const deliverQueuedRef = useRef<typeof deliverQueued>(
-    undefined as unknown as typeof deliverQueued,
-  );
-  deliverQueuedRef.current = deliverQueued; // hoisted function declaration
-
-  // Comma-joined ids of every active conversation (streaming, awaiting the
-  // first event, or compacting). Object.is over the string means this only
-  // re-renders when that set changes, and the flush effect below re-runs on
-  // exactly those boundaries.
-  const streamingSig = useChatStore((s) =>
-    Array.from(s.streamingIds).sort().join(","),
-  );
-
-  // Deliver the next queued follow-up whenever ANY conversation's run ends —
-  // active chat, detail dialog, or a background run the user has navigated away
-  // from. Keying off the store (not the active/detail conversation) is what lets
-  // a queue survive a chat switch: the old per-surface effects only observed the
-  // mounted conversation, so a run that finished in the background stranded its
-  // queue. One flush per true→false transition → items go out sequentially, each
-  // waiting for the turn it just started to finish.
-  const prevStreamingRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const current = new Set(
-      streamingSig ? streamingSig.split(",").filter(Boolean) : [],
-    );
-    const prev = prevStreamingRef.current;
-    prevStreamingRef.current = current;
-    for (const id of prev) {
-      if (current.has(id)) continue; // still running — not a run boundary
-      const q = queuedRef.current[id];
-      if (!q || q.length === 0) continue;
-      const [next, ...rest] = q;
-      setQueued((cur) => ({ ...cur, [id]: rest }));
-      void deliverQueuedRef.current(id, next.text, next.attachments, next.runtime);
-    }
-  }, [streamingSig]);
+    toggleWorkspaceCollapsed,
+    toggleWorkspaceExpanded,
+    piReady,
+    error,
+    hasMessages,
+    automations,
+    loadingChatId,
+    activeConvBackend,
+    activeConvInterrupted,
+    focusToken,
+    backendSwitch,
+    heroHeadline,
+    isStreaming,
+  } = useHomeState({
+    initialViewState: initialViewStateRef.current,
+    autoSortConversations,
+    onSend,
+    deliverQueued,
+  });
 
   // Backend serving the detail-dialog conversation, for steer-capability gating.
   const detailConvBackend = useMemo<BackendId | null>(
     () =>
       (conversations.find((c) => c.id === detailId)?.backend as
-        | BackendId
-        | undefined) ?? null,
+        BackendId | undefined) ?? null,
     [conversations, detailId],
   );
 
@@ -972,7 +227,9 @@ export default function Home() {
         : `q-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
     setQueued((q) => {
       const current = q[convId] ?? [];
-      const beforeIndex = current.findIndex((item) => beforeIds.includes(item.id));
+      const beforeIndex = current.findIndex((item) =>
+        beforeIds.includes(item.id),
+      );
       const insertAt = beforeIndex < 0 ? current.length : beforeIndex;
       return {
         ...q,
@@ -1081,302 +338,21 @@ export default function Home() {
       window.removeEventListener("storage", onStorage);
     };
   }, []);
-
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-    (async () => {
-      api.piPing().then((ok) => ok && setPiReady(true)).catch(console.error);
-
-      const convTitle = (cid: string) =>
-        conversationsRef.current.find((c) => c.id === cid)?.title?.trim() ||
-        "Untitled";
-      // When the window is focused and the event belongs to the chat the user
-      // is already watching, an OS banner is just noise — suppress it there.
-      const watchingNow = (cid: string) =>
-        cid === activeIdRef.current && viewRef.current === "chat";
-
-      const notifyForPiEvent = (
-        cid: string,
-        pe: PiEvent | ExtensionUIRequest,
-      ) => {
-        switch (pe.type) {
-          case "agent_start":
-            runStatusRef.current[cid] = { running: true, outcome: "ok" };
-            markUnread(cid, false);
-            break;
-          case "message_update": {
-            const r = runStatusRef.current[cid];
-            if (r?.running && pe.assistantMessageEvent.type === "error") {
-              r.outcome =
-                pe.assistantMessageEvent.reason === "aborted"
-                  ? "aborted"
-                  : "errored";
-            }
-            break;
-          }
-          case "agent_end": {
-            // pi auto-retries transient provider failures (and retries after an
-            // overflow compaction) — `willRetry` says another run is coming for
-            // the SAME prompt. Notifying here would announce "your task is
-            // ready" mid-retry; the run that finally settles notifies instead.
-            if (pe.willRetry) break;
-            const r = runStatusRef.current[cid];
-            // Ignore an agent_end with no live run behind it (orphan or
-            // replayed event) — only runs we saw start should notify.
-            if (!r || !r.running) break;
-            r.running = false;
-            if (r.outcome === "aborted") break; // user aborted — stay quiet
-            // A queued follow-up is about to auto-deliver (the flush effect
-            // consumes the queue after this handler), so the conversation isn't
-            // really done — stay quiet and let the final run notify.
-            if ((queuedRef.current[cid]?.length ?? 0) > 0) break;
-            // One notification for any finished run (interactive reply, board
-            // task, or automation — they're all just chats); the body carries
-            // success vs error.
-            dispatchNotification("task_finished", {
-              title: convTitle(cid),
-              body:
-                r.outcome === "errored"
-                  ? "Finished with an error."
-                  : "Your task is ready.",
-              suppressWhenFocused: watchingNow(cid),
-              conversationId: cid,
-            });
-            markUnread(cid, !watchingNow(cid));
-            break;
-          }
-        }
-      };
-
-      const u = await onAppEvent((evt: AppEvent) => {
-        const store = chatStore.getState();
-        switch (evt.type) {
-          case "pi_ready":
-            setPiReady(true);
-            break;
-          case "pi_error": {
-            if (evt.conversationId) {
-              store.setError(evt.conversationId, evt.message);
-              // Mark the *active* run as failed so the trailing agent_end
-              // notifies as an error. Guarding on `running` keeps a late stderr
-              // line from a finished run from corrupting the next run's
-              // outcome. We don't notify here: pi_error also fires for benign
-              // stderr lines and would be far too noisy.
-              const r = runStatusRef.current[evt.conversationId];
-              if (r?.running) r.outcome = "errored";
-            }
-            break;
-          }
-          case "pi_exited": {
-            if (evt.conversationId) {
-              const r = runStatusRef.current[evt.conversationId];
-              const liveInStore = store.streamingIds.has(evt.conversationId);
-              // macOS sleep/resume can leave us with a late sidecar-exit event
-              // for a conversation whose run had already settled. Do not poison
-              // that transcript with a Retry state unless the frontend still
-              // believes this conversation has a live run.
-              if (!r?.running && !liveInStore) break;
-              store.setError(
-                evt.conversationId,
-                `pi exited (code ${evt.code ?? "n/a"})`,
-              );
-              // The child is gone; any control request it was waiting on can
-              // never be answered, so drop the card — and it owned every live
-              // background task (monitors, async agents), so clear the strip.
-              store.clearControlRequest(evt.conversationId);
-              store.setBackgroundTasks(evt.conversationId, []);
-              // Close out any live run so a trailing agent_end can't double-fire.
-              if (r) r.running = false;
-              dispatchNotification("task_finished", {
-                title: convTitle(evt.conversationId),
-                body: `Agent process exited (code ${evt.code ?? "n/a"}).`,
-                conversationId: evt.conversationId,
-              });
-            }
-            break;
-          }
-          case "pi_event": {
-            const cid = evt.conversationId;
-            // extension_ui_request → DialogHost; cli_control_request → the
-            // CliControlCard in the chat pane; cli_background_tasks → the
-            // task strip. None of these belong in the reducer.
-            const eventType = evt.event.type as string;
-            if (
-              evt.event.type !== "extension_ui_request" &&
-              eventType !== "cli_control_request" &&
-              eventType !== "cli_control_resolved" &&
-              eventType !== "cli_background_tasks" &&
-              eventType !== "cli_commands" &&
-              eventType !== "cli_rate_limit" &&
-              eventType !== "cli_context_usage" &&
-              cid
-            ) {
-              store.piEvent(cid, evt.event);
-            }
-            // Account-level quota heartbeat. The snapshot is per runtime (not
-            // per conversation), so the runtime picker reads it back by id.
-            if (eventType === "cli_rate_limit") {
-              const quotaEvent = evt.event as unknown as {
-                backend?: string;
-                info?: CliRateLimitInfo;
-              };
-              if (quotaEvent.info) {
-                store.setCliRateLimit(quotaEvent.backend ?? "claude-code", quotaEvent.info);
-              }
-            }
-            if (cid && eventType === "cli_context_usage") {
-              const usage = evt.event as unknown as {
-                usedTokens?: number;
-                contextWindow?: number;
-                transcriptBytes?: number;
-              };
-              if (
-                Number.isFinite(usage.usedTokens) &&
-                Number.isFinite(usage.contextWindow) &&
-                usage.contextWindow! > 0
-              ) {
-                store.setCliContextUsage(cid, {
-                  usedTokens: Math.max(0, usage.usedTokens!),
-                  contextWindow: usage.contextWindow!,
-                  transcriptBytes: Number.isFinite(usage.transcriptBytes)
-                    ? Math.max(0, usage.transcriptBytes!)
-                    : undefined,
-                });
-              }
-            }
-            // The CLI session's slash-command catalog (initialize ack) — the
-            // composer's slash menu reads it back per conversation.
-            if (cid && eventType === "cli_commands") {
-              store.setCliCommands(
-                cid,
-                (evt.event as unknown as { commands?: CliSlashCommand[] }).commands ?? [],
-              );
-            }
-            // Live background tasks (Monitors, async agents, background Bash)
-            // owned by the conversation's CLI session. Standing state — they
-            // outlive model turns, so the bridge streams the full set on every
-            // change (empty when the session process exits).
-            if (cid && eventType === "cli_background_tasks") {
-              store.setBackgroundTasks(
-                cid,
-                (evt.event as unknown as { tasks?: CliBackgroundTask[] }).tasks ?? [],
-              );
-            }
-            // A claude-code control request (permission prompt / AskUserQuestion)
-            // is parked in the store — captured here in the app's single
-            // always-mounted listener so it survives conversation switches and
-            // can't be dropped by a per-card listener's async registration. The
-            // card reads it back; agent_end clears any that went unanswered
-            // (the child is gone, so there's nothing left to answer).
-            if (cid && eventType === "cli_control_request") {
-              const req = evt.event as unknown as CliControlRequest;
-              store.pushControlRequest(cid, req);
-              dispatchNotification("awaiting_input", {
-                title: t("cliControl.notifyTitle"),
-                body:
-                  req.toolName === "AskUserQuestion"
-                    ? req.input.questions?.[0]?.question ?? req.toolName
-                    : req.toolName,
-                suppressWhenFocused: true,
-                conversationId: cid,
-              });
-            }
-            // Codex confirms reverse JSON-RPC requests when they are answered
-            // or invalidated by turn cleanup. Remove a stale card even when
-            // the resolution did not originate from this window.
-            if (cid && eventType === "cli_control_resolved") {
-              const resolved = evt.event as unknown as { requestId?: string | number };
-              if (resolved.requestId != null) {
-                store.clearControlRequest(cid, resolved.requestId);
-              }
-            }
-            if (cid && eventType === "agent_end") {
-              store.clearControlRequest(cid);
-            }
-            // The agent called request_review → park this conversation in the
-            // board's "Needs review" column. pi tools can't write our DB, so the
-            // frontend persists the state on observing the tool's completion
-            // (mirrors how parallel-task status is driven from here).
-            if (
-              cid &&
-              evt.event.type === "tool_execution_end" &&
-              evt.event.toolName === REVIEW_TOOL_NAME &&
-              !evt.event.isError
-            ) {
-              api
-                .setReviewState(cid, "pending")
-                .then(applyReviewedRow)
-                .catch(() => {});
-            }
-            if (cid) notifyForPiEvent(cid, evt.event);
-            break;
-          }
-          case "conversation_updated": {
-            // Async auto-title (or other out-of-band change) landed — merge the
-            // fresh row into the sidebar list in place. If it just got archived
-            // (e.g. by the auto-archive sweep), drop it from the active list.
-            const updated = evt.conversation;
-            setConversations((cs) =>
-              updated.archivedAt != null
-                ? cs.filter((c) => c.id !== updated.id)
-                : cs.map((c) => (c.id === updated.id ? updated : c)),
-            );
-            break;
-          }
-          case "conversation_deleted":
-            // Auto-delete sweep purged an archived chat. It's normally already
-            // out of the active list; filter defensively anyway.
-            setConversations((cs) => cs.filter((c) => c.id !== evt.id));
-            break;
-          case "automation_updated":
-            setAutomations((as) => mergeAutomation(as, evt.automation));
-            break;
-          case "automation_deleted":
-            // Deleted out-of-band (control socket / cetus CLI).
-            setAutomations((as) => as.filter((a) => a.id !== evt.id));
-            break;
-          case "automation_fired":
-            // An automation minted a fresh conversation and started streaming.
-            setAutomations((as) => mergeAutomation(as, evt.automation));
-            setConversations((cs) => mergeConversation(cs, evt.conversation));
-            setTemporaryWorkspaces((dirs) =>
-              dirs.includes(evt.conversation.workspaceDir)
-                ? dirs
-                : [...dirs, evt.conversation.workspaceDir],
-            );
-            break;
-          case "meeting_event": {
-            // Meeting capture lifecycle → localized OS notification. "started"
-            // doubles as the consent surface (you should always know cetus is
-            // transcribing), "saved" carries the generated title when one ran.
-            // "stopped" is a UI-resync signal only — no notification.
-            if (evt.kind === "stopped") break;
-            const started = evt.kind === "started";
-            dispatchNotification("meeting", {
-              title: tt(
-                "meeting",
-                started ? "notify.started.title" : "notify.saved.title",
-              ),
-              body:
-                (!started && evt.title) ||
-                tt(
-                  "meeting",
-                  started ? "notify.started.body" : "notify.saved.body",
-                ),
-            });
-            break;
-          }
-        }
-      });
-      if (cancelled) u();
-      else unlisten = u;
-    })();
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [chatStore, markUnread]);
+  useAppEvents({
+    setPiReady,
+    conversationsRef,
+    activeIdRef,
+    viewRef,
+    runStatusRef,
+    markUnread,
+    queuedRef,
+    chatStore,
+    t,
+    applyReviewedRow,
+    setConversations,
+    setAutomations,
+    setTemporaryWorkspaces,
+  });
 
   const refreshList = useCallback(async () => {
     const list = await api.listConversations(false);
@@ -1400,9 +376,7 @@ export default function Home() {
     // Rebuild ephemeral automation workspace visibility from persisted rows.
     // This also recovers chats restored before the restore callback learned to
     // surface their workspace explicitly.
-    setTemporaryWorkspaces((dirs) =>
-      reconcileTemporaryWorkspaces(dirs, list),
-    );
+    setTemporaryWorkspaces((dirs) => reconcileTemporaryWorkspaces(dirs, list));
     // Seed the unread dots from the persisted rows, once. Later refreshes are
     // not a source of truth: they race in-flight markUnread writes and would
     // resurrect a dot the user just cleared by opening the chat.
@@ -1438,7 +412,10 @@ export default function Home() {
     const openRuntimeSettings = () => setSettingsOpen(true);
     window.addEventListener(OPEN_RUNTIME_SETTINGS_EVENT, openRuntimeSettings);
     return () =>
-      window.removeEventListener(OPEN_RUNTIME_SETTINGS_EVENT, openRuntimeSettings);
+      window.removeEventListener(
+        OPEN_RUNTIME_SETTINGS_EVENT,
+        openRuntimeSettings,
+      );
   }, []);
 
   // Identity-stable SettingsPage props — the panel stays mounted after first
@@ -1480,7 +457,9 @@ export default function Home() {
       const archiving = !c.archivedAt;
       const isActive = c.id === activeIdRef.current;
       const ids = orderedChatIdsRef.current;
-      const stateIndex = conversationsRef.current.findIndex((x) => x.id === c.id);
+      const stateIndex = conversationsRef.current.findIndex(
+        (x) => x.id === c.id,
+      );
       const nextId = nextConversationIdInWorkspace(
         ids,
         conversationsRef.current,
@@ -1638,7 +617,8 @@ export default function Home() {
       // + streaming turn) while the cache read was in flight. It hydrates the
       // cache itself before seeding, so hydrating here would only clobber the
       // live rows.
-      if ((chatStore.getState().chats[lastId]?.messages.length ?? 0) > 0) return;
+      if ((chatStore.getState().chats[lastId]?.messages.length ?? 0) > 0)
+        return;
       // "Unfaithful" covers both legacy automation renders that dropped the
       // user prompt entirely and caches that a pre-fix auto-resume sweep
       // overwrote with just the resume-prompt tail — both are repaired from
@@ -1704,590 +684,64 @@ export default function Home() {
     if (view !== "chat" || !activeId) return;
     markUnread(activeId, false);
   }, [activeId, view, markUnread]);
-
-  // Global keyboard shortcuts (parallels macOS app conventions).
-  //   ⌘K    — command palette
-  //   ⌘N    — new chat / new board task
-  //   ⌘D    — archive current conversation
-  //   ⌘,    — open settings
-  //   ⌘1…⌘3 — switch sidebar view (⌘1 again opens the first chat)
-  //   ⌘[/⌘] — go back / forward through the page history (views + settings)
-  //   ⌃⇥    — switch to the most recently used page (including chats/settings)
-  //   ⌃1…⌃3 — switch the current chat's runtime (Cetus / Claude Code / Codex)
-  //   ⌘⇧S   — collapse / expand the left sidebar
-  //   ⌘B    — toggle workspace
-  //   ⌘J    — toggle Terminal in the workspace
-  //   ⌘T    — open a Browser tab in the right workspace
-  //   ⌘P    — open a Files tab in the right workspace
-  //   ⌘W    — close the active right-workspace tab when that panel is open
-  //   ⌥⌘←/→ — switch right-workspace tabs when that panel is open
-  //   ⌥⌘↑/↓ — switch to the previous / next chat
-  //   ⌘9    — switch to the last chat in the sidebar
-  //   ⌘⇧A   — toggle artifacts panel (chat view, when artifacts exist)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const shortcut = (id: keyof typeof keyboardShortcuts) =>
-        matchesShortcut(e, keyboardShortcuts[id]);
-      // ⌘K / Ctrl+K — the command palette is a global launcher: openable from
-      // anywhere. Handled before the modal guard so an open dialog doesn't
-      // swallow it; it stacks over whatever's showing and owns its own Esc to
-      // close. Toggles, so a second ⌘K dismisses it.
-      if (shortcut("commandPalette")) {
-        e.preventDefault();
-        setPaletteOpen((v) => !v);
-        return;
-      }
-      // ⌘[ / ⌘] — walk the page history (sidebar views + Settings) like a
-      // browser. Handled before the modal guard so Back can close Settings,
-      // but the true dialogs below keep owning the keyboard.
-      if (shortcut("navigateBack") || shortcut("navigateForward")) {
-        if (automationDialogOpen || newTaskOpen || detailId !== null) return;
-        e.preventDefault();
-        if (shortcut("navigateBack")) navigateBack();
-        else navigateForward();
-        return;
-      }
-      // Ctrl+Tab — MRU page switch. It needs to run before the Settings guard
-      // so Settings can toggle back to the page that opened it.
-      if (shortcut("switchPreviousView")) {
-        if (automationDialogOpen || newTaskOpen || detailId !== null) return;
-        e.preventDefault();
-        switchToPreviousPage();
-        return;
-      }
-      // A modal owns the keyboard while open — don't fire app shortcuts behind
-      // it. Settings and dialogs handle their own ⌘↵/Esc.
-      if (
-        settingsOpen ||
-        automationDialogOpen ||
-        newTaskOpen ||
-        detailId !== null
-      )
-        return;
-      // ⌘F — find inside the open conversation. Only meaningful on the chat
-      // view, and only past the modal guard above; the message list owns the
-      // bar's state, so this just hands it the key.
-      if (shortcut("findInChat")) {
-        if (view !== "chat" || historyOpen) return;
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent(FIND_IN_CHAT_EVENT));
-        return;
-      }
-      if (sideWorkspace.open && shortcut("previousWorkspaceTab")) {
-        e.preventDefault();
-        switchWorkspaceTab("side", -1);
-        return;
-      }
-      if (sideWorkspace.open && shortcut("nextWorkspaceTab")) {
-        e.preventDefault();
-        switchWorkspaceTab("side", 1);
-        return;
-      }
-      if (shortcut("previousChat")) {
-        e.preventDefault();
-        switchChat(-1);
-        return;
-      }
-      if (shortcut("nextChat")) {
-        e.preventDefault();
-        switchChat(1);
-        return;
-      }
-      if (shortcut("lastChat")) {
-        e.preventDefault();
-        const lastId = orderedChatIdsRef.current.at(-1);
-        if (lastId) onSelectChat(lastId);
-        return;
-      }
-      if (shortcut("toggleSidebar")) {
-        e.preventDefault();
-        setSidebarOpen((v) => !v);
-      } else if (shortcut("toggleWorkspace")) {
-        e.preventDefault();
-        toggleSideWorkspacePanel();
-      } else if (shortcut("toggleTerminal")) {
-        e.preventDefault();
-        toggleTerminalPanel();
-      } else if (shortcut("openBrowserTab")) {
-        e.preventDefault();
-        openWorkspaceTab("side", "browser", true);
-      } else if (shortcut("openFilesTab")) {
-        e.preventDefault();
-        openWorkspaceTab("side", "files");
-      } else if (
-        shortcut("closeWorkspaceTab") &&
-        sideWorkspace.open &&
-        sideWorkspace.tabs.length > 0
-      ) {
-        e.preventDefault();
-        closeWorkspaceTab(
-          "side",
-          sideWorkspace.activeId ?? sideWorkspace.tabs[0].id,
-        );
-      } else if (shortcut("newChat")) {
-        e.preventDefault();
-        // Cmd+N is contextual on Kanban: a concrete folder creates a task in
-        // that workspace; "All workspaces", Chat, or no selection opens the
-        // repository-free new-chat page. Use the board filter, not workspaceDir
-        // (which may still point at a previously opened conversation).
-        const taskWorkspace =
-          view === "board" &&
-          boardWorkspaceFilter &&
-          boardWorkspaceFilter !== defaultWorkspace
-            ? boardWorkspaceFilter
-            : null;
-        if (taskWorkspace) {
-          setWorkspaceDir(taskWorkspace);
-          setNewTaskOpen(true);
-        } else {
-          onNew(
-            view === "board" ? defaultWorkspace || undefined : undefined,
-          );
-        }
-      } else if (shortcut("newDefaultChat")) {
-        e.preventDefault();
-        // ⌥⌘N always lands a new chat in Chat (the default workspace), even
-        // from the board or with another folder selected.
-        onNew(defaultWorkspace || undefined);
-      } else if (shortcut("archiveChat")) {
-        const c = conversationsRef.current.find((x) => x.id === activeIdRef.current);
-        if (c) {
-          e.preventDefault();
-          archiveConversation(c).catch((err) => {
-            console.error("archiveConversation failed", err);
-            toast.error("Couldn't archive that conversation.");
-          });
-        }
-      } else if (shortcut("openSettings")) {
-        e.preventDefault();
-        setSettingsOpen(true);
-      } else if (
-        view === "chat" &&
-        runtimeForShortcut(e, keyboardShortcuts, runtimeSlotsRef.current) !==
-          undefined
-      ) {
-        // ⌃1…⌃9 address runtimes and presets by position, so the key set
-        // follows Settings › Runtimes. An empty slot still swallows the key
-        // instead of falling through to whatever else is bound to it.
-        e.preventDefault();
-        const entry = runtimeForShortcut(
-          e,
-          keyboardShortcuts,
-          runtimeSlotsRef.current,
-        );
-        if (entry) requestBackendSwitch(runtimeSwitchTarget(entry));
-      } else if (shortcut("switchChats")) {
-        e.preventDefault();
-        if (view === "chat") {
-          const firstId = orderedChatIdsRef.current.at(0);
-          if (firstId) onSelectChat(firstId);
-        } else {
-          setView("chat");
-        }
-      } else if (shortcut("switchBoard")) {
-        e.preventDefault();
-        setView("board");
-      } else if (shortcut("switchAutomations")) {
-        e.preventDefault();
-        setView("automations");
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    view,
-    settingsOpen,
+  useHomeKeyboardShortcuts({
+    keyboardShortcuts,
+    setPaletteOpen,
     automationDialogOpen,
     newTaskOpen,
-    historyOpen,
     detailId,
-    sideWorkspace.open,
-    sideWorkspace.activeId,
-    sideWorkspace.tabs,
-    archiveConversation,
-    keyboardShortcuts,
-    defaultWorkspace,
-    boardWorkspaceFilter,
-    requestBackendSwitch,
-    switchToPreviousPage,
     navigateBack,
     navigateForward,
-  ]);
-
-  function workspaceTitle(kind: WorkspaceTabKind, index: number): string {
-    if (kind === "files") {
-      return index > 1
-        ? t("workspacePanel.filesN", { index })
-        : t("workspacePanel.files");
-    }
-    if (kind === "terminal") {
-      return index > 1
-        ? t("workspacePanel.terminalN", { index })
-        : t("workspacePanel.terminal");
-    }
-    return index > 1
-      ? t("workspacePanel.browserN", { index })
-      : t("workspacePanel.browser");
-  }
-
-  function browserTitle(url: string, fallback: string): string {
-    if (!url || url === "about:blank") return fallback;
-    try {
-      const parsed = new URL(url);
-      return parsed.host || parsed.pathname || fallback;
-    } catch {
-      return url.length > 24 ? `${url.slice(0, 21)}...` : url;
-    }
-  }
-
-  function normalizeVisibleBrowserUrl(raw: string): string {
-    const trimmed = raw.trim();
-    if (!trimmed) return "about:blank";
-    if (/^(https?:|file:|about:)/i.test(trimmed)) return trimmed;
-    if (/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(\/|$)/i.test(trimmed)) {
-      return `http://${trimmed}`;
-    }
-    return `https://${trimmed}`;
-  }
-
-  function browserStateForUrl(url: string): BrowserViewState {
-    return {
-      ...createBrowserViewState(),
-      address: url,
-      url,
-      history: [url],
-      historyIndex: 0,
-    };
-  }
-
-  function updateWorkspaceDock(
-    layout: WorkspaceLayout,
-    updater: (dock: WorkspaceDockState) => WorkspaceDockState,
-    keyOverride?: string | null,
-  ) {
-    const key = keyOverride ?? activeIdRef.current ?? NEW_CHAT_WORKSPACE_KEY;
-    setWorkspaceDocksByChat((current) => {
-      const currentDocks = current[key] ?? createInitialWorkspaceDocks();
-      return {
-        ...current,
-        [key]: {
-          ...currentDocks,
-          [layout]: updater(currentDocks[layout]),
-        },
-      };
-    });
-  }
-
-  function workspaceRefs(layout: WorkspaceLayout, keyOverride?: string | null) {
-    const key = keyOverride ?? activeIdRef.current ?? NEW_CHAT_WORKSPACE_KEY;
-    const dock =
-      (workspaceDocksByChatRef.current[key] ?? createInitialWorkspaceDocks())[
-        layout
-      ];
-    return {
-      ...dock,
-      setTabs: (updater: (tabs: WorkspaceTab[]) => WorkspaceTab[]) =>
-        updateWorkspaceDock(
-          layout,
-          (current) => ({
-            ...current,
-            tabs: updater(current.tabs),
-          }),
-          key,
-        ),
-      setActiveId: (activeId: string | null) =>
-        updateWorkspaceDock(
-          layout,
-          (current) => ({ ...current, activeId }),
-          key,
-        ),
-      setOpen: (open: boolean) =>
-        updateWorkspaceDock(layout, (current) => ({ ...current, open }), key),
-      update: (updater: (dock: WorkspaceDockState) => WorkspaceDockState) =>
-        updateWorkspaceDock(layout, updater, key),
-    };
-  }
-
-  function openWorkspaceTab(
-    layout: WorkspaceLayout,
-    kind: WorkspaceTabKind,
-    alwaysNew = false,
-  ) {
-    const { tabs, update } = workspaceRefs(layout);
-    const existing = !alwaysNew ? tabs.find((t) => t.kind === kind) : undefined;
-    if (existing) {
-      const terminalFocusRequest =
-        kind === "terminal"
-          ? `term-focus-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-          : undefined;
-      update((current) => ({
-        ...current,
-        tabs: terminalFocusRequest
-          ? current.tabs.map((tab) =>
-              tab.id === existing.id
-                ? { ...tab, terminalFocusRequest }
-                : tab,
-            )
-          : current.tabs,
-        activeId: existing.id,
-        open: true,
-      }));
-      return;
-    }
-    const count = tabs.filter((t) => t.kind === kind).length + 1;
-    const terminalFocusRequest =
-      kind === "terminal"
-        ? `term-focus-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-        : undefined;
-    const tab: WorkspaceTab = {
-      id: `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      kind,
-      title: workspaceTitle(kind, count),
-      terminalState: kind === "terminal" ? createTerminalViewState() : undefined,
-      terminalFocusRequest,
-      browserState: kind === "browser" ? createBrowserViewState() : undefined,
-    };
-    update((current) => ({
-      ...current,
-      tabs: [...current.tabs, tab],
-      activeId: tab.id,
-      open: true,
-    }));
-  }
-
-  function openTerminalTab() {
-    const { tabs, activeId, update } = workspaceRefs("bottom");
-    const focusRequest = `term-focus-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const activeTerminal = tabs.find(
-      (tab) => tab.id === activeId && tab.kind === "terminal",
-    );
-    const target = activeTerminal ?? tabs.find((tab) => tab.kind === "terminal");
-    if (target) {
-      update((current) => ({
-        ...current,
-        tabs: current.tabs.map((tab) =>
-          tab.id === target.id ? { ...tab, terminalFocusRequest: focusRequest } : tab,
-        ),
-        activeId: target.id,
-        open: true,
-      }));
-      return;
-    }
-
-    const count = tabs.filter((tab) => tab.kind === "terminal").length + 1;
-    const tab: WorkspaceTab = {
-      id: `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      kind: "terminal",
-      title: workspaceTitle("terminal", count),
-      terminalState: createTerminalViewState(),
-      terminalFocusRequest: focusRequest,
-    };
-    update((current) => ({
-      ...current,
-      tabs: [...current.tabs, tab],
-      activeId: tab.id,
-      open: true,
-    }));
-  }
-
-  function toggleTerminalPanel() {
-    if (workspaceRefs("bottom").open) {
-      workspaceRefs("bottom").setOpen(false);
-      return;
-    }
-    openTerminalTab();
-  }
-
-  function toggleSideWorkspacePanel() {
-    if (workspaceRefs("side").open) {
-      workspaceRefs("side").setOpen(false);
-      return;
-    }
-    openWorkspacePanelLayout("side");
-  }
-
-  function openWorkspacePanelLayout(layout: WorkspaceLayout) {
-    const { tabs, setOpen } = workspaceRefs(layout);
-    setOpen(true);
-    if (tabs.length === 0) {
-      openWorkspaceTab(layout, layout === "bottom" ? "terminal" : "files");
-    }
-  }
-
-  function openTerminalWithCommand(commandRaw: string) {
-    const command = commandRaw.trim();
-    if (!command) return;
-    const request: TerminalRunRequest = {
-      id: `term-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      command,
-      autoRun: true,
-    };
-    const { tabs, activeId, update } = workspaceRefs("bottom");
-    const activeTerminal = tabs.find(
-      (tab) => tab.id === activeId && tab.kind === "terminal",
-    );
-    const target = activeTerminal ?? tabs.find((tab) => tab.kind === "terminal");
-    if (target) {
-      update((current) => ({
-        ...current,
-        tabs: current.tabs.map((tab) =>
-          tab.id === target.id ? { ...tab, terminalRunRequest: request } : tab,
-        ),
-        activeId: target.id,
-        open: true,
-      }));
-      return;
-    }
-
-    const count = tabs.filter((tab) => tab.kind === "terminal").length + 1;
-    const tab: WorkspaceTab = {
-      id: `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      kind: "terminal",
-      title: workspaceTitle("terminal", count),
-      terminalState: createTerminalViewState(),
-      terminalRunRequest: request,
-    };
-    update((current) => ({
-      ...current,
-      tabs: [...current.tabs, tab],
-      activeId: tab.id,
-      open: true,
-    }));
-  }
-
-  function updateBrowserWorkspaceTab(layout: WorkspaceLayout, id: string, state: BrowserViewState) {
-    const { setTabs } = workspaceRefs(layout);
-    setTabs((tabs) =>
-      tabs.map((tab) =>
-        tab.id === id && tab.kind === "browser"
-          ? {
-              ...tab,
-              title: browserTitle(state.url, tab.title),
-              browserState: state,
-            }
-          : tab,
-      ),
-    );
-  }
-
-  function updateTerminalWorkspaceTab(
-    layout: WorkspaceLayout,
-    id: string,
-    state: TerminalViewState,
-  ) {
-    const { setTabs } = workspaceRefs(layout);
-    setTabs((tabs) =>
-      tabs.map((tab) =>
-        tab.id === id && tab.kind === "terminal"
-          ? { ...tab, terminalState: state }
-          : tab,
-      ),
-    );
-  }
-
-  function openVisibleBrowser(urlRaw: string, conversationId?: string | null) {
-    const url = normalizeVisibleBrowserUrl(urlRaw);
-    const { tabs, activeId, update } = workspaceRefs("side", conversationId);
-    const activeBrowser = tabs.find(
-      (tab) => tab.id === activeId && tab.kind === "browser",
-    );
-    const target = activeBrowser ?? tabs.find((tab) => tab.kind === "browser");
-    if (target) {
-      const state = browserStateForUrl(url);
-      update((current) => ({
-        ...current,
-        tabs: current.tabs.map((tab) =>
-          tab.id === target.id
-            ? { ...tab, title: browserTitle(url, tab.title), browserState: state }
-            : tab,
-        ),
-        activeId: target.id,
-        open: true,
-      }));
-      return;
-    }
-
-    const count = tabs.filter((tab) => tab.kind === "browser").length + 1;
-    const tab: WorkspaceTab = {
-      id: `browser-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      kind: "browser",
-      title: browserTitle(url, workspaceTitle("browser", count)),
-      browserState: browserStateForUrl(url),
-    };
-    update((current) => ({
-      ...current,
-      tabs: [...current.tabs, tab],
-      activeId: tab.id,
-      open: true,
-    }));
-  }
-
-  function closeWorkspaceTab(layout: WorkspaceLayout, id: string) {
-    const { activeId, setTabs, setActiveId, setOpen } = workspaceRefs(layout);
-    setTabs((tabs) => {
-      const index = tabs.findIndex((t) => t.id === id);
-      if (index === -1) return tabs;
-      const next = tabs.filter((t) => t.id !== id);
-      if (activeId === id) {
-        const fallback = next[Math.min(index, next.length - 1)] ?? null;
-        setActiveId(fallback?.id ?? null);
-        if (!fallback) setOpen(false);
-      }
-      return next;
-    });
-  }
-
-  function switchWorkspaceTab(layout: WorkspaceLayout, direction: 1 | -1) {
-    const { tabs, activeId, setActiveId, setOpen } = workspaceRefs(layout);
-    if (tabs.length < 2) return;
-    const activeIndex = Math.max(
-      0,
-      tabs.findIndex((tab) => tab.id === activeId),
-    );
-    const nextIndex = (activeIndex + direction + tabs.length) % tabs.length;
-    setActiveId(tabs[nextIndex].id);
-    setOpen(true);
-  }
-
-  function renderWorkspaceDock(layout: WorkspaceLayout) {
-    const dock = workspaceDocks[layout];
-    const presence =
-      layout === "side" ? sideWorkspacePresence : bottomWorkspacePresence;
-    if (!presence.mounted) return null;
-    return (
-      <WorkspacePanel
-        tabs={dock.tabs}
-        activeId={dock.activeId}
-        workspaceDir={workspaceDir}
-        defaultWorkspace={defaultWorkspace}
-        onSelect={(id) => {
-          updateWorkspaceDock(layout, (current) => ({
-            ...current,
-            activeId: id,
-            open: true,
-          }));
-        }}
-        onClose={(id) => closeWorkspaceTab(layout, id)}
-        onClosePanel={() => workspaceRefs(layout).setOpen(false)}
-        onNewTab={(kind) => openWorkspaceTab(layout, kind, true)}
-        layout={layout}
-        onUpdateTerminalTab={(id, state) =>
-          updateTerminalWorkspaceTab(layout, id, state)
-        }
-        onUpdateBrowserTab={(id, state) =>
-          updateBrowserWorkspaceTab(layout, id, state)
-        }
-        motionState={dock.open ? "open" : "closed"}
-        hidden={presence.hidden}
-        onAnnotate={async (message) => {
-          await onSend(message);
-          setView("chat");
-        }}
-        onOpenTerminalCommand={openTerminalWithCommand}
-      />
-    );
-  }
+    switchToPreviousPage,
+    settingsOpen,
+    view,
+    historyOpen,
+    sideWorkspace,
+    switchWorkspaceTab: (...args) => switchWorkspaceTab(...args),
+    switchChat: (...args) => switchChat(...args),
+    orderedChatIdsRef,
+    onSelectChat: (...args) => onSelectChat(...args),
+    setSidebarOpen,
+    toggleSideWorkspacePanel: (...args) => toggleSideWorkspacePanel(...args),
+    toggleTerminalPanel: (...args) => toggleTerminalPanel(...args),
+    openWorkspaceTab: (...args) => openWorkspaceTab(...args),
+    closeWorkspaceTab: (...args) => closeWorkspaceTab(...args),
+    boardWorkspaceFilter,
+    defaultWorkspace,
+    setWorkspaceDir,
+    setNewTaskOpen,
+    onNew,
+    conversationsRef,
+    activeIdRef,
+    archiveConversation,
+    setSettingsOpen,
+    runtimeSlotsRef,
+    requestBackendSwitch,
+    setView,
+  });
+  const {
+    switchWorkspaceTab,
+    toggleSideWorkspacePanel,
+    toggleTerminalPanel,
+    openWorkspaceTab,
+    closeWorkspaceTab,
+    openVisibleBrowser,
+    openTerminalWithCommand,
+    openWorkspacePanelLayout,
+    renderWorkspaceDock,
+  } = useWorkspaceActions({
+    t,
+    activeIdRef,
+    setWorkspaceDocksByChat,
+    workspaceDocksByChatRef,
+    workspaceDocks,
+    sideWorkspacePresence,
+    bottomWorkspacePresence,
+    workspaceDir,
+    defaultWorkspace,
+    onSend,
+    setView,
+  });
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -2328,131 +782,16 @@ export default function Home() {
     setActiveId(null);
     setFocusToken((t) => t + 1);
   }
-
-  const onSelect = useCallback(
-    async (id: string) => {
-      if (id === activeIdRef.current) return;
-      // Mark this as the latest intent *before* any await. If the user clicks a
-      // different chat while our async work is in flight, this ref moves on and
-      // every guard below bails — so a slow select can't land its state on top
-      // of a newer one (the "clicked A, landed on B" / stutter bug).
-      pendingSelectRef.current = id;
-      const isStale = () => pendingSelectRef.current !== id;
-      const finishLoading = () => {
-        setLoadingChatId((current) => (current === id ? null : current));
-      };
-      // Capture liveness before changing the visible id. A cold target needs a
-      // stable loading transcript until hydration; otherwise `hasMessages`
-      // briefly reads false and the main pane mistakes it for a new chat.
-      const liveState = chatStore.getState().chats[id];
-      const hasLiveState = !!liveState && liveState.messages.length > 0;
-      setLoadingChatId(hasLiveState ? null : id);
-      // Flip the active chat *synchronously*, before any await. The highlight
-      // and pane switch must not wait on the backend round-trip — `pi_for`
-      // serializes on a global lock and lazy-spawns a pi process on first open,
-      // so a cold switch can take hundreds of ms. Blocking the visual switch on
-      // it makes rapid clicks feel like they do nothing. Messages stream in
-      // once the cache/backend resolves below (guarded by `isStale`).
-      setActiveId(id);
-      // A *settled* render with no user bubble at all is a stale, lossy render
-      // — e.g. an automation that streamed under older code which dropped the
-      // user prompt. Don't take the client-side fast path for it; fall through
-      // to fetch pi history and repair below. Guarded on !isStreaming so we
-      // never clobber an in-flight turn or hit get_messages' mid-run stall.
-      const liveNeedsRepair =
-        hasLiveState &&
-        !liveState!.isStreaming &&
-        !liveState!.messages.some((m) => m.role === "user");
-      // We already hold this conversation's messages live in memory (opened or
-      // streamed earlier this session) and its pi is attached. Switch purely
-      // client-side and SKIP the backend round-trip: `switch_conversation` calls
-      // `pi.get_messages()`, which blocks up to the 30s request timeout when the
-      // pi is mid-run — it doesn't service control requests while an agent turn
-      // streams. That timeout is spurious (the turn itself replies fine over the
-      // event stream), but it stalls the metadata refresh and logs a scary
-      // error. Metadata comes from the conversation row we already have.
-      if (hasLiveState && !liveNeedsRepair) {
-        const row = conversationsRef.current.find((c) => c.id === id);
-        if (row) {
-          setModelChoice(row.model);
-          setWorkspaceDir(row.workspaceDir);
-        }
-        return;
-      }
-      let cacheHit = false;
-      let cachedUnfaithful = false;
-      let cachedLen = 0;
-      if (!hasLiveState) {
-        // Optimistic: hydrate from IDB cache before the backend roundtrip so
-        // the bubbles paint immediately.
-        const cached = await loadCachedMessages(id);
-        if (isStale()) return;
-        if (cached && cached.length > 0) {
-          chatStore.getState().hydrate(id, cached);
-          finishLoading();
-          cacheHit = true;
-          cachedLen = cached.length;
-          // Caches written before automation runs rendered their prompt are
-          // assistant-only, and caches a pre-fix auto-resume sweep overwrote
-          // start at the resume prompt instead of the real opening prompt.
-          // Both are strictly less faithful than pi history, so flag them to
-          // fall back below.
-          cachedUnfaithful =
-            !cached.some((m) => m.role === "user") ||
-            renderStartsMidConversation(cached);
-        }
-      }
-      if (cacheHit && !cachedUnfaithful) {
-        const row = conversationsRef.current.find((c) => c.id === id);
-        if (row) {
-          setModelChoice(row.model);
-          setWorkspaceDir(row.workspaceDir);
-        }
-        return;
-      }
-      let conversation: Conversation;
-      let messages: PiMessage[];
-      try {
-        ({ conversation, messages } = await api.switchConversation(id));
-      } catch (e) {
-        // A failed round-trip must not leave the click in limbo: the UI already
-        // flipped to `id` optimistically, so log and bail rather than letting
-        // the rejection silently abort the rest of the handler.
-        console.error("switchConversation failed", id, e);
-        finishLoading();
-        return;
-      }
-      if (isStale()) return;
-      setModelChoice(conversation.model);
-      setWorkspaceDir(conversation.workspaceDir);
-      // Seed from pi only when we have neither live state nor a cache hit. The
-      // cache is the faithful render (pi history is lossy for image turns), so
-      // we don't overwrite it; pi history is the fallback for conversations
-      // this client has never rendered. Exception: a cache that dropped the
-      // leading user prompt (legacy automation renders) is repaired from pi
-      // history, which still carries the prompt.
-      // pi history is authoritative for message COUNT. A cache thinner than
-      // history means it missed turns — e.g. an interrupted run that never hit
-      // agent_end, so only the user bubble (or a partial render) was cached.
-      // Compare against pi's non-toolResult messages, since the cache folds
-      // tool results into their tool_use blocks rather than keeping them as
-      // separate entries. When history has more, repair from it.
-      const piTurnCount =
-        messages?.filter((m) => m.role !== "toolResult").length ?? 0;
-      const cacheTooThin = cacheHit && piTurnCount > cachedLen;
-      const repairFromHistory =
-        !!messages?.some((m) => m.role === "user") &&
-        ((cacheHit && (cachedUnfaithful || cacheTooThin)) || liveNeedsRepair);
-      if ((!hasLiveState && !cacheHit) || repairFromHistory) {
-        chatStore.getState().reset(conversation.id, messages);
-      }
-      finishLoading();
-    },
-    // Reads activeIdRef (not activeId) so this keeps a stable identity across
-    // selections — required for the memoized sidebar rows / board cards to skip
-    // re-rendering when only the active highlight moves.
-    [chatStore],
-  );
+  const { onSelect } = useConversationSelection({
+    activeIdRef,
+    pendingSelectRef,
+    setLoadingChatId,
+    chatStore,
+    setActiveId,
+    conversationsRef,
+    setModelChoice,
+    setWorkspaceDir,
+  });
 
   // Identity-stable handlers handed to the memoized AppSidebar / BoardView /
   // ConversationRow / Card. They read the live view via viewRef so none of them
@@ -2474,26 +813,30 @@ export default function Home() {
       const ids = orderedChatIdsRef.current;
       if (ids.length === 0) return;
       const activeIndex = ids.indexOf(activeIdRef.current ?? "");
-      const currentIndex = activeIndex >= 0 ? activeIndex : direction > 0 ? -1 : 0;
+      const currentIndex =
+        activeIndex >= 0 ? activeIndex : direction > 0 ? -1 : 0;
       const nextIndex = (currentIndex + direction + ids.length) % ids.length;
       onSelectChat(ids[nextIndex]);
     },
     [onSelectChat],
   );
-  const onNewSidebar = useCallback((nextWorkspaceDir?: string) => {
-    const taskWorkspace =
-      viewRef.current === "board" &&
-      nextWorkspaceDir &&
-      nextWorkspaceDir !== defaultWorkspace
-        ? nextWorkspaceDir
-        : null;
-    if (taskWorkspace) {
-      setWorkspaceDir(taskWorkspace);
-      setNewTaskOpen(true);
-    } else {
-      onNew(nextWorkspaceDir || defaultWorkspace || undefined);
-    }
-  }, [defaultWorkspace]);
+  const onNewSidebar = useCallback(
+    (nextWorkspaceDir?: string) => {
+      const taskWorkspace =
+        viewRef.current === "board" &&
+        nextWorkspaceDir &&
+        nextWorkspaceDir !== defaultWorkspace
+          ? nextWorkspaceDir
+          : null;
+      if (taskWorkspace) {
+        setWorkspaceDir(taskWorkspace);
+        setNewTaskOpen(true);
+      } else {
+        onNew(nextWorkspaceDir || defaultWorkspace || undefined);
+      }
+    },
+    [defaultWorkspace],
+  );
 
   // Open the conversation a clicked OS notification points at. notify.rs brings
   // the window forward and emits this with the conversation id. Archived → it's
@@ -2599,348 +942,97 @@ export default function Home() {
     setWorkspaceDir(dir);
     if (activeId) {
       const updated = await api.setWorkspace(activeId, dir);
-      setConversations((cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
+      setConversations((cs) =>
+        cs.map((c) => (c.id === updated.id ? updated : c)),
+      );
     }
   }
-
-  /** Commit the runtime displayed in the composer immediately before its
-   *  message is delivered. Runtime picking is intentionally only local UI
-   *  state until this point, so cycling with Tab does not create audit events. */
-  async function applyRuntimeSelection(
-    convId: string,
-    runtime: ComposerRuntimeSelection,
-    fallbackBackend: BackendId = "pi",
+  const useMessageActionsResult = useMessageActions({
+    conversationsRef,
+    chatStore,
+    setConversations,
+    activeId,
+    workspaceDir,
+    setActiveId,
+    setWorkspaceDir,
+    modelChoice,
+    setFocusToken,
+    maybeClearReview: (...args) => maybeClearReview(...args),
+    refreshList,
+    openTerminalWithCommand,
+    setQueued,
+    retryingRef,
+    setRetrying,
+  });
+  function applyRuntimeSelection(
+    ...args: Parameters<typeof useMessageActionsResult.applyRuntimeSelection>
   ) {
-    const conversation = conversationsRef.current.find((c) => c.id === convId);
-    const previous = (conversation?.backend as BackendId | undefined) ?? fallbackBackend;
-    const previousModel = conversation?.cliModel ?? "";
-    const previousEffort = conversation?.cliEffort ?? "";
-    if (previous !== runtime.backend) {
-      await api.setConversationBackend(convId, runtime.backend);
-      const store = chatStore.getState();
-      // Native slash catalogs belong to the runtime process that reported
-      // them. Never carry Claude commands into Codex (or vice versa) while the
-      // newly selected runtime is still starting.
-      store.setCliCommands(convId, []);
-      store.clearCliContextUsage(convId);
-      if ((store.chats[convId]?.messages.length ?? 0) > 0) {
-        store.runtimeSwitch(convId, previous, runtime.backend);
-      }
-    }
-    if (
-      runtime.backend !== "pi" &&
-      (previous !== runtime.backend ||
-        previousModel !== runtime.cliModel ||
-        previousEffort !== runtime.cliEffort)
-    ) {
-      await api.setConversationCliModel(convId, runtime.cliModel, runtime.cliEffort);
-    }
-    if (
-      previous !== runtime.backend ||
-      previousModel !== runtime.cliModel ||
-      previousEffort !== runtime.cliEffort
-    ) {
-      const update = (c: Conversation) =>
-        c.id === convId
-          ? {
-              ...c,
-              backend: runtime.backend,
-              cliModel: runtime.cliModel,
-              cliEffort: runtime.cliEffort,
-            }
-          : c;
-      conversationsRef.current = conversationsRef.current.map(update);
-      setConversations((items) => items.map(update));
-    }
+    return useMessageActionsResult.applyRuntimeSelection(...args);
   }
-
-  async function maybeRunCodexCommand(
-    convId: string,
-    text: string,
-    attachments: ComposerAttachment[],
-  ): Promise<boolean> {
-    const backend = conversationsRef.current.find((c) => c.id === convId)?.backend;
-    if (
-      backend !== "codex" ||
-      attachments.length > 0 ||
-      !/^\/compact(?:\s.*)?$/s.test(text.trim())
-    ) {
-      return false;
-    }
-    try {
-      await api.compactConversation(convId);
-    } catch (error) {
-      chatStore.getState().setError(convId, String(error));
-    }
-    return true;
-  }
-
-  async function onSend(
-    text: string,
-    attachments: ComposerAttachment[] = [],
-    runtime?: ComposerRuntimeSelection,
+  function maybeRunCodexCommand(
+    ...args: Parameters<typeof useMessageActionsResult.maybeRunCodexCommand>
   ) {
-    let id = activeId;
-    let createdBackend: BackendId = "pi";
-    if (!id) {
-      const c = await api.newConversation(workspaceDir ?? undefined);
-      id = c.id;
-      createdBackend = (c.backend as BackendId | undefined) ?? "pi";
-      // Insert the freshly-minted row locally instead of refetching the whole
-      // list over IPC — we already hold it. The trailing refreshList() after
-      // sendPrompt re-sorts by updated_at.
-      setConversations((cs) => mergeConversation(cs, c));
-      setActiveId(id);
-      setWorkspaceDir(c.workspaceDir);
-      api.setModelChoice(id, modelChoice).catch(console.error);
-    }
-    const convId = id;
-    if (runtime) {
-      try {
-        await applyRuntimeSelection(convId, runtime, createdBackend);
-      } catch (e) {
-        console.error("[send] set backend failed", e);
-        toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
-        return;
-      }
-    }
-    if (await maybeRunCodexCommand(convId, text, attachments)) {
-      setFocusToken((token) => token + 1);
-      return;
-    }
-    // A new prompt to a task that was waiting on review means we're moving on —
-    // drop it out of "Needs review".
-    maybeClearReview(convId);
-    const store = chatStore.getState();
-    store.ensure(convId);
-    let out: Outgoing;
-    try {
-      out = await prepareOutgoing(convId, text, attachments);
-    } catch (e) {
-      chatStore.getState().setError(convId, `attachment failed: ${e}`);
-      return;
-    }
-    store.userSent(convId, text, out.localImages, out.savedFiles);
-    // Reclaim focus so the next prompt is one keystroke away — Tauri's
-    // webview steals focus away from the textarea after a submit on macOS.
-    setFocusToken((t) => t + 1);
-    try {
-      await api.sendPrompt(convId, out.piMessage, out.piImages);
-    } catch (e) {
-      chatStore.getState().setError(convId, String(e));
-    }
-    refreshList().catch(() => {});
+    return useMessageActionsResult.maybeRunCodexCommand(...args);
   }
-
-  /** Main-chat bash entry: `!cmd` is a Terminal surface shortcut, not a chat
-   *  message. Open/focus the right Terminal tab and run the command there. */
-  function onBash(command: string) {
-    setFocusToken((t) => t + 1);
-    openTerminalWithCommand(command);
+  function onSend(...args: Parameters<typeof useMessageActionsResult.onSend>) {
+    return useMessageActionsResult.onSend(...args);
   }
-
-  /** True when `id` runs on any CLI backend (claude-code / codex / the ACP
-   *  runtimes / dsh — everything except pi). Their runner persists a stopped
-   *  turn's partial messages, so an abort keeps what streamed on screen
-   *  instead of dropping the in-flight turn (pi's semantics — see
-   *  end_stream's keepPartial). */
-  function isCliConv(id: string | null): boolean {
-    const b = conversationsRef.current.find((c) => c.id === id)?.backend;
-    return !!b && b !== "pi";
+  function onBash(...args: Parameters<typeof useMessageActionsResult.onBash>) {
+    return useMessageActionsResult.onBash(...args);
   }
-
-  async function onAbort() {
-    if (!activeId) return;
-    // Bailing out of the run: drop anything parked for it rather than
-    // auto-delivering the queue after the abort lands.
-    setQueued((q) => ({ ...q, [activeId]: [] }));
-    // pi.abort() stops the model but emits no agent_end, so end the run locally:
-    // flips isStreaming false → the write-through cache flushes the rendered turn
-    // and the run no longer looks "active" (which would stall get_messages on the
-    // next reopen and leave only the user bubble).
-    chatStore.getState().endStream(activeId, isCliConv(activeId));
-    await api.abort(activeId);
-  }
-
-  /** Optimistically repaint one conversation's run_state so the interrupted
-   *  banner reacts instantly; the next refreshList re-syncs from the store. */
-  function setLocalRunState(id: string, runState: RunState) {
-    setConversations((cs) =>
-      cs.map((c) => (c.id === id ? { ...c, runState } : c)),
-    );
-  }
-
-  /** Resume a turn that a quit/update restart cut down mid-run. Not a replay
-   *  of the original prompt: the session resumes with its full context, and a
-   *  visible continuation message asks the agent to check what already
-   *  happened before finishing the task — so side effects (files written,
-   *  messages sent) aren't blindly redone. */
-  function onResumeInterrupted() {
-    if (!activeId) return;
-    setLocalRunState(activeId, "running");
-    onSend(INTERRUPTED_RESUME_PROMPT, []).catch(console.error);
-  }
-
-  /** Dismiss the interrupted-run banner without resuming. */
-  function onDismissInterrupted() {
-    if (!activeId) return;
-    setLocalRunState(activeId, "idle");
-    api.clearInterrupted(activeId).catch(console.error);
-  }
-
-  /** Roll the last failed/empty turn out of history, then resubmit the last
-   *  user message. Drives the inline error row's Retry button. */
-  function onRetry() {
-    return retryConversation(activeId, onSend);
-  }
-
-  /** ChatGPT-style "regenerate" for an arbitrary conversation: roll the last
-   *  turn out of history (so a failed/empty turn can't poison future sends),
-   *  then resubmit the last user message through `send` (onSend for the main
-   *  chat, onDetailSend for the board detail dialog — each re-adds the user
-   *  bubble on its own surface). */
-  async function retryConversation(
-    id: string | null,
-    send: (text: string, attachments?: ComposerAttachment[]) => Promise<void>,
+  function isCliConv(
+    ...args: Parameters<typeof useMessageActionsResult.isCliConv>
   ) {
-    if (!id || retryingRef.current) return;
-    retryingRef.current = true;
-    setRetrying(true);
-    try {
-      // The optimistic user bubble that's already on screen. If the backend has
-      // nothing to fork (the original send died before committing the turn —
-      // e.g. a pi gone stale after a long idle), this is the message the user
-      // wants resent. Capture it before we touch the store.
-      const pendingText = lastUserText(id);
-      let text: string;
-      try {
-        const res = await api.retryLastTurn(id);
-        text = res.text;
-        // Truncated history — the failed/poisoned turn was forked away.
-        chatStore.getState().reset(id, res.messages);
-      } catch (e) {
-        // No committed user turn to roll back to: the send never reached the
-        // session, so there's nothing to fork. Fall back to resubmitting the
-        // optimistic bubble rather than dead-ending on the raw backend error.
-        if (!isNothingToRetry(e) || !pendingText) throw e;
-        text = pendingText;
-        chatStore.getState().reset(id, []); // drop the stranded bubble + error
-      }
-      chatStore.getState().setError(id, null);
-      await send(text); // re-adds the user bubble + reruns the turn
-    } catch (e) {
-      console.error("[retry] error", e);
-      chatStore.getState().setError(id, String(e));
-    } finally {
-      retryingRef.current = false;
-      setRetrying(false);
-    }
+    return useMessageActionsResult.isCliConv(...args);
   }
-
-  // --- Global quick launcher (separate frameless window) ------------------
-  // The launcher gathers a prompt + optional screenshot and fires
-  // "quick-launch" at the main window. We own conversation create/reuse and the
-  // optimistic user bubble, so route the payload through the normal send path.
-  async function quickLaunch(p: QuickLaunchPayload) {
-    setView("chat");
-    // A huge selection rides inline only up to its budget; the full text goes
-    // along as a file so nothing is lost and the fence stays readable.
-    const { inline: context, overflow } = splitSelectionOverflow(p.context);
-    const attachments: ComposerAttachment[] = [
-      ...(overflow
-        ? [{
-            type: "file" as const,
-            data: utf8ToBase64(overflow),
-            mimeType: "text/plain",
-            name: "selection.txt",
-            sizeBytes: new TextEncoder().encode(overflow).length,
-          }]
-        : []),
-      ...(p.image
-        ? [{
-            type: "image" as const,
-            data: p.image.data,
-            mimeType: p.image.mimeType,
-            name: "Screenshot.jpg",
-            previewUrl: `data:${p.image.mimeType};base64,${p.image.data}`,
-          }]
-        : []),
-      ...(p.attachments ?? []).map((attachment) =>
-        attachment.type === "image"
-          ? {
-              ...attachment,
-              previewUrl: `data:${attachment.mimeType};base64,${attachment.data}`,
-            }
-          : attachment,
-      ),
-    ];
-
-    // Adopt the model choice the launcher made so the composer and launched
-    // conversation agree.
-    const launchedModel: ModelChoice = { model: p.model, reasoning: p.reasoning };
-    // The launcher already persisted its own pick to localStorage.
-    setModelChoice(launchedModel);
-
-    let target: string | null = null;
-    if (p.sessionMode === "last") {
-      // The open conversation, else the most-recently-updated one.
-      target = activeId ?? conversations[0]?.id ?? null;
-      if (target && target !== activeId) await onSelect(target);
-    }
-    if (!target) {
-      // A null workspaceDir means the launcher's visible "Chat" default, not
-      // the main window's current repo.
-      const c = await api.newConversation(p.workspaceDir ?? undefined);
-      target = c.id;
-      // Coding-agent runtime chosen in the launcher (Cetus / Claude Code /
-      // Codex). Applied to fresh conversations only — reusing "last" keeps
-      // that conversation's own backend. Awaited so the first send_prompt
-      // already routes through the chosen backend.
-      if (p.backend && p.backend !== "pi") {
-        try {
-          await api.setConversationBackend(c.id, p.backend);
-          if (p.cliModel || p.cliEffort) {
-            await api.setConversationCliModel(c.id, p.cliModel ?? "", p.cliEffort ?? "");
-          }
-        } catch (e) {
-          console.error("[quick-launch] set backend failed", e);
-        }
-      }
-      // Local insert instead of a full refetch; trailing refreshList re-sorts.
-      setConversations((cs) => mergeConversation(cs, c));
-      setActiveId(target);
-      setWorkspaceDir(c.workspaceDir);
-    } else if (target !== activeId) {
-      setActiveId(target);
-    }
-    const convId = target;
-    // Apply the launcher's model to the target (new or reused) before sending.
-    api.setModelChoice(convId, launchedModel).catch(console.error);
-    // Continuing an existing task from the launcher (sessionMode "last") is the
-    // same "moving on" signal as the other send paths — drop it out of review.
-    maybeClearReview(convId);
-    const store = chatStore.getState();
-    store.ensure(convId);
-    // Fold any ambient context into a fenced block ahead of the prompt — the
-    // model reads it as environment data, the bubble renders it as a chip. One
-    // composed string drives both the optimistic render and the model send.
-    const composed = composeWithContext(p.text, context);
-    let out: Awaited<ReturnType<typeof prepareOutgoing>>;
-    try {
-      out = await prepareOutgoing(convId, composed, attachments);
-    } catch (e) {
-      store.ensure(convId);
-      chatStore.getState().setError(convId, String(e));
-      return;
-    }
-    store.userSent(convId, composed, out.localImages, out.savedFiles);
-    setFocusToken((t) => t + 1);
-    try {
-      await api.sendPrompt(convId, out.piMessage, out.piImages);
-    } catch (e) {
-      chatStore.getState().setError(convId, String(e));
-    }
-    refreshList().catch(() => {});
+  function onAbort(
+    ...args: Parameters<typeof useMessageActionsResult.onAbort>
+  ) {
+    return useMessageActionsResult.onAbort(...args);
+  }
+  function setLocalRunState(
+    ...args: Parameters<typeof useMessageActionsResult.setLocalRunState>
+  ) {
+    return useMessageActionsResult.setLocalRunState(...args);
+  }
+  function onResumeInterrupted(
+    ...args: Parameters<typeof useMessageActionsResult.onResumeInterrupted>
+  ) {
+    return useMessageActionsResult.onResumeInterrupted(...args);
+  }
+  function onDismissInterrupted(
+    ...args: Parameters<typeof useMessageActionsResult.onDismissInterrupted>
+  ) {
+    return useMessageActionsResult.onDismissInterrupted(...args);
+  }
+  function onRetry(
+    ...args: Parameters<typeof useMessageActionsResult.onRetry>
+  ) {
+    return useMessageActionsResult.onRetry(...args);
+  }
+  function retryConversation(
+    ...args: Parameters<typeof useMessageActionsResult.retryConversation>
+  ) {
+    return useMessageActionsResult.retryConversation(...args);
+  }
+  const useQuickLaunchResult = useQuickLaunch({
+    setView,
+    setModelChoice,
+    activeId,
+    conversations,
+    onSelect,
+    setConversations,
+    setActiveId,
+    setWorkspaceDir,
+    maybeClearReview: (...args) => maybeClearReview(...args),
+    chatStore,
+    setFocusToken,
+    refreshList,
+  });
+  function quickLaunch(
+    ...args: Parameters<typeof useQuickLaunchResult.quickLaunch>
+  ) {
+    return useQuickLaunchResult.quickLaunch(...args);
   }
   // Keep a live ref so the mount-once listener always calls the latest closure
   // (quickLaunch closes over activeId / conversations / workspaceDir).
@@ -2987,10 +1079,7 @@ export default function Home() {
   /** Create-task dialog handler: mint a conversation, optimistically seed the
    *  user bubble, fire-and-forget sendPrompt (the agent streams asynchronously
    *  and shows up as a card on the kanban with a streaming dot). */
-  async function onCreateTask(
-    text: string,
-    attachments: ComposerAttachment[],
-  ) {
+  async function onCreateTask(text: string, attachments: ComposerAttachment[]) {
     const c = await api.newConversation(workspaceDir ?? undefined);
     const id = c.id;
     // Runtime chosen in the dialog — the shared pending state (same one the chat
@@ -3000,7 +1089,11 @@ export default function Home() {
       try {
         await api.setConversationBackend(id, pendingBackend);
         if (pendingCliModel || pendingCliEffort) {
-          await api.setConversationCliModel(id, pendingCliModel, pendingCliEffort);
+          await api.setConversationCliModel(
+            id,
+            pendingCliModel,
+            pendingCliEffort,
+          );
         }
       } catch (e) {
         console.error("[create-task] set backend failed", e);
@@ -3076,8 +1169,11 @@ export default function Home() {
         // leading user prompt, and a cache a pre-fix auto-resume sweep
         // overwrote with just the resume-prompt tail.
         const repairFromHistory =
-          cacheHit && cachedUnfaithful && !!messages?.some((m) => m.role === "user");
-        if (!cacheHit || repairFromHistory) chatStore.getState().reset(id, messages);
+          cacheHit &&
+          cachedUnfaithful &&
+          !!messages?.some((m) => m.role === "user");
+        if (!cacheHit || repairFromHistory)
+          chatStore.getState().reset(id, messages);
       } finally {
         if (!cancelled) setDetailLoading(false);
       }
@@ -3087,351 +1183,92 @@ export default function Home() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailId]);
-
-  /** Deliver a queued follow-up to `convId`, regardless of which surface (if
-   *  any) currently has it open. Mirrors the core of onSend/onDetailSend without
-   *  the surface-specific focus handling, so the store-driven flush can send to
-   *  a background conversation the user has navigated away from. */
-  async function deliverQueued(
-    convId: string,
-    text: string,
-    attachments: ComposerAttachment[] = [],
-    runtime?: ComposerRuntimeSelection,
+  const useDetailActionsResult = useDetailActions({
+    applyRuntimeSelection,
+    maybeRunCodexCommand,
+    maybeClearReview: (...args) => maybeClearReview(...args),
+    chatStore,
+    refreshList,
+    detailId,
+    setDetailFocusToken,
+    setQueued,
+    isCliConv,
+    retryConversation,
+    queuedRef,
+    removeQueued,
+    setDetailModelChoice,
+    setDetailWorkspaceDir,
+    setConversations,
+  });
+  function deliverQueued(
+    ...args: Parameters<typeof useDetailActionsResult.deliverQueued>
   ) {
-    if (runtime) {
-      try {
-        await applyRuntimeSelection(convId, runtime);
-      } catch (e) {
-        console.error("[queue] set backend failed", e);
-        toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
-        return;
-      }
-    }
-    if (await maybeRunCodexCommand(convId, text, attachments)) return;
-    maybeClearReview(convId);
-    const store = chatStore.getState();
-    store.ensure(convId);
-    let out: Outgoing;
-    try {
-      out = await prepareOutgoing(convId, text, attachments);
-    } catch (e) {
-      chatStore.getState().setError(convId, `attachment failed: ${e}`);
-      return;
-    }
-    store.userSent(convId, text, out.localImages, out.savedFiles);
-    try {
-      await api.sendPrompt(convId, out.piMessage, out.piImages);
-    } catch (e) {
-      chatStore.getState().setError(convId, String(e));
-    }
-    refreshList().catch(() => {});
+    return useDetailActionsResult.deliverQueued(...args);
   }
-
-  async function onDetailSend(
-    text: string,
-    attachments: ComposerAttachment[] = [],
-    runtime?: ComposerRuntimeSelection,
+  function onDetailSend(
+    ...args: Parameters<typeof useDetailActionsResult.onDetailSend>
   ) {
-    if (!detailId) return;
-    const id = detailId;
-    if (runtime) {
-      try {
-        await applyRuntimeSelection(id, runtime);
-      } catch (e) {
-        console.error("[detail-send] set backend failed", e);
-        toast.error(typeof e === "string" ? e : "Couldn't switch runtime.");
-        return;
-      }
-    }
-    if (await maybeRunCodexCommand(id, text, attachments)) {
-      setDetailFocusToken((token) => token + 1);
-      return;
-    }
-    // Sending feedback from the review surface clears the "Needs review" flag.
-    maybeClearReview(id);
-    const store = chatStore.getState();
-    store.ensure(id);
-    let out: Outgoing;
-    try {
-      out = await prepareOutgoing(id, text, attachments);
-    } catch (e) {
-      chatStore.getState().setError(id, `attachment failed: ${e}`);
-      return;
-    }
-    store.userSent(id, text, out.localImages, out.savedFiles);
-    setDetailFocusToken((t) => t + 1);
-    try {
-      await api.sendPrompt(id, out.piMessage, out.piImages);
-    } catch (e) {
-      chatStore.getState().setError(id, String(e));
-    }
-    refreshList().catch(() => {});
+    return useDetailActionsResult.onDetailSend(...args);
   }
-
-  async function onDetailAbort() {
-    if (!detailId) return;
-    // Bailing out: drop anything parked for this conversation rather than
-    // auto-delivering the queue after the abort lands (mirrors onAbort).
-    setQueued((q) => ({ ...q, [detailId]: [] }));
-    chatStore.getState().endStream(detailId, isCliConv(detailId));
-    await api.abort(detailId);
+  function onDetailAbort(
+    ...args: Parameters<typeof useDetailActionsResult.onDetailAbort>
+  ) {
+    return useDetailActionsResult.onDetailAbort(...args);
   }
-
-  /** Roll back + rerun the last turn from the detail dialog. */
-  function onDetailRetry() {
-    return retryConversation(detailId, onDetailSend);
+  function onDetailRetry(
+    ...args: Parameters<typeof useDetailActionsResult.onDetailRetry>
+  ) {
+    return useDetailActionsResult.onDetailRetry(...args);
   }
-
-  /** Promote a queued follow-up to an immediate send from the detail dialog.
-   *  Routes through onDetailSend so the delivery lands on `detailId` (not the
-   *  main chat's activeId). */
-  function steerQueuedDetail(id: string) {
-    if (!detailId) return;
-    const item = (queuedRef.current[detailId] ?? []).find((m) => m.id === id);
-    if (!item) return;
-    removeQueued(detailId, id);
-    void onDetailSend(item.text, item.attachments, item.runtime);
+  function steerQueuedDetail(
+    ...args: Parameters<typeof useDetailActionsResult.steerQueuedDetail>
+  ) {
+    return useDetailActionsResult.steerQueuedDetail(...args);
   }
-
-  async function onDetailModelChange(next: ModelChoice) {
-    setDetailModelChoice(next);
-    if (detailId) {
-      api.setModelChoice(detailId, next).catch(console.error);
-    }
+  function onDetailModelChange(
+    ...args: Parameters<typeof useDetailActionsResult.onDetailModelChange>
+  ) {
+    return useDetailActionsResult.onDetailModelChange(...args);
   }
-
-  async function onDetailWorkspaceChange(dir: string) {
-    setDetailWorkspaceDir(dir);
-    if (detailId) {
-      const updated = await api.setWorkspace(detailId, dir);
-      setConversations((cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
-    }
+  function onDetailWorkspaceChange(
+    ...args: Parameters<typeof useDetailActionsResult.onDetailWorkspaceChange>
+  ) {
+    return useDetailActionsResult.onDetailWorkspaceChange(...args);
   }
-
-  const onArchive = useCallback(
-    async (c: Conversation) => {
-      try {
-        await archiveConversation(c);
-      } catch (e) {
-        console.error("archiveConversation failed", e);
-        toast.error("Couldn't archive that conversation.");
-      }
-    },
-    [archiveConversation],
-  );
-
-  const onTogglePin = useCallback(async (c: Conversation) => {
-    const pinned = c.pinnedAt == null;
-    const pinnedAt = pinned ? Date.now() : null;
-    // Optimistic: the row jumps to / leaves the pinned block immediately; the
-    // persisted marker lands behind it (and is rolled back on failure).
-    setConversations((cs) =>
-      cs.map((x) => (x.id === c.id ? { ...x, pinnedAt } : x)),
-    );
-    try {
-      await api.setConversationPinned(c.id, pinned);
-    } catch (e) {
-      console.error("setConversationPinned failed", e);
-      setConversations((cs) =>
-        cs.map((x) =>
-          x.id === c.id ? { ...x, pinnedAt: c.pinnedAt ?? null } : x,
-        ),
-      );
-      toast.error("Couldn't pin that conversation.");
-    }
-  }, []);
-
-  const onRename = useCallback(async (c: Conversation, title: string) => {
-    // Optimistic: the row retitles immediately; rolled back on failure.
-    setConversations((cs) =>
-      cs.map((x) => (x.id === c.id ? { ...x, title } : x)),
-    );
-    try {
-      const updated = await api.renameConversation(c.id, title);
-      setConversations((cs) => cs.map((x) => (x.id === updated.id ? updated : x)));
-    } catch (e) {
-      console.error("renameConversation failed", e);
-      setConversations((cs) =>
-        cs.map((x) => (x.id === c.id ? { ...x, title: c.title } : x)),
-      );
-      toast.error("Couldn't rename that conversation.");
-    }
-  }, []);
-
-  const onRevealWorkspace = useCallback(async (dir: string) => {
-    try {
-      await api.openPath(dir);
-    } catch (e) {
-      console.error("reveal workspace failed", dir, e);
-      toast.error("Couldn't reveal that folder.");
-    }
-  }, []);
-
-  const onArchiveWorkspaceChats = useCallback(
-    async (dir: string) => {
-      if (archivingWorkspacesRef.current.has(dir)) return;
-      const targets = conversationsRef.current.filter(
-        (c) =>
-          c.workspaceDir === dir &&
-          !c.archivedAt &&
-          !archivingIdsRef.current.has(c.id),
-      );
-      if (targets.length === 0) return;
-      archivingWorkspacesRef.current.add(dir);
-      const targetIds = new Set(targets.map((c) => c.id));
-      for (const id of targetIds) archivingIdsRef.current.add(id);
-
-      // Match single-chat archive semantics: the workspace vanishes at click
-      // time, while the slower process cleanup / Codex sync finishes behind it.
-      setConversations((cs) => cs.filter((c) => !targetIds.has(c.id)));
-      setDetailId((id) => (id && targetIds.has(id) ? null : id));
-      if (activeIdRef.current && targetIds.has(activeIdRef.current)) {
-        pendingSelectRef.current = null;
-        activeIdRef.current = null;
-        saveLastActive(null);
-        setActiveId(null);
-      }
-      setBoardWorkspaceFilter((filter) => (filter === dir ? null : filter));
-
-      try {
-        const results = await Promise.allSettled(
-          targets.map((c) => api.archiveConversation(c.id, true)),
-        );
-        const store = chatStore.getState();
-        results.forEach((result, index) => {
-          if (result.status === "fulfilled") store.drop(targets[index].id);
-        });
-        const failed = results.find(
-          (result): result is PromiseRejectedResult => result.status === "rejected",
-        );
-        if (failed) throw failed.reason;
-      } catch (e) {
-        console.error("archive workspace chats failed", dir, e);
-        // Some rows may have committed, so query the backend instead of blindly
-        // restoring every optimistic removal. allSettled above guarantees the
-        // reconciliation cannot race the remaining archive commands.
-        await refreshList().catch(console.error);
-        toast.error("Couldn't archive those chats.");
-      } finally {
-        for (const id of targetIds) archivingIdsRef.current.delete(id);
-        archivingWorkspacesRef.current.delete(dir);
-      }
-    },
-    [chatStore, refreshList],
-  );
-
-  const onRemoveWorkspace = useCallback(
-    (dir: string) => {
-      const next = hideWorkspace(dir);
-      setRecentWorkspaces(next.recent);
-      setHiddenWorkspaces(next.hidden);
-      setBoardWorkspaceFilter((filter) => (filter === dir ? null : filter));
-      setWorkspaceDir((current) =>
-        current === dir ? (defaultWorkspace || null) : current,
-      );
-      const active = conversationsRef.current.find(
-        (c) => c.id === activeIdRef.current,
-      );
-      if (active?.workspaceDir === dir) {
-        saveLastActive(null);
-        setActiveId(null);
-      }
-    },
-    [defaultWorkspace],
-  );
-
-  const onReorderWorkspaces = useCallback((dirs: string[]) => {
-    setRecentWorkspaces(reorderRecentWorkspaces(dirs));
-  }, []);
-
-  const onFork = useCallback(
-    async (c: Conversation, messageKey?: string | null, messageIndex?: number | null) => {
-      const store = chatStore.getState();
-      if (store.chats[c.id]?.isStreaming) {
-        toast.error("Wait for the current run to finish before forking.");
-        return;
-      }
-      try {
-        const { conversation, messages } = await api.forkConversation(
-          c.id,
-          messageKey,
-          messageIndex,
-        );
-        setConversations((cs) => mergeConversation(cs, conversation));
-
-        const liveCopy = store.cloneRendered(c.id, conversation.id, messageKey);
-        if (!liveCopy) {
-          const cached = await copyCachedMessages(c.id, conversation.id);
-          if (cached && cached.length > 0) {
-            chatStore.getState().hydrate(conversation.id, cached);
-          } else {
-            chatStore.getState().reset(conversation.id, messages);
-          }
-        }
-
-        pendingSelectRef.current = conversation.id;
-        setView("chat");
-        setActiveId(conversation.id);
-        setModelChoice(conversation.model);
-        setWorkspaceDir(conversation.workspaceDir);
-        setFocusToken((t) => t + 1);
-      } catch (e) {
-        console.error("forkConversation failed", e);
-        toast.error("Couldn't fork that conversation.");
-      }
-    },
-    [chatStore],
-  );
-
-  // --- Human-in-the-loop review (request_review tool → "Needs review") ------
-
-  /** Approve a pending-review task → it leaves "Needs review" for "Done". */
-  const onApproveReview = useCallback(
-    async (id: string) => {
-      const previous = conversationsRef.current.find((c) => c.id === id);
-      if (!previous) return;
-      setConversations((cs) =>
-        cs.map((c) => (c.id === id ? { ...c, reviewState: "approved" } : c)),
-      );
-      try {
-        const updated = await api.setReviewState(id, "approved");
-        applyReviewedRow(updated);
-      } catch (e) {
-        console.error(e);
-        // Revert only if this optimistic value is still current; a newer event
-        // or user action wins over this failed request.
-        setConversations((cs) =>
-          cs.map((c) =>
-            c.id === id && c.reviewState === "approved"
-              ? { ...c, reviewState: previous.reviewState }
-              : c,
-          ),
-        );
-        toast.error("Couldn't approve that conversation.");
-      }
-    },
-    [applyReviewedRow],
-  );
-
-  /** "Request changes": open the conversation so the user can type feedback.
-   *  The pending flag is cleared when they actually send (see maybeClearReview),
-   *  so a card they merely peek at stays in "Needs review". */
-  const onRequestChanges = useCallback((c: Conversation) => {
-    setDetailId(c.id);
-  }, []);
-
-  /** Clear a conversation's review flag once the user sends it a fresh prompt —
-   *  giving feedback (or just continuing) means it's no longer waiting on review.
-   *  Reads the live conversations list via a ref so it stays cheap on every send. */
-  const maybeClearReview = useCallback(
-    (id: string) => {
-      const c = conversationsRef.current.find((x) => x.id === id);
-      if (c && c.reviewState !== "none") {
-        api.setReviewState(id, "none").then(applyReviewedRow).catch(() => {});
-      }
-    },
-    [applyReviewedRow],
-  );
+  const {
+    maybeClearReview,
+    onFork,
+    onRevealWorkspace,
+    onArchiveWorkspaceChats,
+    onRemoveWorkspace,
+    onReorderWorkspaces,
+    onArchive,
+    onTogglePin,
+    onRename,
+    onApproveReview,
+    onRequestChanges,
+  } = useConversationActions({
+    archiveConversation,
+    setConversations,
+    archivingWorkspacesRef,
+    conversationsRef,
+    archivingIdsRef,
+    setDetailId,
+    activeIdRef,
+    pendingSelectRef,
+    setActiveId,
+    setBoardWorkspaceFilter,
+    chatStore,
+    refreshList,
+    setRecentWorkspaces,
+    setHiddenWorkspaces,
+    setWorkspaceDir,
+    defaultWorkspace,
+    setView,
+    setModelChoice,
+    setFocusToken,
+    applyReviewedRow,
+  });
 
   // --- Automations --------------------------------------------------------
   function openNewAutomation() {
@@ -3499,431 +1336,125 @@ export default function Home() {
     await api.deleteAutomation(a.id);
     setAutomations((as) => as.filter((x) => x.id !== a.id));
   }
-
-  return (
-    <SidebarProvider
-      // Pin the shell to the window with `fixed inset-0` rather than a
-      // viewport-height calc. CSS `zoom` (use-zoom) re-bases `svh` inside the
-      // zoomed root on modern WebKit, so a `100svh/var(--zoom)` height would
-      // double-compensate and drift as you ⌘+/⌘− — fixed insets fill the window
-      // at any zoom. `!min-h-0` clears shadcn's `min-h-svh` so the sidebar's
-      // `h-full` resolves against the window, not content. The shell background
-      // also paints the gutter around the content card, so keep it tied to the
-      // same sidebar token.
-      className="fixed inset-0 !min-h-0 bg-sidebar"
-      open={sidebarOpen}
-      onOpenChange={setSidebarOpen}
-    >
-      <DialogHost />
-      <ZoomHud />
-      <Onboarding />
-      {/* DEV-ONLY eval bridge — no-ops unless NEXT_PUBLIC_CETUS_DEVTEST === "1"
-          (gated both here and internally). Always-mounted host. */}
-      {process.env.NEXT_PUBLIC_CETUS_DEVTEST === "1" && <TestHook />}
-      {/* cmdk's internal store has a race on first render with Turbopack +
-          React 19: even though Radix Dialog hides DialogContent when closed,
-          CommandPalette's CommandInput still ends up reaching for a null
-          context (`o.subscribe` crash). Lazy-mount the palette so it's
-          rendered only after the user actually opens it. */}
-      {paletteOpen && <CommandPalette
-        open={paletteOpen}
-        onOpenChange={setPaletteOpen}
-        conversations={conversations}
-        activeId={activeId}
-        modelChoice={modelChoice}
-        onSelectConversation={(id) => {
-          setView("chat");
-          setPaletteOpen(false);
-          onSelect(id);
-        }}
-        onSelectArchivedConversation={async (conv) => {
-          setPaletteOpen(false);
-          // Archived rows aren't in the sidebar list, so opening one means
-          // restoring it first — the same path Settings › Archived uses —
-          // then selecting it like any other chat. Push its metadata into
-          // state directly so the pane doesn't wait on the next render of
-          // `conversationsRef` (which onSelect reads after an await).
-          try {
-            const restored = await api.archiveConversation(conv.id, false);
-            onSettingsConversationsChanged(restored);
-            conversationsRef.current = mergeConversation(conversationsRef.current, restored);
-            setView("chat");
-            onSelect(restored.id);
-          } catch (e) {
-            console.error("restore archived conversation failed", conv.id, e);
-            toast.error(String(e));
-          }
-        }}
-        onNewTask={() => {
-          setPaletteOpen(false);
-          setNewTaskOpen(true);
-        }}
-        onModelChange={(m) => {
-          setPaletteOpen(false);
-          onModelChange(m);
-        }}
-        onOpenSettings={() => {
-          setPaletteOpen(false);
-          setSettingsOpen(true);
-        }}
-        onViewChange={(v) => {
-          setPaletteOpen(false);
-          setView(v);
-        }}
-        onOpenScreenHistory={(q, frame) => {
-          setPaletteOpen(false);
-          setHistoryQuery(q ?? "");
-          setHistoryFrame(frame ?? null);
-          setHistoryOpen(true);
-        }}
-      />}
-      <SessionDetailDialog
-        conversation={conversations.find((c) => c.id === detailId) ?? null}
-        open={detailId !== null}
-        onOpenChange={(o) => {
-          if (!o) setDetailId(null);
-        }}
-        onOpenInChat={(id) => {
-          setDetailId(null);
-          setView("chat");
-          onSelect(id);
-        }}
-        loading={detailLoading}
-        modelChoice={detailModelChoice}
-        onModelChange={onDetailModelChange}
-        workspaceDir={detailWorkspaceDir}
-        defaultWorkspace={defaultWorkspace}
-        onWorkspaceChange={onDetailWorkspaceChange}
-        onSend={onDetailSend}
-        onAbort={onDetailAbort}
-        onForkMessage={(messageKey, messageIndex) => {
-          const c = conversationsRef.current.find((x) => x.id === detailId);
-          if (c) onFork(c, messageKey, messageIndex);
-        }}
-        focusToken={detailFocusToken}
-        onRetry={onDetailRetry}
-        retrying={retrying}
-        queued={detailId ? queued[detailId] : undefined}
-        onQueue={(text, atts, runtime, beforeIds) => {
-          if (detailId) enqueueMessage(detailId, text, atts, runtime, beforeIds);
-        }}
-        onSteerQueued={
-          detailConvBackend && !backendSupportsSteer(detailConvBackend)
-            ? undefined
-            : (id) => steerQueuedDetail(id)
-        }
-        onRemoveQueued={(id) => {
-          if (detailId) removeQueued(detailId, id);
-        }}
-      />
-      <ArtifactsDialog
-        convId={activeId}
-        title={conversations.find((c) => c.id === activeId)?.title}
-        // Gate on chat view + a live artifact set so switching away (or a
-        // conversation with no artifacts) can't leave a stale gallery open.
-        open={view === "chat" && chatArtifactsOpen && activeHasArtifacts}
-        onOpenChange={setChatArtifactsOpen}
-      />
-      <CreateTaskDialog
-        open={newTaskOpen}
-        onOpenChange={setNewTaskOpen}
-        modelChoice={modelChoice}
-        onModelChange={onModelChange}
-        workspaceDir={workspaceDir}
-        defaultWorkspace={defaultWorkspace}
-        onWorkspaceChange={onWorkspaceChange}
-        pendingBackend={pendingBackend}
-        onPendingBackendChange={setPendingBackend}
-        pendingCliModel={pendingCliModel}
-        pendingCliEffort={pendingCliEffort}
-        onPendingTuningChange={onPendingTuningChange}
-        onSubmit={onCreateTask}
-      />
-      <AutomationDialog
-        open={automationDialogOpen}
-        onOpenChange={setAutomationDialogOpen}
-        automation={editingAutomation}
-        defaultModel={modelChoice}
-        defaultWorkspace={defaultWorkspace}
-        onSubmit={onSaveAutomation}
-      />
-      {settingsEverOpened && (
-        <SettingsPage
-          open={settingsOpen}
-          onClose={closeSettings}
-          storedProviders={storedProviders}
-          onSaved={onSettingsSaved}
-          onConversationsChanged={onSettingsConversationsChanged}
-          onOpenHistory={openHistoryFromSettings}
-        />
-      )}
-      <ScreenHistoryPage
-        open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
-        initialQuery={historyQuery}
-        initialFrame={historyFrame}
-      />
-      <AppSidebar
-        conversations={conversations}
-        activeId={activeId}
-        streamingIds={activityIds}
-        unreadCompletedIds={unreadCompletedIds}
-        workspaceDirs={[...recentWorkspaces, ...temporaryWorkspaces]}
-        hiddenWorkspaceDirs={hiddenWorkspaces.filter(
-          (dir) => !temporaryWorkspaces.includes(dir),
-        )}
-        collapsedWorkspaceDirs={collapsedWorkspaceDirs}
-        expandedWorkspaceDirs={expandedWorkspaceDirs}
-        defaultWorkspace={defaultWorkspace}
-        view={view}
-        onViewChange={setView}
-        workspaceFilter={boardWorkspaceFilter}
-        onWorkspaceFilterChange={setBoardWorkspaceFilter}
-        onSelect={onSelectChat}
-        onNewTask={() => {
-          if (view === "chat") {
-            onNew();
-          } else {
-            setNewTaskOpen(true);
-          }
-        }}
-        onNew={onNewSidebar}
-        onRevealWorkspace={onRevealWorkspace}
-        onArchiveWorkspaceChats={onArchiveWorkspaceChats}
-        onRemoveWorkspace={onRemoveWorkspace}
-        onReorderWorkspaces={onReorderWorkspaces}
-        onToggleWorkspaceCollapsed={toggleWorkspaceCollapsed}
-        onToggleWorkspaceExpanded={toggleWorkspaceExpanded}
-        onArchive={onArchive}
-        onTogglePin={onTogglePin}
-        onRename={onRename}
-        onOpenSettings={openSettings}
-        updateReadyVersion={updateReadyVersion}
-        onRestartToUpdate={onRestartToUpdate}
-      />
-      {/* Opaque card, no backdrop-filter: the shell root paints solid bg-sidebar,
-          so a translucent+blurred card only re-blurred a flat color — at the cost
-          of a full-window GPU recomposite on every repaint. */}
-      <SidebarInset
-        className="m-2 flex min-h-0 flex-col overflow-hidden rounded-xl border-[0.5px] border-border bg-background shadow-[inset_0_1px_0_rgb(255_255_255_/_0.45),0_3px_16px_rgb(0_0_0_/_0.045)] dark:shadow-[inset_0_1px_0_rgb(255_255_255_/_0.10),0_4px_18px_rgb(0_0_0_/_0.14)]"
-      >
-        <div className="flex min-h-0 flex-1 flex-row">
-          <div className="flex min-w-0 flex-1 flex-col">
-            <header
-              className="flex h-10 items-center justify-end gap-3 px-4 text-xs text-muted-foreground"
-            >
-              {/* With the sidebar collapsed, nothing else clears the macOS
-                  traffic lights, so the content card takes over: a drag spacer
-                  wide enough for the three lights, then the expand button in
-                  the spot the sidebar's collapse button used to be. */}
-              {!sidebarOpen && (
-                <>
-                  {shortcutPlatform() === "mac" && (
-                    <div data-tauri-drag-region className="h-full w-14 shrink-0" />
-                  )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label={tt("sidebar", "toggleSidebar")}
-                        data-testid="sidebar-expand"
-                        onClick={() => setSidebarOpen(true)}
-                      >
-                        <PanelLeft className="size-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      <span>{tt("sidebar", "toggleSidebar")}</span>
-                      <Kbd>{shortcutDisplay(keyboardShortcuts.toggleSidebar)}</Kbd>
-                    </TooltipContent>
-                  </Tooltip>
-                </>
-              )}
-              <div data-tauri-drag-region className="h-full flex-1" />
-              {!piReady && <span className="text-muted-foreground/70">○ connecting…</span>}
-              {/* With messages present, the failure surfaces inline at the end of
-                the message list (see MessageError). Keep the header copy only as
-                a fallback for errors that fire before any message exists
-                (e.g. an attachment write failing on the very first send). */}
-              {error && !hasMessages && (
-                <span className="text-destructive">{error}</span>
-              )}
-              {view === "chat" && activeHasArtifacts && (
-                <Button
-                  type="button"
-                  size="icon-xs"
-                  variant="ghost"
-                  title={tt("board", "session.toggleArtifacts")}
-                  aria-label={tt("board", "session.toggleArtifacts")}
-                  onClick={() => setChatArtifactsOpen((v) => !v)}
-                >
-                  <Inbox className="size-3.5" />
-                </Button>
-              )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={t("workspacePanel.openSide")}
-                    data-testid="workspace-open-side"
-                    onClick={() => openWorkspacePanelLayout("side")}
-                  >
-                    <PanelRight className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <span>{t("workspacePanel.openSide")}</span>
-                  <Kbd>{shortcutDisplay(keyboardShortcuts.toggleWorkspace)}</Kbd>
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={t("workspacePanel.openBottom")}
-                    data-testid="workspace-open-bottom"
-                    onClick={() => openWorkspacePanelLayout("bottom")}
-                  >
-                    <PanelBottom className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <span>{t("workspacePanel.openBottom")}</span>
-                  <Kbd>{shortcutDisplay(keyboardShortcuts.toggleTerminal)}</Kbd>
-                </TooltipContent>
-              </Tooltip>
-            </header>
-            {view === "automations" ? (
-              <AutomationsView
-                automations={automations}
-                defaultWorkspace={defaultWorkspace}
-                onNew={openNewAutomation}
-                onEdit={openEditAutomation}
-                onToggle={onToggleAutomation}
-                onRunNow={onRunAutomation}
-                onDelete={onDeleteAutomation}
-                onOpenConversation={(id) => {
-                  setView("chat");
-                  onSelect(id);
-                }}
-              />
-            ) : view === "board" ? (
-              <BoardView
-                conversations={conversations}
-                workspaceFilter={boardWorkspaceFilter}
-                defaultWorkspace={defaultWorkspace}
-                streamingIds={activityIds}
-                onOpen={onOpenDetail}
-                onArchive={onArchive}
-                onApproveReview={onApproveReview}
-                onRequestChanges={onRequestChanges}
-              />
-            ) : loadingChatId !== null &&
-              loadingChatId === activeId &&
-              !hasMessages ? (
-              <ChatLoadingPane opticalCenter={sidebarOpen && !sideWorkspace.open} />
-            ) : hasMessages ? (
-              <ChatPane
-                convId={activeId}
-                backend={activeConvBackend ?? pendingBackend}
-                opticalCenter={sidebarOpen && !sideWorkspace.open}
-                draftKey={activeId ? `chat:${activeId}` : "chat:new"}
-                modelChoice={modelChoice}
-                onModelChange={onModelChange}
-                workspaceDir={workspaceDir}
-                defaultWorkspace={defaultWorkspace}
-                onWorkspaceChange={onWorkspaceChange}
-                onSend={onSend}
-                onBash={onBash}
-                onAbort={onAbort}
-                onRetry={onRetry}
-                interrupted={activeConvInterrupted}
-                onResumeInterrupted={onResumeInterrupted}
-                onDismissInterrupted={onDismissInterrupted}
-                onForkMessage={(messageKey, messageIndex) => {
-                  const c = conversationsRef.current.find(
-                    (x) => x.id === activeIdRef.current,
-                  );
-                  if (c) onFork(c, messageKey, messageIndex);
-                }}
-                retrying={retrying}
-                queued={activeId ? queued[activeId] : undefined}
-                onQueue={(text, atts, runtime, beforeIds) => {
-                  if (activeId) enqueueMessage(activeId, text, atts, runtime, beforeIds);
-                }}
-                onSteerQueued={
-                  // pi steers via RPC, claude-code over stdin, and codex uses
-                  // Codex-app-style interrupt + resume. Hide this only for any
-                  // future backend that lacks a running-turn steer path.
-                  activeConvBackend && !backendSupportsSteer(activeConvBackend)
-                    ? undefined
-                    : (id) => {
-                        if (activeId) steerQueued(activeId, id);
-                      }
-                }
-                onRemoveQueued={(id) => {
-                  if (activeId) removeQueued(activeId, id);
-                }}
-                focusToken={focusToken}
-                disabled={!piReady}
-                pendingBackend={pendingBackend}
-                onPendingBackendChange={setPendingBackend}
-                pendingCliModel={pendingCliModel}
-                pendingCliEffort={pendingCliEffort}
-                onPendingTuningChange={onPendingTuningChange}
-                backendSwitch={backendSwitch}
-                onRequestBackendSwitch={requestBackendSwitch}
-              />
-            ) : (
-              <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
-                <GlyphBackdrop />
-                <div
-                  className={`relative z-10 w-full max-w-2xl space-y-6 panel-motion transition-[translate] ${
-                    !sidebarOpen || sideWorkspace.open
-                      ? ""
-                      : "xl:-translate-x-10 2xl:-translate-x-12"
-                  }`}
-                >
-                  <h1 className="text-center font-serif text-4xl italic tracking-tight text-foreground">
-                    {heroHeadline}
-                  </h1>
-                  <Composer
-                    variant="hero"
-                    focusToken={focusToken}
-                    draftKey={activeId ? `chat:${activeId}` : "chat:new"}
-                    disabled={!piReady}
-                    streaming={isStreaming}
-                    modelChoice={modelChoice}
-                    onModelChange={onModelChange}
-                    conversationId={activeId}
-                    workspaceDir={workspaceDir}
-                    defaultWorkspace={defaultWorkspace}
-                    onWorkspaceChange={onWorkspaceChange}
-                    onSend={onSend}
-                    onBash={onBash}
-                    onAbort={onAbort}
-                    pendingBackend={pendingBackend}
-                    onPendingBackendChange={setPendingBackend}
-                    pendingCliModel={pendingCliModel}
-                    pendingCliEffort={pendingCliEffort}
-                    onPendingTuningChange={onPendingTuningChange}
-                    backendSwitch={backendSwitch}
-                    onRequestBackendSwitch={requestBackendSwitch}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-          {renderWorkspaceDock("side")}
-        </div>
-        {renderWorkspaceDock("bottom")}
-      </SidebarInset>
-    </SidebarProvider>
-  );
+  return renderHome({
+    sidebarOpen,
+    setSidebarOpen,
+    paletteOpen,
+    setPaletteOpen,
+    conversations,
+    activeId,
+    modelChoice,
+    setView,
+    onSelect,
+    onSettingsConversationsChanged,
+    conversationsRef,
+    setNewTaskOpen,
+    onModelChange,
+    setSettingsOpen,
+    setHistoryQuery,
+    setHistoryFrame,
+    setHistoryOpen,
+    detailId,
+    setDetailId,
+    detailLoading,
+    detailModelChoice,
+    onDetailModelChange,
+    detailWorkspaceDir,
+    defaultWorkspace,
+    onDetailWorkspaceChange,
+    onDetailSend,
+    onDetailAbort,
+    onFork,
+    detailFocusToken,
+    onDetailRetry,
+    retrying,
+    queued,
+    enqueueMessage,
+    detailConvBackend,
+    steerQueuedDetail,
+    removeQueued,
+    view,
+    chatArtifactsOpen,
+    activeHasArtifacts,
+    setChatArtifactsOpen,
+    newTaskOpen,
+    workspaceDir,
+    onWorkspaceChange,
+    pendingBackend,
+    setPendingBackend,
+    pendingCliModel,
+    pendingCliEffort,
+    onPendingTuningChange,
+    onCreateTask,
+    automationDialogOpen,
+    setAutomationDialogOpen,
+    editingAutomation,
+    onSaveAutomation,
+    settingsEverOpened,
+    settingsOpen,
+    closeSettings,
+    storedProviders,
+    onSettingsSaved,
+    openHistoryFromSettings,
+    historyOpen,
+    historyQuery,
+    historyFrame,
+    activityIds,
+    unreadCompletedIds,
+    recentWorkspaces,
+    temporaryWorkspaces,
+    hiddenWorkspaces,
+    collapsedWorkspaceDirs,
+    expandedWorkspaceDirs,
+    boardWorkspaceFilter,
+    setBoardWorkspaceFilter,
+    onSelectChat,
+    onNew,
+    onNewSidebar,
+    onRevealWorkspace,
+    onArchiveWorkspaceChats,
+    onRemoveWorkspace,
+    onReorderWorkspaces,
+    toggleWorkspaceCollapsed,
+    toggleWorkspaceExpanded,
+    onArchive,
+    onTogglePin,
+    onRename,
+    openSettings,
+    updateReadyVersion,
+    onRestartToUpdate,
+    keyboardShortcuts,
+    piReady,
+    error,
+    hasMessages,
+    t,
+    openWorkspacePanelLayout,
+    automations,
+    openNewAutomation,
+    openEditAutomation,
+    onToggleAutomation,
+    onRunAutomation,
+    onDeleteAutomation,
+    onOpenDetail,
+    onApproveReview,
+    onRequestChanges,
+    loadingChatId,
+    sideWorkspace,
+    activeConvBackend,
+    onSend,
+    onBash,
+    onAbort,
+    onRetry,
+    activeConvInterrupted,
+    onResumeInterrupted,
+    onDismissInterrupted,
+    activeIdRef,
+    steerQueued,
+    focusToken,
+    backendSwitch,
+    requestBackendSwitch,
+    heroHeadline,
+    isStreaming,
+    renderWorkspaceDock,
+  });
 }

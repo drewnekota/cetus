@@ -806,6 +806,18 @@ export function BackendPicker({
     onTuningChange?.(model, effort);
   }
 
+  /** The tuning menu's automatic rewrite of an existing conversation's stored
+   *  tuning (legacy "" → the CLI default, a retired model id → the current
+   *  one). It only fixes what *this* conversation launches with — unlike an
+   *  explicit pick it must not touch the sticky per-runtime choice, otherwise
+   *  merely opening an old chat (say a dsh "deepseek-v4-flash · High" one)
+   *  silently turns the next new chat's effort into that chat's. */
+  function migrateTuning(model: string, effort: string) {
+    setCliModel(model);
+    setCliEffort(effort);
+    onTuningChange?.(model, effort);
+  }
+
   function selectModel(model: string) {
     selectTuning(model, cliEffort);
   }
@@ -895,7 +907,7 @@ export function BackendPicker({
             effort={cliEffort}
             onModelChange={selectModel}
             onEffortChange={selectEffort}
-            onMigrate={matchedPreset ? undefined : selectTuning}
+            onMigrate={matchedPreset ? undefined : migrateTuning}
             disabled={disabled}
             open={tuningMenuOpen}
             onOpenChange={onTuningMenuOpenChange}
