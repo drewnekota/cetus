@@ -1,4 +1,3 @@
-use base64::Engine as _;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -29,7 +28,7 @@ pub(super) fn normalize_content(v: &Value) -> Value {
                                     | "file"
                             )
                         ) {
-                            json!({ "type": "text", "text": "[Artifact delivered to user]" })
+                            json!({ "type": "text", "text": "[Media returned to agent]" })
                         } else if let Some(t) = o.get("text").and_then(|t| t.as_str()) {
                             json!({ "type": "text", "text": t })
                         } else {
@@ -47,11 +46,9 @@ pub(super) fn normalize_content(v: &Value) -> Value {
                 Some("image" | "input_image" | "inputImage" | "input_file" | "inputFile" | "file")
             ) =>
         {
-            // `extracted_artifact_details` materializes inline base64 before
-            // this normalization runs. Never persist the original object as
-            // text: doing so duplicates multi-megabyte media into Cetus's
-            // transcript even though the artifact already has a local path.
-            json!([{ "type": "text", "text": "[Artifact delivered to user]" }])
+            // Keep binary tool observations out of the transcript. Receiving
+            // media is not an instruction to deliver it to the user.
+            json!([{ "type": "text", "text": "[Media returned to agent]" }])
         }
         Value::Null => json!([]),
         other => json!([{ "type": "text", "text": other.to_string() }]),
@@ -226,47 +223,6 @@ pub(super) fn artifact_details(
     }))
 }
 
-fn extension_for_mime(mime: &str) -> &'static str {
-    match mime {
-        "image/png" => "png",
-        "image/jpeg" => "jpg",
-        "image/gif" => "gif",
-        "image/webp" => "webp",
-        "image/svg+xml" => "svg",
-        "application/pdf" => "pdf",
-        "text/plain" => "txt",
-        "text/markdown" => "md",
-        "text/html" => "html",
-        "application/json" => "json",
-        "text/csv" => "csv",
-        "audio/mpeg" => "mp3",
-        "audio/wav" => "wav",
-        "video/mp4" => "mp4",
-        _ => "bin",
-    }
-}
-
-fn persist_inline_artifact(data: &str, mime: &str, dir: &Path) -> Option<Value> {
-    if data.trim().is_empty() {
-        return None;
-    }
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .ok()?;
-    std::fs::create_dir_all(dir).ok()?;
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_millis();
-    let sequence = ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let path = dir.join(format!(
-        "runtime-artifact-{millis}-{sequence}.{}",
-        extension_for_mime(mime)
-    ));
-    std::fs::write(&path, bytes).ok()?;
-    artifact_details(&path, Some(mime), None)
-}
-
 fn resolve_file_path(raw: &str, cwd: Option<&Path>) -> Option<PathBuf> {
     let raw = raw.trim().trim_matches(|c: char| {
         matches!(
@@ -291,8 +247,8 @@ fn resolve_file_path(raw: &str, cwd: Option<&Path>) -> Option<PathBuf> {
 /// Tool output often reports unrelated existing files (for example, `simctl`
 /// prints `Image Path: /.../runtime.dmg`). Treating generic `path:` / `file:` /
 /// `saved to` prose as delivery intent makes those files appear in chat even
-/// though the agent never sent them. Structured runtime file blocks are still
-/// handled by `collect_artifacts`; plain text must use `cetus artifact <path>`.
+/// though the agent never sent them. Delivery requires `cetus artifact <path>`
+/// or explicit structured artifact details from `send_artifact`.
 fn paths_from_text(text: &str, cwd: Option<&Path>) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for line in text.lines() {
@@ -311,95 +267,23 @@ fn paths_from_text(text: &str, cwd: Option<&Path>) -> Vec<PathBuf> {
     paths
 }
 
-fn collect_artifacts(
-    value: &Value,
-    artifact_dir: Option<&Path>,
-    cwd: Option<&Path>,
-    out: &mut Vec<Value>,
-) {
+/// Ordinary runtime images, files and paths are observations, not deliveries.
+fn collect_artifacts(value: &Value, cwd: Option<&Path>, out: &mut Vec<Value>) {
     match value {
-        Value::String(text) => {
-            if let Some(rest) = text.strip_prefix("data:") {
-                if let Some((meta, data)) = rest.split_once(',') {
-                    if meta.ends_with(";base64") {
-                        if let Some(dir) = artifact_dir {
-                            if let Some(artifact) =
-                                persist_inline_artifact(data, meta.trim_end_matches(";base64"), dir)
-                            {
-                                out.push(artifact);
-                            }
-                        }
-                    }
-                }
-            } else {
-                out.extend(
-                    paths_from_text(text, cwd)
-                        .into_iter()
-                        .filter_map(|path| artifact_details(&path, None, None)),
-                );
-            }
-        }
+        Value::String(text) => out.extend(
+            paths_from_text(text, cwd)
+                .into_iter()
+                .filter_map(|path| artifact_details(&path, None, None)),
+        ),
         Value::Array(items) => {
             for item in items {
-                collect_artifacts(item, artifact_dir, cwd, out);
+                collect_artifacts(item, cwd, out);
             }
         }
         Value::Object(object) => {
             if object.get("kind").and_then(Value::as_str) == Some("artifact") {
                 out.push(value.clone());
                 return;
-            }
-            let mime = object
-                .get("mimeType")
-                .or_else(|| object.get("mime_type"))
-                .or_else(|| object.get("media_type"))
-                .and_then(Value::as_str);
-            let caption = object.get("caption").and_then(Value::as_str);
-            for key in [
-                "path",
-                "file_path",
-                "filePath",
-                "output_path",
-                "outputPath",
-                "local_path",
-                "localPath",
-            ] {
-                if let Some(path) = object
-                    .get(key)
-                    .and_then(Value::as_str)
-                    .and_then(|p| resolve_file_path(p, cwd))
-                {
-                    if let Some(artifact) = artifact_details(&path, mime, caption) {
-                        out.push(artifact);
-                    }
-                }
-            }
-            let block_type = object.get("type").and_then(Value::as_str).unwrap_or("");
-            if matches!(
-                block_type,
-                "image" | "input_image" | "inputImage" | "input_file" | "inputFile" | "file"
-            ) {
-                if let Some(url) = object
-                    .get("image_url")
-                    .or_else(|| object.get("imageUrl"))
-                    .or_else(|| object.get("url"))
-                {
-                    collect_artifacts(url, artifact_dir, cwd, out);
-                }
-                if let (Some(data), Some(dir)) =
-                    (object.get("data").and_then(Value::as_str), artifact_dir)
-                {
-                    if let Some(artifact) = persist_inline_artifact(
-                        data,
-                        mime.unwrap_or("application/octet-stream"),
-                        dir,
-                    ) {
-                        out.push(artifact);
-                    }
-                }
-                if let Some(source) = object.get("source") {
-                    collect_artifacts(source, artifact_dir, cwd, out);
-                }
             }
             for (key, child) in object {
                 if !matches!(
@@ -417,7 +301,7 @@ fn collect_artifacts(
                         | "url"
                         | "source"
                 ) {
-                    collect_artifacts(child, artifact_dir, cwd, out);
+                    collect_artifacts(child, cwd, out);
                 }
             }
         }
@@ -427,11 +311,11 @@ fn collect_artifacts(
 
 pub(super) fn extracted_artifact_details(
     value: &Value,
-    artifact_dir: Option<&Path>,
+    _artifact_dir: Option<&Path>,
     cwd: Option<&Path>,
 ) -> Option<Value> {
     let mut artifacts = Vec::new();
-    collect_artifacts(value, artifact_dir, cwd, &mut artifacts);
+    collect_artifacts(value, cwd, &mut artifacts);
     let mut seen = HashSet::new();
     artifacts.retain(|artifact| {
         artifact

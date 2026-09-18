@@ -35,26 +35,41 @@ fn prose_paths_are_not_promoted_to_artifacts() {
 }
 
 #[test]
-fn inline_file_data_is_materialized_in_managed_storage() {
-    let dir = artifact_test_dir("inline");
-    let details = extracted_artifact_details(
-        &json!({
-            "type": "input_file",
-            "data": base64::engine::general_purpose::STANDARD.encode(b"hello"),
-            "mimeType": "text/plain"
-        }),
-        Some(&dir),
-        Some(&dir),
-    )
-    .unwrap();
-    let path = PathBuf::from(details["path"].as_str().unwrap());
-    assert_eq!(std::fs::read(path).unwrap(), b"hello");
-    assert_eq!(details["artifactKind"], json!("text"));
+fn tool_media_and_paths_are_not_deliveries() {
+    let dir = artifact_test_dir("observations");
+    let file = dir.join("crop.png");
+    std::fs::write(&file, b"fake-png").unwrap();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(b"fake-png");
+    for value in [
+        json!({ "type": "image", "data": encoded, "mimeType": "image/png" }),
+        json!({ "type": "input_file", "data": encoded, "mimeType": "text/plain" }),
+        json!({ "type": "image", "source": { "type": "base64", "data": encoded } }),
+        json!({ "type": "input_image", "image_url": format!("data:image/png;base64,{encoded}") }),
+        json!(format!("data:image/png;base64,{encoded}")),
+        json!({ "type": "file", "path": file }),
+        json!({ "output_path": file }),
+    ] {
+        assert!(extracted_artifact_details(&value, Some(&dir), Some(&dir)).is_none());
+    }
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-fn codex_image_generation_becomes_answer_artifact() {
+fn explicit_structured_artifact_is_delivered() {
+    let dir = artifact_test_dir("explicit-image");
+    let file = dir.join("answer.png");
+    std::fs::write(&file, b"fake-png").unwrap();
+    let details = artifact_details(&file, None, Some("Answer")).unwrap();
+    assert_eq!(
+        extracted_artifact_details(&json!({ "details": details }), Some(&dir), Some(&dir)),
+        Some(details)
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn codex_image_generation_requires_explicit_delivery() {
     let dir = artifact_test_dir("codex-image");
     let mut tr =
         EventTranslator::new(CliBackend::Codex).with_artifact_storage(dir.clone(), dir.clone());
@@ -67,8 +82,11 @@ fn codex_image_generation_becomes_answer_artifact() {
         .iter()
         .find(|event| event["type"] == "tool_execution_end")
         .unwrap();
-    assert_eq!(end["result"]["details"]["artifactKind"], json!("image"));
-    assert!(Path::new(end["result"]["details"]["path"].as_str().unwrap()).is_file());
+    assert!(end["result"]["details"].is_null());
+    assert_eq!(
+        end["result"]["content"][0]["text"],
+        json!("[Media returned to agent]")
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -87,8 +105,8 @@ fn dynamic_tool_can_deliver_multiple_file_types() {
         "tool": "export",
         "arguments": {},
         "contentItems": [
-            { "type": "file", "path": pdf },
-            { "type": "file", "path": archive }
+            { "type": "text", "text": format!("CETUS_ARTIFACT:{}", json!({ "path": pdf })) },
+            { "type": "text", "text": format!("CETUS_ARTIFACT:{}", json!({ "path": archive })) }
         ],
         "success": true
     }));
