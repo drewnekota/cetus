@@ -57,7 +57,7 @@ export const board = {
 
     "card.untitled": "未命名",
     "card.streaming": "生成中",
-    "card.createdByAutomation": "由自动化创建",
+    "card.createdByAutomation": "由定时任务创建",
     "card.reviewed": "已审核",
     "card.needsYourReview": "需要你的审核",
     "card.approve": "通过",

@@ -298,7 +298,7 @@ export const chat = {
     "model.custom": "自定义模型",
     "mention.tab.all": "全部",
     "mention.tab.functions": "功能",
-    "mention.tab.automations": "自动化",
+    "mention.tab.automations": "定时任务",
     "mention.tab.artifacts": "产物",
     "mention.tab.files": "文件",
     "mention.tab.conversations": "会话",
