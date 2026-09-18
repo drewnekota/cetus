@@ -212,7 +212,7 @@ export const zh = {
   "notifications.mute.description": "仅在窗口处于后台时通知。",
   "notifications.event.task_finished.label": "任务完成",
   "notifications.event.task_finished.description":
-    "一次智能体运行已结束——可能是对话回复、看板任务或定时自动化（无论成功或出错）。",
+    "一次智能体运行已结束——可能是对话回复、看板任务或定时任务（无论成功或出错）。",
   "notifications.event.awaiting_input.label": "需要你的输入",
   "notifications.event.awaiting_input.description":
     "智能体正在等待你回应提示。",
@@ -493,7 +493,7 @@ export const zh = {
     "把你长时间未处理的对话自动移入归档。归档后仍可在此恢复。",
   "autoArchive.threshold.label": "归档阈值",
   "autoArchive.threshold.description":
-    "对话闲置多久后自动归档。正在打开的对话、还没读的运行结果，以及自动化（Automation）产生的对话不会被归档。",
+    "对话闲置多久后自动归档。正在打开的对话、还没读的运行结果，以及定时任务（Automation）产生的对话不会被归档。",
   "autoArchive.unit.hours": "小时",
   "autoArchive.unit.days": "天",
 

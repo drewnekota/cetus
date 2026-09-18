@@ -55,7 +55,7 @@ export const sidebar = {
   zh: {
     "new.chat": "新建对话",
     "new.task": "新建任务",
-    "nav.automations": "自动化",
+    "nav.automations": "定时任务",
     "nav.browser": "浏览器",
     "section.workspaces": "工作区",
     "section.pinned": "置顶",
