@@ -45,6 +45,9 @@ export const ru = {
   "general.confirmQuit.label": "Подтверждать выход",
   "general.confirmQuit.description":
     "Спрашивать перед тем, как Cmd+Q закроет Cetus, чтобы случайное нажатие не прервало работающих агентов.",
+  "general.keepAwake.label": "Не давать Mac засыпать во время работы",
+  "general.keepAwake.description":
+    "Блокирует переход в режим сна, пока выполняется ход агента или идёт запись встречи. Экран по-прежнему гаснет и блокируется; закрытие крышки по-прежнему переводит в сон.",
   "nav.api-keys": "API-ключи",
   "nav.memory": "Память",
   "nav.skills": "Навыки",

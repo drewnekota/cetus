@@ -577,6 +577,9 @@ async fn start_internal(
             last_activity: last_activity.clone(),
         });
         drop(slot);
+        // A recording must outlive the idle-sleep timer (released in the
+        // reader's cleanup below, alongside the slot).
+        crate::awake::meeting_begin();
 
         emit_meeting_event(app, "started", &id, app_hint.as_deref(), None);
         spawn_pill_watcher(app.clone(), id.clone());
@@ -882,6 +885,7 @@ async fn run_reader(
             *slot = None;
         }
     }
+    crate::awake::meeting_end();
     // Announce the end immediately (the HUD and Settings resync off this);
     // "saved" follows once the summary lands.
     emit_meeting_event(&app, "stopped", &id, app_hint.as_deref(), None);

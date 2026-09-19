@@ -17,6 +17,7 @@ mod auto_archive;
 mod automation;
 mod automation_api;
 mod automation_tool;
+mod awake;
 mod ax;
 mod bash;
 mod biasing;
@@ -590,6 +591,9 @@ pub fn run() {
                 cli_command_catalogs: std::sync::Mutex::new(HashMap::new()),
                 cli_auto_retry: std::sync::Mutex::new(HashMap::new()),
             });
+            // Idle-sleep holds (agent turns, meetings, remote access). Must be
+            // live before the remote server starts so its hold registers.
+            awake::initialize(app.handle());
             let remote_runtime = remote::RemoteRuntime::new(&app.state::<AppState>().store);
             app.manage(remote_runtime);
             remote::initialize(app.handle().clone());
@@ -1072,6 +1076,7 @@ pub fn run() {
         commands::set_conversation_cli_model,
         remote::get_remote_settings,
         remote::set_remote_enabled,
+        remote::set_remote_keep_awake,
         remote::rotate_remote_access,
         resources::resources_snapshot,
         cli_backend::get_cli_agent_settings,
@@ -1264,6 +1269,7 @@ pub fn run() {
         commands::set_conversation_cli_model,
         remote::get_remote_settings,
         remote::set_remote_enabled,
+        remote::set_remote_keep_awake,
         remote::rotate_remote_access,
         resources::resources_snapshot,
         cli_backend::get_cli_agent_settings,

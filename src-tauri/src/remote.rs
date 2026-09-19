@@ -70,6 +70,7 @@ impl RemoteRuntime {
             events: self.events.clone(),
             pending_controls: self.pending_controls.clone(),
         };
+        crate::awake::set_remote_active(true);
         *task = Some(tauri::async_runtime::spawn(async move {
             let router = router(web);
             let addr = SocketAddr::from(([127, 0, 0, 1], PORT));
@@ -89,6 +90,7 @@ impl RemoteRuntime {
         if let Some(task) = self.task.lock().unwrap().take() {
             task.abort();
         }
+        crate::awake::set_remote_active(false);
     }
 }
 
@@ -149,6 +151,10 @@ pub fn initialize(app: AppHandle) {
 #[serde(rename_all = "camelCase")]
 pub struct RemoteSettings {
     enabled: bool,
+    /// Hold off system idle sleep while remote access is enabled so the phone
+    /// can always reach this Mac. Display sleep and the lock screen are
+    /// unaffected.
+    keep_awake: bool,
     port: u16,
     access_url: String,
     pairing_url: String,
@@ -195,6 +201,24 @@ pub async fn set_remote_enabled(
 }
 
 #[tauri::command]
+pub async fn set_remote_keep_awake(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    runtime: State<'_, RemoteRuntime>,
+    enabled: bool,
+) -> Result<RemoteSettings, String> {
+    state
+        .store
+        .set_setting(
+            crate::awake::REMOTE_KEEP_AWAKE_KEY,
+            if enabled { "true" } else { "false" },
+        )
+        .map_err(|e| e.to_string())?;
+    crate::awake::set_remote_pref(enabled);
+    Ok(settings(&app, &state, &runtime))
+}
+
+#[tauri::command]
 pub async fn rotate_remote_access(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -219,6 +243,13 @@ fn settings(_app: &AppHandle, state: &AppState, runtime: &RemoteRuntime) -> Remo
         .flatten()
         .as_deref()
         == Some("true");
+    let keep_awake = state
+        .store
+        .get_setting(crate::awake::REMOTE_KEEP_AWAKE_KEY)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true");
     let (access_url, tailscale_ready, tailscale_message) = tailscale_url();
     let pairing_url = format!("{access_url}/pair?token={}", runtime.token());
     let pairing_qr_svg = QrCode::new(pairing_url.as_bytes())
@@ -232,6 +263,7 @@ fn settings(_app: &AppHandle, state: &AppState, runtime: &RemoteRuntime) -> Remo
         .unwrap_or_default();
     RemoteSettings {
         enabled,
+        keep_awake,
         port: PORT,
         access_url,
         pairing_url,

@@ -1061,7 +1061,12 @@ pub fn order_out(ns_window: *mut c_void) {
 pub fn prevent_app_nap() {
     // NSActivityUserInitiatedAllowingIdleSystemSleep — prevents App Nap (and
     // sudden / automatic termination) while still letting the system idle-sleep.
-    const NS_ACTIVITY_USER_INITIATED_ALLOWING_IDLE_SYSTEM_SLEEP: u64 = 0x00FF_FFFF;
+    // NSProcessInfo.h: UserInitiated = 0x00FFFFFF (which already carries the
+    // IdleSystemSleepDisabled bit, 1 << 20); the AllowingIdleSystemSleep
+    // variant masks that bit off. 0x00FFFFFF here used to pin a permanent
+    // PreventUserIdleSystemSleep assertion for the app's whole lifetime —
+    // sleep suppression is opt-in and scoped in `awake` instead.
+    const NS_ACTIVITY_USER_INITIATED_ALLOWING_IDLE_SYSTEM_SLEEP: u64 = 0x00EF_FFFF;
     unsafe {
         let (Some(pinfo_cls), Some(str_cls)) =
             (AnyClass::get(c"NSProcessInfo"), AnyClass::get(c"NSString"))
@@ -1302,5 +1307,40 @@ pub fn install_activation_watch(on_event: impl Fn(&'static str) + 'static) {
                 let _: *mut AnyObject = msg_send![token, retain];
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod app_nap_tests {
+    /// The App Nap activity must not double as a sleep assertion: `pmset` lists
+    /// every `PreventUserIdleSystemSleep` holder by reason string, and ours
+    /// must never appear there (it did while the options constant carried the
+    /// IdleSystemSleepDisabled bit).
+    #[test]
+    fn app_nap_activity_allows_idle_sleep() {
+        super::prevent_app_nap();
+        // Registration is asynchronous; give it ample time to show up if it
+        // is going to.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let out = std::process::Command::new("pmset")
+            .args(["-g", "assertions"])
+            .output()
+            .expect("pmset");
+        let text = String::from_utf8_lossy(&out.stdout);
+        // Only this process: a running cetus.app (possibly an older build)
+        // shows up in the same listing.
+        let me = format!("pid {}(", std::process::id());
+        let offending: Vec<&str> = text
+            .lines()
+            .filter(|l| {
+                l.contains(&me)
+                    && l.contains("cetus keeps its window rendered")
+                    && l.contains("PreventUserIdleSystemSleep")
+            })
+            .collect();
+        assert!(
+            offending.is_empty(),
+            "App Nap activity holds sleep: {offending:?}"
+        );
     }
 }

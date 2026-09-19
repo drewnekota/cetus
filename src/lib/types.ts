@@ -148,6 +148,9 @@ export interface QuickSettings {
   autoUpdate: boolean;
   /** Ask "Quit Cetus?" before quitting (Cmd+Q, menu, tray). On by default. */
   confirmQuit: boolean;
+  /** Keep the Mac from idle-sleeping while an agent turn or meeting recording
+   *  is running. System sleep only: the display still sleeps and locks. */
+  keepAwakeWhileWorking: boolean;
 }
 
 export const DEFAULT_QUICK_SETTINGS: QuickSettings = {
@@ -172,6 +175,7 @@ export const DEFAULT_QUICK_SETTINGS: QuickSettings = {
   launchOnStartup: false,
   autoUpdate: true,
   confirmQuit: true,
+  keepAwakeWhileWorking: true,
 };
 
 /** Metadata for an available app update (from the release manifest). */

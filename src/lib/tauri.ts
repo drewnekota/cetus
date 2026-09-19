@@ -176,6 +176,8 @@ export interface MeetingCaption {
 
 export interface RemoteSettings {
   enabled: boolean;
+  /** Hold off system idle sleep while remote access is on. */
+  keepAwake: boolean;
   port: number;
   accessUrl: string;
   pairingUrl: string;
@@ -235,6 +237,8 @@ export const api = {
   getRemoteSettings: () => invoke<RemoteSettings>("get_remote_settings"),
   setRemoteEnabled: (enabled: boolean) =>
     invoke<RemoteSettings>("set_remote_enabled", { enabled }),
+  setRemoteKeepAwake: (enabled: boolean) =>
+    invoke<RemoteSettings>("set_remote_keep_awake", { enabled }),
   rotateRemoteAccess: () => invoke<RemoteSettings>("rotate_remote_access"),
   /** Worktree path + branch of a CLI-backend conversation (null for pi
    *  conversations and non-git workspaces). */

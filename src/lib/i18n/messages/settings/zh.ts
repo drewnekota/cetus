@@ -55,6 +55,9 @@ export const zh = {
   "remote.enable": "启用手机伴侣",
   "remote.enableDescription":
     "启动仅监听本机的服务，并在可用时自动配置 Tailscale Serve。",
+  "remote.keepAwake.label": "远程访问开启时保持 Mac 唤醒",
+  "remote.keepAwake.description":
+    "手机伴侣开启期间阻止 Mac 进入睡眠，确保手机随时能连上这台 Mac。屏幕仍会正常关闭并锁定。",
   "remote.ready": "Tailnet 地址已就绪",
   "remote.localOnly": "本地服务已就绪",
   "remote.scanHint": "首次扫描二维码完成配对，之后手机会保留已认证的会话。",
@@ -96,6 +99,9 @@ export const zh = {
   "general.confirmQuit.label": "退出前确认",
   "general.confirmQuit.description":
     "按 Cmd+Q 退出 Cetus 前先询问，避免误触打断正在运行的智能体。",
+  "general.keepAwake.label": "任务运行时保持唤醒",
+  "general.keepAwake.description":
+    "智能体回合或会议录制进行中时阻止 Mac 进入睡眠。屏幕仍会正常关闭并锁定，合盖仍会睡眠。",
   "general.cliAgents.label": "CLI 智能体：跳过权限确认",
   "general.cliAgents.description":
     "允许外部 Runtime 跳过逐项确认。关闭后工具调用会通过聊天中的审批卡片先询问。",

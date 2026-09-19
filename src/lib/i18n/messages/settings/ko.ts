@@ -45,6 +45,9 @@ export const ko = {
   "general.confirmQuit.label": "종료 전 확인",
   "general.confirmQuit.description":
     "Cmd+Q로 Cetus를 종료하기 전에 확인하여 실수로 실행 중인 에이전트를 중단하지 않도록 합니다.",
+  "general.keepAwake.label": "작업 중 Mac 깨어 있게 유지",
+  "general.keepAwake.description":
+    "에이전트 턴이나 회의 녹음이 진행되는 동안 시스템 잠자기를 막습니다. 화면은 평소처럼 꺼지고 잠기며, 덮개를 닫으면 여전히 잠자기 상태가 됩니다.",
   "nav.api-keys": "API 키",
   "nav.memory": "메모리",
   "nav.skills": "스킬",

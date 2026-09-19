@@ -130,6 +130,11 @@ pub struct QuickSettings {
     /// session. Read at quit time, so toggling takes effect immediately.
     #[serde(default = "default_true")]
     pub confirm_quit: bool,
+    /// Keep the Mac from idle-sleeping while an agent turn or a meeting
+    /// recording is in flight (system sleep only — the display still sleeps
+    /// and locks). On by default; applied immediately via `awake`.
+    #[serde(default = "default_true")]
+    pub keep_awake_while_working: bool,
 }
 
 fn default_voice_start_sound() -> bool {
@@ -188,6 +193,7 @@ impl Default for QuickSettings {
             launch_on_startup: false,
             auto_update: true,
             confirm_quit: true,
+            keep_awake_while_working: true,
         }
     }
 }
@@ -564,6 +570,8 @@ pub async fn set_quick_settings(
     crate::apply_summon_hotkey(&app, &settings.summon_hotkey);
     // Keep the OS login item in sync with the toggle.
     crate::apply_launch_on_startup(&app, settings.launch_on_startup);
+    // Drops or takes the idle-sleep hold right away if work is in flight.
+    crate::awake::set_work_pref(settings.keep_awake_while_working);
     Ok(())
 }
 

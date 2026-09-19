@@ -133,6 +133,9 @@ export const en = {
   "remote.enable": "Enable mobile companion",
   "remote.enableDescription":
     "Starts a localhost-only server and configures Tailscale Serve when available.",
+  "remote.keepAwake.label": "Keep this Mac awake for remote access",
+  "remote.keepAwake.description":
+    "While the mobile companion is on, hold off system sleep so your phone can always reach this Mac. The display still sleeps and locks.",
   "remote.ready": "Tailnet address ready",
   "remote.localOnly": "Local server ready",
   "remote.scanHint":
@@ -185,6 +188,9 @@ export const en = {
   "general.confirmQuit.label": "Confirm before quitting",
   "general.confirmQuit.description":
     "Ask before Cmd+Q closes Cetus, so a slip of the hand doesn't interrupt running agents.",
+  "general.keepAwake.label": "Keep Mac awake while working",
+  "general.keepAwake.description":
+    "Hold off system sleep while an agent turn or meeting recording is running. The display still sleeps and locks; closing the lid still sleeps.",
   "general.cliAgents.label": "CLI agents: skip permission prompts",
   "general.cliAgents.description":
     "Let external runtimes run without approval prompts. Off = tool calls ask first through approval cards in the chat.",

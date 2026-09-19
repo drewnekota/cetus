@@ -45,6 +45,9 @@ export const de = {
   "general.confirmQuit.label": "Vor dem Beenden nachfragen",
   "general.confirmQuit.description":
     "Fragt nach, bevor Cmd+Q Cetus beendet, damit ein Fehlgriff keine laufenden Agenten unterbricht.",
+  "general.keepAwake.label": "Mac während der Arbeit wach halten",
+  "general.keepAwake.description":
+    "Verhindert den Ruhezustand, solange ein Agent-Durchlauf oder eine Meeting-Aufnahme läuft. Das Display schaltet sich weiterhin ab und sperrt sich; Zuklappen versetzt den Mac weiterhin in den Ruhezustand.",
   "nav.api-keys": "API-Schlüssel",
   "nav.memory": "Gedächtnis",
   "nav.skills": "Fähigkeiten",

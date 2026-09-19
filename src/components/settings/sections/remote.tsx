@@ -14,7 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { useTranslation } from "@/lib/i18n";
 import { api } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
-import { SectionHeading } from "../settings-controls";
+import { SectionHeading, ToggleRow } from "../settings-controls";
 
 export function RemoteSection() {
   const { t } = useTranslation("settings");
@@ -34,6 +34,15 @@ export function RemoteSection() {
     setBusy(true);
     try {
       setRemote(await api.setRemoteEnabled(enabled));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleKeepAwake(enabled: boolean) {
+    setBusy(true);
+    try {
+      setRemote(await api.setRemoteKeepAwake(enabled));
     } finally {
       setBusy(false);
     }
@@ -150,6 +159,16 @@ export function RemoteSection() {
             </div>
           </div>
         ) : null}
+      </div>
+      <div className="mt-2">
+        <ToggleRow
+          id="remote-keep-awake"
+          label={t("remote.keepAwake.label")}
+          description={t("remote.keepAwake.description")}
+          checked={remote?.keepAwake ?? false}
+          disabled={!remote || busy}
+          onCheckedChange={toggleKeepAwake}
+        />
       </div>
       <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
         {t("remote.security")}

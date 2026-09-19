@@ -45,6 +45,9 @@ export const fr = {
   "general.confirmQuit.label": "Confirmer avant de quitter",
   "general.confirmQuit.description":
     "Demande confirmation avant que Cmd+Q ne ferme Cetus, pour qu'une fausse manipulation n'interrompe pas les agents en cours.",
+  "general.keepAwake.label": "Garder le Mac éveillé pendant le travail",
+  "general.keepAwake.description":
+    "Empêche la mise en veille tant qu'un tour d'agent ou un enregistrement de réunion est en cours. L'écran s'éteint et se verrouille toujours ; fermer le capot met toujours en veille.",
   "nav.api-keys": "Clés API",
   "nav.memory": "Mémoire",
   "nav.skills": "Compétences",

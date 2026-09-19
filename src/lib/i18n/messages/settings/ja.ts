@@ -46,6 +46,9 @@ export const ja = {
   "general.confirmQuit.label": "終了前に確認",
   "general.confirmQuit.description":
     "Cmd+Q で Cetus を終了する前に確認し、誤操作で実行中のエージェントを中断しないようにします。",
+  "general.keepAwake.label": "作業中は Mac をスリープさせない",
+  "general.keepAwake.description":
+    "エージェントのターンや会議の録音中はシステムのスリープを抑止します。ディスプレイは通常どおり消灯・ロックされ、蓋を閉じるとスリープします。",
   "nav.api-keys": "API キー",
   "nav.memory": "メモリ",
   "nav.skills": "スキル",
