@@ -1,4 +1,8 @@
 export const es = {
+  "search.placeholder": "Buscar ajustes…",
+  "search.clear": "Borrar búsqueda",
+  "search.empty": "No hay ajustes coincidentes",
+
   "models.model.reasoningHint":
     "Activa Razonamiento en los modelos con parámetro de esfuerzo y habilita los niveles que admite tu endpoint. Cada nivel envía su propio nombre por defecto; escribe un token para sobrescribirlo. En «Formato» elige la forma del campo de esfuerzo que espera tu proveedor; los niveles deshabilitados se ajustan al habilitado más cercano.",
   "models.model.format": "Formato",

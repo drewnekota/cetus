@@ -6,8 +6,11 @@
 // as a dedicated page rather than a modal dialog, with a left section rail and
 // a scrollable content pane. Opened from the sidebar, the command palette, or
 // ⌘, ; closed with Back or Esc.
-import { memo, useEffect, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Search, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { meeting } from "@/lib/i18n/messages/meeting";
+import { en as settingsEnglish } from "@/lib/i18n/messages/settings/en";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/lib/i18n";
 import type { Conversation } from "@/lib/types";
@@ -105,6 +108,21 @@ const SECTION_GROUPS: { labelKey: string; sections: Section[] }[] = [
   },
 ];
 
+// Search static labels without mounting sections or loading their private data.
+const SEARCH_PREFIXES: Partial<Record<SectionId, string[]>> = {
+  general: ["general.", "update.", "diagnostics.", "launcher.startup."],
+  runtimes: ["runtimes.", "general.cli"],
+  "api-keys": ["apiKeys."],
+  "slash-commands": ["slashCmd."],
+  connectors: ["connectors.", "discovery."],
+  "keyboard-shortcuts": ["keyboard."],
+  screen: ["screen.", "ambient."],
+  archived: ["archived.", "autoArchive.", "autoDelete."],
+};
+const SEARCH_KEYS = Object.keys(settingsEnglish).filter((key) =>
+  /\.(label|title)$/.test(key),
+);
+
 const SETTINGS_SECTION_KEY = "cetus:settingsSection";
 
 const SECTION_IDS = new Set<SectionId>(
@@ -149,7 +167,38 @@ export const SettingsPage = memo(function SettingsPage({
 }: Props) {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
+  const { t: tm } = useTranslation("meeting");
   const [section, setSection] = useState<SectionId>(readSettingsSection);
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const searchIndex = useMemo(() => new Map(
+    SECTION_GROUPS.flatMap((group) => group.sections.map((item) => {
+      const prefixes = SEARCH_PREFIXES[item.id] ?? [`${item.id}.`];
+      const keys = SEARCH_KEYS.filter((key) =>
+        prefixes.some((prefix) => key.startsWith(prefix)) &&
+        !(item.id === "general" && key.startsWith("general.cli")),
+      );
+      const meetingLabels = item.id === "meetings"
+        ? Object.entries(meeting.en).filter(([key]) => /\.(label|title)$/.test(key))
+            .flatMap(([key, value]) => [tm(key), value])
+        : [];
+      const text = [...meetingLabels, item.id, t(item.labelKey), settingsEnglish[item.labelKey as keyof typeof settingsEnglish],
+        ...keys.flatMap((key) => [t(key), settingsEnglish[key as keyof typeof settingsEnglish]])]
+        .join(" ").normalize("NFKC").toLowerCase();
+      return [item.id, text] as const;
+    })),
+  ), [t, tm]);
+  const terms = search.normalize("NFKC").toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const filteredGroups = SECTION_GROUPS.map((group) => ({
+    ...group,
+    sections: group.sections.filter((item) =>
+      terms.every((term) => searchIndex.get(item.id)?.includes(term)),
+    ),
+  })).filter((group) => group.sections.length > 0);
+
+  useEffect(() => {
+    if (!open) setSearch("");
+  }, [open]);
 
   useEffect(() => {
     try {
@@ -158,7 +207,10 @@ export const SettingsPage = memo(function SettingsPage({
   }, [section]);
 
   useEffect(() => {
-    const showRuntimeSettings = () => setSection("runtimes");
+    const showRuntimeSettings = () => {
+      setSearch("");
+      setSection("runtimes");
+    };
     window.addEventListener(OPEN_RUNTIME_SETTINGS_EVENT, showRuntimeSettings);
     return () =>
       window.removeEventListener(
@@ -167,7 +219,7 @@ export const SettingsPage = memo(function SettingsPage({
       );
   }, []);
 
-  // Esc closes the page. Capture phase + stopPropagation keeps the shortcut
+  // Esc clears the search first, then closes the page. Capture phase keeps it
   // scoped to Settings instead of reaching the page underneath.
   useEffect(() => {
     if (!open) return;
@@ -176,12 +228,17 @@ export const SettingsPage = memo(function SettingsPage({
         if (document.documentElement.dataset.hotkeyRecording === "true") return;
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        if (search) {
+          setSearch("");
+          searchRef.current?.focus();
+        } else {
+          onClose();
+        }
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [open, onClose]);
+  }, [open, onClose, search]);
 
   // Keep the panel mounted across close/reopen (hidden via CSS) instead of
   // unmounting. Section selection, scroll position, and already-loaded data all
@@ -207,33 +264,63 @@ export const SettingsPage = memo(function SettingsPage({
         <span className="text-sm font-semibold">{t("page.title")}</span>
       </header>
       <div className="flex min-h-0 flex-1">
-        <nav className="scrollbar-slim w-52 shrink-0 overflow-y-auto border-r border-border bg-muted/20 p-2">
-          {SECTION_GROUPS.map((group) => (
-            <div key={group.labelKey} className="mb-3 last:mb-0">
-              <div className="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground">
-                {t(group.labelKey)}
+        <nav aria-label={t("page.title")} className="flex w-52 shrink-0 flex-col border-r border-border bg-muted/20">
+          <div className="relative m-2 shrink-0">
+            <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+            <Input
+              ref={searchRef}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={t("search.placeholder")}
+              aria-label={t("search.placeholder")}
+              className="pl-8 pr-8"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  const first = filteredGroups[0]?.sections[0];
+                  if (first) setSection(first.id);
+                }
+              }}
+            />
+            {search && (
+              <button type="button" aria-label={t("search.clear")}
+                className="absolute right-1 top-1 flex size-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-ring"
+                onClick={() => { setSearch(""); searchRef.current?.focus(); }}>
+                <X aria-hidden="true" className="size-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="scrollbar-slim min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            {filteredGroups.length === 0 && (
+              <p role="status" className="px-3 py-6 text-center text-xs text-muted-foreground">{t("search.empty")}</p>
+            )}
+            {filteredGroups.map((group) => (
+              <div key={group.labelKey} className="mb-3 last:mb-0">
+                <div className="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground">
+                  {t(group.labelKey)}
+                </div>
+                {group.sections.map((s) => {
+                  const active = section === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      data-testid={`nav-${s.id}`}
+                      aria-current={active ? "page" : undefined}
+                      type="button"
+                      onClick={() => setSection(s.id)}
+                      className={cn(
+                        "flex w-full items-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors motion-reduce:transition-none",
+                        active
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      {t(s.labelKey)}
+                    </button>
+                  );
+                })}
               </div>
-              {group.sections.map((s) => {
-                const active = section === s.id;
-                return (
-                  <button
-                    key={s.id}
-                    data-testid={`nav-${s.id}`}
-                    type="button"
-                    onClick={() => setSection(s.id)}
-                    className={cn(
-                      "flex w-full items-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors motion-reduce:transition-none",
-                      active
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    {t(s.labelKey)}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+            ))}
+          </div>
         </nav>
         <main className="scrollbar-slim min-w-0 flex-1 overflow-y-auto bg-muted/10">
           <div className="mx-auto w-full max-w-3xl px-6 py-8">

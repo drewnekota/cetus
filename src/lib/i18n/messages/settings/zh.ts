@@ -1,4 +1,8 @@
 export const zh = {
+  "search.placeholder": "搜索设置…",
+  "search.clear": "清除搜索",
+  "search.empty": "没有匹配的设置",
+
   "appearance.wallpaper.label": "背景图片",
   "appearance.wallpaper.description":
     "上传图片作为首页和聊天背景。支持 JPG、PNG、WebP，最大 20 MB，仅保存在本机。",

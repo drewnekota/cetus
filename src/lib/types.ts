@@ -465,6 +465,8 @@ export interface QuickLaunchPayload {
   cliEffort: string;
   /** "Create more": launch in the background and keep the launcher open. */
   keepOpen?: boolean;
+  /** Open the main app after sending; defaults to true. Create more takes precedence. */
+  openMain?: boolean;
 }
 
 export const DEFAULT_MODEL_CHOICE: ModelChoice = {

@@ -1,4 +1,8 @@
 export const ko = {
+  "search.placeholder": "설정 검색…",
+  "search.clear": "검색 지우기",
+  "search.empty": "일치하는 설정이 없습니다",
+
   "models.model.reasoningHint":
     "추론 강도 파라미터가 있는 모델은 '추론'을 켜고 엔드포인트가 지원하는 레벨을 활성화하세요. 각 레벨은 기본적으로 레벨 이름을 그대로 보내며, 토큰을 입력해 재정의할 수 있습니다. '형식'은 공급자가 기대하는 effort 필드 형태를 선택합니다. 비활성 레벨은 가장 가까운 활성 레벨로 조정됩니다.",
   "models.model.format": "형식",

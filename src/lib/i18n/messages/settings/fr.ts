@@ -1,4 +1,8 @@
 export const fr = {
+  "search.placeholder": "Rechercher un réglage…",
+  "search.clear": "Effacer la recherche",
+  "search.empty": "Aucun réglage trouvé",
+
   "models.model.reasoningHint":
     "Activez Raisonnement pour les modèles dotés d'un réglage d'effort, puis activez les niveaux pris en charge par votre endpoint. Chaque niveau envoie son propre nom par défaut ; saisissez un token pour le remplacer. « Format » définit la forme du champ d'effort attendue par votre fournisseur ; les niveaux désactivés sont ramenés au niveau activé le plus proche.",
   "models.model.format": "Format",

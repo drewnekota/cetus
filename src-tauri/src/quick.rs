@@ -679,11 +679,15 @@ pub struct QuickSubmit {
     /// typed right away.
     #[serde(default)]
     pub keep_open: bool,
+    /// Bring the main app forward after sending, unless Create more is enabled.
+    #[serde(default = "default_true")]
+    pub open_main: bool,
 }
 
-/// Hand the captured prompt to the main window, bring it forward, hide the
-/// panel. The main window owns conversation create/reuse and the optimistic
-/// user-bubble render, so we just forward the payload as a `quick-launch` event.
+/// Hand the captured prompt to the main window, optionally bring it forward,
+/// and hide the panel unless Create more is enabled. The main window owns
+/// conversation create/reuse and the optimistic user-bubble render, so we just
+/// forward the payload as a `quick-launch` event.
 #[tauri::command]
 pub async fn quick_submit(app: AppHandle, payload: QuickSubmit) -> Result<(), String> {
     let _ = app.emit_to(
@@ -708,7 +712,9 @@ pub async fn quick_submit(app: AppHandle, payload: QuickSubmit) -> Result<(), St
     }
     // Routes through `focus_main` so a parked (warm off-screen) main window is
     // restored to its real position before it's brought forward.
-    crate::focus_main(&app);
+    if payload.open_main {
+        crate::focus_main(&app);
+    }
     park_quick(&app);
     Ok(())
 }

@@ -1,4 +1,8 @@
 export const it = {
+  "search.placeholder": "Cerca impostazioni…",
+  "search.clear": "Cancella ricerca",
+  "search.empty": "Nessuna impostazione trovata",
+
   "models.model.reasoningHint":
     "Attiva Ragionamento per i modelli con un parametro di sforzo e abilita i livelli supportati dal tuo endpoint. Ogni livello invia il proprio nome per impostazione predefinita; digita un token per sovrascriverlo. In «Formato» scegli la forma del campo attesa dal fornitore; i livelli disabilitati vengono ricondotti al più vicino abilitato.",
   "models.model.format": "Formato",

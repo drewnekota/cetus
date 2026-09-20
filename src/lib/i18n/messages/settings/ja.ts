@@ -1,4 +1,8 @@
 export const ja = {
+  "search.placeholder": "設定を検索…",
+  "search.clear": "検索をクリア",
+  "search.empty": "一致する設定はありません",
+
   "models.model.reasoningHint":
     "推論の強度パラメーターを持つモデルでは「推論」をオンにし、エンドポイントが対応するレベルを有効にしてください。各レベルは既定でレベル名をそのまま送信し、トークンを入力すると上書きできます。「形式」はベンダーが期待する effort フィールドの形を選択します。無効なレベルは最も近い有効レベルに丸められます。",
   "models.model.format": "形式",

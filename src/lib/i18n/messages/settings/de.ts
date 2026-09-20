@@ -1,4 +1,8 @@
 export const de = {
+  "search.placeholder": "Einstellungen suchen…",
+  "search.clear": "Suche löschen",
+  "search.empty": "Keine passenden Einstellungen",
+
   "models.model.reasoningHint":
     "Aktiviere Reasoning bei Modellen mit Effort-Parameter und schalte die Stufen frei, die dein Endpunkt unterstützt. Jede Stufe sendet standardmäßig ihren eigenen Namen; ein eingetragenes Token überschreibt das. Unter „Format“ wählst du die Feldform deines Anbieters; deaktivierte Stufen werden auf die nächste aktive geklemmt.",
   "models.model.format": "Format",

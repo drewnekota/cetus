@@ -1,4 +1,8 @@
 export const pt = {
+  "search.placeholder": "Buscar configurações…",
+  "search.clear": "Limpar busca",
+  "search.empty": "Nenhuma configuração encontrada",
+
   "models.model.reasoningHint":
     "Ative Raciocínio nos modelos com parâmetro de esforço e habilite os níveis que seu endpoint aceita. Cada nível envia o próprio nome por padrão; digite um token para sobrescrever. Em “Formato”, escolha a forma do campo de esforço que seu fornecedor espera; níveis desabilitados são ajustados ao habilitado mais próximo.",
   "models.model.format": "Formato",

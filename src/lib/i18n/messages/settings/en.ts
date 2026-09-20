@@ -1,4 +1,8 @@
 export const en = {
+  "search.placeholder": "Search settings…",
+  "search.clear": "Clear search",
+  "search.empty": "No matching settings",
+
   "appearance.wallpaper.label": "Background image",
   "appearance.wallpaper.description":
     "Choose a local image for the home and chat background. JPG, PNG or WebP, up to 20 MB. Images stay on this device.",

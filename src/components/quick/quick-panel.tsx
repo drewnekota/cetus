@@ -82,6 +82,7 @@ const TEXTAREA_LINE_PX = 24;
 const TEXTAREA_MAX_LINES = 8;
 /** Sticky "Create more" switch: keep the launcher up after each launch. */
 const KEEP_OPEN_STORAGE_KEY = "cetus:quickKeepOpen";
+const OPEN_MAIN_STORAGE_KEY = "cetus:quickOpenMain";
 
 function readZoom(): number {
   try {
@@ -144,6 +145,7 @@ export function QuickPanel() {
   // "Create more": each launch runs in the background and the panel stays up
   // for the next one instead of handing off to the main window.
   const [keepOpen, setKeepOpen] = useState(false);
+  const [openMain, setOpenMain] = useState(true);
   // Bumped per background launch; drives the transient "Started" confirmation.
   const [launchedTick, setLaunchedTick] = useState(0);
   // Whether any non-archived chat exists — gates the "Last" session option.
@@ -241,12 +243,20 @@ export function QuickPanel() {
   useEffect(() => {
     try {
       setKeepOpen(localStorage.getItem(KEEP_OPEN_STORAGE_KEY) === "1");
+      setOpenMain(localStorage.getItem(OPEN_MAIN_STORAGE_KEY) !== "0");
     } catch {}
   }, []);
   const onKeepOpenChange = useCallback((next: boolean) => {
     setKeepOpen(next);
     try {
       localStorage.setItem(KEEP_OPEN_STORAGE_KEY, next ? "1" : "0");
+    } catch {}
+  }, []);
+
+  const onOpenMainChange = useCallback((next: boolean) => {
+    setOpenMain(next);
+    try {
+      localStorage.setItem(OPEN_MAIN_STORAGE_KEY, next ? "1" : "0");
     } catch {}
   }, []);
 
@@ -635,6 +645,7 @@ export function QuickPanel() {
         cliModel: backend === "pi" ? "" : cliModel,
         cliEffort: backend === "pi" ? "" : cliEffort,
         keepOpen,
+        openMain,
       });
       // quick_submit hides the window for us (unless keepOpen); clear for the
       // next open so a with-screenshot submit doesn't leave a stale thumbnail
@@ -659,7 +670,7 @@ export function QuickPanel() {
       setSubmitting(false);
       submittingRef.current = false;
     }
-  }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, backend, cliModel, cliEffort, keepOpen, focusSoon]);
+  }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, backend, cliModel, cliEffort, keepOpen, openMain, focusSoon]);
 
   const insertReply = useCallback(async () => {
     const value = replyDraft.trim();
@@ -852,30 +863,51 @@ export function QuickPanel() {
           grows with the text (capped, then scrolls) and the attachment chips
           (when present) tuck in under it. Clicking the empty space focuses. */}
       <div className="relative flex flex-1 flex-col px-5 pt-4 pb-3" onMouseDown={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); taRef.current?.focus(); } }}>
-        {/* "Create more" lives in the top-right corner of the input, out of the
-            crowded action strip: a plain label + switch, no icon. The textarea
-            keeps a right gutter so the first line never runs under it. */}
-        <TooltipProvider disableHoverableContent>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <label
-                className={cn(
-                  "absolute right-3 top-2.5 flex h-7 shrink-0 cursor-pointer select-none items-center gap-2 whitespace-nowrap rounded-md px-2 text-xs font-medium transition-colors hover:bg-black/5 dark:hover:bg-white/[0.08]",
-                  keepOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {t("footer.createMore")}
-                <Switch
-                  size="sm"
-                  checked={keepOpen}
-                  onCheckedChange={onKeepOpenChange}
-                  aria-label={t("footer.createMore")}
-                />
-              </label>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t("footer.createMore.hint")}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        {/* Keep launch preferences together above the full-width input. */}
+        <div className="-mt-1.5 mb-2 flex flex-wrap justify-end gap-x-2">
+          <TooltipProvider disableHoverableContent>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <label
+                  className={cn(
+                    "flex h-7 shrink-0 cursor-pointer select-none items-center gap-2 whitespace-nowrap rounded-md px-2 text-xs font-medium transition-colors hover:bg-black/5 dark:hover:bg-white/[0.08]",
+                    keepOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t("footer.createMore")}
+                  <Switch
+                    size="sm"
+                    checked={keepOpen}
+                    onCheckedChange={onKeepOpenChange}
+                    aria-label={t("footer.createMore")}
+                  />
+                </label>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("footer.createMore.hint")}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <label
+                  className={cn(
+                    "flex h-7 shrink-0 select-none items-center gap-2 whitespace-nowrap rounded-md px-2 text-xs font-medium transition-colors",
+                    keepOpen ? "cursor-not-allowed text-muted-foreground opacity-50" : "cursor-pointer hover:bg-black/5 dark:hover:bg-white/[0.08]",
+                    !keepOpen && (openMain ? "text-foreground" : "text-muted-foreground hover:text-foreground"),
+                  )}
+                >
+                  {t("footer.openMain")}
+                  <Switch
+                    size="sm"
+                    checked={openMain}
+                    disabled={keepOpen}
+                    onCheckedChange={onOpenMainChange}
+                    aria-label={t("footer.openMain")}
+                  />
+                </label>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t(keepOpen ? "footer.openMain.keepOpenHint" : "footer.openMain.hint")}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
         <textarea
           ref={taRef}
           autoFocus
@@ -885,7 +917,7 @@ export function QuickPanel() {
           onKeyDown={onKeyDown}
           placeholder={t("launcher.placeholder")}
           rows={1}
-          className="w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent pr-36 text-base font-normal text-foreground outline-none placeholder:text-muted-foreground/60"
+          className="w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent text-base font-normal text-foreground outline-none placeholder:text-muted-foreground/60"
         />
 
         {/* Attachments band — screenshot thumbnail (or its denied hint) and the

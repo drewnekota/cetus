@@ -27,9 +27,10 @@ interface HighlightRegistry {
 
 function registry(): HighlightRegistry | null {
   const css = globalThis.CSS as unknown as
-    | { highlights?: HighlightRegistry; Highlight?: unknown }
+    | { highlights?: HighlightRegistry }
     | undefined;
-  return css?.highlights && typeof css.Highlight === "function"
+  // Highlight is a global constructor; only the registry lives under CSS.
+  return css?.highlights && typeof globalThis.Highlight === "function"
     ? css.highlights
     : null;
 }
@@ -102,8 +103,6 @@ export function paintFindHighlights(
     return null;
   }
 
-  const Highlight = (globalThis.CSS as unknown as { Highlight: new (...r: Range[]) => unknown })
-    .Highlight;
   const all: Range[] = [];
   let activeRange: Range | null = null;
 
