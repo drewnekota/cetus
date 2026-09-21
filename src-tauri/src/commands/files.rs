@@ -121,7 +121,8 @@ pub async fn read_dropped_file(path: String, max_bytes: u64) -> CmdResult<Droppe
 
 #[tauri::command]
 pub async fn read_text_file(path: String) -> CmdResult<String> {
-    const MAX_BYTES: u64 = 4 * 1024 * 1024;
+    // Allow self-contained HTML with embedded images/fonts while bounding IPC payloads.
+    const MAX_BYTES: u64 = 32 * 1024 * 1024;
     let meta = std::fs::metadata(&path).map_err(err)?;
     if meta.len() > MAX_BYTES {
         return Err(format!(
