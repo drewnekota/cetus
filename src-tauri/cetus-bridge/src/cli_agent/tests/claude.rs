@@ -620,10 +620,6 @@ fn monitor_stays_in_strip_without_holding_the_turn() {
         snap["tasks"][0]["description"],
         json!("content change in /tmp/flag.txt")
     );
-    // local_bash never holds the turn — the reply can settle while the
-    // monitor keeps watching.
-    assert!(!tr.has_pending_turn_tasks());
-
     // The CLI's authoritative list re-emits the same snapshot (this is
     // what a resumed process reports even when our registry is empty).
     let ev = tr.on_line(r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b864cfibk","task_type":"local_bash","description":"content change in /tmp/flag.txt"}]}"#);
@@ -714,10 +710,6 @@ fn background_bash_stays_running_until_notification() {
     assert!(
         tr.has_pending_tasks(),
         "the runner must keep reading the monitor stream"
-    );
-    assert!(
-        !tr.has_pending_turn_tasks(),
-        "background Bash must not keep the model turn open"
     );
     let update = ev
         .iter()

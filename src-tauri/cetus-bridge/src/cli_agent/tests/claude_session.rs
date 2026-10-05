@@ -300,6 +300,117 @@ async fn continuation_turn_after_finished_turn_streams_to_base_sink() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A `result` that arrives while an async agent is still running settles
+/// the turn right away (like the native TUI). Holding it open until the
+/// agent finished kept the conversation "streaming" for the agent's whole
+/// lifetime, so every message the user typed sat in the follow-up queue.
+/// The agent's report still lands: its notification persists the real
+/// result row and the CLI's continuation turn streams afterwards.
+#[tokio::test]
+async fn async_agent_does_not_hold_the_turn_open() {
+    let dir = std::env::temp_dir().join(format!(
+        "cetus-claude-async-agent-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("fake-async-agent-claude.sh");
+    let go = dir.join("go");
+    // The agent only "finishes" once the test creates `go` — after the
+    // launching turn's outcome has been observed.
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\n\
+             echo '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"async-1\"}}'\n\
+             while IFS= read -r line; do\n\
+               case \"$line\" in *'\"type\":\"user\"'*)\n\
+                 echo '{{\"type\":\"stream_event\",\"event\":{{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"tool_use\",\"id\":\"tA\",\"name\":\"Agent\",\"input\":{{}}}}}}}}'\n\
+                 echo '{{\"type\":\"stream_event\",\"event\":{{\"type\":\"content_block_stop\",\"index\":0}}}}'\n\
+                 echo '{{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"a1\",\"tool_use_id\":\"tA\",\"description\":\"research\",\"subagent_type\":\"general-purpose\"}}'\n\
+                 echo '{{\"type\":\"user\",\"message\":{{\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tA\",\"content\":\"Async agent launched successfully. agentId: x\",\"is_error\":false}}]}}}}'\n\
+                 echo '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"\"}}'\n\
+                 while [ ! -f '{}' ]; do sleep 0.05; done\n\
+                 echo '{{\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"a1\",\"tool_use_id\":\"tA\",\"status\":\"completed\",\"summary\":\"the report\"}}'\n\
+                 echo '{{\"type\":\"stream_event\",\"event\":{{\"type\":\"message_start\",\"message\":{{\"role\":\"assistant\"}}}}}}'\n\
+                 echo '{{\"type\":\"stream_event\",\"event\":{{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}}}'\n\
+                 echo '{{\"type\":\"stream_event\",\"event\":{{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"agent done\"}}}}}}'\n\
+                 echo '{{\"type\":\"stream_event\",\"event\":{{\"type\":\"content_block_stop\",\"index\":0}}}}'\n\
+                 echo '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"agent done\"}}'\n\
+               ;; esac\n\
+             done\n",
+            go.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let sink = Arc::new(TestSink(std::sync::Mutex::new(Vec::new())));
+    let (orphan_tx, mut orphan_rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = spawn_claude_session(
+        sink.clone() as Arc<dyn EventSink>,
+        &script.to_string_lossy(),
+        &dir,
+        None,
+        None,
+        Vec::new(),
+        CliRunOpts::default(),
+        Some(orphan_tx),
+    )
+    .unwrap();
+
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        session
+            .start_turn(
+                claude_user_message_line("research this in the background", &[]),
+                sink.clone() as Arc<dyn EventSink>,
+            )
+            .unwrap(),
+    )
+    .await
+    .expect("turn held open while the async agent runs")
+    .unwrap();
+    let ack = outcome
+        .messages
+        .iter()
+        .find(|m| m["role"] == "toolResult")
+        .expect("launch ack persisted with the turn");
+    assert_eq!(ack["toolCallId"], json!("tA"));
+
+    std::fs::write(&go, "").unwrap();
+
+    // The notification persists the real report for the same tool call,
+    // then the continuation reply follows.
+    let mut shipped = Vec::new();
+    while !shipped.iter().any(|m: &Value| m["role"] == "assistant") {
+        let batch = tokio::time::timeout(std::time::Duration::from_secs(5), orphan_rx.recv())
+            .await
+            .expect("agent report not shipped")
+            .unwrap();
+        shipped.extend(batch);
+    }
+    let report = shipped
+        .iter()
+        .find(|m| m["role"] == "toolResult")
+        .expect("report row persisted");
+    assert_eq!(report["toolCallId"], json!("tA"));
+    assert_eq!(report["content"][0]["text"], json!("the report"));
+    let reply = shipped.iter().find(|m| m["role"] == "assistant").unwrap();
+    assert_eq!(reply["content"][0]["text"], json!("agent done"));
+
+    session.shutdown();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Live smoke test against the real claude binary — run manually with
 /// `cargo test -p cetus-bridge --lib live_claude -- --ignored --nocapture`.
 /// Requires claude auth; costs a few haiku tokens.

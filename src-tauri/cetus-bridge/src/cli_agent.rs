@@ -405,6 +405,9 @@ struct BackgroundTask {
     subagent_type: String,
     description: String,
     done: bool,
+    /// The launch ack was emitted as this task's tool result: the task runs
+    /// past that row, so its notification must update (or re-persist) it.
+    launched: bool,
     /// The subagent's own tool calls, observed on its sidechain lines. Painted
     /// onto the Agent card as a nested step list (`details.subagent.steps`).
     /// Each step: { id, tool, detail, done }.
@@ -590,16 +593,6 @@ impl EventTranslator {
     /// child at the first `result` would orphan the subagent mid-flight.
     pub fn has_pending_tasks(&self) -> bool {
         self.background_tasks.values().any(|t| !t.done)
-    }
-
-    /// Background Bash commands (dev servers, watchers, log tails) deliberately
-    /// outlive the model turn. Async agents/workflows are different: Claude
-    /// starts a continuation turn when they finish, so the current turn must
-    /// keep reading until that continuation settles.
-    pub fn has_pending_turn_tasks(&self) -> bool {
-        self.background_tasks
-            .values()
-            .any(|t| !t.done && t.subagent_type != "Bash")
     }
 
     /// True if any background subagent ran during this turn (pending or done).

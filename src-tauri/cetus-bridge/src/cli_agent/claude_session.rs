@@ -287,13 +287,13 @@ pub fn spawn_claude_session(
                         tr.saw_result = false;
                         continue;
                     }
-                    if tr.saw_result && tr.has_pending_turn_tasks() {
-                        // Claude will emit a continuation turn when an async
-                        // agent/workflow settles. A background Bash task is not
-                        // included here and may outlive the completed turn.
-                        tr.saw_result = false;
-                        continue;
-                    }
+                    // A result settles the turn even while an async
+                    // agent/workflow is still running, like the native TUI:
+                    // holding it open kept the composer "streaming" for the
+                    // task's whole lifetime, so every follow-up sat in the
+                    // queue. The task's notification settles its card via the
+                    // base sink, and the report arrives as a self-started
+                    // continuation turn (handled above).
                     if tr.saw_result {
                         let Some(turn) = active.take() else {
                             // A self-started continuation turn settled: close

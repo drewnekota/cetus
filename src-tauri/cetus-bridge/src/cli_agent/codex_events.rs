@@ -115,6 +115,7 @@ impl EventTranslator {
                         subagent_type,
                         description: description.clone(),
                         done: false,
+                        launched: false,
                         steps: Vec::new(),
                         status_text: String::new(),
                     };

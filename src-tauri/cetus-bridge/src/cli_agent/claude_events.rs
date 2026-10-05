@@ -30,6 +30,9 @@ impl EventTranslator {
                 };
                 let status = json!([{ "type": "text", "text": label }]);
                 let details = task.details("running");
+                if let Some(t) = self.background_tasks.get_mut(&task_id) {
+                    t.launched = true;
+                }
                 self.flush_assistant();
                 self.messages.push(json!({
                     "role": "toolResult",
@@ -255,6 +258,7 @@ impl EventTranslator {
                                 .unwrap_or("background task")
                                 .to_string(),
                             done: false,
+                            launched: false,
                             steps: Vec::new(),
                             status_text: String::new(),
                         },
@@ -329,15 +333,26 @@ impl EventTranslator {
                 }
                 // Keep the persisted transcript in sync with what the card
                 // now shows (the launch-ack row was already pushed).
-                for m in self.messages.iter_mut().rev() {
-                    if m.get("toolCallId").and_then(|i| i.as_str())
-                        == Some(task.tool_use_id.as_str())
-                    {
-                        m["content"] = content.clone();
-                        m["isError"] = json!(is_err);
-                        m["details"] = details.clone();
-                        break;
-                    }
+                let pending_row = self.messages.iter_mut().rev().find(|m| {
+                    m.get("toolCallId").and_then(|i| i.as_str()) == Some(task.tool_use_id.as_str())
+                });
+                if let Some(m) = pending_row {
+                    m["content"] = content.clone();
+                    m["isError"] = json!(is_err);
+                    m["details"] = details.clone();
+                } else if task.launched {
+                    // The launching turn already settled and persisted the
+                    // ack row. Persist the report as a later row for the same
+                    // tool call — on reload the last result wins.
+                    self.flush_assistant();
+                    self.messages.push(json!({
+                        "role": "toolResult",
+                        "toolCallId": task.tool_use_id,
+                        "toolName": self.tool_names.get(&task.tool_use_id).cloned().unwrap_or_else(|| "tool".to_string()),
+                        "content": content.clone(),
+                        "isError": is_err,
+                        "details": details.clone(),
+                    }));
                 }
                 vec![json!({
                     "type": "tool_execution_end",
