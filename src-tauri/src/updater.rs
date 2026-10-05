@@ -501,9 +501,62 @@ pub async fn pending_update_version(app: AppHandle) -> Result<Option<String>, St
 /// Relaunch the app to apply a downloaded update. The updater swaps the bundle
 /// in place, so a plain restart boots the new version. Drives the sidebar's
 /// "Restart to update" button.
+///
+/// On macOS this must NOT be Tauri's `app.restart()`: that is a bare
+/// `Command::new(current_exe).spawn()`, so the new process is not launched by
+/// LaunchServices. RunningBoard then tracks it as `anon<cetus>` instead of
+/// `app<dev.cetus.app>`, and AppKit's out-of-process view services refuse to
+/// attach to it (tccd: `bundleRecordForAuditToken failed -10814`). Symptoms:
+/// open/save panels never appear — a crash in 2026-08 and an invisible-modal
+/// freeze in 2026-09. Relaunching through `/usr/bin/open` yields a properly
+/// LS-owned instance. The helper waits for this process to be gone first so
+/// the new one does not race us for the control socket and remote port.
 #[tauri::command]
 pub fn relaunch_app(app: AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(bundle) = macos_bundle_path() {
+            let pid = std::process::id();
+            // Poll for up to ~30 s, then open regardless (if we are somehow
+            // still alive, `open` without `-n` just activates us — no second
+            // instance).
+            let script = format!(
+                "i=0; while kill -0 {pid} 2>/dev/null && [ \"$i\" -lt 150 ]; do sleep 0.2; i=$((i+1)); done; exec /usr/bin/open \"$0\""
+            );
+            let spawned = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&script)
+                .arg(&bundle)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            match spawned {
+                Ok(_) => {
+                    tracing::info!(
+                        "cetus: relaunching via LaunchServices: {}",
+                        bundle.display()
+                    );
+                    app.exit(0);
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!("cetus: relaunch helper failed to spawn ({e}); falling back to app.restart()");
+                }
+            }
+        }
+    }
     app.restart();
+}
+
+/// `/path/to/Cetus.app` for a bundled build; `None` under `tauri dev` (the
+/// binary lives in target/) or any other layout.
+#[cfg(target_os = "macos")]
+fn macos_bundle_path() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    // Contents/MacOS/cetus → Contents/MacOS → Contents → Cetus.app
+    let bundle = exe.parent()?.parent()?.parent()?;
+    (bundle.extension().and_then(|e| e.to_str()) == Some("app")).then(|| bundle.to_path_buf())
 }
 
 /// Remember a version the user dismissed so the passive toast won't nag again

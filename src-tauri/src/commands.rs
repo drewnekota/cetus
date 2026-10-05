@@ -36,6 +36,7 @@ use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Size, State, Url,
     WebviewUrl, WebviewWindowBuilder,
 };
+#[cfg(not(target_os = "macos"))]
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 

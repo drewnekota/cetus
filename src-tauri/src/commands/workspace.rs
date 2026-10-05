@@ -1,5 +1,7 @@
+#[cfg(not(target_os = "macos"))]
+use super::DialogExt;
 use super::{
-    err, sanitize_segment, AppState, CmdResult, DialogExt, Emitter, Path, PathBuf, Read, State,
+    err, sanitize_segment, AppState, CmdResult, Emitter, Path, PathBuf, Read, State,
     WorkspaceDirectoryListing, WorkspaceFileEntry, WorkspaceTextPreview, UNIX_EPOCH,
 };
 
@@ -15,18 +17,12 @@ pub async fn default_workspace(state: State<'_, AppState>) -> CmdResult<String> 
 /// launch — seen on updater-relaunched "anon" instances, where AppKit logs
 /// "Unable to display open panel: Connection interrupted" — rfd's completion
 /// path unwraps a nil URL and the panic takes down the whole app (2026-08-31,
-/// "click Add folder → app quits"). Here every failure, nil, or Obj-C
-/// exception is just a cancel.
+/// "click Add folder → app quits"). See [`native_panel`] for the replacement.
 #[tauri::command]
 pub async fn pick_workspace_dir(app: tauri::AppHandle) -> CmdResult<Option<String>> {
     #[cfg(target_os = "macos")]
     {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        app.run_on_main_thread(move || {
-            let _ = tx.send(pick_folder_native());
-        })
-        .map_err(err)?;
-        let result = rx.await.map_err(err)?;
+        let result = native_panel::pick(&app, native_panel::Kind::Folder).await?;
         Ok(result.map(|p| p.to_string_lossy().to_string()))
     }
     #[cfg(not(target_os = "macos"))]
@@ -40,30 +36,121 @@ pub async fn pick_workspace_dir(app: tauri::AppHandle) -> CmdResult<Option<Strin
     }
 }
 
-/// NSOpenPanel folder picker that cannot crash the process. Must run on the
-/// main thread. `runModal` (app-modal, not a sheet) keeps the flow synchronous:
-/// no completion-handler race with a dying panel service, and it works the same
-/// from the quick panel where there is no key window to sheet onto.
+/// Crash-proof, hang-proof NSOpenPanel / NSSavePanel.
+///
+/// Two failure modes of the stock dialogs, both triggered by the same root
+/// cause (the panel XPC service refusing to attach to a process LaunchServices
+/// does not own — see `updater::relaunch_app`):
+///
+/// * rfd's completion handler unwraps a nil URL → panic → app quits (2026-08-31).
+/// * `runModal` never returns when the remote view dies: it keeps an empty,
+///   invisible app-modal session alive and the whole app looks frozen until
+///   the user hits Escape or Cmd-Tabs away and back (2026-09-22).
+///
+/// So the panel is shown with `beginWithCompletionHandler:` — non-modal, no
+/// key window needed (works from the quick panel too) — and AppKit's own
+/// failure path *does* fire that handler with a cancel response, which we
+/// turn into "no path". Every nil, every Obj-C exception, is just a cancel.
 #[cfg(target_os = "macos")]
-fn pick_folder_native() -> Option<PathBuf> {
+mod native_panel {
+    use block2::RcBlock;
     use objc2::msg_send;
+    use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject, Bool};
-    let caught = objc2::exception::catch(core::panic::AssertUnwindSafe(|| unsafe {
-        let cls = AnyClass::get(c"NSOpenPanel")?;
-        let panel: *mut AnyObject = msg_send![cls, openPanel];
-        if panel.is_null() {
-            return None;
+    use objc2_foundation::NSString;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::oneshot;
+
+    pub enum Kind {
+        /// Choose one existing directory (may create new ones).
+        Folder,
+        /// Choose a destination file, pre-filled with `name`.
+        SaveFile { name: String },
+    }
+
+    type Slot = Arc<Mutex<Option<oneshot::Sender<Option<PathBuf>>>>>;
+
+    /// Show the panel and resolve with the chosen path (`None` = cancelled or
+    /// the panel could not be displayed).
+    pub async fn pick(app: &tauri::AppHandle, kind: Kind) -> Result<Option<PathBuf>, String> {
+        let (tx, rx) = oneshot::channel();
+        app.run_on_main_thread(move || begin(kind, tx))
+            .map_err(|e| e.to_string())?;
+        rx.await.map_err(|e| e.to_string())
+    }
+
+    fn resolve(slot: &Slot, path: Option<PathBuf>) {
+        if let Some(tx) = slot.lock().ok().and_then(|mut s| s.take()) {
+            let _ = tx.send(path);
         }
-        let _: () = msg_send![panel, setCanChooseDirectories: Bool::YES];
-        let _: () = msg_send![panel, setCanChooseFiles: Bool::NO];
-        let _: () = msg_send![panel, setAllowsMultipleSelection: Bool::NO];
-        let _: () = msg_send![panel, setCanCreateDirectories: Bool::YES];
-        // NSModalResponseOK == 1; anything else (cancel, abort, or the panel
-        // service never coming up) means "no folder".
-        let response: isize = msg_send![panel, runModal];
-        if response != 1 {
-            return None;
+    }
+
+    /// Must run on the main thread. Never blocks: the result arrives through
+    /// the completion block, or immediately as `None` if the panel could not
+    /// even be constructed.
+    fn begin(kind: Kind, tx: oneshot::Sender<Option<PathBuf>>) {
+        let slot: Slot = Arc::new(Mutex::new(Some(tx)));
+        let slot_for_block = slot.clone();
+        let caught = objc2::exception::catch(core::panic::AssertUnwindSafe(|| unsafe {
+            // Bring the panel in front: from the quick panel another app may
+            // be active, and a non-modal panel does not steal focus by itself.
+            if let Some(ns_app) = AnyClass::get(c"NSApplication") {
+                let shared: *mut AnyObject = msg_send![ns_app, sharedApplication];
+                if !shared.is_null() {
+                    let _: () = msg_send![shared, activateIgnoringOtherApps: Bool::YES];
+                }
+            }
+            let panel: Retained<AnyObject> = match &kind {
+                Kind::Folder => {
+                    let cls = AnyClass::get(c"NSOpenPanel")?;
+                    let panel: Retained<AnyObject> = msg_send![cls, openPanel];
+                    let _: () = msg_send![&*panel, setCanChooseDirectories: Bool::YES];
+                    let _: () = msg_send![&*panel, setCanChooseFiles: Bool::NO];
+                    let _: () = msg_send![&*panel, setAllowsMultipleSelection: Bool::NO];
+                    let _: () = msg_send![&*panel, setCanCreateDirectories: Bool::YES];
+                    panel
+                }
+                Kind::SaveFile { name } => {
+                    let cls = AnyClass::get(c"NSSavePanel")?;
+                    let panel: Retained<AnyObject> = msg_send![cls, savePanel];
+                    let name = NSString::from_str(name);
+                    let _: () = msg_send![&*panel, setNameFieldStringValue: &*name];
+                    let _: () = msg_send![&*panel, setCanCreateDirectories: Bool::YES];
+                    panel
+                }
+            };
+            // The block keeps the panel alive until AppKit calls back.
+            let panel_for_block = panel.clone();
+            let block = RcBlock::new(move |response: isize| {
+                // NSModalResponseOK == 1; anything else (cancel, abort, the
+                // panel service never coming up) means "no path".
+                let path = if response == 1 {
+                    // The completion handler runs on the main thread with the
+                    // panel still valid; every step is nil-checked.
+                    url_path(&panel_for_block)
+                } else {
+                    None
+                };
+                resolve(&slot_for_block, path);
+            });
+            let _: () = msg_send![&*panel, beginWithCompletionHandler: &*block];
+            Some(())
+        }));
+        match caught {
+            Ok(Some(())) => {}
+            Ok(None) => {
+                tracing::warn!("native_panel: panel class unavailable");
+                resolve(&slot, None);
+            }
+            Err(e) => {
+                tracing::warn!("native_panel: panel raised an exception: {e:?}");
+                resolve(&slot, None);
+            }
         }
+    }
+
+    unsafe fn url_path(panel: &AnyObject) -> Option<PathBuf> {
         let url: *mut AnyObject = msg_send![panel, URL];
         if url.is_null() {
             return None;
@@ -79,13 +166,6 @@ fn pick_folder_native() -> Option<PathBuf> {
         Some(PathBuf::from(
             std::ffi::CStr::from_ptr(cstr).to_string_lossy().to_string(),
         ))
-    }));
-    match caught {
-        Ok(path) => path,
-        Err(e) => {
-            tracing::warn!("pick_folder_native: open panel raised an exception: {e:?}");
-            None
-        }
     }
 }
 
@@ -107,14 +187,21 @@ pub async fn save_artifact_copy(app: tauri::AppHandle, path: String) -> CmdResul
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "artifact".to_string());
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .file()
-        .set_file_name(&name)
-        .save_file(move |path| {
-            let _ = tx.send(path.and_then(|p| p.into_path().ok()));
-        });
-    let Some(target) = rx.await.map_err(err)? else {
+    #[cfg(target_os = "macos")]
+    let picked =
+        native_panel::pick(&app, native_panel::Kind::SaveFile { name: name.clone() }).await?;
+    #[cfg(not(target_os = "macos"))]
+    let picked = {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app.dialog()
+            .file()
+            .set_file_name(&name)
+            .save_file(move |path| {
+                let _ = tx.send(path.and_then(|p| p.into_path().ok()));
+            });
+        rx.await.map_err(err)?
+    };
+    let Some(target) = picked else {
         return Ok(None);
     };
     // Outcome is ALSO emitted as an event: the invoke callback dies with a
