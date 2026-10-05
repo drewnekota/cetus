@@ -1,7 +1,9 @@
+#[cfg(target_os = "macos")]
+use super::helper_command;
 use super::{
-    helper_command, load_settings, now_ms, remove_audio_dir, start_internal, stop_internal,
-    AppHandle, Arc, Duration, Instant, Manager, MeetingRuntime, Ordering, Path, PathBuf, Store,
-    Value, AUTO_START_SECS, AUTO_STOP_SECS, MEETING_APP_BUNDLES, MEETING_BROWSER_BUNDLES,
+    load_settings, now_ms, remove_audio_dir, start_internal, stop_internal, AppHandle, Arc,
+    Duration, Instant, Manager, MeetingRuntime, Ordering, Path, PathBuf, Store, Value,
+    AUTO_START_SECS, AUTO_STOP_SECS, MEETING_APP_BUNDLES, MEETING_BROWSER_BUNDLES,
     MEETING_WEB_DOMAINS, PRUNE_INTERVAL_SECS,
 };
 
