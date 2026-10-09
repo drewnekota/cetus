@@ -177,6 +177,21 @@ export function QuickPanel() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [reportHeight]);
+  // The launch-preference switches float in the input's top-right corner; the
+  // textarea reserves a right gutter of their measured width (labels vary by
+  // locale) so text never runs under them.
+  const prefsRef = useRef<HTMLDivElement>(null);
+  const [prefsGutter, setPrefsGutter] = useState(0);
+  useLayoutEffect(() => {
+    const el = prefsRef.current;
+    if (!el) return;
+    const measure = () => setPrefsGutter(Math.ceil(el.getBoundingClientRect().width));
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // Auto-grow the textarea with its content (capped, then it scrolls).
   useLayoutEffect(() => {
     const ta = taRef.current;
@@ -185,7 +200,7 @@ export function QuickPanel() {
     const line = parseFloat(getComputedStyle(ta).lineHeight) || TEXTAREA_LINE_PX;
     const max = line * TEXTAREA_MAX_LINES;
     ta.style.height = `${Math.min(Math.max(ta.scrollHeight, line), max)}px`;
-  }, [text]);
+  }, [text, prefsGutter]);
   const rootRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -863,8 +878,9 @@ export function QuickPanel() {
           grows with the text (capped, then scrolls) and the attachment chips
           (when present) tuck in under it. Clicking the empty space focuses. */}
       <div className="relative flex flex-1 flex-col px-5 pt-4 pb-3" onMouseDown={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); taRef.current?.focus(); } }}>
-        {/* Keep launch preferences together above the full-width input. */}
-        <div className="-mt-1.5 mb-2 flex flex-wrap justify-end gap-x-2">
+        {/* Launch preferences float in the input's top-right corner, on the
+            same line as the first row of text: plain label + switch, no icon. */}
+        <div ref={prefsRef} className="absolute right-3 top-2.5 flex gap-x-2">
           <TooltipProvider disableHoverableContent>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -917,6 +933,7 @@ export function QuickPanel() {
           onKeyDown={onKeyDown}
           placeholder={t("launcher.placeholder")}
           rows={1}
+          style={{ paddingRight: prefsGutter }}
           className="w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent text-base font-normal text-foreground outline-none placeholder:text-muted-foreground/60"
         />
 
