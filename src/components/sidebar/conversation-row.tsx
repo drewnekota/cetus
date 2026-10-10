@@ -406,6 +406,10 @@ export const ConversationRow = memo(function ConversationRow({
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => {
                   e.stopPropagation();
+                  // Enter/Escape while an IME is composing only commits or
+                  // cancels the candidate; `keyCode === 229` covers browsers
+                  // that drop isComposing on the committing keystroke.
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                   if (e.key === "Enter") finishRename(e.currentTarget.value);
                   else if (e.key === "Escape") finishRename(null);
                 }}
