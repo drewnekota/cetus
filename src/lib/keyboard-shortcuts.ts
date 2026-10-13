@@ -34,6 +34,16 @@ export type ShortcutId =
   | "nextWorkspaceTab"
   | "previousChat"
   | "nextChat"
+  | "previousChatAlternate"
+  | "nextChatAlternate"
+  | "chatSlot1"
+  | "chatSlot2"
+  | "chatSlot3"
+  | "chatSlot4"
+  | "chatSlot5"
+  | "chatSlot6"
+  | "chatSlot7"
+  | "chatSlot8"
   | "lastChat";
 
 export interface ShortcutDefinition {
@@ -66,6 +76,20 @@ export const RUNTIME_SLOT_SHORTCUT_IDS = [
   "runtimeSlot7",
   "runtimeSlot8",
   "runtimeSlot9",
+] as const satisfies readonly ShortcutId[];
+
+/** ⌘1…⌘8 open the 1st…8th visible chat in the sidebar, and ⌘9 (lastChat) the
+ *  last one — the browser-tab convention. Holding the modifier reveals the
+ *  numbers on the rows. */
+export const CHAT_SLOT_SHORTCUT_IDS = [
+  "chatSlot1",
+  "chatSlot2",
+  "chatSlot3",
+  "chatSlot4",
+  "chatSlot5",
+  "chatSlot6",
+  "chatSlot7",
+  "chatSlot8",
 ] as const satisfies readonly ShortcutId[];
 
 /** Bindings replaced by the positional slots in 0.3.41. Carried over by index
@@ -118,19 +142,22 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: "switchChats",
     label: "Switch to chats",
     description: "Show the chat list",
-    defaultAccelerator: "Cmd+1",
+    defaultAccelerator: "Alt+Cmd+1",
+    windowsAccelerator: "Ctrl+Shift+1",
   },
   {
     id: "switchBoard",
     label: "Switch to Kanban",
     description: "Show the Kanban board",
-    defaultAccelerator: "Cmd+2",
+    defaultAccelerator: "Alt+Cmd+2",
+    windowsAccelerator: "Ctrl+Shift+2",
   },
   {
     id: "switchAutomations",
     label: "Switch to automations",
     description: "Show scheduled automations",
-    defaultAccelerator: "Cmd+3",
+    defaultAccelerator: "Alt+Cmd+3",
+    windowsAccelerator: "Ctrl+Shift+3",
   },
   {
     id: "switchPreviousView",
@@ -224,6 +251,24 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     defaultAccelerator: "Cmd+Alt+ArrowDown",
     windowsAccelerator: "Ctrl+Shift+ArrowDown",
   },
+  {
+    id: "previousChatAlternate",
+    label: "Previous chat (alternate)",
+    description: "Move to the previous chat in the sidebar",
+    defaultAccelerator: "Shift+Cmd+BracketLeft",
+  },
+  {
+    id: "nextChatAlternate",
+    label: "Next chat (alternate)",
+    description: "Move to the next chat in the sidebar",
+    defaultAccelerator: "Shift+Cmd+BracketRight",
+  },
+  ...CHAT_SLOT_SHORTCUT_IDS.map((id, index) => ({
+    id,
+    label: `Chat ${index + 1}`,
+    description: `Open the chat in position ${index + 1} of the sidebar`,
+    defaultAccelerator: `Cmd+${index + 1}`,
+  })),
   {
     id: "lastChat",
     label: "Last chat",
@@ -338,6 +383,16 @@ export function readKeyboardShortcuts(): ShortcutMap {
   }
 }
 
+/** Former defaults that moved: the sidebar/workspace toggles, and the view
+ *  switches that gave ⌘1…⌘3 up to the chat slots after 0.4.4. */
+const SUPERSEDED_DEFAULTS: Partial<Record<ShortcutId, string>> = {
+  toggleSidebar: "Shift+Cmd+S",
+  toggleWorkspace: "Cmd+B",
+  switchChats: "Cmd+1",
+  switchBoard: "Cmd+2",
+  switchAutomations: "Cmd+3",
+};
+
 /** Merge a persisted partial map with current platform defaults. Exported so
  *  platform migration remains covered without mocking browser localStorage. */
 export function mergeStoredShortcutMap(
@@ -356,16 +411,15 @@ export function mergeStoredShortcutMap(
       (slot >= 0 ? legacy[LEGACY_RUNTIME_SHORTCUT_IDS[slot] ?? ""] : undefined);
     if (typeof value !== "string") continue;
     const normalized = normalizeAccelerator(value);
-    // Stored maps include defaults. Upgrade the former sidebar bindings while
-    // preserving bindings that differ from those defaults on either platform.
-    const oldPanelDefault =
-      def.id === "toggleSidebar" ? "Shift+Cmd+S" :
-      def.id === "toggleWorkspace" ? "Cmd+B" : undefined;
+    // Stored maps include defaults. Upgrade bindings that still equal a
+    // superseded default while preserving ones the user changed, on either
+    // platform.
+    const oldDefault = SUPERSEDED_DEFAULTS[def.id];
     if (
-      oldPanelDefault &&
-      (normalized === normalizeAccelerator(oldPanelDefault) ||
+      oldDefault &&
+      (normalized === normalizeAccelerator(oldDefault) ||
         (platform === "windows" &&
-          normalized === normalizeAccelerator(oldPanelDefault.replaceAll("Cmd", "Ctrl"))))
+          normalized === normalizeAccelerator(oldDefault.replaceAll("Cmd", "Ctrl"))))
     ) {
       next[def.id] = defaults[def.id];
       continue;
@@ -431,12 +485,7 @@ export function acceleratorFromEvent(
   const key = keyToken(e.code, e.key);
   if (!key) return null;
   if (!e.metaKey && !e.ctrlKey && !e.altKey) return null;
-  const mods: string[] = [];
-  if (e.ctrlKey) mods.push("Ctrl");
-  if (e.altKey) mods.push("Alt");
-  if (e.shiftKey) mods.push("Shift");
-  if (e.metaKey) mods.push("Cmd");
-  return [...mods, key].join("+");
+  return `${heldModifiers(e)}+${key}`;
 }
 
 export function normalizeAccelerator(accelerator: string): string {
@@ -449,6 +498,24 @@ export function normalizeAccelerator(accelerator: string): string {
   const mods = new Set(parts.filter(isModifier).map(normalizeModifier));
   const orderedMods = ["Ctrl", "Alt", "Shift", "Cmd"].filter((m) => mods.has(m));
   return [...orderedMods, normalizeKey(key)].join("+");
+}
+
+/** The modifier half of an accelerator ("Alt+Cmd" for "Alt+Cmd+1"), in the
+ *  same canonical order acceleratorFromEvent emits. */
+export function acceleratorModifiers(accelerator: string): string {
+  return normalizeAccelerator(accelerator).split("+").slice(0, -1).join("+");
+}
+
+/** The modifiers currently held, as acceleratorModifiers would spell them. */
+export function heldModifiers(
+  e: Pick<KeyboardEvent, "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
+): string {
+  const mods: string[] = [];
+  if (e.ctrlKey) mods.push("Ctrl");
+  if (e.altKey) mods.push("Alt");
+  if (e.shiftKey) mods.push("Shift");
+  if (e.metaKey) mods.push("Cmd");
+  return mods.join("+");
 }
 
 export function shortcutChips(

@@ -103,6 +103,39 @@ describe("platform keyboard shortcuts", () => {
     });
   });
 
+  test("⌘1…⌘8 open chats and the view switches move off the digits", () => {
+    const mac = defaultShortcutMap("mac");
+    expect(mac.chatSlot1).toBe("Cmd+1");
+    expect(mac.chatSlot8).toBe("Cmd+8");
+    expect(mac.lastChat).toBe("Cmd+9");
+    expect(mac.switchChats).toBe("Alt+Cmd+1");
+    expect(shortcutDisplay(mac.switchAutomations, "mac")).toBe("⌥⌘3");
+    expect(shortcutDisplay(mac.nextChatAlternate, "mac")).toBe("⇧⌘]");
+    const windows = defaultShortcutMap("windows");
+    expect(windows.chatSlot1).toBe("Ctrl+1");
+    expect(windows.switchBoard).toBe("Ctrl+Shift+2");
+    expect(windows.previousChatAlternate).toBe("Ctrl+Shift+BracketLeft");
+  });
+
+  test("stored ⌘1…⌘3 view bindings yield to the chat slots", () => {
+    for (const platform of ["mac", "windows"]) {
+      const mod = platform === "mac" ? "Cmd" : "Ctrl";
+      const defaults = defaultShortcutMap(platform);
+      const migrated = mergeStoredShortcutMap({
+        switchChats: `${mod}+1`,
+        switchBoard: `${mod}+2`,
+        switchAutomations: `${mod}+Shift+K`,
+        // A custom binding is kept, only canonicalised.
+      }, platform);
+      expect(migrated.switchChats).toBe(defaults.switchChats);
+      expect(migrated.switchBoard).toBe(defaults.switchBoard);
+      expect(migrated.switchAutomations).toBe(
+        platform === "mac" ? "Shift+Cmd+K" : "Ctrl+Shift+K",
+      );
+      expect(migrated.chatSlot1).toBe(`${mod}+1`);
+    }
+  });
+
   test("right sidebar matches the backslash key event", () => {
     expect(matchesShortcut({
       code: "Backslash", key: "\\", metaKey: true, ctrlKey: false,

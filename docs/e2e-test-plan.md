@@ -84,7 +84,7 @@ cases `skip` and **log it** — avoid a false all-green.
 ### P0 — Multi-window & hotkeys
 
 - [ ] Window routing: main / quick / voice all render correctly
-- [ ] Hotkeys: ⌘K, ⌘N, ⌘,, ⌘1/2/3, Esc (modal-blocking guard)
+- [ ] Hotkeys: ⌘K, ⌘N, ⌘,, ⌥⌘1/2/3, ⌘1–9, Esc (modal-blocking guard)
 - [ ] Tray: Open / Settings / Quit; closing window only hides; ⌘Q quits
 
 ### P1 — Board / Automations
@@ -193,6 +193,6 @@ Minimum set proving the app is alive:
 5. One tool call (file write in `~/cetus-e2e`) → tool card + file on disk
 6. One artifact ("SVG smiley") → right panel opens
 7. ⌘K → search a conversation → opens it
-8. ⌘1/2/3 → Chat / Board / Automations switch
+8. ⌥⌘1/2/3 → Chat / Board / Automations switch; ⌘1–8 / ⌘9 → nth / last chat
 9. Settings → add a Memory entry → persists after reopen
 10. Tray → Quit

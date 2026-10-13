@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/tooltip";
 import { BACKENDS } from "@/components/chat/backend-picker";
 import { cn } from "@/lib/utils";
+import { useChatSlotHint } from "./chat-slot-hints";
 import { useTranslation } from "@/lib/i18n";
 import { workspaceName } from "@/lib/paths";
 import { formatDateTimeMinute } from "@/lib/format";
@@ -268,6 +269,7 @@ export const ConversationRow = memo(function ConversationRow({
   // Read the minute clock here rather than as a prop, so a tick re-renders only
   // the rows — not the whole sidebar tree (see minuteClock above).
   const nowMs = useMinuteNow();
+  const slotHint = useChatSlotHint(conversation.id);
   const archived = !!conversation.archivedAt;
   const pinned = conversation.pinnedAt != null;
   const title = conversation.title || t("conversation.untitled");
@@ -420,12 +422,19 @@ export const ConversationRow = memo(function ConversationRow({
             )}
             <span
               className={cn(
-                "fade-layer absolute inset-y-0 right-2 flex w-7 shrink-0 items-center justify-center font-mono text-xs tracking-tight tabular-nums text-muted-foreground/70 transition-opacity",
-                "group-has-[:focus-visible]/menu-item:opacity-0 group-hover/menu-item:opacity-0",
+                "fade-layer absolute inset-y-0 right-2 flex min-w-7 shrink-0 items-center justify-center font-mono text-xs tracking-tight tabular-nums text-muted-foreground/70 transition-opacity",
+                // A held-modifier hint stays put under the pointer: it's the
+                // thing being looked for, not chrome to clear for the actions.
+                !slotHint &&
+                  "group-has-[:focus-visible]/menu-item:opacity-0 group-hover/menu-item:opacity-0",
                 active && "text-sidebar-accent-foreground/70",
               )}
             >
-              {streaming ? (
+              {slotHint ? (
+                <Kbd className="h-[18px] border-border bg-background px-1.5 text-foreground/80 shadow-xs">
+                  {slotHint}
+                </Kbd>
+              ) : streaming ? (
                 <>
                   <Spinner className="size-3" />
                   <span className="sr-only">

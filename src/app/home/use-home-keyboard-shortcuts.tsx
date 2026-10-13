@@ -17,7 +17,10 @@ import {
   runtimeSwitchTarget,
   type RuntimeSwitchTarget,
 } from "@/components/chat/backend-picker";
-import { matchesShortcut } from "@/lib/keyboard-shortcuts";
+import {
+  CHAT_SLOT_SHORTCUT_IDS,
+  matchesShortcut,
+} from "@/lib/keyboard-shortcuts";
 import { WorkspaceDockState } from "./home-utils";
 
 export function useHomeKeyboardShortcuts({
@@ -98,7 +101,7 @@ export function useHomeKeyboardShortcuts({
   //   ⌘N    — new chat / new board task
   //   ⌘D    — archive current conversation
   //   ⌘,    — open settings
-  //   ⌘1…⌘3 — switch sidebar view (⌘1 again opens the first chat)
+  //   ⌥⌘1…⌥⌘3 — switch sidebar view (Chats / Kanban / Automations)
   //   ⌘[/⌘] — go back / forward through the page history (views + settings)
   //   ⌃⇥    — switch to the most recently used page (including chats/settings)
   //   ⌃1…⌃3 — switch the current chat's runtime (Cetus / Claude Code / Codex)
@@ -109,7 +112,8 @@ export function useHomeKeyboardShortcuts({
   //   ⌘P    — open a Files tab in the right workspace
   //   ⌘W    — close the active right-workspace tab when that panel is open
   //   ⌥⌘←/→ — switch right-workspace tabs when that panel is open
-  //   ⌥⌘↑/↓ — switch to the previous / next chat
+  //   ⌥⌘↑/↓, ⇧⌘[/] — switch to the previous / next chat
+  //   ⌘1…⌘8 — open the nth visible chat in the sidebar (hold ⌘ to see them)
   //   ⌘9    — switch to the last chat in the sidebar
   //   ⌘⇧A   — toggle artifacts panel (chat view, when artifacts exist)
   useEffect(() => {
@@ -171,14 +175,21 @@ export function useHomeKeyboardShortcuts({
         switchWorkspaceTab("side", 1);
         return;
       }
-      if (shortcut("previousChat")) {
+      if (shortcut("previousChat") || shortcut("previousChatAlternate")) {
         e.preventDefault();
         switchChat(-1);
         return;
       }
-      if (shortcut("nextChat")) {
+      if (shortcut("nextChat") || shortcut("nextChatAlternate")) {
         e.preventDefault();
         switchChat(1);
+        return;
+      }
+      const chatSlot = CHAT_SLOT_SHORTCUT_IDS.findIndex((id) => shortcut(id));
+      if (chatSlot >= 0) {
+        e.preventDefault();
+        const id = orderedChatIdsRef.current.at(chatSlot);
+        if (id) onSelectChat(id);
         return;
       }
       if (shortcut("lastChat")) {
@@ -266,12 +277,7 @@ export function useHomeKeyboardShortcuts({
         if (entry) requestBackendSwitch(runtimeSwitchTarget(entry));
       } else if (shortcut("switchChats")) {
         e.preventDefault();
-        if (view === "chat") {
-          const firstId = orderedChatIdsRef.current.at(0);
-          if (firstId) onSelectChat(firstId);
-        } else {
-          setView("chat");
-        }
+        setView("chat");
       } else if (shortcut("switchBoard")) {
         e.preventDefault();
         setView("board");

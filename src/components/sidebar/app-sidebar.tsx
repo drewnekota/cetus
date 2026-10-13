@@ -61,6 +61,8 @@ import { useConversationAutoSort } from "@/lib/conversation-order";
 import type { Conversation } from "@/lib/types";
 import { useSidebarWidth, SidebarResizeHandle } from "./sidebar-width";
 import { groupByWorkspace, PINNED_GROUP_DIR } from "./workspace-grouping";
+import { visibleConversationIds } from "@/lib/collapsed-workspaces";
+import { ChatSlotHintsProvider, useChatSlotHints } from "./chat-slot-hints";
 import {
   WorkspaceFilterButton,
   SortableWorkspaceFilterRow,
@@ -196,6 +198,17 @@ export const AppSidebar = memo(function AppSidebar({
       ),
     [groups, defaultWorkspace],
   );
+  // Same visual order the ⌘1…⌘9 handler walks (see use-home-state).
+  const visibleChatIds = useMemo(
+    () =>
+      visibleConversationIds(
+        groups,
+        collapsedWorkspaceDirs,
+        expandedWorkspaceDirs,
+      ),
+    [groups, collapsedWorkspaceDirs, expandedWorkspaceDirs],
+  );
+  const chatSlotHints = useChatSlotHints(visibleChatIds, shortcuts);
   const sortableIds = useMemo(
     () => folderGroups.map((g) => g.dir),
     [folderGroups],
@@ -327,7 +340,7 @@ export const AppSidebar = memo(function AppSidebar({
             board: shortcutLabels.switchBoard,
           }}
         />
-        {/* Automations completes the ⌘1/⌘2/⌘3 destination sequence;
+        {/* Automations completes the ⌥⌘1/⌥⌘2/⌥⌘3 destination sequence;
             New task follows as an action. Both stay pinned while the list scrolls. */}
         <SidebarMenu>
           {/* Automations is its own destination (a scheduled-prompt feature),
@@ -438,71 +451,45 @@ export const AppSidebar = memo(function AppSidebar({
             </SidebarMenu>
           </SidebarGroup>
         ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragStart={(e) => setActiveDragDir(String(e.active.id))}
-            onDragCancel={() => setActiveDragDir(null)}
-            onDragEnd={handleDragEnd}
-          >
-            {/* Global "Pinned" section — only exists while something is
-                pinned, and always sits above every workspace group. */}
-            {pinnedGroup && (
-              <SidebarGroup>
-                <PinnedGroupView
-                  items={pinnedGroup.items}
-                  collapsed={collapsedWorkspaceDirs.has(PINNED_GROUP_DIR)}
-                  onToggleCollapse={toggleCollapsed}
-                  expanded={expandedWorkspaceDirs.has(PINNED_GROUP_DIR)}
-                  onToggleExpanded={onToggleWorkspaceExpanded}
-                  activeId={activeId}
-                  streamingIds={streamingIds}
-                  unreadCompletedIds={unreadCompletedIds}
-                  archiveShortcut={shortcutLabels.archiveChat}
-                  onSelect={onSelect}
-                  onArchive={onArchive}
-                  onTogglePin={onTogglePin}
-                  onRename={onRename}
-                />
-              </SidebarGroup>
-            )}
-            {/* "Chat" (the default workspace) is pinned first, outside the
-                sortable list — it reads as a plain section, not a folder. */}
-            <SidebarGroup>
-              <WorkspaceGroupView
-                group={defaultGroup}
-                label={t("workspace.default")}
-                isDefault
-                collapsed={collapsedWorkspaceDirs.has(defaultGroup.dir)}
-                onToggleCollapse={toggleCollapsed}
-                expanded={expandedWorkspaceDirs.has(defaultGroup.dir)}
-                onToggleExpanded={onToggleWorkspaceExpanded}
-                activeId={activeId}
-                streamingIds={streamingIds}
-                unreadCompletedIds={unreadCompletedIds}
-                archiveShortcut={shortcutLabels.archiveChat}
-                onNew={onNew}
-                onSelect={onSelect}
-                onArchive={onArchive}
-                onTogglePin={onTogglePin}
-                onRename={onRename}
-                onRevealWorkspace={onRevealWorkspace}
-                onArchiveWorkspaceChats={onArchiveWorkspaceChats}
-                onRemoveWorkspace={onRemoveWorkspace}
-              />
-            </SidebarGroup>
-            <SortableContext
-              items={sortableIds}
-              strategy={verticalListSortingStrategy}
+          <ChatSlotHintsProvider value={chatSlotHints}>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={(e) => setActiveDragDir(String(e.active.id))}
+              onDragCancel={() => setActiveDragDir(null)}
+              onDragEnd={handleDragEnd}
             >
-              {folderGroups.map((g) => (
-                <SortableWorkspaceGroup
-                  key={g.dir}
-                  group={g}
-                  label={workspaceName(g.dir)}
-                  collapsed={collapsedWorkspaceDirs.has(g.dir)}
+              {/* Global "Pinned" section — only exists while something is
+                  pinned, and always sits above every workspace group. */}
+              {pinnedGroup && (
+                <SidebarGroup>
+                  <PinnedGroupView
+                    items={pinnedGroup.items}
+                    collapsed={collapsedWorkspaceDirs.has(PINNED_GROUP_DIR)}
+                    onToggleCollapse={toggleCollapsed}
+                    expanded={expandedWorkspaceDirs.has(PINNED_GROUP_DIR)}
+                    onToggleExpanded={onToggleWorkspaceExpanded}
+                    activeId={activeId}
+                    streamingIds={streamingIds}
+                    unreadCompletedIds={unreadCompletedIds}
+                    archiveShortcut={shortcutLabels.archiveChat}
+                    onSelect={onSelect}
+                    onArchive={onArchive}
+                    onTogglePin={onTogglePin}
+                    onRename={onRename}
+                  />
+                </SidebarGroup>
+              )}
+              {/* "Chat" (the default workspace) is pinned first, outside the
+                  sortable list — it reads as a plain section, not a folder. */}
+              <SidebarGroup>
+                <WorkspaceGroupView
+                  group={defaultGroup}
+                  label={t("workspace.default")}
+                  isDefault
+                  collapsed={collapsedWorkspaceDirs.has(defaultGroup.dir)}
                   onToggleCollapse={toggleCollapsed}
-                  expanded={expandedWorkspaceDirs.has(g.dir)}
+                  expanded={expandedWorkspaceDirs.has(defaultGroup.dir)}
                   onToggleExpanded={onToggleWorkspaceExpanded}
                   activeId={activeId}
                   streamingIds={streamingIds}
@@ -517,18 +504,46 @@ export const AppSidebar = memo(function AppSidebar({
                   onArchiveWorkspaceChats={onArchiveWorkspaceChats}
                   onRemoveWorkspace={onRemoveWorkspace}
                 />
-              ))}
-            </SortableContext>
-            {typeof document !== "undefined" &&
-              createPortal(
-                <DragOverlay dropAnimation={null}>
-                  {activeDragDir ? (
-                    <WorkspaceDragGhost label={workspaceName(activeDragDir)} />
-                  ) : null}
-                </DragOverlay>,
-                document.body,
-              )}
-          </DndContext>
+              </SidebarGroup>
+              <SortableContext
+                items={sortableIds}
+                strategy={verticalListSortingStrategy}
+              >
+                {folderGroups.map((g) => (
+                  <SortableWorkspaceGroup
+                    key={g.dir}
+                    group={g}
+                    label={workspaceName(g.dir)}
+                    collapsed={collapsedWorkspaceDirs.has(g.dir)}
+                    onToggleCollapse={toggleCollapsed}
+                    expanded={expandedWorkspaceDirs.has(g.dir)}
+                    onToggleExpanded={onToggleWorkspaceExpanded}
+                    activeId={activeId}
+                    streamingIds={streamingIds}
+                    unreadCompletedIds={unreadCompletedIds}
+                    archiveShortcut={shortcutLabels.archiveChat}
+                    onNew={onNew}
+                    onSelect={onSelect}
+                    onArchive={onArchive}
+                    onTogglePin={onTogglePin}
+                    onRename={onRename}
+                    onRevealWorkspace={onRevealWorkspace}
+                    onArchiveWorkspaceChats={onArchiveWorkspaceChats}
+                    onRemoveWorkspace={onRemoveWorkspace}
+                  />
+                ))}
+              </SortableContext>
+              {typeof document !== "undefined" &&
+                createPortal(
+                  <DragOverlay dropAnimation={null}>
+                    {activeDragDir ? (
+                      <WorkspaceDragGhost label={workspaceName(activeDragDir)} />
+                    ) : null}
+                  </DragOverlay>,
+                  document.body,
+                )}
+            </DndContext>
+          </ChatSlotHintsProvider>
         )}
       </SidebarContent>
 
