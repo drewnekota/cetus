@@ -3,7 +3,7 @@
 import type { RuntimeEntry } from "@/lib/runtime-settings";
 import type { Dispatch, SetStateAction, RefObject } from "react";
 import type { ShortcutMap } from "@/lib/keyboard-shortcuts";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { FIND_IN_CHAT_EVENT } from "@/components/chat/find-highlight";
 import type { SidebarView } from "@/components/sidebar/view-toggle";
 import {
@@ -19,7 +19,11 @@ import {
 } from "@/components/chat/backend-picker";
 import {
   CHAT_SLOT_SHORTCUT_IDS,
+  acceleratorModifiers,
+  heldModifiers,
+  keyToken,
   matchesShortcut,
+  normalizeAccelerator,
 } from "@/lib/keyboard-shortcuts";
 import { WorkspaceDockState } from "./home-utils";
 
@@ -31,7 +35,10 @@ export function useHomeKeyboardShortcuts({
   detailId,
   navigateBack,
   navigateForward,
-  switchToPreviousPage,
+  chatSwitcherOpen,
+  stepChatSwitcher,
+  commitChatSwitcher,
+  closeChatSwitcher,
   settingsOpen,
   view,
   historyOpen,
@@ -65,7 +72,10 @@ export function useHomeKeyboardShortcuts({
   detailId: string | null;
   navigateBack: () => void;
   navigateForward: () => void;
-  switchToPreviousPage: () => void;
+  chatSwitcherOpen: boolean;
+  stepChatSwitcher: (delta: 1 | -1, stillHeld: () => boolean) => void;
+  commitChatSwitcher: () => void;
+  closeChatSwitcher: (entry: null) => void;
   settingsOpen: boolean;
   view: SidebarView;
   historyOpen: boolean;
@@ -103,7 +113,8 @@ export function useHomeKeyboardShortcuts({
   //   ⌘,    — open settings
   //   ⌥⌘1…⌥⌘3 — switch sidebar view (Chats / Kanban / Automations)
   //   ⌘[/⌘] — go back / forward through the page history (views + settings)
-  //   ⌃⇥    — switch to the most recently used page (including chats/settings)
+  //   ⌃⇥    — tap: previous chat; hold ⌃: MRU switcher over recent chats
+  //           (⇥ / ⇧⇥ step, release ⌃ to switch, esc to cancel)
   //   ⌃1…⌃3 — switch the current chat's runtime (Cetus / Claude Code / Codex)
   //   ⌘⇧S   — collapse / expand the left sidebar
   //   ⌘B    — toggle workspace
@@ -116,6 +127,64 @@ export function useHomeKeyboardShortcuts({
   //   ⌘1…⌘8 — open the nth visible chat in the sidebar (hold ⌘ to see them)
   //   ⌘9    — switch to the last chat in the sidebar
   //   ⌘⇧A   — toggle artifacts panel (chat view, when artifacts exist)
+  // Live modifier state, so the switcher can tell a tap from a hold once its
+  // reveal delay is up.
+  const heldModifiersRef = useRef("");
+  useEffect(() => {
+    const track = (e: KeyboardEvent) => {
+      heldModifiersRef.current = heldModifiers(e);
+    };
+    const clear = () => {
+      heldModifiersRef.current = "";
+    };
+    window.addEventListener("keydown", track, true);
+    window.addEventListener("keyup", track, true);
+    window.addEventListener("blur", clear);
+    return () => {
+      window.removeEventListener("keydown", track, true);
+      window.removeEventListener("keyup", track, true);
+      window.removeEventListener("blur", clear);
+    };
+  }, []);
+  // While the switcher is up it owns the keyboard (capture phase, ahead of the
+  // composer): ⇥ / arrows step, ↩ commits, esc cancels, and releasing the
+  // switcher's modifier — or the window losing focus — commits the selection.
+  useEffect(() => {
+    if (!chatSwitcherOpen) return;
+    const holdMods = acceleratorModifiers(
+      keyboardShortcuts.switchPreviousView,
+    ).split("+");
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (keyToken(e.code, e.key) === null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") closeChatSwitcher(null);
+      else if (e.key === "Enter") commitChatSwitcher();
+      else if (e.key === "Tab") stepChatSwitcher(e.shiftKey ? -1 : 1, () => true);
+      else if (e.key === "ArrowDown" || e.key === "ArrowRight")
+        stepChatSwitcher(1, () => true);
+      else if (e.key === "ArrowUp" || e.key === "ArrowLeft")
+        stepChatSwitcher(-1, () => true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      const held = heldModifiers(e);
+      if (!holdMods.every((m) => held.includes(m))) commitChatSwitcher();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", commitChatSwitcher);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", commitChatSwitcher);
+    };
+  }, [
+    chatSwitcherOpen,
+    keyboardShortcuts.switchPreviousView,
+    stepChatSwitcher,
+    commitChatSwitcher,
+    closeChatSwitcher,
+  ]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const shortcut = (id: keyof typeof keyboardShortcuts) =>
@@ -139,12 +208,21 @@ export function useHomeKeyboardShortcuts({
         else navigateForward();
         return;
       }
-      // Ctrl+Tab — MRU page switch. It needs to run before the Settings guard
-      // so Settings can toggle back to the page that opened it.
-      if (shortcut("switchPreviousView")) {
+      // Ctrl+Tab — MRU chat switch. It runs before the Settings guard so a
+      // chat can be picked straight from Settings. The reverse step is the
+      // same chord plus Shift.
+      const switcherAccel = keyboardShortcuts.switchPreviousView;
+      const reverseSwitch =
+        !!switcherAccel &&
+        !normalizeAccelerator(switcherAccel).includes("Shift") &&
+        matchesShortcut(e, `${switcherAccel}+Shift`);
+      if (shortcut("switchPreviousView") || reverseSwitch) {
         if (automationDialogOpen || newTaskOpen || detailId !== null) return;
         e.preventDefault();
-        switchToPreviousPage();
+        const holdMods = acceleratorModifiers(switcherAccel).split("+");
+        stepChatSwitcher(reverseSwitch ? -1 : 1, () =>
+          holdMods.every((m) => heldModifiersRef.current.includes(m)),
+        );
         return;
       }
       // A modal owns the keyboard while open — don't fire app shortcuts behind
@@ -304,7 +382,7 @@ export function useHomeKeyboardShortcuts({
     defaultWorkspace,
     boardWorkspaceFilter,
     requestBackendSwitch,
-    switchToPreviousPage,
+    stepChatSwitcher,
     navigateBack,
     navigateForward,
   ]);

@@ -54,6 +54,20 @@ import {
 } from "./home-utils";
 import { usePendingRuntime } from "./use-pending-runtime";
 
+/** How many recent chats the Ctrl+Tab switcher remembers. */
+const CHAT_SWITCHER_LIMIT = 12;
+/** How long the modifier must stay down before the switcher shows; a quicker
+ *  tap just toggles to the previous chat. */
+const CHAT_SWITCHER_DELAY_MS = 150;
+
+export type ChatSwitcherState = {
+  /** Chat ids, most recently used first. */
+  ids: string[];
+  index: number;
+  /** False during the reveal delay, while a quick tap can still just switch. */
+  visible: boolean;
+};
+
 export function useHomeState({
   initialViewState,
   autoSortConversations,
@@ -292,17 +306,17 @@ export function useHomeState({
     a.view === b.view &&
     a.activeId === b.activeId &&
     a.settings === b.settings;
-  // Ctrl+Tab is MRU page switching: it toggles the last complete page, not just
-  // the last sidebar view. That makes separate chats and Settings participate.
-  const previousPageRef = useRef<NavEntry | null>(null);
-  const committedPageRef = useRef<NavEntry>(currentNavEntry());
+  // Ctrl+Tab is MRU chat switching, most recent first. A tap toggles the last
+  // chat; holding the modifier opens the switcher (see stepChatSwitcher).
+  const mruChatsRef = useRef<string[]>([]);
+  const onChatPage = view === "chat" && !settingsOpen && activeId !== null;
   useEffect(() => {
-    const next = currentNavEntry();
-    if (!sameNavEntry(committedPageRef.current, next)) {
-      previousPageRef.current = committedPageRef.current;
-      committedPageRef.current = next;
-    }
-  }, [currentNavEntry]);
+    if (!onChatPage || !activeId || mruChatsRef.current[0] === activeId) return;
+    mruChatsRef.current = [
+      activeId,
+      ...mruChatsRef.current.filter((id) => id !== activeId),
+    ].slice(0, CHAT_SWITCHER_LIMIT);
+  }, [onChatPage, activeId]);
   const navHistoryRef = useRef<NavEntry[]>([]);
   const navIndexRef = useRef(0);
   const navApplyingRef = useRef(false);
@@ -327,11 +341,75 @@ export function useHomeState({
     if (entry.view === "chat") setActiveId(entry.activeId);
     setSettingsOpen(entry.settings);
   }, []);
-  const switchToPreviousPage = useCallback(() => {
-    const prev = previousPageRef.current;
-    if (prev && !sameNavEntry(committedPageRef.current, prev))
-      applyNavEntry(prev);
-  }, [applyNavEntry]);
+  const [chatSwitcher, setChatSwitcher] = useState<ChatSwitcherState | null>(
+    null,
+  );
+  const chatSwitcherRef = useRef<ChatSwitcherState | null>(null);
+  chatSwitcherRef.current = chatSwitcher;
+  const onChatPageRef = useRef(onChatPage);
+  onChatPageRef.current = onChatPage;
+  const closeChatSwitcher = useCallback((id: string | null) => {
+    if (!chatSwitcherRef.current) return;
+    chatSwitcherRef.current = null;
+    setChatSwitcher(null);
+    if (!id) return;
+    setSettingsOpen(false);
+    if (!onChatPageRef.current || id !== activeIdRef.current)
+      selectChatRef.current(id);
+  }, []);
+  const commitChatSwitcher = useCallback(() => {
+    const s = chatSwitcherRef.current;
+    closeChatSwitcher(s ? (s.ids[s.index] ?? null) : null);
+  }, [closeChatSwitcher]);
+  /** ⌃⇥ (+1) / ⌃⇧⇥ (-1): open on the previous chat, or step while the
+   *  switcher is up. `stillHeld` reports whether the switcher's modifier is
+   *  still down; a release before the reveal delay is a tap and just switches.
+   *  From Kanban, Automations or Settings the current chat isn't on screen, so
+   *  the switcher starts on it rather than the one before. */
+  const stepChatSwitcher = useCallback(
+    (delta: 1 | -1, stillHeld: () => boolean) => {
+      const open = chatSwitcherRef.current;
+      if (open) {
+        const n = open.ids.length;
+        const next = { ...open, index: (((open.index + delta) % n) + n) % n };
+        chatSwitcherRef.current = next;
+        setChatSwitcher(next);
+        return;
+      }
+      // Chats visited this session lead; the rest of the list (most recently
+      // updated first) tops it up so the switcher is useful right after
+      // launch. Archived or deleted chats drop out instead of reopening blank.
+      const convs = conversationsRef.current;
+      const live = new Set(convs.map((c) => c.id));
+      const visited = mruChatsRef.current.filter((id) => live.has(id));
+      const rest = [...convs]
+        .filter((c) => !visited.includes(c.id))
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .map((c) => c.id);
+      const ids = [...visited, ...rest].slice(0, CHAT_SWITCHER_LIMIT);
+      const skipCurrent = onChatPageRef.current && ids[0] === activeIdRef.current;
+      if (ids.length < (skipCurrent ? 2 : 1)) return;
+      const state: ChatSwitcherState = {
+        ids,
+        index: delta > 0 ? (skipCurrent ? 1 : 0) : ids.length - 1,
+        visible: false,
+      };
+      chatSwitcherRef.current = state;
+      setChatSwitcher(state);
+      setTimeout(() => {
+        const s = chatSwitcherRef.current;
+        if (!s || s.visible) return;
+        if (!stillHeld()) {
+          commitChatSwitcher();
+          return;
+        }
+        const shown = { ...s, visible: true };
+        chatSwitcherRef.current = shown;
+        setChatSwitcher(shown);
+      }, CHAT_SWITCHER_DELAY_MS);
+    },
+    [commitChatSwitcher],
+  );
   const navigateBack = useCallback(() => {
     if (navIndexRef.current <= 0) return;
     navIndexRef.current -= 1;
@@ -554,7 +632,10 @@ export function useHomeState({
     newTaskOpen,
     navigateBack,
     navigateForward,
-    switchToPreviousPage,
+    chatSwitcher,
+    stepChatSwitcher,
+    commitChatSwitcher,
+    closeChatSwitcher,
     settingsOpen,
     historyOpen,
     sideWorkspace,

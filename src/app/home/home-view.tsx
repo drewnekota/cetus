@@ -13,6 +13,7 @@ import {
 import { ChatPane } from "@/components/chat/chat-pane";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
 import { CommandPalette } from "@/components/command-palette";
+import { ChatSwitcher } from "@/components/chat-switcher";
 import { AppSidebar } from "@/components/sidebar/app-sidebar";
 import type { SidebarView } from "@/components/sidebar/view-toggle";
 import { BoardView } from "@/components/board/board-view";
@@ -52,6 +53,7 @@ import {
   mergeConversation,
   ChatLoadingPane,
 } from "./home-utils";
+import type { ChatSwitcherState } from "./use-home-state";
 
 // The settings UI is a ~3900-line client component (plus react-markdown for the
 // skill previews). Code-split it so its chunk only loads the first time the user
@@ -74,6 +76,8 @@ const Onboarding = dynamic(
 );
 
 export function renderHome({
+  chatSwitcher,
+  closeChatSwitcher,
   sidebarOpen,
   setSidebarOpen,
   paletteOpen,
@@ -194,6 +198,8 @@ export function renderHome({
   isStreaming,
   renderWorkspaceDock,
 }: {
+  chatSwitcher: ChatSwitcherState | null;
+  closeChatSwitcher: (id: string | null) => void;
   sidebarOpen: boolean;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
   paletteOpen: boolean;
@@ -363,6 +369,15 @@ export function renderHome({
           CommandPalette's CommandInput still ends up reaching for a null
           context (`o.subscribe` crash). Lazy-mount the palette so it's
           rendered only after the user actually opens it. */}
+      {chatSwitcher?.visible && (
+        <ChatSwitcher
+          state={chatSwitcher}
+          conversations={conversations}
+          activityIds={activityIds}
+          unreadCompletedIds={unreadCompletedIds}
+          onPick={closeChatSwitcher}
+        />
+      )}
       {paletteOpen && (
         <CommandPalette
           open={paletteOpen}

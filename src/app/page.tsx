@@ -121,7 +121,10 @@ export default function Home() {
     newTaskOpen,
     navigateBack,
     navigateForward,
-    switchToPreviousPage,
+    chatSwitcher,
+    stepChatSwitcher,
+    commitChatSwitcher,
+    closeChatSwitcher,
     settingsOpen,
     historyOpen,
     sideWorkspace,
@@ -692,7 +695,10 @@ export default function Home() {
     detailId,
     navigateBack,
     navigateForward,
-    switchToPreviousPage,
+    chatSwitcherOpen: chatSwitcher !== null,
+    stepChatSwitcher,
+    commitChatSwitcher,
+    closeChatSwitcher,
     settingsOpen,
     view,
     historyOpen,
@@ -1337,6 +1343,8 @@ export default function Home() {
     setAutomations((as) => as.filter((x) => x.id !== a.id));
   }
   return renderHome({
+    chatSwitcher,
+    closeChatSwitcher,
     sidebarOpen,
     setSidebarOpen,
     paletteOpen,

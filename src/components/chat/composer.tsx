@@ -195,6 +195,9 @@ interface Props {
   onRequestBackendSwitch?: (target: RuntimeSwitchTarget) => void;
 }
 
+const FIELD_SIZING =
+  typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
@@ -1008,6 +1011,13 @@ export function Composer({
   useLayoutEffect(() => {
     const el = taRef.current;
     if (!el) return;
+    // Where `field-sizing: content` works the field grows on its own; the
+    // collapse-and-measure below forces two whole-page layouts per keystroke,
+    // which is what makes fast typing stutter beside a long transcript.
+    if (FIELD_SIZING) {
+      el.style.maxHeight = (variant === "hero" ? 320 : 240) + "px";
+      return;
+    }
     const scrollTop = el.scrollTop;
     el.style.height = "auto";
     el.style.height =

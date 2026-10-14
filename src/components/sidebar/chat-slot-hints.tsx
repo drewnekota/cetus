@@ -24,16 +24,23 @@ export function useChatSlotHint(id: string): string | undefined {
 
 // Long enough that a quick ⌘C or ⌘K doesn't flash numbers over every row.
 const REVEAL_DELAY_MS = 120;
+// After ⌘⇥ brings the window back, WebKit replays the still-held ⌘ as a
+// keydown but the release can land before the window is key, so its keyup
+// never arrives. Ignore modifier presses this soon after regaining focus.
+const FOCUS_SETTLE_MS = 400;
 
 /** The modifiers held on their own, after a short pause; null otherwise.
  *  Pressing a key while they're held keeps the hints up (⌘1 then ⌘2 reads
  *  them as you go) but cancels a pending reveal, so a quick ⌘C never flashes
- *  them. Releasing a modifier or the window losing focus hides them. */
+ *  them. Releasing a modifier or the window losing focus hides them, and so
+ *  does any pointer event reporting different modifiers — the safety net for
+ *  a keyup the window never received. */
 function useHeldModifiers(): string | null {
   const [held, setHeld] = useState<string | null>(null);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let shown: string | null = null;
+    let focusedAt = 0;
     const show = (mods: string | null) => {
       clearTimeout(timer);
       shown = mods;
@@ -46,21 +53,37 @@ function useHeldModifiers(): string | null {
       // WebKit can re-send the held modifier's keydown; same set, keep it up.
       if (mods === shown) return;
       show(null);
-      if (mods) timer = setTimeout(() => show(mods), REVEAL_DELAY_MS);
+      if (mods && performance.now() - focusedAt > FOCUS_SETTLE_MS)
+        timer = setTimeout(() => show(mods), REVEAL_DELAY_MS);
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (keyToken(e.code, e.key) === null && heldModifiers(e) !== shown)
         show(null);
     };
+    const onPointer = (e: PointerEvent | WheelEvent) => {
+      if (shown !== null && heldModifiers(e) !== shown) show(null);
+    };
     const hide = () => show(null);
+    const onFocus = () => {
+      focusedAt = performance.now();
+      show(null);
+    };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("pointermove", onPointer, { passive: true });
+    window.addEventListener("pointerdown", onPointer, { passive: true });
+    window.addEventListener("wheel", onPointer, { passive: true });
     window.addEventListener("blur", hide);
+    window.addEventListener("focus", onFocus);
     return () => {
       clearTimeout(timer);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("pointermove", onPointer);
+      window.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("wheel", onPointer);
       window.removeEventListener("blur", hide);
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
   return held;

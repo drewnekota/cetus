@@ -360,16 +360,16 @@ export function cliModelCatalog(
  *  family match (a stale pinned Claude id vs. the live catalog), and when
  *  nothing is persisted ("" = no flag) the row the CLI itself reports as its
  *  configured default. `undefined` when even that can't be resolved (catalog
- *  still loading, or an older CLI that doesn't report one). */
+ *  still loading, or an older CLI that doesn't report one). A persisted id
+ *  that matches no row never falls back to the CLI default: that id is what
+ *  spawns, so checking the default row would show a model that isn't running. */
 export function resolveCliModel(
   selected: string,
   catalog: { id: string; label: string }[],
   defaults: CliDefaults | null,
 ) {
-  return (
-    findCatalogModel(selected, catalog) ??
-    resolveDefaultEntry(defaults?.model, catalog)
-  );
+  if (selected) return findCatalogModel(selected, catalog);
+  return resolveDefaultEntry(defaults?.model, catalog);
 }
 
 /** Effort row a persisted override selects, falling back to the level the
@@ -412,11 +412,32 @@ function findCatalogModel(
   const exact = catalog.find((model) => model.id === selected);
   if (exact || !selected) return exact;
   const family = selected.split("[")[0].toLowerCase();
-  return catalog.find((model) => {
+  const byFamily = catalog.find((model) => {
     const id = model.id.split("[")[0].toLowerCase();
     const label = model.label.toLowerCase();
     return id.includes(family) || family.includes(label);
   });
+  return byFamily ?? findClaudeRelease(family, catalog);
+}
+
+/** Row for a full Claude id the catalog lists only under a floating alias
+ *  ("claude-fable-5-1[1m]" once the catalog reports `fable` as "Fable 5.1"):
+ *  the row labelled with the same tier and version, else the tier's bare
+ *  alias row (a release newer or older than any labelled one). */
+function findClaudeRelease(
+  family: string,
+  catalog: { id: string; label: string }[],
+) {
+  const m = family.match(/^claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?:-|$)/);
+  if (!m) return undefined;
+  const tier = m[1];
+  const version = m[3] ? `${m[2]}.${m[3]}` : m[2];
+  const labelOf = (model: { label: string }) =>
+    model.label.split(" (")[0].trim().toLowerCase();
+  return (
+    catalog.find((model) => labelOf(model) === `${tier} ${version}`) ??
+    catalog.find((model) => model.id.split("[")[0].toLowerCase() === tier)
+  );
 }
 
 /** Whether a persisted model override is a pinned full id that can fall

@@ -161,8 +161,9 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: "switchPreviousView",
-    label: "Switch to previous page",
-    description: "Toggle back to the page you were on before",
+    label: "Switch between recent chats",
+    description:
+      "Tap to go back to the previous chat; hold the modifier to pick from recent chats",
     defaultAccelerator: "Ctrl+Tab",
   },
   {

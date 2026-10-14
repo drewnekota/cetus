@@ -42,6 +42,33 @@ export function readDraft(key: string): string {
   return cache.get(key) ?? "";
 }
 
+// localStorage is synchronous, and the composer saves on every keystroke, so
+// writes are batched: the cache is current immediately and the disk catches up
+// once typing pauses (or the page hides, so a reload still finds the text).
+const PERSIST_DELAY_MS = 400;
+const pendingWrites = new Set<string>();
+let persistTimer: ReturnType<typeof setTimeout> | undefined;
+
+function flushDrafts() {
+  clearTimeout(persistTimer);
+  persistTimer = undefined;
+  for (const key of pendingWrites) {
+    const text = cache.get(key);
+    try {
+      if (text) localStorage.setItem(PREFIX + key, text);
+      else localStorage.removeItem(PREFIX + key);
+    } catch {}
+  }
+  pendingWrites.clear();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", flushDrafts);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushDrafts();
+  });
+}
+
 export function writeDraft(key: string, text: string): void {
   hydrate();
   if (text) {
@@ -49,10 +76,9 @@ export function writeDraft(key: string, text: string): void {
   } else {
     cache.delete(key);
   }
-  try {
-    if (text) localStorage.setItem(PREFIX + key, text);
-    else localStorage.removeItem(PREFIX + key);
-  } catch {}
+  pendingWrites.add(key);
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(flushDrafts, PERSIST_DELAY_MS);
 }
 
 export function readDraftAttachments(key: string): DraftAttachment[] {
