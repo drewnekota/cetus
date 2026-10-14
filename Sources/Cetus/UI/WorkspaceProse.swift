@@ -191,6 +191,8 @@ private struct WSPre: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
         }
+        // A trackpad swipe must not wiggle a block whose content fits (AppKit allows horizontal rubber-banding by default).
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 4).fill(Theme.secondary))
     }
@@ -335,6 +337,8 @@ private struct WSProseTable: View {
             }
         }
         .scrollDisabled(w.reduce(0, +) <= width + 0.5)
+        // A trackpad swipe must not wiggle a block whose content fits (AppKit allows horizontal rubber-banding by default).
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }
 }
 

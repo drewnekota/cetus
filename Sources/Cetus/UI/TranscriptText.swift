@@ -15,6 +15,43 @@ enum ProseKey {
     static let mention = NSAttributedString.Key("cetusProseMention")
     /// Italic requested: fallback fonts without an italic face get WebKit's synthetic 14° oblique.
     static let italic = NSAttributedString.Key("cetusProseItalic")
+    /// Line metrics of a merged block (`ProseMetricsBox`), overriding the view's own.
+    static let metrics = NSAttributedString.Key("cetusProseMetrics")
+    /// Collapsed margin above a merged block, on its first character only (CGFloat).
+    static let gap = NSAttributedString.Key("cetusProseGap")
+    /// List marker drawn left of a merged block's first line (`ProseMarker`).
+    static let marker = NSAttributedString.Key("cetusProseMarker")
+}
+
+/// Several markdown blocks in one text view: each block carries its own line
+/// metrics and the collapsed margin above it as attributes. Values compare by
+/// content so an unchanged rebuild doesn't reset the text storage.
+final class ProseMetricsBox: NSObject {
+    let metrics: ProseMetrics
+    init(_ m: ProseMetrics) { metrics = m }
+    override func isEqual(_ object: Any?) -> Bool { (object as? ProseMetricsBox)?.metrics == metrics }
+    override var hash: Int { metrics.lineHeight.hashValue ^ metrics.ascent.hashValue }
+}
+
+/// A list item's marker, drawn in the indent left of its first line like MDBullet / the ordered counter.
+final class ProseMarker: NSObject {
+    enum Kind: Equatable { case bullet, ordered(String), task(Bool) }
+    let kind: Kind
+    /// Body size and line height the marker is laid out for.
+    let size: CGFloat
+    let lineHeight: CGFloat
+    /// The list's indent: the marker box spans [textStart - indent, textStart).
+    let indent: CGFloat
+    /// Ordered counters: the right-aligned number box width (4ch).
+    let numberWidth: CGFloat
+    init(_ kind: Kind, size: CGFloat, lineHeight: CGFloat, indent: CGFloat, numberWidth: CGFloat = 0) {
+        self.kind = kind; self.size = size; self.lineHeight = lineHeight; self.indent = indent; self.numberWidth = numberWidth
+    }
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let o = object as? ProseMarker else { return false }
+        return o.kind == kind && o.size == size && o.lineHeight == lineHeight && o.indent == indent && o.numberWidth == numberWidth
+    }
+    override var hash: Int { size.hashValue ^ indent.hashValue }
 }
 
 /// Line metrics shared by layout and drawing.
@@ -41,9 +78,19 @@ final class ProseLayoutDelegate: NSObject, NSLayoutManagerDelegate {
     func layoutManager(_ layoutManager: NSLayoutManager, shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
                        lineFragmentUsedRect: UnsafeMutablePointer<NSRect>, baselineOffset: UnsafeMutablePointer<CGFloat>,
                        in textContainer: NSTextContainer, forGlyphRange glyphRange: NSRange) -> Bool {
-        lineFragmentRect.pointee.size.height = metrics.lineHeight
-        lineFragmentUsedRect.pointee.size.height = metrics.lineHeight
-        baselineOffset.pointee = metrics.baseline
+        var m = metrics
+        var gap: CGFloat = 0
+        if let storage = layoutManager.textStorage, storage.length > 0 {
+            let c = layoutManager.characterIndexForGlyph(at: glyphRange.location)
+            if c < storage.length {
+                if let box = storage.attribute(ProseKey.metrics, at: c, effectiveRange: nil) as? ProseMetricsBox { m = box.metrics }
+                if let g = storage.attribute(ProseKey.gap, at: c, effectiveRange: nil) as? CGFloat { gap = g }
+            }
+        }
+        lineFragmentRect.pointee.size.height = m.lineHeight + gap
+        lineFragmentUsedRect.pointee.origin.y = lineFragmentRect.pointee.origin.y + gap
+        lineFragmentUsedRect.pointee.size.height = m.lineHeight
+        baselineOffset.pointee = gap + m.baseline
         return true
     }
 }
@@ -55,7 +102,6 @@ final class ProseLayoutManager: NSLayoutManager {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
         guard let storage = textStorage, let tc = textContainers.first else { return }
         let chars = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
-        let baseline = (delegate as? ProseLayoutDelegate)?.metrics.baseline ?? 0
         storage.enumerateAttribute(ProseKey.find, in: chars) { value, range, _ in
             guard let color = value as? NSColor else { return }
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
@@ -64,6 +110,8 @@ final class ProseLayoutManager: NSLayoutManager {
                 guard r.length > 0 else { return }
                 let b = self.boundingRect(forGlyphRange: r, in: tc)
                 let font = storage.attribute(.font, at: self.characterIndexForGlyph(at: r.location), effectiveRange: nil) as? NSFont ?? NSFont.systemFont(ofSize: 15)
+                // Per line: merged blocks have their own line heights and gaps above.
+                let baseline = self.location(forGlyphAt: r.location).y
                 let top = rect.minY + baseline - font.ascender
                 color.setFill()
                 NSRect(x: b.minX + origin.x, y: top + origin.y, width: b.width, height: font.ascender - font.descender).fill()
@@ -85,10 +133,11 @@ final class ProseLayoutManager: NSLayoutManager {
                 let b = self.boundingRect(forGlyphRange: r, in: tc)
                 let x0 = first ? b.minX - 4 : b.minX
                 let x1 = last ? b.maxX : min(b.maxX, used.maxX)
+                let baseline = self.location(forGlyphAt: r.location).y
                 let top = rect.minY + baseline - font.ascender - 2
                 let bottom = rect.minY + baseline - font.descender + 2
                 let box = NSRect(x: x0 + origin.x, y: top + origin.y, width: x1 - x0, height: bottom - top)
-                let path = Self.slicedRoundRect(box, radius: mention != nil ? 8 : 4, left: first, right: last)
+                let path = Self.slicedRoundRect(box, radius: mention != nil ? 6 : 4, left: first, right: last)
                 self.codeFill.setFill()
                 if let mention {
                     mention.setFill()
@@ -96,10 +145,46 @@ final class ProseLayoutManager: NSLayoutManager {
                 path.fill()
                 if mention != nil {
                     NSColor(Theme.primary).withAlphaComponent(0.2).setStroke()
-                    let ring = Self.slicedRoundRect(box.insetBy(dx: -0.5, dy: -0.5), radius: 8.5, left: first, right: last)
+                    let ring = Self.slicedRoundRect(box.insetBy(dx: -0.5, dy: -0.5), radius: 6.5, left: first, right: last)
                     ring.lineWidth = 1
                     ring.stroke()
                 }
+            }
+        }
+    }
+
+    /// List markers of merged blocks, positioned like MDBullet / the ordered counter.
+    override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
+        guard let storage = textStorage else { return }
+        let chars = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        storage.enumerateAttribute(ProseKey.marker, in: chars) { value, range, _ in
+            guard let marker = value as? ProseMarker else { return }
+            let g = glyphIndexForCharacter(at: range.location)
+            let used = lineFragmentUsedRect(forGlyphAt: g, effectiveRange: nil)
+            let para = storage.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
+            let boxX = origin.x + (para?.headIndent ?? 0) - marker.indent
+            let top = origin.y + used.minY
+            let size = marker.size, lh = marker.lineHeight
+            switch marker.kind {
+            case .bullet:
+                let d = size * 0.3333
+                NSColor(Theme.proseBullet).setFill()
+                NSBezierPath(ovalIn: NSRect(x: boxX + MDBulletGeometry.dx(size), y: top + MDBulletGeometry.dy(size, lh), width: d, height: d)).fill()
+            case .task(let done):
+                let r = NSRect(x: boxX + marker.indent - 6 - 13, y: top + (lh - 13) / 2, width: 13, height: 13)
+                let fill = NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3)
+                if done { NSColor(Theme.primary).setFill(); fill.fill() }
+                NSColor(Theme.mutedForeground).setStroke()
+                let ring = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 2.5, yRadius: 2.5)
+                ring.lineWidth = 1
+                ring.stroke()
+            case .ordered(let label):
+                let font = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular)
+                let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor(Theme.proseCounter)]
+                let w = (label as NSString).size(withAttributes: attrs).width
+                let m = ProseMetrics(font: font, lineHeight: lh)
+                (label as NSString).draw(at: NSPoint(x: boxX + marker.numberWidth - w, y: top + m.baseline - font.ascender), withAttributes: attrs)
             }
         }
     }
@@ -136,6 +221,39 @@ final class ProseTextView: NSTextView {
         return super.resignFirstResponder()
     }
 
+    /// Transcript prose selects across blocks (TranscriptSelection); a press on
+    /// a link, a double/triple click, or shift-click stays native.
+    override func mouseDown(with event: NSEvent) {
+        let sel = TranscriptSelection.shared
+        guard isSelectable, sel.owns(self) else { super.mouseDown(with: event); return }
+        if event.clickCount == 1, !event.modifierFlags.contains(.shift), !onLinkText(event) {
+            sel.track(self, event)
+            return
+        }
+        sel.clear()
+        super.mouseDown(with: event)
+        sel.adoptNative(self)
+    }
+
+    private func onLinkText(_ event: NSEvent) -> Bool {
+        guard let lm = layoutManager, let tc = textContainer, let storage = textStorage, storage.length > 0 else { return false }
+        var p = convert(event.locationInWindow, from: nil)
+        p.x -= textContainerOrigin.x
+        p.y -= textContainerOrigin.y
+        let g = lm.glyphIndex(for: p, in: tc)
+        guard lm.boundingRect(forGlyphRange: NSRange(location: g, length: 1), in: tc).contains(p) else { return false }
+        return storage.attribute(.link, at: lm.characterIndexForGlyph(at: g), effectiveRange: nil) != nil
+    }
+
+    override func copy(_ sender: Any?) {
+        if TranscriptSelection.shared.hasSelection { TranscriptSelection.shared.copy() } else { super.copy(sender) }
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(copy(_:)), TranscriptSelection.shared.hasSelection { return true }
+        return super.validateUserInterfaceItem(item)
+    }
+
     override func clicked(onLink link: Any, at charIndex: Int) {
         if let url = link as? URL { onLink?(url) } else if let s = link as? String, let url = URL(string: s) { onLink?(url) }
     }
@@ -162,8 +280,10 @@ enum ProseMeasure {
         lm.ensureLayout(for: tc)
         var lines = 0
         var maxX: CGFloat = 0
-        lm.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: lm.numberOfGlyphs)) { _, used, _, glyphs, _ in
+        var bottom: CGFloat = 0
+        lm.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: lm.numberOfGlyphs)) { rect, used, _, glyphs, _ in
             lines += 1
+            bottom = max(bottom, rect.maxY)
             // Trailing whitespace does not count toward the max-content width.
             var end = NSMaxRange(glyphs)
             let s = storage.string as NSString
@@ -178,8 +298,8 @@ enum ProseMeasure {
             }
             _ = used
         }
-        if lines == 0 { lines = 1 }
-        let size = CGSize(width: maxX, height: CGFloat(lines) * metrics.lineHeight)
+        // Merged blocks have their own line heights and gaps: the last line's bottom is the height.
+        let size = CGSize(width: maxX, height: lines == 0 ? metrics.lineHeight : bottom)
         cache.setObject(Entry(size), forKey: key)
         return size
     }
@@ -195,14 +315,33 @@ struct ProseText: NSViewRepresentable {
 
     fileprivate var id: Int {
         var h = Hasher()
-        h.combine(text.string)
+        h.combine(Self.textHash(text))
         h.combine(firstLineIndent)
+        return h.finalize()
+    }
+
+    /// Per attributed-string instance: layout asks for the size many times per pass, and
+    /// hashing the whole text and its attributes each time added up across a transcript.
+    nonisolated(unsafe) private static let hashes = NSMapTable<NSAttributedString, NSNumber>(keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory)
+
+    private static func textHash(_ text: NSAttributedString) -> Int {
+        if let hit = hashes.object(forKey: text) { return hit.intValue }
+        var h = Hasher()
+        h.combine(text.string)
         text.enumerateAttributes(in: NSRange(location: 0, length: text.length)) { attrs, r, _ in
             h.combine(r.location)
             if let f = attrs[.font] as? NSFont { h.combine(f.fontName); h.combine(f.pointSize) }
             if let k = attrs[.kern] as? CGFloat { h.combine(k) }
+            // Merged blocks: their metrics, gaps and indents change the measured height.
+            if let m = attrs[ProseKey.metrics] as? ProseMetricsBox { h.combine(m.metrics.lineHeight); h.combine(m.metrics.ascent) }
+            if let g = attrs[ProseKey.gap] as? CGFloat { h.combine(g) }
+            if let p = attrs[.paragraphStyle] as? NSParagraphStyle, p.headIndent != 0 || p.firstLineHeadIndent != 0 {
+                h.combine(p.headIndent); h.combine(p.firstLineHeadIndent)
+            }
         }
-        return h.finalize()
+        let v = h.finalize()
+        hashes.setObject(NSNumber(value: v), forKey: text)
+        return v
     }
 
     final class Coordinator {
@@ -239,12 +378,14 @@ struct ProseText: NSViewRepresentable {
 
     func updateNSView(_ tv: ProseTextView, context: Context) {
         tv.isSelectable = selectable
+        let metricsChanged = context.coordinator.delegate.metrics != metrics
         context.coordinator.delegate.metrics = metrics
         let full = withIndent(text)
         if context.coordinator.lastText != full {
             context.coordinator.lastText = full
             tv.textStorage?.setAttributedString(full)
-        } else {
+        } else if metricsChanged {
+            // Same text: only new line metrics need a relayout (not every SwiftUI update).
             tv.layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: 0, length: tv.textStorage?.length ?? 0), actualCharacterRange: nil)
         }
     }

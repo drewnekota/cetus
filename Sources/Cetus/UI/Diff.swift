@@ -102,6 +102,8 @@ struct DiffView: View {
             .padding(.vertical, 6)
             .textSelection(.enabled)
         }
+        // A trackpad swipe must not wiggle a diff whose lines fit (AppKit allows horizontal rubber-banding by default).
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }
 
     private func marker(_ k: DiffLine.Kind) -> String { k == .added ? "+" : k == .removed ? "−" : "" }

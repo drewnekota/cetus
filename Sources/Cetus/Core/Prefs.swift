@@ -10,6 +10,8 @@ struct Draft: Codable, Equatable {
     var text: String
     var attachments: [String]
     var mentions: [MentionRef]? = nil
+    /// Pending "Add to chat" quote, sent as a leading `>` blockquote.
+    var quote: String? = nil
 }
 
 struct NotificationPrefs: Codable, Equatable {
@@ -105,7 +107,7 @@ final class PrefStore {
 
     /// Drafts change on every keystroke: save without notifying observers.
     func setDraft(_ key: String, _ draft: Draft?) {
-        if let draft, !(draft.text.isEmpty && draft.attachments.isEmpty) { value.drafts[key] = draft }
+        if let draft, !(draft.text.isEmpty && draft.attachments.isEmpty && (draft.quote ?? "").isEmpty) { value.drafts[key] = draft }
         else { value.drafts.removeValue(forKey: key) }
         scheduleSave()
     }

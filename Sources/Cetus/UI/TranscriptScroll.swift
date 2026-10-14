@@ -101,15 +101,26 @@ struct TranscriptScrollProbe: NSViewRepresentable {
 /// TanStack Virtual measures each transcript row with `Math.round(blockSize)`
 /// and stacks rows at those rounded offsets; rows report the same rounded height.
 struct TranscriptRowRounding: Layout {
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    /// The row's measured size per proposed width: placing it reuses the measurement
+    /// instead of laying the whole row out a second time. Reset when the row changes.
+    final class Sizes { var byWidth: [CGFloat: CGSize] = [:] }
+    func makeCache(subviews: Subviews) -> Sizes { Sizes() }
+
+    private func measure(_ v: LayoutSubview, width: CGFloat?, _ cache: Sizes) -> CGSize {
+        if let w = width, let hit = cache.byWidth[w] { return hit }
+        let s = v.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        if let w = width { cache.byWidth[w] = s }
+        return s
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Sizes) -> CGSize {
         guard let v = subviews.first else { return .zero }
-        let s = v.sizeThatFits(proposal)
-        if ProcessInfo.processInfo.environment["CETUS_TR_DEBUG"] != nil { FileHandle.standardError.write("row proposal=\(proposal) size=\(s)\n".data(using: .utf8)!) }
+        let s = proposal.height == nil ? measure(v, width: proposal.width, cache) : v.sizeThatFits(proposal)
         return CGSize(width: s.width, height: (s.height).rounded(.toNearestOrAwayFromZero))
     }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Sizes) {
         guard let v = subviews.first else { return }
-        let s = v.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+        let s = measure(v, width: bounds.width, cache)
         v.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: s.height))
     }
 }

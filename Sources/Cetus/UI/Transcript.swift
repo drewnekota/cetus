@@ -686,10 +686,14 @@ struct MessageActions: View {
     static func clock(_ ms: Double) -> String { fmt("hh:mm a").string(from: Date(timeIntervalSince1970: ms / 1000)) }
     /// `toLocaleString` with 2-digit date and seconds (the tooltip).
     static func full(_ ms: Double) -> String { fmt("MM/dd/yyyy, hh:mm:ss a").string(from: Date(timeIntervalSince1970: ms / 1000)) }
+    /// DateFormatter is expensive to create and every transcript row formats its time.
+    nonisolated(unsafe) private static var formatters: [String: DateFormatter] = [:]
     private static func fmt(_ f: String) -> DateFormatter {
+        if let d = formatters[f] { return d }
         let d = DateFormatter()
         d.locale = Locale(identifier: "en_US_POSIX")
         d.dateFormat = f
+        formatters[f] = d
         return d
     }
     let text: String
@@ -755,13 +759,23 @@ func userTextAttributed(_ text: String, labels: [String], size: CGFloat, find: F
         .paragraphStyle: para, ProseBuilder.language: "en",
     ])
     let ns = text as NSString
+    // `bg-background/70 dark:bg-background/40`.
+    let mentionFill = NSColor(name: nil) { a in
+        NSColor(Theme.background).withAlphaComponent(a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.4 : 0.7)
+    }
     for sp in Mentions.spans(text, labels: labels) {
         let r = NSRange(sp.range, in: text)
         m.addAttributes([.font: NSFont.systemFont(ofSize: size, weight: .medium), .foregroundColor: NSColor(Theme.primary),
-                         ProseKey.code: 1, ProseKey.mention: NSColor(Theme.background).withAlphaComponent(0.4)], range: r)
-        if r.location > 0 {
+                         ProseKey.code: 1, ProseKey.mention: mentionFill], range: r)
+        if r.location > 0, ns.character(at: r.location - 1) != 0x0A {
             let prev = (m.attribute(.kern, at: r.location - 1, effectiveRange: nil) as? CGFloat) ?? 0
             m.addAttribute(.kern, value: prev + 4, range: NSRange(location: r.location - 1, length: 1))
+        } else {
+            // A pill opening a paragraph (`@goal …`) has no previous glyph to kern:
+            // indent the first line instead, or its left padding is clipped at x=0.
+            let indented = para.mutableCopy() as! NSMutableParagraphStyle
+            indented.firstLineHeadIndent = 4
+            m.addAttribute(.paragraphStyle, value: indented, range: ns.paragraphRange(for: r))
         }
         if r.length > 0 { m.addAttribute(.kern, value: 4, range: NSRange(location: NSMaxRange(r) - 1, length: 1)) }
     }
@@ -798,7 +812,9 @@ struct UserMessageView: View {
 
     var body: some View {
         let textBlocks = message.blocks.filter { $0.kind == .text }
-        let text = textBlocks.map(\.text).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        let full = textBlocks.map(\.text).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        let quoted = UserQuote.split(full)
+        let text = quoted?.text ?? full
         let labels = textBlocks.flatMap(\.mentions)
         let attachments = message.blocks.filter { $0.kind == .image || $0.kind == .file }
         let size = (15 * scale).rounded()
@@ -809,6 +825,17 @@ struct UserMessageView: View {
             ForEach(Array(attachments.enumerated()), id: \.offset) { _, b in
                 if b.kind == .image { ImageThumb(block: b) } else { FileChip(name: b.text, path: b.path, size: b.sizeBytes, user: true) }
             }
+            if let quoted {
+                // Quote header: `text-md leading-relaxed text-muted-foreground line-clamp-2`.
+                HStack(alignment: .top, spacing: 6) {
+                    Glyph(name: "corner-down-right", size: 14, color: Theme.mutedForeground.opacity(0.7)).padding(.top, 4)
+                    Text(quoted.quote).font(.system(size: (14 * scale).rounded())).foregroundStyle(Theme.mutedForeground)
+                        .lineSpacing((14 * scale).rounded() * 0.625).lineLimit(2).truncationMode(.tail)
+                        .multilineTextAlignment(.leading)
+                }
+                .padding(.horizontal, 4)
+                .testID("message-quote")
+            }
             if !text.isEmpty {
                 // `rounded-2xl bg-primary/20 px-4 py-2`, `text-base leading-relaxed whitespace-pre-wrap`, w-fit.
                 ProseText(text: userText(text, labels: labels, size: size, unit: "\(message.key):u"),
@@ -817,7 +844,7 @@ struct UserMessageView: View {
                     .padding(.vertical, 8)
                     .background(RoundedRectangle(cornerRadius: 16).fill(Theme.userBubble))
             }
-            MessageActions(text: text, createdAt: message.createdAt, user: true, visible: hover, onFork: onFork)
+            MessageActions(text: full, createdAt: message.createdAt, user: true, visible: hover, onFork: onFork)
         }
         .containerRelativeFrame(.horizontal, alignment: .trailing) { w, _ in min(w, 768) * 0.88 }
         .frame(maxWidth: .infinity, alignment: .trailing)

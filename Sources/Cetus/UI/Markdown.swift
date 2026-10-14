@@ -44,6 +44,47 @@ private struct MDBox {
     var innerBottom: CGFloat = 0
 }
 
+/// Rendered markdown by text and metrics (see MarkdownView.renderedBlocks).
+private enum MarkdownRenderCache {
+    final class Entry { let boxes: [MDBox]; init(_ b: [MDBox]) { boxes = b } }
+    nonisolated(unsafe) static let shared: NSCache<NSString, Entry> = {
+        let c = NSCache<NSString, Entry>()
+        c.countLimit = 600
+        return c
+    }()
+}
+
+/// Text blocks of a merged run, with collapsed margins between them.
+private struct MDFlat {
+    struct Leaf {
+        var text: NSAttributedString
+        var metrics: ProseMetrics
+        /// Head indent (list nesting).
+        var indent: CGFloat
+        /// Starts with inline code: +4 first-line indent (the chip's left padding).
+        var codeStart: Bool
+        var marker: ProseMarker? = nil
+        /// Collapsed margin above this block.
+        var gap: CGFloat = 0
+    }
+    var leaves: [Leaf]
+    var top: CGFloat
+    var bottom: CGFloat
+    var innerTop: CGFloat = 0
+    var innerBottom: CGFloat = 0
+
+    /// MDStack's collapsing: the gap between neighbours is the larger of the two margins.
+    static func stack(_ parts: [MDFlat]) -> MDFlat {
+        var leaves: [Leaf] = []
+        for (i, p) in parts.enumerated() {
+            var ls = p.leaves
+            if i > 0, !ls.isEmpty { ls[0].gap = max(parts[i - 1].bottom, p.top) }
+            leaves += ls
+        }
+        return MDFlat(leaves: leaves, top: parts.first?.top ?? 0, bottom: parts.last?.bottom ?? 0)
+    }
+}
+
 private final class MDCounter { var n = 0 }
 
 struct MarkdownView: View {
@@ -59,9 +100,7 @@ struct MarkdownView: View {
     @Environment(\.lineScale) private var lineScale
 
     var body: some View {
-        let nodes = MDParser.parse(text)
-        let counter = MDCounter()
-        let boxes = nodes.map { box($0, counter: counter, tight: false) }
+        let boxes = renderedBlocks()
         // `[&>*:first-child]:mt-0 [&>*:last-child]:mb-0` trims the outer children's own
         // margins, but the prose div is a BFC (overflow-x-hidden): margins collapsing
         // up from inside them (a quote's p, a list's li) stay inside it.
@@ -103,6 +142,135 @@ struct MarkdownView: View {
         return AnyView(ProseText(text: attr, metrics: ProseMetrics(font: primary, lineHeight: lineHeight), firstLineIndent: startsWithCode ? 4 : 0))
     }
 
+    /// Parsing and building the attributed text is most of a row's cost; reopening a
+    /// chat (or re-rendering a row) reuses it. Find highlights are baked into the text,
+    /// so a live query always rebuilds.
+    private func renderedBlocks() -> [MDBox] {
+        let build = { blocks(MDParser.parse(text), counter: MDCounter()) }
+        guard (find?.query ?? "").isEmpty else { return build() }
+        let key = "\(unit)\u{1}\(baseSize)\u{1}\(scale)\u{1}\(lineScale)\u{1}\(bodyColor.map { "\($0)" } ?? "-")\u{1}\(text)" as NSString
+        if let hit = MarkdownRenderCache.shared.object(forKey: key) { return hit.boxes }
+        let boxes = build()
+        MarkdownRenderCache.shared.setObject(MarkdownRenderCache.Entry(boxes), forKey: key)
+        return boxes
+    }
+
+    // MARK: Merged text runs
+
+    /// Top-level blocks; consecutive paragraphs, headings and text-only lists
+    /// share one ProseText. A text view per paragraph made long answers cost
+    /// dozens of NSTextViews to build, and selection stopped at every block edge.
+    private func blocks(_ nodes: [MDNode], counter: MDCounter) -> [MDBox] {
+        var out: [MDBox] = []
+        var run: [MDFlat] = []
+        func flush() {
+            guard !run.isEmpty else { return }
+            out.append(mergedBox(run))
+            run = []
+        }
+        for node in nodes {
+            if Self.flattenable(node) { run.append(flat(node, tight: false, x: 0, counter: counter)) }
+            else { flush(); out.append(box(node, counter: counter, tight: false)) }
+        }
+        flush()
+        return out
+    }
+
+    /// Text-only blocks: paragraphs, headings, and lists whose items open with a paragraph.
+    private static func flattenable(_ node: MDNode) -> Bool {
+        switch node {
+        case .paragraph, .heading: return true
+        case .list(_, _, _, let items):
+            return items.allSatisfy { item in
+                guard case .paragraph = item.blocks.first else { return false }
+                return item.blocks.allSatisfy(flattenable)
+            }
+        default: return false
+        }
+    }
+
+    /// Same metrics and margins as `box`, as text blocks instead of views.
+    private func flat(_ node: MDNode, tight: Bool, x: CGFloat, counter: MDCounter) -> MDFlat {
+        switch node {
+        case .paragraph(let a):
+            let m: CGFloat = tight ? 0 : 8
+            return MDFlat(leaves: [flatLeaf(a, fonts(), lineHeight: lh, x: x, counter: counter)], top: m, bottom: m)
+        case .heading(let level, let a):
+            let (f, l) = headingStyle(level)
+            return MDFlat(leaves: [flatLeaf(a, f, lineHeight: l, x: x, counter: counter)], top: 12, bottom: 12)
+        case .list(let ordered, let start, let loose, let items):
+            let liMargin = size * 0.2857143
+            let ch = ("0" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size)]).width
+            let indent = ordered ? 4 * ch + size * 0.75 : size * 2.25 + size * 0.4285714
+            var itemFlats: [MDFlat] = []
+            for (k, item) in items.enumerated() {
+                var inner = MDFlat.stack(item.blocks.map { flat($0, tight: !loose, x: x + indent, counter: counter) })
+                let kind: ProseMarker.Kind = ordered ? .ordered("\(start + k).") : item.task.map { .task($0) } ?? .bullet
+                inner.leaves[0].marker = ProseMarker(kind, size: size, lineHeight: lh, indent: indent, numberWidth: 4 * ch)
+                itemFlats.append(MDFlat(leaves: inner.leaves, top: max(liMargin, inner.top), bottom: max(liMargin, inner.bottom)))
+            }
+            let stack = MDFlat.stack(itemFlats)
+            return MDFlat(leaves: stack.leaves, top: max(8, stack.top), bottom: max(8, stack.bottom),
+                          innerTop: stack.top, innerBottom: stack.bottom)
+        default:
+            preconditionFailure("not flattenable")
+        }
+    }
+
+    private func flatLeaf(_ spans: MDInline, _ f: ProseBuilder.Fonts, lineHeight: CGFloat, x: CGFloat, counter: MDCounter) -> MDFlat.Leaf {
+        let u = "\(unit):\(counter.n)"
+        counter.n += 1
+        let (attr, startsWithCode) = ProseBuilder.build(spans, f, find: findRanges(spans.plain.replacingOccurrences(of: "\n", with: " "), unit: u))
+        return MDFlat.Leaf(text: attr, metrics: ProseMetrics(font: ProseBuilder.font(f.size, f.weight), lineHeight: lineHeight),
+                           indent: x, codeStart: startsWithCode)
+    }
+
+    private func mergedBox(_ run: [MDFlat]) -> MDBox {
+        let all = MDFlat.stack(run)
+        let out = NSMutableAttributedString()
+        for (i, leaf) in all.leaves.enumerated() {
+            let a = NSMutableAttributedString(attributedString: leaf.text.length > 0 ? leaf.text : NSAttributedString(string: " "))
+            let full = NSRange(location: 0, length: a.length)
+            a.enumerateAttribute(.paragraphStyle, in: full) { value, r, _ in
+                let p = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle ?? NSMutableParagraphStyle()
+                p.headIndent = leaf.indent
+                p.firstLineHeadIndent = leaf.indent + (leaf.codeStart ? 4 : 0)
+                a.addAttribute(.paragraphStyle, value: p, range: r)
+            }
+            a.addAttribute(ProseKey.metrics, value: ProseMetricsBox(leaf.metrics), range: full)
+            let first = NSRange(location: 0, length: 1)
+            if i > 0 { a.addAttribute(ProseKey.gap, value: leaf.gap, range: first) }
+            if let m = leaf.marker { a.addAttribute(ProseKey.marker, value: m, range: first) }
+            if out.length > 0 {
+                // The break belongs to the previous block: its font, paragraph style and metrics.
+                var attrs = out.attributes(at: out.length - 1, effectiveRange: nil)
+                for k in [ProseKey.find, ProseKey.code, ProseKey.marker, ProseKey.gap, .link, .underlineStyle, .strikethroughStyle, .kern] { attrs[k] = nil }
+                out.append(NSAttributedString(string: "\n", attributes: attrs))
+            }
+            out.append(a)
+        }
+        let primary = all.leaves.first?.metrics ?? ProseMetrics(font: .systemFont(ofSize: size), lineHeight: lh)
+        return MDBox(view: AnyView(ProseText(text: out, metrics: primary)), top: all.top, bottom: all.bottom,
+                     innerTop: run.first?.innerTop ?? 0, innerBottom: run.last?.innerBottom ?? 0)
+    }
+
+    /// Heading fonts and line height per level (h5/h6 use the body color and line height).
+    private func headingStyle(_ level: Int) -> (ProseBuilder.Fonts, CGFloat) {
+        let (k, w, l): (CGFloat, NSFont.Weight, CGFloat) = switch level {
+        case 1: (2.1428571, .heavy, 1.2)
+        case 2: (1.4285714, .bold, 1.4)
+        case 3: (1.2857143, .semibold, 1.5555556)
+        case 4: (1, .semibold, 1.4285714)
+        case 5: (0.83, .bold, 1.5)
+        default: (0.67, .bold, 1.5)
+        }
+        let fs = size * k
+        var f = fonts(size: fs, weight: w, color: heading)
+        f.strongWeight = w == .semibold ? .semibold : .bold
+        if level >= 5 { f = fonts(size: fs, weight: w, color: body_) }
+        return (f, level >= 5 ? lh : fs * l * lineScale)
+    }
+
     // MARK: Blocks
 
     private func box(_ node: MDNode, counter: MDCounter, tight: Bool) -> MDBox {
@@ -111,20 +279,8 @@ struct MarkdownView: View {
             let v = leaf(a, fonts(), lineHeight: lh, counter: counter)
             return MDBox(view: v, top: tight ? 0 : 8, bottom: tight ? 0 : 8)
         case .heading(let level, let a):
-            let (k, w, l): (CGFloat, NSFont.Weight, CGFloat) = switch level {
-            case 1: (2.1428571, .heavy, 1.2)
-            case 2: (1.4285714, .bold, 1.4)
-            case 3: (1.2857143, .semibold, 1.5555556)
-            case 4: (1, .semibold, 1.4285714)
-            case 5: (0.83, .bold, 1.5)
-            default: (0.67, .bold, 1.5)
-            }
-            let fs = size * k
-            var f = fonts(size: fs, weight: w, color: heading)
-            f.strongWeight = w == .semibold ? .semibold : .bold
-            if level >= 5 { f = fonts(size: fs, weight: w, color: body_) }
-            let v = leaf(a, f, lineHeight: level >= 5 ? lh : fs * l * lineScale, counter: counter)
-            return MDBox(view: v, top: 12, bottom: 12)
+            let (f, l) = headingStyle(level)
+            return MDBox(view: leaf(a, f, lineHeight: l, counter: counter), top: 12, bottom: 12)
         case .code(let lang, let code):
             let u = "\(unit):\(counter.n)"
             counter.n += 1
@@ -233,10 +389,14 @@ private struct MDBullet: View {
             // WebKit's disc: ~0.33em circle, its center on the x-height middle, right edge 0.5em before the text box.
             Circle().fill(Theme.proseBullet)
                 .frame(width: size * 0.3333, height: size * 0.3333)
-                .offset(x: MDBullet.dx(size), y: MDBullet.dy(size, lineHeight))
+                .offset(x: MDBulletGeometry.dx(size), y: MDBulletGeometry.dy(size, lineHeight))
                 .frame(maxWidth: .infinity, maxHeight: lineHeight, alignment: .topLeading)
         }
     }
+}
+
+/// Disc placement shared by MDBullet and merged-block markers (ProseLayoutManager).
+enum MDBulletGeometry {
     /// Measured against WebKit: disc center 19.4px (at 15px) left of the li's text start (2.25em + 0.4286em).
     static func dx(_ size: CGFloat) -> CGFloat { size * 1.1267 }
     static func dy(_ size: CGFloat, _ lh: CGFloat) -> CGFloat {
@@ -316,7 +476,6 @@ private struct MDTable: View {
             }
         }
         let sumMax = maxW.reduce(0, +), sumMin = minW.reduce(0, +)
-        if ProcessInfo.processInfo.environment["CETUS_TR_DEBUG"] != nil { FileHandle.standardError.write("table w=\(width) min=\(minW) max=\(maxW)\n".data(using: .utf8)!) }
         if sumMax <= width {
             guard sumMax > 0 else { return Array(repeating: width / CGFloat(max(cols, 1)), count: cols) }
             return maxW.map { $0 + (width - sumMax) * $0 / sumMax }
@@ -397,6 +556,8 @@ private struct MDTable: View {
             }
         }
         .scrollDisabled(widths.reduce(0, +) <= width + 0.5)
+        // A trackpad swipe must not wiggle a block whose content fits (AppKit allows horizontal rubber-banding by default).
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }
 }
 
@@ -452,6 +613,8 @@ struct CodeBlockView: View {
                 .padding(.trailing, 64 + 4)
                 .padding(.vertical, preSize * 0.6666667)
         }
+        // A trackpad swipe must not wiggle a block whose content fits (AppKit allows horizontal rubber-banding by default).
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .frame(maxHeight: maxHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 4).fill(Theme.secondary))

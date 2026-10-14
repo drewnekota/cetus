@@ -15,6 +15,7 @@ struct ChatView: View {
             }
         }
         .chatWallpaper()
+        .task { TranscriptControl.install() }
     }
 }
 
@@ -185,8 +186,26 @@ struct ConversationView: View {
     @State private var distanceFromBottom: CGFloat = 0
     @State private var viewport: CGFloat = 600
     @State private var rowFrames = ChatFindRowFrames()
+    @State private var distanceFromTop: CGFloat = 0
+    /// Mounted row window [lo, hi): only rows near the viewport exist as views.
+    /// Building every row of a long chat (text views, layout) blocked a switch for
+    /// 300ms+ and kept growing with the chat; the window opens on the tail and
+    /// grows a chunk at a time as the reader nears either edge, and rows far
+    /// off-screen are dropped. `lo == nil`: the last `firstChunk` rows.
+    /// `hi == nil`: through the end, following new rows.
+    @State private var lo: Int?
+    @State private var hi: Int?
+    @State private var windowCheck = false
+    private static let firstChunk = 3, chunk = 2
 
-    private var atBottom: Bool { distanceFromBottom < 60 }
+    /// At the real end: the last row is mounted and on screen (not just the window's last row).
+    private var atBottom: Bool { distanceFromBottom < 60 && hi == nil }
+
+    private func bounds(_ count: Int) -> Range<Int> {
+        let to = min(count, hi ?? count)
+        let from = min(to, max(0, lo ?? count - Self.firstChunk))
+        return from ..< to
+    }
 
     var body: some View {
         let state = chat.state
@@ -198,9 +217,10 @@ struct ConversationView: View {
             ZStack(alignment: .top) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(items) { item in
+                        ForEach(items[bounds(items.count)]) { item in
                             row(item).id(item.id)
                                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .scrollView) } action: { rowFrames.frames[item.id] = $0 }
+                                .onDisappear { rowFrames.frames[item.id] = nil }
                         }
                         if state.awaitingAssistant {
                             ThinkingPlaceholder(since: chat.startedAt).padding(.vertical, 12).testID("thinking")
@@ -218,11 +238,17 @@ struct ConversationView: View {
                     .environment(\.findHighlight, find.map { FindHighlight(query: $0.query, active: $0.active, offsets: index.offsets) })
                 }
                 .scrollPosition($position)
-                .onScrollGeometryChange(for: CGSize.self) { g in
-                    CGSize(width: g.containerSize.height, height: max(0, g.contentSize.height - g.contentOffset.y - g.containerSize.height))
+                // Following the bottom: growth (new rows, older rows mounting above) keeps it pinned.
+                // Elsewhere the top holds still and moveWindow compensates for rows changing above.
+                .defaultScrollAnchor(atBottom ? .bottom : nil, for: .sizeChanges)
+                .onScrollGeometryChange(for: CGRect.self) { g in
+                    CGRect(x: max(0, g.contentOffset.y), y: max(0, g.contentSize.height - g.contentOffset.y - g.containerSize.height),
+                           width: g.containerSize.height, height: 0)
                 } action: { _, v in
                     viewport = v.width
-                    distanceFromBottom = v.height
+                    distanceFromBottom = v.minY
+                    distanceFromTop = v.minX
+                    scheduleWindowCheck()
                 }
                 .testID("transcript")
                 if find != nil {
@@ -256,6 +282,7 @@ struct ConversationView: View {
             if atBottom { position.scrollTo(edge: .bottom) }
         }
         .onChange(of: app.scrollToBottomToken) { _, _ in
+            resetToTail()
             distanceFromBottom = 0
             DispatchQueue.main.async { position.scrollTo(edge: .bottom) }
             TranscriptScroller.shared.pinBottom()
@@ -268,7 +295,16 @@ struct ConversationView: View {
         }
         .onChange(of: find?.active) { _, a in
             guard let a, index.owners.indices.contains(a) else { return }
-            withAnimation(.easeOut(duration: 0.15)) { position.scrollTo(id: index.owners[a], anchor: .center) }
+            let id = index.owners[a]
+            guard let t = items.firstIndex(where: { $0.id == id }) else { return }
+            if bounds(items.count).contains(t) {
+                withAnimation(.easeOut(duration: 0.15)) { position.scrollTo(id: id, anchor: .center) }
+            } else {
+                // Off the mounted window: remount around the match, then center it.
+                lo = max(0, t - Self.chunk)
+                hi = t + Self.chunk + 1 >= items.count ? nil : t + Self.chunk + 1
+                DispatchQueue.main.async { position.scrollTo(id: id, anchor: .center) }
+            }
         }
         .onChange(of: index.total) { _, total in
             if var f = app.find, f.count != total {
@@ -280,14 +316,90 @@ struct ConversationView: View {
         .onAppear {
             DispatchQueue.main.async { position.scrollTo(edge: .bottom) }
             TranscriptScroller.shared.pinBottom()
+            TranscriptWindowProbe.frames = rowFrames
+            scheduleWindowCheck()
+        }
+    }
+
+    // MARK: Row window
+
+    /// Back to the tail (sending, jump to bottom) when rows below were dropped.
+    private func resetToTail() {
+        guard hi != nil else { return }
+        lo = nil
+        hi = nil
+    }
+
+    /// One window step per frame while the reader is near an edge of the mounted rows, until it settles.
+    /// (Dispatch, not a Task: a Task spawned from the scroll callback could sit unscheduled until the next event.)
+    private func scheduleWindowCheck() {
+        guard !windowCheck else { return }
+        windowCheck = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) {
+            windowCheck = false
+            if adjustWindow() { scheduleWindowCheck() }
+        }
+    }
+
+    /// Moves the window one step; false when it is where it should be.
+    private func adjustWindow() -> Bool {
+        let items = TranscriptLayout.items(chat.state)
+        let n = items.count, r = bounds(n)
+        let vp = max(viewport, 200)
+        let near = vp * 1.5, far = vp * 5
+        let report = { TranscriptWindowProbe.describe = "\(bounds(n).lowerBound)..<\(bounds(n).upperBound)/\(n)" }
+        defer { report() }
+        if r.lowerBound > 0 && distanceFromTop < near {
+            moveWindow(above: true) { lo = max(0, r.lowerBound - Self.chunk) }
+        } else if r.upperBound < n && distanceFromBottom < near {
+            moveWindow(above: false) { hi = r.upperBound + Self.chunk >= n ? nil : r.upperBound + Self.chunk }
+        } else if distanceFromBottom > far + vp, r.count > Self.firstChunk,
+                  let cut = items[r].firstIndex(where: { (rowFrames.frames[$0.id]?.minY ?? 0) > vp + far }), cut > r.lowerBound {
+            moveWindow(above: false) { hi = cut }
+        } else if distanceFromTop > far + vp, r.count > Self.firstChunk,
+                  let keep = items[r].lastIndex(where: { (rowFrames.frames[$0.id]?.maxY ?? 0) < -far }), keep + 1 < r.upperBound {
+            moveWindow(above: true) { lo = keep + 1 }
+        } else {
+            return false
+        }
+        return true
+    }
+
+    /// Rows changing below the viewport leave it alone (top anchor). Rows changing above
+    /// would shift it: lay the new rows out now and scroll by the height they added or
+    /// removed before the frame draws. At the bottom the bottom anchor does this instead.
+    private func moveWindow(above: Bool, _ change: () -> Void) {
+        let sv = TranscriptScroller.shared.scrollView
+        guard above, !atBottom, let sv, let doc = sv.documentView, let root = sv.window?.contentView else {
+            change()
+            // The anchor misses growth while the tail is shorter than the viewport.
+            if above && atBottom { position.scrollTo(edge: .bottom) }
+            return
+        }
+        // Settle any pending layout (e.g. rows just mounted below) so the delta is only this change's.
+        root.layoutSubtreeIfNeeded()
+        let height = doc.frame.height, y = sv.contentView.bounds.origin.y
+        change()
+        root.layoutSubtreeIfNeeded()
+        let delta = doc.frame.height - height
+        if delta != 0 {
+            sv.contentView.scroll(to: NSPoint(x: sv.contentView.bounds.origin.x, y: max(0, y + delta)))
+            sv.reflectScrolledClipView(sv.contentView)
         }
     }
 
     /// 36px circle, shown once the reader is max(360, half a screen) above the bottom.
     private var jumpButton: some View {
-        let show = distanceFromBottom > max(360, viewport * 0.5)
+        let show = distanceFromBottom > max(360, viewport * 0.5) || hi != nil
         return Button {
-            withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(edge: .bottom) }
+            if hi != nil {
+                // Rows below were dropped: remount the tail and jump there.
+                resetToTail()
+                DispatchQueue.main.async { position.scrollTo(edge: .bottom) }
+                TranscriptScroller.shared.pinBottom(for: 0.4)
+            } else {
+                withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(edge: .bottom) }
+            }
         } label: {
             Glyph(name: "arrow-down", size: 16, color: Theme.foreground)
                 .frame(width: 36, height: 36)

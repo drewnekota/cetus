@@ -24,20 +24,89 @@ struct Kbd: View {
 }
 
 /// Cetus's spinner: a fixed track plus a dash that travels around it (the circle never rotates).
+/// The dash runs as a Core Animation, so a visible spinner costs no per-frame SwiftUI updates.
 struct Spinner: View {
     var size: CGFloat = 16
     var color: Color = Theme.mutedForeground
-    @State private var phase: CGFloat = 0
     var body: some View {
-        ZStack {
-            Circle().stroke(color.opacity(0.25), lineWidth: 2 * size / 24)
-            Circle()
-                .stroke(color, style: StrokeStyle(lineWidth: 2 * size / 24, lineCap: .round, dash: [14 * size / 24, 43 * size / 24], dashPhase: phase))
+        SpinnerLayer(size: size, color: NSColor(color))
+            .frame(width: size, height: size)
+            .allowsHitTesting(false)
+    }
+}
+
+private struct SpinnerLayer: NSViewRepresentable {
+    let size: CGFloat
+    let color: NSColor
+    func makeNSView(context: Context) -> SpinnerView { SpinnerView() }
+    func updateNSView(_ v: SpinnerView, context: Context) {
+        v.size = size
+        v.color = color
+    }
+
+    final class SpinnerView: NSView {
+        private let track = CAShapeLayer()
+        private let dash = CAShapeLayer()
+        var size: CGFloat = 16 { didSet { if size != oldValue { needsLayout = true; applyAnimation() } } }
+        var color: NSColor = .clear { didSet { if color != oldValue { applyColors() } } }
+
+        override var isFlipped: Bool { true }
+
+        init() {
+            super.init(frame: .zero)
+            wantsLayer = true
+            for l in [track, dash] {
+                l.fillColor = nil
+                layer?.addSublayer(l)
+            }
+            dash.lineCap = .round
         }
-        .padding(3 * size / 24)
-        .frame(width: size, height: size)
-        .onAppear {
-            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { phase = 57 * size / 24 }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func layout() {
+            super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            let u = size / 24
+            let path = CGPath(ellipseIn: bounds.insetBy(dx: 3 * u, dy: 3 * u), transform: nil)
+            for l in [track, dash] {
+                l.frame = bounds
+                l.path = path
+                l.lineWidth = 2 * u
+            }
+            dash.lineDashPattern = [NSNumber(value: Double(14 * u)), NSNumber(value: Double(43 * u))]
+            CATransaction.commit()
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            applyColors()
+            applyAnimation()
+        }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyColors()
+        }
+
+        private func applyColors() {
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                track.strokeColor = color.withAlphaComponent(color.alphaComponent * 0.25).cgColor
+                dash.strokeColor = color.cgColor
+            }
+        }
+
+        private func applyAnimation() {
+            dash.removeAnimation(forKey: "dash")
+            guard window != nil else { return }
+            let a = CABasicAnimation(keyPath: "lineDashPhase")
+            a.fromValue = 0
+            a.toValue = 57 * size / 24
+            a.duration = 0.9
+            a.repeatCount = .infinity
+            a.isRemovedOnCompletion = false
+            dash.add(a, forKey: "dash")
         }
     }
 }

@@ -21,6 +21,7 @@ struct WorkspacePanel: View {
                         ForEach(ws.tabs) { tab in TabChip(layout: layout, tab: tab, active: tab.id == active?.id) }
                     }
                 }
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
                 .fixedSize(horizontal: true, vertical: false)
                 GhostIconButton(icon: "plus", color: Theme.foreground, testID: "workspace-new-tab") { openNewTabMenu() }
                     .help("New Terminal tab")

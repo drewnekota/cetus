@@ -13,6 +13,12 @@ final class ComposerNSTextView: NSTextView {
     var placeholderPara = NSParagraphStyle()
     var placeholderLift: CGFloat = 0
     var placeholderColor: NSColor?
+    /// `@label` character ranges painted as pills, like the Tauri
+    /// MentionHighlight layer: `-mx-1 px-1 py-0.5 rounded-md bg-primary/35`
+    /// (dark /45). The pill bleeds 4pt past the token without changing its
+    /// advance, and wraps per line like `box-decoration-break: clone`.
+    var pills: [NSRange] = [] { didSet { if pills != oldValue { needsDisplay = true } } }
+    var pillFill: NSColor = .clear { didSet { if pillFill != oldValue { needsDisplay = true } } }
 
     override func paste(_ sender: Any?) {
         let pb = NSPasteboard.general
@@ -46,6 +52,27 @@ final class ComposerNSTextView: NSTextView {
             return true
         }
         return super.performDragOperation(sender)
+    }
+
+    // Drawn here rather than in the layout manager's drawBackground, which is
+    // clipped to the line fragments and would shave off the left bleed.
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        guard !pills.isEmpty, let lm = layoutManager, let tc = textContainer, let storage = textStorage else { return }
+        let origin = textContainerOrigin
+        pillFill.setFill()
+        for chars in pills where NSMaxRange(chars) <= storage.length {
+            let glyphs = lm.glyphRange(forCharacterRange: chars, actualCharacterRange: nil)
+            let font = storage.attribute(.font, at: chars.location, effectiveRange: nil) as? NSFont ?? .systemFont(ofSize: 14)
+            let content = font.ascender - font.descender
+            lm.enumerateLineFragments(forGlyphRange: glyphs) { line, _, _, lineGlyphs, _ in
+                let r = NSIntersectionRange(lineGlyphs, glyphs)
+                guard r.length > 0 else { return }
+                let b = lm.boundingRect(forGlyphRange: r, in: tc)
+                let box = NSRect(x: b.minX - 4 + origin.x, y: line.midY - content / 2 - 2 + origin.y, width: b.width + 8, height: content + 4)
+                NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6).fill()
+            }
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -199,18 +226,13 @@ struct ComposerTextView: NSViewRepresentable {
             }
         }
 
-        /// Draw `@label` tokens as accent text without touching the string.
+        /// Draw `@label` tokens as pills without touching the string.
         func colorMentions() {
-            guard let tv = textView, let lm = tv.layoutManager else { return }
-            let full = NSRange(location: 0, length: (tv.string as NSString).length)
-            lm.removeTemporaryAttribute(.foregroundColor, forCharacterRange: full)
-            lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: full)
+            guard let tv = textView else { return }
             let s = tv.string
-            for span in Mentions.spans(s, labels: parent.mentionLabels) {
-                let r = NSRange(span.range, in: s)
-                let dark = tv.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                lm.addTemporaryAttributes([.backgroundColor: NSColor(hex: 0x827BE6, alpha: dark ? 0.45 : 0.35)], forCharacterRange: r)
-            }
+            let dark = tv.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            tv.pills = Mentions.spans(s, labels: parent.mentionLabels).map { NSRange($0.range, in: s) }
+            tv.pillFill = NSColor(Theme.primary).withAlphaComponent(dark ? 0.45 : 0.35)
         }
 
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {

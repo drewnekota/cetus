@@ -152,6 +152,8 @@ final class AppState {
     var scrollToBottomToken = 0
     /// Text queued for the composer (Edit on a queued message, quote reply).
     var composerInsert: (text: String, replace: Bool, token: Int)?
+    /// Transcript selection sent with "Add to chat": the composer holds it as a quote.
+    var quoteRequest: (text: String, token: Int)?
     /// Window-wide file drops routed to the composer (WorkspaceFileDropHost).
     var composerDrop: (paths: [String], token: Int)?
     var fileDragActive = false

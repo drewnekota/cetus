@@ -346,10 +346,11 @@ enum Fmt {
     }
 
     static func clock(_ ms: Double) -> String {
-        let f = DateFormatter()
-        f.dateFormat = Calendar.current.isDateInToday(Date(timeIntervalSince1970: ms / 1000)) ? "HH:mm" : "MMM d, HH:mm"
-        return f.string(from: Date(timeIntervalSince1970: ms / 1000))
+        let date = Date(timeIntervalSince1970: ms / 1000)
+        return (Calendar.current.isDateInToday(date) ? clockToday : clockOther).string(from: date)
     }
+    private static let clockToday: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
+    private static let clockOther: DateFormatter = { let f = DateFormatter(); f.dateFormat = "MMM d, HH:mm"; return f }()
 
     /// 84123 → "84K".
     static func tokens(_ n: Double) -> String {

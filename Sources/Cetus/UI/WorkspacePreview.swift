@@ -357,6 +357,7 @@ private struct WorkspaceTable: View {
                 }
             }
         }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1))
     }

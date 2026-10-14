@@ -17,6 +17,8 @@ struct ComposerView: View {
     @State private var text = ""
     @State private var attachments: [Attachment] = []
     @State private var refs: [MentionRef] = []
+    /// "Add to chat" selection held apart from the typed text; leads the message as a blockquote.
+    @State private var quote = ""
     /// Starts at the last height measured for this draft (else the 56pt
     /// minimum): the real one only arrives a frame after layout, and switching
     /// chats rebuilds the composer, so a stale start made it (and the queued
@@ -119,6 +121,14 @@ struct ComposerView: View {
             saveDraft()
         }
         .onChange(of: attachments) { _, _ in saveDraft() }
+        .onChange(of: quote) { _, _ in saveDraft() }
+        .onChange(of: app.quoteRequest?.token) { _, _ in
+            guard let q = app.quoteRequest else { return }
+            app.quoteRequest = nil
+            // A new selection replaces the pending one: one quote bar at a time.
+            quote = UserQuote.clean(q.text)
+            app.focusComposer()
+        }
         .onChange(of: height) { _, h in Self.lastHeight[draftKey] = h }
         .onReceive(NotificationCenter.default.publisher(for: NSTextView.didChangeSelectionNotification)) { n in
             guard let v = n.object as? NSTextView, v === app.composerView else { return }
@@ -150,7 +160,12 @@ struct ComposerView: View {
         }
         .onChange(of: app.composerInsert?.token) { _, _ in
             guard let ins = app.composerInsert else { return }
-            setText(ins.replace ? ins.text : (text.isEmpty ? ins.text : text + (text.hasSuffix("\n") ? "" : "\n") + ins.text))
+            if ins.replace, let q = UserQuote.split(ins.text) {
+                quote = q.quote
+                setText(q.text)
+            } else {
+                setText(ins.replace ? ins.text : (text.isEmpty ? ins.text : text + (text.hasSuffix("\n") ? "" : "\n") + ins.text))
+            }
             app.composerInsert = nil
             app.focusComposer()
         }
@@ -243,6 +258,7 @@ struct ComposerView: View {
                 }
                 .padding(.horizontal, 10).padding(.top, 6)
             }
+            if !quote.isEmpty && !bashMode { quoteBar }
             if !attachments.isEmpty {
                 HStack(spacing: 8) { ForEach(attachments) { a in attachmentTile(a) } }
                     .padding(.horizontal, 6).padding(.top, 4).padding(.bottom, 6)
@@ -465,8 +481,30 @@ struct ComposerView: View {
         return efforts + [MenuItem(id: "models", title: shown, group: efforts.isEmpty ? nil : " ", testID: "model-sub", submenu: models)]
     }
 
+    /// `rounded-t-[15px] border-b bg-muted/30 px-3 pb-2 pt-2.5`, flush with the card's top edge.
+    private var quoteBar: some View {
+        HStack(spacing: 8) {
+            Glyph(name: "corner-down-right", size: 14, color: Theme.mutedForeground)
+            Text("“\(quote.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression))”")
+                .font(.system(size: 12)).foregroundStyle(Theme.mutedForeground)
+                .lineLimit(1).truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button { quote = "" } label: {
+                Glyph(name: "x", size: 14, color: Theme.mutedForeground).padding(2).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .tip("Remove quote")
+            .testID("composer-remove-quote")
+        }
+        .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
+        .background(UnevenRoundedRectangle(topLeadingRadius: 15, topTrailingRadius: 15).fill(Theme.muted.opacity(0.3)))
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.opacity(0.5)).frame(height: 1) }
+        .padding(.horizontal, hero ? -8 : -6).padding(.top, hero ? -8 : -6)
+        .padding(.bottom, 4)
+    }
+
     private var sendButton: some View {
-        let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty
+        let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && quote.isEmpty
         // Terminal mode always offers Run; a running turn always offers Abort (⏎ still queues).
         let stop = busy && !bashMode
         let bashEmpty = String(text.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -573,12 +611,13 @@ struct ComposerView: View {
         text = d?.text ?? ""
         attachments = (d?.attachments ?? []).compactMap { try? Attachment.make($0).get() }
         refs = d?.mentions ?? []
+        quote = d?.quote ?? ""
         dismissed = nil
     }
 
     private func saveDraft() {
         guard loadedKey == draftKey else { return }
-        controller.prefStore.setDraft(draftKey, Draft(text: text, attachments: attachments.map(\.path), mentions: refs.isEmpty ? nil : refs))
+        controller.prefStore.setDraft(draftKey, Draft(text: text, attachments: attachments.map(\.path), mentions: refs.isEmpty ? nil : refs, quote: quote.isEmpty ? nil : quote))
     }
 
     /// Clear and persist the empty draft now: sending from a new chat switches
@@ -588,6 +627,7 @@ struct ComposerView: View {
         text = ""
         attachments = []
         refs = []
+        quote = ""
         dismissed = nil
     }
 
@@ -616,12 +656,12 @@ struct ComposerView: View {
         var bare = body
         for m in mentions { bare = bare.replacingOccurrences(of: "@\(m.label)", with: "") }
         let onlyFunctions = bare.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && !mentions.contains { $0.kind != .function }
-        if body.isEmpty || onlyFunctions {
+        if (body.isEmpty || onlyFunctions) && quote.isEmpty {
             // Enter on an empty composer steers the first queued message.
             if body.isEmpty, let convId, let first = chat?.queue.first { controller.steer(convId, queuedId: first.id) }
             return
         }
-        let id = controller.send(SendOptions(conversationId: convId, text: AmbientCollector.composeForSend(body), backend: selection.runtime, model: selection.model, effort: selection.effort, workspaceDir: workspace, attachments: attachments, mentions: mentions))
+        let id = controller.send(SendOptions(conversationId: convId, text: AmbientCollector.composeForSend(UserQuote.compose(quote, body)), backend: selection.runtime, model: selection.model, effort: selection.effort, workspaceDir: workspace, attachments: attachments, mentions: mentions))
         controller.prefStore.touchWorkspace(workspace)
         clear()
         sent(id)
@@ -833,21 +873,93 @@ private struct AttachmentTile: View {
 }
 
 /// The conic highlight that circles the composer while the agent works (2.8s/turn).
+/// Driven by Core Animation in the render server: a TimelineView here re-ran the
+/// whole window's SwiftUI update and CPU-rasterized the conic gradient every frame.
 private struct StreamingRing: View {
     let color: Color
     @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
-        TimelineView(.animation(paused: reduce)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            let angle = Angle.degrees((t.truncatingRemainder(dividingBy: 2.8)) / 2.8 * 360)
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(AngularGradient(stops: [
-                    .init(color: .clear, location: 0), .init(color: .clear, location: 0.48),
-                    .init(color: color.opacity(0.35), location: 0.62), .init(color: color, location: 0.8),
-                    .init(color: color.opacity(0.45), location: 0.92), .init(color: .clear, location: 1),
-                ], center: .center, angle: angle), lineWidth: 2)
-                .padding(-2)
+        StreamingRingLayer(color: NSColor(color), animated: !reduce)
+            .padding(-2)
+            .allowsHitTesting(false)
+    }
+}
+
+private struct StreamingRingLayer: NSViewRepresentable {
+    let color: NSColor
+    let animated: Bool
+    func makeNSView(context: Context) -> RingView { RingView() }
+    func updateNSView(_ v: RingView, context: Context) {
+        v.color = color
+        v.animated = animated
+    }
+
+    final class RingView: NSView {
+        private let gradient = CAGradientLayer()
+        private let mask = CAShapeLayer()
+        var color: NSColor = .clear { didSet { if color != oldValue { applyColors() } } }
+        var animated = true { didSet { if animated != oldValue { applyAnimation() } } }
+
+        override var isFlipped: Bool { true }
+
+        init() {
+            super.init(frame: .zero)
+            wantsLayer = true
+            gradient.type = .conic
+            gradient.startPoint = CGPoint(x: 0.5, y: 0.5)
+            gradient.endPoint = CGPoint(x: 1, y: 0.5)
+            gradient.locations = [0, 0.48, 0.62, 0.8, 0.92, 1]
+            mask.fillColor = nil
+            mask.strokeColor = NSColor.black.cgColor
+            mask.lineWidth = 2
+            layer?.addSublayer(gradient)
+            layer?.mask = mask
         }
-        .allowsHitTesting(false)
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func layout() {
+            super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            // A square covering the rect's diagonal, so rotating it never exposes a corner.
+            let d = hypot(bounds.width, bounds.height)
+            gradient.bounds = CGRect(x: 0, y: 0, width: d, height: d)
+            gradient.position = CGPoint(x: bounds.midX, y: bounds.midY)
+            mask.frame = bounds
+            mask.path = CGPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), cornerWidth: 17, cornerHeight: 17, transform: nil)
+            CATransaction.commit()
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            applyColors()
+            applyAnimation()
+        }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            applyColors()
+        }
+
+        private func applyColors() {
+            var cg: [CGColor] = []
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                cg = [0, 0, 0.35, 1, 0.45, 0].map { color.withAlphaComponent(color.alphaComponent * $0).cgColor }
+            }
+            gradient.colors = cg
+        }
+
+        private func applyAnimation() {
+            gradient.removeAnimation(forKey: "spin")
+            guard animated, window != nil else { return }
+            let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+            spin.fromValue = 0
+            spin.toValue = 2 * Double.pi
+            spin.duration = 2.8
+            spin.repeatCount = .infinity
+            spin.isRemovedOnCompletion = false
+            gradient.add(spin, forKey: "spin")
+        }
     }
 }
