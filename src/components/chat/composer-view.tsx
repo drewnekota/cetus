@@ -560,16 +560,15 @@ export function renderComposer({
             // Slash menu owns the navigation keys while it's open. Guard against
             // IME composition so candidate selection isn't stolen.
             if (slashVisible && !composing) {
+              // Clamp at the ends instead of wrapping, like the @-mention menu.
               if (e.key === "ArrowDown") {
                 e.preventDefault();
-                setSlashActive((i) => (i + 1) % slashItems.length);
+                setSlashActive(Math.min(slashIdx + 1, slashItems.length - 1));
                 return;
               }
               if (e.key === "ArrowUp") {
                 e.preventDefault();
-                setSlashActive(
-                  (i) => (i - 1 + slashItems.length) % slashItems.length,
-                );
+                setSlashActive(Math.max(slashIdx - 1, 0));
                 return;
               }
               if (e.key === "Enter" || e.key === "Tab") {
