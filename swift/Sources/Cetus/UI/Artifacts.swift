@@ -420,14 +420,29 @@ private struct PDFPreview: NSViewRepresentable {
     func updateNSView(_ v: PDFView, context: Context) {}
 }
 
+// SwiftUI's VideoPlayer aborts on macOS 27 ("failed to demangle superclass of
+// VideoPlayerView ... AVPlayerView") the moment it's built, so wrap AVPlayerView directly.
+struct PlayerView: NSViewRepresentable {
+    let url: URL
+    func makeNSView(context: Context) -> AVPlayerView {
+        let v = AVPlayerView()
+        v.player = AVPlayer(url: url)
+        return v
+    }
+    func updateNSView(_ v: AVPlayerView, context: Context) {
+        if (v.player?.currentItem?.asset as? AVURLAsset)?.url != url { v.player = AVPlayer(url: url) }
+    }
+    static func dismantleNSView(_ v: AVPlayerView, coordinator: ()) { v.player?.pause() }
+}
+
 private struct ArtifactFullPreview: View {
     let a: ArtifactDetails
     var body: some View {
         switch a.artifactKind {
         case "image":
             if let img = FileImageCache.image(a.path) { Image(nsImage: img).resizable().scaledToFit().padding(16) } else { noPreview }
-        case "video": VideoPlayer(player: AVPlayer(url: URL(fileURLWithPath: a.path))).background(Color.black)
-        case "audio": VideoPlayer(player: AVPlayer(url: URL(fileURLWithPath: a.path))).frame(maxWidth: 576, maxHeight: 60).padding(24)
+        case "video": PlayerView(url: URL(fileURLWithPath: a.path)).background(Color.black)
+        case "audio": PlayerView(url: URL(fileURLWithPath: a.path)).frame(maxWidth: 576, maxHeight: 60).padding(24)
         case "pdf": PDFPreview(path: a.path).background(Color.white)
         case "html": ArtifactWebView(path: a.path, interactive: true).background(Color.white)
         case "markdown":
