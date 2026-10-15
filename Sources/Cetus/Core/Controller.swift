@@ -105,6 +105,9 @@ final class Controller {
     @ObservationIgnored let host = AgentHost()
     @ObservationIgnored private var chats: [String: ChatModel] = [:]
     @ObservationIgnored private var steering = Set<String>()
+    /// Chats streaming a turn the CLI started on its own (a background task
+    /// finished): no turn_done settles these, so agent_end does.
+    @ObservationIgnored private var selfStarted = Set<String>()
     @ObservationIgnored private var scheduler: Timer?
     /// The conversation on screen: finishing it doesn't mark it unread.
     @ObservationIgnored private var visible: String?
@@ -229,6 +232,7 @@ final class Controller {
         for i in payload { content.append(["type": "image", "mimeType": .string(i.mime), "data": .string(i.data)]) }
         store.append(conv.id, ["role": "user", "content": .array(content)], resumeBefore: conv.sessionFile)
         store.update(conv.id, [.runState(.running)])
+        selfStarted.remove(conv.id)
         let model = chat(conv.id)
         model.state.reduce(.userSent(
             text: text,
@@ -448,6 +452,8 @@ final class Controller {
             if let conv { onEvent(conv, m["event"]) }
         case "turn_done":
             settle(m)
+        case "orphan_messages":
+            if let conv { store.transaction { for msg in m["messages"].array ?? [] { store.append(conv, msg) } } }
         case "error":
             if let conv { chat(conv).state.reduce(.setError(m["message"].stringValue)) }
         case "exited":
@@ -465,6 +471,7 @@ final class Controller {
         case "host_request": handleHostRequest(m)
         case "settings_changed": hostSettingsChanged(m)
         case "host_exited":
+            selfStarted.removeAll()
             for (id, c) in chats where c.isStreaming {
                 c.state.reduce(.setError("The agent host exited unexpectedly."))
                 c.state.reduce(.endStream(keepPartial: true))
@@ -497,9 +504,29 @@ final class Controller {
         case "extension_ui_request":
             MainActor.assumeIsolated { ChatExtensionDialogs.observe(conv: id, event: event, controller: self) }
         default:
-            if event["type"].string == "agent_end" { model.controls = [] }
+            let type = event["type"].string
+            if type == "agent_end" { model.controls = [] }
             model.state.reduce(.piEvent(event))
+            if type == "agent_start" { selfStartedBegan(id) }
+            if type == "agent_end", !event["willRetry"].truthy, selfStarted.remove(id) != nil { selfStartedEnded(id) }
         }
+    }
+
+    /// A turn we didn't send started streaming: show it as running like any other.
+    private func selfStartedBegan(_ id: String) {
+        guard let c = store.get(id), c.runState != .running else { return }
+        selfStarted.insert(id)
+        store.update(id, [.runState(.running)])
+        reload()
+    }
+
+    private func selfStartedEnded(_ id: String) {
+        var fields: [Store.Field] = [.runState(.idle), .updatedAt(nowMs())]
+        if visible != id { fields.append(.unread(true)) }
+        store.update(id, fields)
+        chat(id).controls = []
+        drainQueue(id)
+        reload()
     }
 
     private func settle(_ done: JSON) {

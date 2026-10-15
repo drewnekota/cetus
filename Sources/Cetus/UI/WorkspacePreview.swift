@@ -140,7 +140,7 @@ struct WorkspacePreview: View {
                 }
                 .background(Theme.muted.opacity(0.2))
             case .video, .audio:
-                VideoPlayer(player: AVPlayer(url: URL(fileURLWithPath: e.path)))
+                PlayerView(url: URL(fileURLWithPath: e.path))
                     .padding(kind == .video ? 16 : 24)
                     .background(kind == .video ? Color.black : .clear)
             case .html:
