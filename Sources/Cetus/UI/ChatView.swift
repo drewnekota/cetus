@@ -402,8 +402,12 @@ struct ConversationView: View {
             .overlay(alignment: .bottom) { jumpButton }
         }
         .onChange(of: tailSignature(state)) { _, _ in
-            if atBottom { position.scrollTo(edge: .bottom) }
+            // Already flush (within a point): TranscriptScroller follows growth in the layout
+            // pass. Re-scrolling on every streamed token under zoom's scaleEffect landed on a
+            // different sub-pixel offset each time, which shimmered the whole transcript.
+            if atBottom, metrics.fromBottom > 1 { position.scrollTo(edge: .bottom) }
         }
+        .onChange(of: hi == nil, initial: true) { _, tail in TranscriptScroller.shared.followTail = tail }
         .onChange(of: app.scrollToBottomToken) { _, _ in
             resetToTail()
             metrics.fromBottom = 0
@@ -440,6 +444,7 @@ struct ConversationView: View {
         .onAppear {
             DispatchQueue.main.async { position.scrollTo(edge: .bottom) }
             TranscriptScroller.shared.pinBottom()
+            TranscriptScroller.shared.onFollow = { [position = $position] in position.wrappedValue.scrollTo(edge: .bottom) }
             TranscriptWindowProbe.frames = rowFrames
             scheduleWindowCheck()
         }

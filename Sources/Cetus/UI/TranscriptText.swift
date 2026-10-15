@@ -383,11 +383,30 @@ struct ProseText: NSViewRepresentable {
         let full = withIndent(text)
         if context.coordinator.lastText != full {
             context.coordinator.lastText = full
-            tv.textStorage?.setAttributedString(full)
+            setText(tv, full)
         } else if metricsChanged {
             // Same text: only new line metrics need a relayout (not every SwiftUI update).
             tv.layoutManager?.invalidateLayout(forCharacterRange: NSRange(location: 0, length: tv.textStorage?.length ?? 0), actualCharacterRange: nil)
         }
+    }
+
+    /// New text that wraps to another line lands over three layout passes a few ms apart:
+    /// the text, then the transcript growing (and following the bottom), then this view's
+    /// frame. A frame composited in between showed the wrapped line clipped or a blank
+    /// line, so streaming flashed its last line. Take the height the layout is about to
+    /// give now (top edge in place) and grow the transcript with it, all in one pass.
+    private func setText(_ tv: ProseTextView, _ full: NSAttributedString) {
+        tv.textStorage?.setAttributedString(full)
+        let w = tv.frame.width
+        guard !fit, w > 1 else { return }
+        let h = ProseMeasure.size(full, metrics: metrics, width: w, id: id).height
+        guard abs(h - tv.frame.height) >= 0.5 else { return }
+        let grew = h - tv.frame.height
+        var f = tv.frame
+        if let sv = tv.superview, !sv.isFlipped { f.origin.y -= grew }
+        f.size.height = h
+        tv.frame = f
+        if grew > 0 { TranscriptScroller.shared.contentGrew(tv, by: grew) }
     }
 
     /// Height for a width, as the view will lay itself out.

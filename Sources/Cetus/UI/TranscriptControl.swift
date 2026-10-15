@@ -109,6 +109,39 @@ enum TranscriptControl {
             app.find = f
             await sleep(600)
             return String(format: "active %d of %d offset %.0f max %.0f rows %@", app.find?.active ?? -1, app.find?.count ?? -1, s.offset, s.maxOffset, TranscriptWindowProbe.describe)
+        case "watch":
+            // watch <ms> : every few ms, how far the on-screen text views moved since the
+            // last sample (window points, + = up) and the distance from the bottom.
+            guard let sv = s.scrollView, let doc = sv.documentView else { return "no scroller" }
+            let t0 = CACurrentMediaTime(), limit = (Double(arg) ?? 3000) / 1000
+            var last: [ObjectIdentifier: CGRect] = [:]
+            var out: [String] = []
+            while CACurrentMediaTime() - t0 < limit {
+                await sleep(4)
+                let visible = sv.convert(sv.contentView.bounds, from: sv.contentView)
+                var now: [ObjectIdentifier: CGRect] = [:]
+                func walk(_ v: NSView) {
+                    for c in v.subviews {
+                        if c is ProseTextView, !c.isHidden {
+                            let r = c.convert(c.bounds, to: sv)
+                            if r.intersects(visible) { now[ObjectIdentifier(c)] = c.convert(c.bounds, to: nil) }
+                        } else { walk(c) }
+                    }
+                }
+                walk(doc)
+                let moves = now.compactMap { k, r in last[k].map { (r.minY - $0.minY, r.minX - $0.minX, r.height - $0.height) } }
+                last = now
+                let dys = moves.map(\.0).sorted(), dxs = moves.map(\.1)
+                let dy = dys.isEmpty ? 0 : dys[dys.count / 2]
+                let dx = dxs.map(abs).max() ?? 0
+                if dy != 0 || dx != 0 || dys.first != dys.last {
+                    let top = now.values.min { $0.maxY > $1.maxY }
+                    out.append(String(format: "%.0f:%.2f[%.2f..%.2f]x%.2f b%.2f h%.2f w%.2f o%.2f at%.2f,%.2f n%d", (CACurrentMediaTime() - t0) * 1000, dy,
+                                      dys.first ?? 0, dys.last ?? 0, dx, s.maxOffset - s.offset, doc.frame.height, doc.frame.width, s.offset,
+                                      top?.minX ?? 0, top?.maxY ?? 0, now.count))
+                }
+            }
+            return out.joined(separator: " ")
         case "pos":
             return String(format: "offset %.0f max %.0f bottom %.0f rows %@", s.offset, s.maxOffset, s.maxOffset - s.offset, TranscriptWindowProbe.describe)
         case "scrollers":

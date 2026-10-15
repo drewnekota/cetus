@@ -24,13 +24,69 @@ final class TranscriptScroller {
     private var pinTimer: Timer?
     private var liveObserver: NSObjectProtocol?
 
+    /// Set by the transcript: the mounted rows run through the end, so growth at the
+    /// bottom is the live tail and following it is wanted.
+    var followTail = true
+    /// Set by the transcript: points its ScrollPosition at the bottom edge.
+    var onFollow: (() -> Void)?
+    private var followQueued = false
+    private var liveScrolling = false
+    private var endObserver: NSObjectProtocol?
+    private var docObserver: NSObjectProtocol?
+    private var docHeight: CGFloat = 0
+
     func register(_ sv: NSScrollView) {
         guard scrollView !== sv else { return }
         scrollView = sv
-        if let o = liveObserver { NotificationCenter.default.removeObserver(o) }
+        for o in [liveObserver, endObserver, docObserver].compactMap({ $0 }) { NotificationCenter.default.removeObserver(o) }
         // A user gesture ends the open-time pin.
         liveObserver = NotificationCenter.default.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: sv, queue: .main) { _ in
-            MainActor.assumeIsolated { TranscriptScroller.shared.pinUntil = .distantPast }
+            MainActor.assumeIsolated {
+                TranscriptScroller.shared.pinUntil = .distantPast
+                TranscriptScroller.shared.liveScrolling = true
+            }
+        }
+        endObserver = NotificationCenter.default.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: sv, queue: .main) { _ in
+            MainActor.assumeIsolated { TranscriptScroller.shared.liveScrolling = false }
+        }
+        guard let doc = sv.documentView else { return }
+        docHeight = doc.frame.height
+        doc.postsFrameChangedNotifications = true
+        // Posted synchronously inside the layout pass that resized the content, so
+        // following here lands before the frame draws. Scrolling only when the height
+        // changed (not on every streamed token) keeps the offset from re-rounding to a
+        // different sub-pixel each time under zoom's scaleEffect, which shimmered the transcript.
+        docObserver = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: nil) { _ in
+            MainActor.assumeIsolated { TranscriptScroller.shared.documentResized() }
+        }
+    }
+
+    /// A prose view inside the transcript just grew by `dh` ahead of SwiftUI's layout:
+    /// while following the bottom, grow the document by as much now so the follow scroll
+    /// lands in the same pass. SwiftUI's next layout sets its own (equal or sub-point
+    /// different) height.
+    func contentGrew(_ v: NSView, by dh: CGFloat) {
+        guard followTail, !liveScrolling, let sv = scrollView, let doc = sv.documentView,
+              offset >= maxOffset - 1, v.isDescendant(of: doc) else { return }
+        doc.setFrameSize(NSSize(width: doc.frame.width, height: doc.frame.height + dh))
+    }
+
+    private func documentResized() {
+        guard let sv = scrollView, let doc = sv.documentView else { return }
+        let h = doc.frame.height, old = docHeight
+        docHeight = h
+        guard h != old, followTail, !liveScrolling else { return }
+        let wasFromBottom = max(0, old - sv.contentView.bounds.height) - offset
+        guard wasFromBottom < 60 else { return }
+        if offset < maxOffset - 0.5 { scroll(to: .greatestFiniteMagnitude) }
+        // Tell SwiftUI too: its ScrollPosition otherwise keeps the last point it scrolled to
+        // itself and restores it on a later layout change, yanking the transcript back up.
+        if !followQueued {
+            followQueued = true
+            DispatchQueue.main.async {
+                TranscriptScroller.shared.followQueued = false
+                TranscriptScroller.shared.onFollow?()
+            }
         }
     }
 

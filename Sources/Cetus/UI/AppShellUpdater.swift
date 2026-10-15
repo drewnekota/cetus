@@ -29,6 +29,23 @@ enum AppShellUpdater {
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { applyAutoUpdate() }
         }
+        // Sparkle's hourly timer slips while a laptop sleeps; catch up on wake
+        // and whenever the app comes forward.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { checkIfStale() }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { checkIfStale() }
+        }
+    }
+
+    /// Background check when automatic checks are on and the last one is over
+    /// an hour old. Skipped while an update is already staged.
+    private static func checkIfStale() {
+        guard let u = controller?.updater, u.automaticallyChecksForUpdates, u.canCheckForUpdates,
+              state.readyVersion == nil else { return }
+        if let last = u.lastUpdateCheckDate, Date().timeIntervalSince(last) < 3600 { return }
+        u.checkForUpdatesInBackground()
     }
 
     private static func applyAutoUpdate() {
