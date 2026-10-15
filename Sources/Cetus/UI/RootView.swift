@@ -13,7 +13,7 @@ struct RootView: View {
             HStack(spacing: 0) {
                 if p.sidebar {
                     SidebarView()
-                        .frame(width: CGFloat(p.sidebarWidth))
+                        .frame(width: app.sidebarDragWidth ?? CGFloat(p.sidebarWidth))
                         .overlay(alignment: .trailing) { sidebarHandle.offset(x: 4) }
                         .zIndex(1)
                 }
@@ -110,13 +110,19 @@ struct RootView: View {
 
     /// 8px hit strip straddling the sidebar edge; double-click resets to 224.
     private var sidebarHandle: some View {
-        SidebarHandle(onDrag: { d in app.controller.setPrefs { $0.sidebarWidth = min(420, max(180, $0.sidebarWidth + d)) } },
+        SidebarHandle(onDrag: { d in app.sidebarDragWidth = min(420, max(180, (app.sidebarDragWidth ?? CGFloat(app.prefs.sidebarWidth)) + d)) },
+                      onEnd: {
+                          guard let w = app.sidebarDragWidth else { return }
+                          app.controller.setPrefs { $0.sidebarWidth = Double(w) }
+                          app.sidebarDragWidth = nil
+                      },
                       onReset: { app.controller.setPrefs { $0.sidebarWidth = 224 } })
     }
 }
 
 private struct SidebarHandle: View {
     let onDrag: (CGFloat) -> Void
+    let onEnd: () -> Void
     let onReset: () -> Void
     @State private var hover = false
     @State private var last: CGFloat?
@@ -137,7 +143,7 @@ private struct SidebarHandle: View {
                 onDrag(g.translation.width - (last ?? 0))
                 last = g.translation.width
             }
-            .onEnded { _ in last = nil })
+            .onEnded { _ in last = nil; onEnd() })
     }
 }
 

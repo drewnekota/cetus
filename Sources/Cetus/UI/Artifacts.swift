@@ -177,7 +177,7 @@ private struct Thumbnail: View {
     var body: some View {
         switch a.artifactKind {
         case "image":
-            if let img = NSImage(contentsOfFile: a.path) { Image(nsImage: img).resizable().scaledToFill() } else { IconThumb(icon: "image") }
+            if let img = FileImageCache.image(a.path, maxPixel: 640) { Image(nsImage: img).resizable().scaledToFill() } else { IconThumb(icon: "image") }
         case "video":
             NativeThumb(path: a.path, cover: true) { Color.black }
                 .overlay {
@@ -425,7 +425,7 @@ private struct ArtifactFullPreview: View {
     var body: some View {
         switch a.artifactKind {
         case "image":
-            if let img = NSImage(contentsOfFile: a.path) { Image(nsImage: img).resizable().scaledToFit().padding(16) } else { noPreview }
+            if let img = FileImageCache.image(a.path) { Image(nsImage: img).resizable().scaledToFit().padding(16) } else { noPreview }
         case "video": VideoPlayer(player: AVPlayer(url: URL(fileURLWithPath: a.path))).background(Color.black)
         case "audio": VideoPlayer(player: AVPlayer(url: URL(fileURLWithPath: a.path))).frame(maxWidth: 576, maxHeight: 60).padding(24)
         case "pdf": PDFPreview(path: a.path).background(Color.white)
@@ -463,7 +463,7 @@ private struct ArtifactFullPreview: View {
 struct ArtifactsInboxButton: View {
     @Environment(AppState.self) private var app
     var body: some View {
-        if let id = app.active, app.page == .chats, !ArtifactDetails.all(app.controller.chat(id).state).isEmpty {
+        if let id = app.active, app.page == .chats, app.controller.chat(id).hasArtifacts {
             GhostIconButton(icon: "inbox", box: 24, glyph: 14) {
                 if DialogHost.openId == "artifacts" { DialogHost.dismiss(); return }
                 DialogHost.present("artifacts", app: app) { ArtifactsPanel(convId: id) }

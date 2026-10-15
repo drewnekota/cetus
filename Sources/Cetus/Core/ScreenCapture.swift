@@ -436,11 +436,15 @@ enum ScreenCapture {
             h.write(data + Data("\n".utf8))
             try? h.close()
         }
+        // Over 2MB: keep the newest whole lines within 1MB. (Trimming by line count left
+        // long-line logs above the limit, so every capture re-read and rewrote the file.)
         if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 2_000_000,
-           let content = try? String(contentsOf: url, encoding: .utf8)
+           let content = try? Data(contentsOf: url)
         {
-            let lines = content.split(separator: "\n", omittingEmptySubsequences: false).filter { !$0.isEmpty }
-            try? (lines.suffix(1500).joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+            let from = content.count - 1_000_000
+            if let nl = content[(content.startIndex + from)...].firstIndex(of: 0x0A) {
+                try? Data(content[(nl + 1)...]).write(to: url, options: .atomic)
+            }
         }
     }
 

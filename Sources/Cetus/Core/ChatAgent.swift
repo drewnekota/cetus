@@ -242,18 +242,34 @@ final class ChatAgentSync {
     static let shared = ChatAgentSync()
     private static let keys = ["skills", "discovery", "mcp_connectors", "plugins", "agent_control"]
     private weak var host: AgentHost?
-    private var timer: Timer?
+    /// The shared db is large and another app may hold its lock (2s busy timeout):
+    /// poll it off the main thread, and only query when the db or its WAL changed.
+    private let queue = DispatchQueue(label: "cetus.agent-sync", qos: .utility)
+    private var timer: DispatchSourceTimer?
     private var last: [String: String]?
+    private var stamp: [Date?] = []
 
     func start(_ host: AgentHost) {
         self.host = host
         guard timer == nil else { return }
-        last = snapshot()
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.poll() }
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(500))
+        t.setEventHandler { [weak self] in self?.poll() }
+        timer = t
+        queue.async {
+            self.stamp = Self.fileStamp()
+            self.last = self.snapshot()
+            t.resume()
+        }
     }
 
     /// The agent's own tool call already re-exported; just resync the baseline.
-    func noteExternalChange() { last = snapshot() }
+    func noteExternalChange() {
+        queue.async {
+            self.stamp = Self.fileStamp()
+            self.last = self.snapshot()
+        }
+    }
 
     private func snapshot() -> [String: String] {
         var out: [String: String] = [:]
@@ -261,11 +277,19 @@ final class ChatAgentSync {
         return out
     }
 
+    private static func fileStamp() -> [Date?] {
+        let db = IntelData.file("pi-desktop.db").path
+        return [db, db + "-wal"].map { (try? FileManager.default.attributesOfItem(atPath: $0))?[.modificationDate] as? Date }
+    }
+
     private func poll() {
+        let s = Self.fileStamp()
+        guard s != stamp else { return }
+        stamp = s
         let now = snapshot()
         defer { last = now }
         guard let last, last != now else { return }
-        host?.exportConfig()
+        DispatchQueue.main.async { self.host?.exportConfig() }
     }
 }
 

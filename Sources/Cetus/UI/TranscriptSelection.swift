@@ -55,17 +55,28 @@ final class TranscriptSelection {
                 dragged = true
             }
             // Past the transcript's edge: scroll (periodic events keep it going while the mouse rests).
-            if e.type == .periodic {
-                if let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: last, modifierFlags: [], timestamp: e.timestamp,
-                                                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
-                    sv.contentView.autoscroll(with: drag)
-                }
-            } else {
-                sv.contentView.autoscroll(with: e)
-            }
+            Self.edgeScroll(sv, last)
             select(to: focus(at: last))
         }
         if dragged { finish() } else { views = [] }
+    }
+
+    /// Vertical-only edge scrolling while the pointer is above or below the viewport.
+    /// NSClipView.autoscroll nudged the SwiftUI clip view by fractions of a point on
+    /// every drag event even with the pointer inside, shaking the whole transcript.
+    private static func edgeScroll(_ sv: NSScrollView, _ p: NSPoint) {
+        let clip = sv.contentView
+        guard let doc = sv.documentView else { return }
+        let r = clip.convert(clip.bounds, to: nil)
+        // Window coordinates grow upward.
+        let over = p.y > r.maxY ? p.y - r.maxY : p.y < r.minY ? p.y - r.minY : 0
+        guard over != 0 else { return }
+        let step = min(abs(over), 40) * (over > 0 ? -1 : 1) * (clip.isFlipped ? 1 : -1)
+        let maxY = max(0, doc.frame.height - clip.bounds.height)
+        let y = min(max(clip.bounds.origin.y + step, 0), maxY)
+        guard y != clip.bounds.origin.y else { return }
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
+        sv.reflectScrolledClipView(clip)
     }
 
     /// Adopt a native selection (double-click word, triple-click paragraph) so it quotes the same way.

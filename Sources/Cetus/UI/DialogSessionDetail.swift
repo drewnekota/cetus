@@ -34,14 +34,14 @@ struct SessionDetailDialog: View {
             header(conv, streaming: chat.isStreaming)
             if app.bottom.open {
                 VStack(spacing: 0) {
-                    ConversationView(chat: chat).id(id).frame(maxHeight: .infinity).modifier(NoOpticalNudge())
+                    ChatPane(chat: chat).frame(maxHeight: .infinity).modifier(NoOpticalNudge())
                     WorkspacePanel(layout: .bottom)
                         .frame(height: 300)
                         .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
                 }
             } else {
                 HStack(spacing: 0) {
-                    ConversationView(chat: chat).id(id).frame(maxWidth: .infinity).modifier(NoOpticalNudge())
+                    ChatPane(chat: chat).frame(maxWidth: .infinity).modifier(NoOpticalNudge())
                     if app.side.open {
                         WorkspacePanel(layout: .side)
                             .frame(width: 520)

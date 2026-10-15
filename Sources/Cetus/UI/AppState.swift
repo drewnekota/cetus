@@ -159,6 +159,9 @@ final class AppState {
     var fileDragActive = false
     /// Ctrl+Tab switcher: candidates and the highlighted index while Ctrl is held.
     var switcher: (ids: [String], index: Int)?
+    /// The sidebar width mid-drag; committed to prefs on release (prefs is one
+    /// observed value, so writing it per mouse move re-rendered every reader).
+    var sidebarDragWidth: CGFloat?
     /// Cmd held long enough to show the numbered chat hints.
     var showNumberHints = false
 

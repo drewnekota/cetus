@@ -154,6 +154,7 @@ struct ComposerView: View {
             controller.loadCliDefaults(r)
             // Prewarm the runtime's slash catalog for a composer with no live session.
             if chat?.commands.isEmpty ?? true { SlashProbe.shared.probe(r, workspace, refreshIfStale: false) }
+            SlashSources.prewarm()
         }
         .onChange(of: app.composerDrop?.token) { _, _ in
             if let d = app.composerDrop { app.composerDrop = nil; addPaths(d.paths) }
@@ -613,6 +614,10 @@ struct ComposerView: View {
         refs = d?.mentions ?? []
         quote = d?.quote ?? ""
         dismissed = nil
+        // The composer outlives chat switches: start at this draft's last height,
+        // and don't let ⌘Z walk back into another chat's typing.
+        if let h = Self.lastHeight[draftKey] { height = h }
+        app.composerView?.undoManager?.removeAllActions()
     }
 
     private func saveDraft() {
@@ -836,7 +841,7 @@ private struct AttachmentTile: View {
     @Environment(AppState.self) private var app
     var body: some View {
         Group {
-            if a.isImage, let img = NSImage(contentsOfFile: a.path) {
+            if a.isImage, let img = FileImageCache.image(a.path, maxPixel: 168) {
                 Image(nsImage: img).resizable().scaledToFill().frame(width: 56, height: 56)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .opacity(hover ? 0.9 : 1)

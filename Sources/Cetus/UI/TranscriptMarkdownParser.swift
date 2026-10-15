@@ -14,7 +14,7 @@ struct MDStyle: OptionSet, Hashable {
     static let strike = MDStyle(rawValue: 8)
 }
 
-struct MDSpan: Equatable {
+struct MDSpan: Hashable {
     var text: String
     var style: MDStyle = []
     var link: String? = nil
@@ -22,7 +22,7 @@ struct MDSpan: Equatable {
 
 typealias MDInline = [MDSpan]
 
-enum MDAlign: Equatable { case none, left, center, right }
+enum MDAlign: Hashable { case none, left, center, right }
 
 struct MDItem: Equatable {
     var blocks: [MDNode]
@@ -45,13 +45,19 @@ extension MDInline {
 
 enum MDParser {
     private final class Box { let nodes: [MDNode]; init(_ n: [MDNode]) { nodes = n } }
-    nonisolated(unsafe) private static let cache = NSCache<NSString, Box>()
+    nonisolated(unsafe) private static let cache: NSCache<NSString, Box> = {
+        let c = NSCache<NSString, Box>()
+        c.countLimit = 1000
+        return c
+    }()
 
-    static func parse(_ text: String) -> [MDNode] {
+    /// `cache: false` for text still streaming: each prefix is parsed once and
+    /// never again, and caching them evicted finished messages.
+    static func parse(_ text: String, cache useCache: Bool = true) -> [MDNode] {
         if let hit = cache.object(forKey: text as NSString) { return hit.nodes }
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\t", with: "    ")
         let nodes = parseBlocks(normalized.components(separatedBy: "\n"))
-        cache.setObject(Box(nodes), forKey: text as NSString)
+        if useCache { cache.setObject(Box(nodes), forKey: text as NSString) }
         return nodes
     }
 
@@ -652,8 +658,10 @@ enum MDParser {
     }
 
     /// GFM literal autolinks (http(s)://, www.) in plain text spans, cut before CJK punctuation.
+    nonisolated(unsafe) private static let urlPattern = try? NSRegularExpression(pattern: "(?:https?://|www\\.)[^\\s<]+")
+
     private static func autolink(_ spans: MDInline) -> MDInline {
-        guard let re = try? NSRegularExpression(pattern: "(?:https?://|www\\.)[^\\s<]+") else { return spans }
+        guard let re = urlPattern else { return spans }
         var out: MDInline = []
         for s in spans {
             guard s.link == nil, !s.style.contains(.code), s.text.contains("://") || s.text.contains("www.") else { out.append(s); continue }

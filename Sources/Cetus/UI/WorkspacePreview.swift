@@ -130,7 +130,7 @@ struct WorkspacePreview: View {
             case .image:
                 ScrollView {
                     Group {
-                        if let img = NSImage(contentsOfFile: e.path) {
+                        if let img = FileImageCache.image(e.path) {
                             Image(nsImage: img).resizable().scaledToFit()
                                 .frame(maxWidth: img.size.width, maxHeight: img.size.height)
                         }

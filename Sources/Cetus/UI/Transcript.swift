@@ -386,12 +386,54 @@ struct ThinkingView: View {
 }
 
 enum ImageCache {
-    nonisolated(unsafe) private static var cache: [Int: NSImage] = [:]
+    private final class Entry {
+        let source: String
+        let image: NSImage
+        init(_ s: String, _ i: NSImage) { source = s; image = i }
+    }
+    nonisolated(unsafe) private static let cache: NSCache<NSString, Entry> = {
+        let c = NSCache<NSString, Entry>()
+        c.countLimit = 120
+        return c
+    }()
+
+    /// Rows re-render often; hashing megabytes of base64 each time was the cost.
+    /// Keyed by length and ends, confirmed by content (identical storage compares instantly).
     static func image(_ base64: String) -> NSImage? {
-        let key = base64.hashValue
-        if let hit = cache[key] { return hit }
+        let key = "\(base64.utf8.count)|\(base64.prefix(96))|\(base64.suffix(96))" as NSString
+        if let hit = cache.object(forKey: key), hit.source == base64 { return hit.image }
         guard let data = Data(base64Encoded: base64), let img = NSImage(data: data) else { return nil }
-        cache[key] = img
+        cache.setObject(Entry(base64, img), forKey: key)
+        return img
+    }
+}
+
+/// Images from disk for views that re-render often (composer tiles, artifact cards,
+/// previews): decoded once per file version, optionally downsampled to a thumbnail.
+enum FileImageCache {
+    nonisolated(unsafe) private static let cache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 200
+        return c
+    }()
+
+    static func image(_ path: String, maxPixel: Int? = nil) -> NSImage? {
+        guard !path.isEmpty, let attrs = try? FileManager.default.attributesOfItem(atPath: path) else { return nil }
+        let date = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let key = "\(path)|\(date)|\(attrs[.size] as? Int ?? 0)|\(maxPixel ?? 0)" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        let img: NSImage?
+        if let maxPixel, let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+           let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+               kCGImageSourceCreateThumbnailFromImageAlways: true,
+               kCGImageSourceCreateThumbnailWithTransform: true,
+               kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+           ] as CFDictionary) {
+            img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        } else {
+            img = NSImage(contentsOfFile: path)
+        }
+        if let img { cache.setObject(img, forKey: key) }
         return img
     }
 }
@@ -451,9 +493,8 @@ struct BlockView: View {
         case .text:
             if !block.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 HStack(alignment: .lastTextBaseline, spacing: 0) {
-                    MarkdownView(text: block.text, unit: unit)
+                    MarkdownView(text: block.text, unit: unit, streaming: block.streaming)
                 }
-                .overlay(alignment: .bottomTrailing) { if block.streaming { StreamingCaret() } }
             }
         case .thinking:
             if !block.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { ThinkingView(text: block.text, streaming: block.streaming) }
@@ -468,17 +509,6 @@ struct BlockView: View {
         case .image:
             ImageThumb(block: block)
         }
-    }
-}
-
-/// 6×14 block in the text color, pulsing.
-private struct StreamingCaret: View {
-    @State private var on = true
-    var body: some View {
-        Rectangle().fill(Theme.proseBody.opacity(0.7)).frame(width: 6, height: 14)
-            .opacity(on ? 1 : 0.3)
-            .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { on = false } }
-            .hidden()
     }
 }
 
@@ -736,7 +766,7 @@ func mentionText(_ text: String, labels: [String], size: CGFloat) -> AttributedS
         a[start ..< end].backgroundColor = Theme.background.opacity(0.7)
     }
     // Bare URLs are links (underlined, text-colored).
-    if let re = try? NSRegularExpression(pattern: "https?://[^\\s<>\"]+") {
+    if let re = TranscriptRegex.bareURL {
         for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
             guard let r = Range(m.range, in: text), let url = URL(string: String(text[r])) else { continue }
             let lower = text.distance(from: text.startIndex, to: r.lowerBound)
@@ -779,7 +809,7 @@ func userTextAttributed(_ text: String, labels: [String], size: CGFloat, find: F
         }
         if r.length > 0 { m.addAttribute(.kern, value: 4, range: NSRange(location: NSMaxRange(r) - 1, length: 1)) }
     }
-    if let re = try? NSRegularExpression(pattern: "(?:https?://|www\\.)[^\\s<>\"]+") {
+    if let re = TranscriptRegex.url {
         for match in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
             var url = ns.substring(with: match.range)
             if let cut = url.firstIndex(where: { !$0.isASCII && ($0.isPunctuation || $0.isSymbol) }) { url = String(url[..<cut]) }
@@ -861,7 +891,7 @@ struct UserMessageView: View {
 
 /// A rendered transcript row: a user prompt, a custom breadcrumb, or one
 /// assistant turn (all assistant messages between two prompts).
-enum TranscriptItem: Identifiable {
+enum TranscriptItem: Identifiable, Equatable {
     case user(RenderedMessage, turn: Int)
     case custom(RenderedMessage)
     case assistant(AssistantTurn)
@@ -874,7 +904,7 @@ enum TranscriptItem: Identifiable {
     }
 }
 
-struct AssistantTurn {
+struct AssistantTurn: Equatable {
     var key: String
     var blocks: [Block]
     /// createdAt of the message each block came from.
@@ -1162,4 +1192,10 @@ struct AssistantTurnView: View {
             .testID("message-\(turn.key)")
         }
     }
+}
+
+/// Compiled once: user bubbles rebuild their text on every render.
+enum TranscriptRegex {
+    nonisolated(unsafe) static let bareURL = try? NSRegularExpression(pattern: "https?://[^\\s<>\"]+")
+    nonisolated(unsafe) static let url = try? NSRegularExpression(pattern: "(?:https?://|www\\.)[^\\s<>\"]+")
 }

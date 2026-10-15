@@ -49,6 +49,9 @@ final class TranscriptScroller {
         }
     }
 
+    /// Inside the open-time pin (a user scroll ends it early).
+    var pinned: Bool { Date() < pinUntil }
+
     /// Test hook: `echo top > $CETUS_CONTROL.scroll` (also `bottom`, `y <px>`, `by <px>`).
     private func poll() {
         guard let path = commandPath, let s = try? String(contentsOfFile: path, encoding: .utf8) else { return }

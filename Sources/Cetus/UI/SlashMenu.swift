@@ -68,51 +68,57 @@ enum SlashCatalog {
     /// description), partition Commands → Skills, per-runtime sources.
     static func items(backend: String, query: String, native nativeCommands: [SlashCommand], local: [SlashItem], skills: [SlashItem]) -> [SlashItem] {
         let q = query.lowercased()
+        // Runs on every keystroke while the menu is open: compile the segment pattern once.
+        let segment = q.isEmpty ? nil : try? NSRegularExpression(pattern: "(^|[-_:/.])" + NSRegularExpression.escapedPattern(for: q))
         func rank(_ it: SlashItem) -> Int {
             if q.isEmpty { return 1 }
             let name = it.name.lowercased()
             if name == q { return 1 }
             if name.hasPrefix(q) { return 2 }
-            let pattern = "(^|[-_:/.])" + NSRegularExpression.escapedPattern(for: q)
-            if name.range(of: pattern, options: .regularExpression) != nil { return 3 }
+            if let segment, segment.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil { return 3 }
             if name.contains(q) { return 4 }
             if it.description.lowercased().contains(q) { return 5 }
             return 0
         }
+        /// Rank once, drop misses, stable-sort by rank.
         func byRank(_ list: [SlashItem]) -> [SlashItem] {
-            let ranks: [Int] = list.map(rank)
-            let order: [Int] = Array(list.indices).sorted { (a: Int, b: Int) -> Bool in
-                ranks[a] != ranks[b] ? ranks[a] < ranks[b] : a < b
+            list.enumerated().compactMap { i, it -> (Int, Int, SlashItem)? in
+                let r = rank(it)
+                return r > 0 ? (r, i, it) : nil
             }
-            return order.map { list[$0] }
+            .sorted { $0.0 != $1.0 ? $0.0 < $1.0 : $0.1 < $1.1 }
+            .map(\.2)
         }
         func byKind(_ list: [SlashItem]) -> [SlashItem] {
             byRank(list.filter { $0.kind == .command }) + byRank(list.filter { $0.kind == .skill })
         }
-        let match = { (it: SlashItem) in rank(it) > 0 }
         let native = native(nativeCommands)
         switch backend {
-        case "claude-code": return byKind((native.isEmpty ? claude : native).filter(match) + local.filter(match))
-        case "codex": return byKind(codex.filter(match) + native.filter(match) + local.filter(match))
-        case "pi": return byKind(local.filter(match) + skills.filter(match))
-        default: return byKind(native.filter(match) + local.filter(match))
+        case "claude-code": return byKind((native.isEmpty ? claude : native) + local)
+        case "codex": return byKind(codex + native + local)
+        case "pi": return byKind(local + skills)
+        default: return byKind(native + local)
         }
     }
 
     /// detectSlashToken: a `/` at line start or after whitespace, no whitespace up to the caret.
+    /// Runs several times per keystroke: walks back from the caret over the token
+    /// only, instead of copying the whole draft.
     static func detect(_ value: String, caret: Int, trigger: Character = "/") -> (start: Int, query: String)? {
-        let chars = Array(value.utf16)
+        let ns = value as NSString
+        let end = min(caret, ns.length)
         let t = trigger.utf16.first!
-        var i = min(caret, chars.count) - 1
+        func space(_ c: unichar) -> Bool { Unicode.Scalar(c).map { CharacterSet.whitespacesAndNewlines.contains($0) } ?? false }
+        var i = end - 1
         while i >= 0 {
-            if chars[i] == t { break }
-            if let s = Unicode.Scalar(chars[i]), CharacterSet.whitespacesAndNewlines.contains(s) { return nil }
+            let c = ns.character(at: i)
+            if c == t { break }
+            if space(c) { return nil }
             i -= 1
         }
-        guard i >= 0, chars[i] == t else { return nil }
-        if i > 0, let s = Unicode.Scalar(chars[i - 1]), !CharacterSet.whitespacesAndNewlines.contains(s) { return nil }
-        let q = String(utf16CodeUnits: Array(chars[(i + 1) ..< min(caret, chars.count)]), count: min(caret, chars.count) - i - 1)
-        return (i, q)
+        guard i >= 0 else { return nil }
+        if i > 0, let s = Unicode.Scalar(ns.character(at: i - 1)), !CharacterSet.whitespacesAndNewlines.contains(s) { return nil }
+        return (i, ns.substring(with: NSRange(location: i + 1, length: end - i - 1)))
     }
 
     /// Claude's catalog tags a skill's origin with a "(user)"-style suffix: lift it into a scope tag.
@@ -125,6 +131,57 @@ enum SlashCatalog {
             return (t, scope)
         }
         return (trimmed, nil)
+    }
+}
+
+/// The menu's Cetus-stored commands and library skills. Reading them hits the
+/// shared settings db (and, with discovery on, walks every workspace's parents
+/// for skill folders): the menu opens on the last read while a fresh one loads.
+@MainActor
+enum SlashSources {
+    private static var cached: (local: [SlashItem], skills: [SlashItem])?
+    private static var loading = false
+    /// Asked again mid-read (e.g. a command was just saved): read once more after.
+    private static var again = false
+    private static var waiting: [(([SlashItem], [SlashItem]) -> Void)] = []
+
+    static func load(_ apply: @escaping ([SlashItem], [SlashItem]) -> Void) {
+        if let c = cached { apply(c.local, c.skills) } else {
+            let c = (SlashCatalog.localCommands(), SlashCatalog.localSkills())
+            cached = c
+            apply(c.0, c.1)
+        }
+        waiting.append(apply)
+        refresh()
+    }
+
+    private static var readAt = Date.distantPast
+
+    /// Composer appeared: read ahead unless a recent read is still fresh.
+    static func prewarm() {
+        if cached == nil || Date().timeIntervalSince(readAt) > 30 { refresh() }
+    }
+
+    /// Revalidate (the menu opened, a command was saved).
+    static func refresh() {
+        guard !loading else { again = true; return }
+        loading = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let c = (SlashCatalog.localCommands(), SlashCatalog.localSkills())
+            DispatchQueue.main.async {
+                cached = c
+                readAt = Date()
+                loading = false
+                if again {
+                    again = false
+                    refresh()
+                    return
+                }
+                let w = waiting
+                waiting = []
+                for apply in w { apply(c.0, c.1) }
+            }
+        }
     }
 }
 
@@ -262,24 +319,26 @@ struct SlashMenuView: View {
     var onEdit: ((SlashItem) -> Void)?
     @State private var hoverDriven = false
 
+    /// Rows are at least 28pt, so past this many the list always overflows the
+    /// 318pt cap: build it lazily at a fixed height instead of laying out every
+    /// row (a big skill catalog) on each keystroke.
+    private static let lazyThreshold = 12
+
     var body: some View {
+        let lazy = items.count > Self.lazyThreshold
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
-                        if i == 0 || items[i - 1].kind != item.kind {
-                            heading(item.kind == .command ? "Commands" : "Skills", create: item.kind == .command ? onCreate : nil)
-                        }
-                        SlashRow(item: item, active: i == active, editable: item.kind == .command && item.commandId != nil && onEdit != nil,
-                                 onSelect: { onSelect(item) }, onEdit: { onEdit?(item) },
-                                 onHover: { if i != active { hoverDriven = true; onHover(i) } })
-                            .id(item.id)
-                            .testID("slash-row-\(i)")
+                Group {
+                    if lazy {
+                        LazyVStack(alignment: .leading, spacing: 0) { rows }
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) { rows }
                     }
                 }
                 .padding(4)
             }
             .scrollIndicators(.never)
+            .frame(height: lazy ? 318 : nil)
             .frame(maxHeight: 318)
             .fixedSize(horizontal: false, vertical: true)
             .onChange(of: active) { _, h in
@@ -294,6 +353,19 @@ struct SlashMenuView: View {
         .shadow(color: .black.opacity(0.1), radius: 7.5, y: 10)
         .shadow(color: .black.opacity(0.1), radius: 3, y: 4)
         .testID("slash-menu")
+    }
+
+    @ViewBuilder private var rows: some View {
+        ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
+            if i == 0 || items[i - 1].kind != item.kind {
+                heading(item.kind == .command ? "Commands" : "Skills", create: item.kind == .command ? onCreate : nil)
+            }
+            SlashRow(item: item, active: i == active, editable: item.kind == .command && item.commandId != nil && onEdit != nil,
+                     onSelect: { onSelect(item) }, onEdit: { onEdit?(item) },
+                     onHover: { if i != active { hoverDriven = true; onHover(i) } })
+                .id(item.id)
+                .testID("slash-row-\(i)")
+        }
     }
 
     /// px-3 pb-1 pt-2, text-2xs muted; the Commands heading carries "+ New command".
@@ -355,7 +427,8 @@ private struct SlashRow: View {
                     }
                 }
                 .frame(height: 16.2)
-                if !split.text.isEmpty { IntelPara(text: split.text) }
+                // line-clamp-1: full wraps made every row a multi-line text layout.
+                if !split.text.isEmpty { IntelPara(text: split.text, lineLimit: 1) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

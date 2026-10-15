@@ -8,7 +8,11 @@ import SwiftUI
 final class ComposerNSTextView: NSTextView {
     var onPasteFiles: (([String]) -> Void)?
     var onPasteImage: ((NSImage) -> Void)?
-    var placeholder = "" { didSet { needsDisplay = true } }
+    var placeholder = "" { didSet { if placeholder != oldValue { needsDisplay = true } } }
+    /// What `apply` last styled the text for: re-setting textColor re-attributes the
+    /// whole storage, and SwiftUI updates the view on every keystroke.
+    var appliedStyle: [CGFloat]?
+    var styledTyping: [NSAttributedString.Key: Any] = [:]
     var placeholderFont: NSFont = .systemFont(ofSize: 14)
     var placeholderPara = NSParagraphStyle()
     var placeholderLift: CGFloat = 0
@@ -173,6 +177,17 @@ struct ComposerTextView: NSViewRepresentable {
     }
 
     private func apply(_ tv: ComposerNSTextView) {
+        tv.placeholder = placeholder
+        tv.onPasteFiles = onPasteFiles
+        tv.onPasteImage = onPasteImage
+        // Colors are dynamic (resolved at draw time), so only metrics changes need a restyle.
+        let style: [CGFloat] = [fontSize, mono ? 1 : 0, lineScale, inset.width, inset.height]
+        guard tv.appliedStyle != style else {
+            // Replacing the text can reset the typing attributes: re-assert them (cheap, no relayout).
+            for (k, v) in tv.styledTyping { tv.typingAttributes[k] = v }
+            return
+        }
+        tv.appliedStyle = style
         let font: NSFont = mono ? .monospacedSystemFont(ofSize: fontSize - 1, weight: .regular) : .systemFont(ofSize: fontSize)
         if tv.font != font {
             tv.font = font
@@ -197,9 +212,7 @@ struct ComposerTextView: NSViewRepresentable {
         tv.typingAttributes[.foregroundColor] = ink
         tv.textColor = ink
         tv.insertionPointColor = ink // caret-color: auto → currentColor
-        tv.placeholder = placeholder
-        tv.onPasteFiles = onPasteFiles
-        tv.onPasteImage = onPasteImage
+        tv.styledTyping = [.font: font, .paragraphStyle: para, .baselineOffset: lift, .foregroundColor: ink]
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {

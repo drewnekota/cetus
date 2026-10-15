@@ -64,6 +64,8 @@ final class VoiceRuntime: @unchecked Sendable {
     private var tapThread: Thread?
     private let queueLock = NSLock()
     private var queue: [VoiceCmd] = []
+    /// The worker parked until `send` (or shutdown) wakes it; guarded by queueLock.
+    private var waiter: CheckedContinuation<Void, Never>?
     private var stopFlag = VoiceBox(false)
     private var lastCapsActive: Bool?
     private var trustTimer: Timer?
@@ -91,6 +93,7 @@ final class VoiceRuntime: @unchecked Sendable {
     /// App quit: drop any session, the tap, the warm helper and the Caps remap.
     func shutdown() {
         stopFlag.value = true
+        wakeWorker()
         removeTap()
         VoiceCapsRemap.restore()
         let sem = DispatchSemaphore(value: 0)
@@ -286,7 +289,13 @@ final class VoiceRuntime: @unchecked Sendable {
     // MARK: Monitor (run_voice_monitor)
 
     private func send(_ c: VoiceCmd) {
-        queueLock.lock(); queue.append(c); queueLock.unlock()
+        queueLock.lock(); queue.append(c); let w = waiter; waiter = nil; queueLock.unlock()
+        w?.resume()
+    }
+
+    private func wakeWorker() {
+        queueLock.lock(); let w = waiter; waiter = nil; queueLock.unlock()
+        w?.resume()
     }
 
     private func pop() -> VoiceCmd? {
@@ -302,7 +311,9 @@ final class VoiceRuntime: @unchecked Sendable {
         var fast = true
         var disabledIdle = false
         while !stopFlag.value {
-            usleep(fast ? 15_000 : 200_000)
+            // Fast ticks only around a press (the 250ms hold threshold); otherwise
+            // just pick up toggles and cancels. Off: only watch for re-enabling.
+            usleep(!fast ? 1_000_000 : (pressStart != nil || engaged || pttHeld.value) ? 15_000 : 30_000)
             let enabled = settings.value.voiceEnabled
             fast = enabled
             if !enabled {
@@ -352,7 +363,13 @@ final class VoiceRuntime: @unchecked Sendable {
     private func nextCmd() async -> VoiceCmd? {
         while !stopFlag.value {
             if let c = pop() { return c }
-            try? await Task.sleep(nanoseconds: 5_000_000)
+            // Park until a command arrives instead of polling.
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                queueLock.lock()
+                if !queue.isEmpty || stopFlag.value { queueLock.unlock(); cont.resume(); return }
+                waiter = cont
+                queueLock.unlock()
+            }
         }
         return nil
     }

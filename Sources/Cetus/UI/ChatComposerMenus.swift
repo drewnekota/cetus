@@ -45,8 +45,11 @@ final class ComposerMenus {
     }
 
     func slashOpened() {
-        local = SlashCatalog.localCommands()
-        skills = SlashCatalog.localSkills()
+        SlashSources.load { [weak self] local, skills in
+            guard let self else { return }
+            if self.local != local { self.local = local }
+            if self.skills != skills { self.skills = skills }
+        }
     }
 
     func mentionOpened(_ controller: Controller, state: ChatState?) {

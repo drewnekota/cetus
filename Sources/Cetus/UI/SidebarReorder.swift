@@ -67,8 +67,11 @@ final class WorkspaceReorder {
     private func ended(_ commit: ([String]) -> Void) {
         guard let d = drag else { return }
         endedAt = Date()
-        withAnimation(.easeOut(duration: 0.15)) { drag = nil }
+        // Persist first: clearing `drag` while the prefs still hold the old
+        // order lays the folders out in that order for a pass, then snaps them
+        // to the new one — a visible jump right after the drop.
         commit(d.order)
+        withAnimation(.easeOut(duration: 0.15)) { drag = nil }
     }
 }
 

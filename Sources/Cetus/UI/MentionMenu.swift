@@ -46,19 +46,22 @@ enum MentionSources {
     static func describe(_ s: Schedule) -> String {
         switch s {
         case .once(let at):
-            let f = ISO8601DateFormatter()
-            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return "runs once at \(f.string(from: Date(timeIntervalSince1970: at / 1000)))"
+            return "runs once at \(isoMs(at))"
         case .interval: return "runs every \(s.everyMinutes) minutes"
         case .daily(let time, _): return "runs daily at \(time)"
         case .cron(let expr): return "cron \(expr)"
         }
     }
 
-    static func isoMs(_ ms: Double) -> String {
+    /// The menu's items are rebuilt on every keystroke and hover: one formatter.
+    nonisolated(unsafe) private static let iso: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f.string(from: Date(timeIntervalSince1970: ms / 1000))
+        return f
+    }()
+
+    static func isoMs(_ ms: Double) -> String {
+        iso.string(from: Date(timeIntervalSince1970: ms / 1000))
     }
 
     /// Artifacts the agent delivered in this conversation, newest first, deduped by path.
@@ -135,16 +138,18 @@ enum MentionSources {
             }, 5)
         }
         if want(.conversation) {
-            let rows = conversations.filter { $0.id != current && hit($0.title) }.sorted { a, b in
+            let sorted = conversations.filter { $0.id != current && hit($0.title) }.sorted { a, b in
                 let aa = a.archivedAt != nil ? 1 : 0, ba = b.archivedAt != nil ? 1 : 0
                 return aa != ba ? aa < ba : a.updatedAt > b.updatedAt
-            }.map { c in
+            }
+            // Cap before building rows: only the shown ones need their meta formatted.
+            let rows = (all ? Array(sorted.prefix(4)) : sorted).map { c in
                 MentionItem(kind: .conversation, label: c.title, refId: c.id, title: c.title,
                             subtitle: c.workspaceDir.split(separator: "/").last.map(String.init) ?? c.workspaceDir,
                             archived: c.archivedAt != nil,
                             meta: "runtime \(c.backend.isEmpty ? "pi" : c.backend), last updated \(isoMs(c.updatedAt))")
             }
-            out += cap(rows, 4)
+            out += rows
         }
         return out
     }

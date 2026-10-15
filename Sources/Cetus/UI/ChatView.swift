@@ -8,8 +8,7 @@ struct ChatView: View {
     var body: some View {
         Group {
             if let id = app.active {
-                ConversationView(chat: app.controller.chat(id))
-                    .id(id)
+                ChatPane(chat: app.controller.chat(id))
             } else {
                 NewChatView()
             }
@@ -178,15 +177,111 @@ struct GlyphBackdrop: View {
     }
 }
 
-struct ConversationView: View {
+/// A chat: the transcript, rebuilt per chat (`.id`) so its scroll window starts
+/// fresh, over a footer that persists across switches. Rebuilding the composer on
+/// every switch (new text view, focus, async branch lookup) made it flicker.
+struct ChatPane: View {
+    let chat: ChatModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ConversationView(chat: chat).id(chat.id)
+            ConversationFooter(chat: chat)
+        }
+    }
+}
+
+/// Banners, the pending control card, and the composer under the transcript.
+struct ConversationFooter: View {
     @Environment(AppState.self) private var app
     let chat: ChatModel
     @AppStorage("settings.wallpaper") private var wallpaper = ""
+
+    var body: some View {
+        let conversation = app.controller.conversation(chat.id)
+        VStack(spacing: 8) {
+            if !chat.background.isEmpty { backgroundTasks(conversation?.backend ?? "claude-code") }
+            if let c = conversation, c.runState == .interrupted && !chat.isStreaming { interruptedBanner(c) }
+            if chat.compacting { compactionStrip }
+            if let request = chat.controls.first {
+                ControlCard(request: request) { response in app.controller.respondToControl(chat.id, request: request, response: response) }
+            }
+            ComposerView(convId: chat.id)
+        }
+        .frame(maxWidth: 768)
+        .modifier(OpticalNudge())
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity)
+        .background(ChatWallpaper.image(wallpaper) == nil ? Theme.background : .clear)
+    }
+
+    private func strip<C: View>(border: Color, fill: Color, @ViewBuilder _ content: () -> C) -> some View {
+        HStack(spacing: 8) { content() }
+            .font(.system(size: 12))
+            .foregroundStyle(Theme.mutedForeground)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(fill))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(border, lineWidth: 1))
+    }
+
+    private func backgroundTasks(_ backend: String) -> some View {
+        let color = Theme.runtimeColor(backend)
+        let names = chat.background.map { t in t["description"].string ?? t["kind"].stringValue }
+        return strip(border: color.opacity(0.3), fill: color.opacity(0.06)) {
+            Glyph(name: "bot", size: 14, color: color)
+            Spinner(size: 12, color: color)
+            Text("\(chat.background.count) background task\(chat.background.count == 1 ? "" : "s") running").fontWeight(.medium).foregroundStyle(Theme.foreground)
+            Text(names.prefix(3).joined(separator: ", ") + (names.count > 3 ? " +\(names.count - 3) more" : "")).lineLimit(1)
+        }
+        .testID("background-tasks")
+    }
+
+    private var compactionStrip: some View {
+        strip(border: Theme.sky.opacity(0.25), fill: Theme.sky.opacity(0.05)) {
+            Spinner(size: 12, color: Color(nsColor: NSColor(hex: 0x0084D1)))
+            Text("Compacting context…").fontWeight(.medium).foregroundStyle(Theme.foreground)
+        }
+    }
+
+    private func interruptedBanner(_ c: Conversation) -> some View {
+        strip(border: Theme.amber.opacity(0.25), fill: Theme.amber.opacity(0.05)) {
+            Text("Run interrupted").fontWeight(.medium).foregroundStyle(Theme.foreground)
+            Text("The last run was cut short by a restart.").lineLimit(1)
+            Spacer(minLength: 6)
+            Button {
+                app.controller.send(SendOptions(conversationId: c.id, text: "Continue from where you left off.", backend: c.backend, model: c.cliModel, effort: c.cliEffort, workspaceDir: c.workspaceDir))
+            } label: {
+                Text("Resume").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.background)
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Theme.foreground))
+            }
+            .buttonStyle(.plain)
+            Button { app.controller.markIdle(c.id) } label: {
+                Text("Dismiss").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .hoverFill(Theme.muted)
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+        }
+        .testID("interrupted-banner")
+    }
+}
+
+struct ConversationView: View {
+    @Environment(AppState.self) private var app
+    let chat: ChatModel
     @State private var position = ScrollPosition(edge: .bottom)
-    @State private var distanceFromBottom: CGFloat = 0
-    @State private var viewport: CGFloat = 600
+    /// Scroll metrics change every frame: kept in a plain box so scrolling doesn't
+    /// re-run the body. Only the derived flags below are observed, written when they flip.
+    @State private var metrics = ScrollMetrics()
+    @State private var nearBottom = true
+    @State private var farFromBottom = false
     @State private var rowFrames = ChatFindRowFrames()
-    @State private var distanceFromTop: CGFloat = 0
+    @State private var memo = LayoutMemo()
     /// Mounted row window [lo, hi): only rows near the viewport exist as views.
     /// Building every row of a long chat (text views, layout) blocked a switch for
     /// 300ms+ and kept growing with the chat; the window opens on the tail and
@@ -198,8 +293,46 @@ struct ConversationView: View {
     @State private var windowCheck = false
     private static let firstChunk = 3, chunk = 2
 
+    final class ScrollMetrics {
+        var viewport: CGFloat = 600
+        var fromBottom: CGFloat = 0
+        var fromTop: CGFloat = 0
+    }
+
+    /// Items and the find index per state revision: the body, the window checks
+    /// (every frame while scrolling) and find all ask for them.
+    final class LayoutMemo {
+        private var rev = -1
+        private var items: [TranscriptItem] = []
+        private var findKey: (rev: Int, query: String)?
+        private var index: (offsets: [String: Int], total: Int, owners: [String]) = ([:], 0, [])
+
+        func items(_ chat: ChatModel) -> [TranscriptItem] {
+            if rev != chat.revision {
+                items = TranscriptLayout.items(chat.state)
+                rev = chat.revision
+            }
+            return items
+        }
+
+        func index(_ chat: ChatModel, query: String) -> (offsets: [String: Int], total: Int, owners: [String]) {
+            let all = items(chat)
+            if let k = findKey, k.rev == rev, k.query == query { return index }
+            index = TranscriptLayout.findIndex(all, query: query)
+            findKey = (rev, query)
+            return index
+        }
+    }
+
     /// At the real end: the last row is mounted and on screen (not just the window's last row).
-    private var atBottom: Bool { distanceFromBottom < 60 && hi == nil }
+    private var atBottom: Bool { metrics.fromBottom < 60 && hi == nil }
+
+    private func updateScrollFlags() {
+        let near = metrics.fromBottom < 60
+        if nearBottom != near { nearBottom = near }
+        let far = metrics.fromBottom > max(360, metrics.viewport * 0.5)
+        if farFromBottom != far { farFromBottom = far }
+    }
 
     private func bounds(_ count: Int) -> Range<Int> {
         let to = min(count, hi ?? count)
@@ -209,16 +342,17 @@ struct ConversationView: View {
 
     var body: some View {
         let state = chat.state
-        let items = TranscriptLayout.items(state)
+        let items = memo.items(chat)
         let find = app.find
-        let index = TranscriptLayout.findIndex(items, query: find?.query ?? "")
-        let conversation = app.controller.conversation(chat.id)
+        let index = memo.index(chat, query: find?.query ?? "")
         VStack(spacing: 0) {
             ZStack(alignment: .top) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(items[bounds(items.count)]) { item in
-                            row(item).id(item.id)
+                            TranscriptRow(item: item, startedAt: chat.startedAt, lastDurationMs: chat.lastDurationMs, fork: fork)
+                                .equatable()
+                                .id(item.id)
                                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .scrollView) } action: { rowFrames.frames[item.id] = $0 }
                                 .onDisappear { rowFrames.frames[item.id] = nil }
                         }
@@ -240,14 +374,19 @@ struct ConversationView: View {
                 .scrollPosition($position)
                 // Following the bottom: growth (new rows, older rows mounting above) keeps it pinned.
                 // Elsewhere the top holds still and moveWindow compensates for rows changing above.
-                .defaultScrollAnchor(atBottom ? .bottom : nil, for: .sizeChanges)
+                .defaultScrollAnchor(nearBottom && hi == nil ? .bottom : nil, for: .sizeChanges)
                 .onScrollGeometryChange(for: CGRect.self) { g in
                     CGRect(x: max(0, g.contentOffset.y), y: max(0, g.contentSize.height - g.contentOffset.y - g.containerSize.height),
                            width: g.containerSize.height, height: 0)
                 } action: { _, v in
-                    viewport = v.width
-                    distanceFromBottom = v.minY
-                    distanceFromTop = v.minX
+                    metrics.viewport = v.width
+                    metrics.fromBottom = v.minY
+                    metrics.fromTop = v.minX
+                    updateScrollFlags()
+                    // Opening lands short of the bottom by however much rows grew while the
+                    // initial offset was resolved; the pin timer only fixed it a frame later.
+                    // Correct it in this layout pass so the first frame is already at the end.
+                    if v.minY > 0.5, hi == nil, TranscriptScroller.shared.pinned { position.scrollTo(edge: .bottom) }
                     scheduleWindowCheck()
                 }
                 .testID("transcript")
@@ -261,29 +400,14 @@ struct ConversationView: View {
                 }
             }
             .overlay(alignment: .bottom) { jumpButton }
-            VStack(spacing: 8) {
-                if !chat.background.isEmpty { backgroundTasks(conversation?.backend ?? "claude-code") }
-                if let c = conversation, c.runState == .interrupted && !chat.isStreaming { interruptedBanner(c) }
-                if state.isCompacting { compactionStrip }
-                if let request = chat.controls.first {
-                    ControlCard(request: request) { response in app.controller.respondToControl(chat.id, request: request, response: response) }
-                }
-                ComposerView(convId: chat.id)
-            }
-            .frame(maxWidth: 768)
-            .modifier(OpticalNudge())
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 12)
-            .frame(maxWidth: .infinity)
-            .background(ChatWallpaper.image(wallpaper) == nil ? Theme.background : .clear)
         }
         .onChange(of: tailSignature(state)) { _, _ in
             if atBottom { position.scrollTo(edge: .bottom) }
         }
         .onChange(of: app.scrollToBottomToken) { _, _ in
             resetToTail()
-            distanceFromBottom = 0
+            metrics.fromBottom = 0
+            updateScrollFlags()
             DispatchQueue.main.async { position.scrollTo(edge: .bottom) }
             TranscriptScroller.shared.pinBottom()
         }
@@ -343,9 +467,10 @@ struct ConversationView: View {
 
     /// Moves the window one step; false when it is where it should be.
     private func adjustWindow() -> Bool {
-        let items = TranscriptLayout.items(chat.state)
+        let items = memo.items(chat)
         let n = items.count, r = bounds(n)
-        let vp = max(viewport, 200)
+        let vp = max(metrics.viewport, 200)
+        let distanceFromTop = metrics.fromTop, distanceFromBottom = metrics.fromBottom
         let near = vp * 1.5, far = vp * 5
         let report = { TranscriptWindowProbe.describe = "\(bounds(n).lowerBound)..<\(bounds(n).upperBound)/\(n)" }
         defer { report() }
@@ -390,7 +515,7 @@ struct ConversationView: View {
 
     /// 36px circle, shown once the reader is max(360, half a screen) above the bottom.
     private var jumpButton: some View {
-        let show = distanceFromBottom > max(360, viewport * 0.5) || hi != nil
+        let show = farFromBottom || hi != nil
         return Button {
             if hi != nil {
                 // Rows below were dropped: remount the tail and jump there.
@@ -424,19 +549,30 @@ struct ConversationView: View {
 
     private func tailSignature(_ s: ChatState) -> String {
         let last = s.messages.last
-        return "\(s.messages.count):\(last?.blocks.count ?? 0):\(last?.blocks.last?.text.count ?? 0):\(last?.blocks.last?.result != nil):\(s.awaitingAssistant):\(chat.controls.count):\(chat.queue.count)"
+        return "\(s.messages.count):\(last?.blocks.count ?? 0):\(last?.blocks.last?.text.utf16.count ?? 0):\(last?.blocks.last?.result != nil):\(s.awaitingAssistant):\(chat.controls.count):\(chat.queue.count)"
     }
 
-    @ViewBuilder
-    private func row(_ item: TranscriptItem) -> some View {
-        switch item {
-        case .user(let m, let turn):
-            UserMessageView(message: m) { fork(turn) }
-        case .custom(let m):
-            CustomMessageView(message: m)
-        case .assistant(let t):
-            AssistantTurnView(turn: t, startedAt: chat.startedAt, lastDurationMs: chat.lastDurationMs,
-                              onFork: { fork(t.turn) })
+    /// One transcript row. Equatable on its content: the fork closure is new on every
+    /// parent update, which made every mounted row re-render on each streamed delta.
+    private struct TranscriptRow: View, Equatable {
+        let item: TranscriptItem
+        let startedAt: Double?
+        let lastDurationMs: Double?
+        let fork: (Int) -> Void
+
+        static func == (a: Self, b: Self) -> Bool {
+            a.item == b.item && a.startedAt == b.startedAt && a.lastDurationMs == b.lastDurationMs
+        }
+
+        var body: some View {
+            switch item {
+            case .user(let m, let turn):
+                UserMessageView(message: m) { fork(turn) }
+            case .custom(let m):
+                CustomMessageView(message: m)
+            case .assistant(let t):
+                AssistantTurnView(turn: t, startedAt: startedAt, lastDurationMs: lastDurationMs, onFork: { fork(t.turn) })
+            }
         }
     }
 
@@ -472,59 +608,6 @@ struct ConversationView: View {
         .fixedSize(horizontal: true, vertical: false)
         .padding(.vertical, 12)
         .testID("chat-error")
-    }
-
-    private func strip<C: View>(border: Color, fill: Color, @ViewBuilder _ content: () -> C) -> some View {
-        HStack(spacing: 8) { content() }
-            .font(.system(size: 12))
-            .foregroundStyle(Theme.mutedForeground)
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10).fill(fill))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(border, lineWidth: 1))
-    }
-
-    private func backgroundTasks(_ backend: String) -> some View {
-        let color = Theme.runtimeColor(backend)
-        let names = chat.background.map { t in t["description"].string ?? t["kind"].stringValue }
-        return strip(border: color.opacity(0.3), fill: color.opacity(0.06)) {
-            Glyph(name: "bot", size: 14, color: color)
-            Spinner(size: 12, color: color)
-            Text("\(chat.background.count) background task\(chat.background.count == 1 ? "" : "s") running").fontWeight(.medium).foregroundStyle(Theme.foreground)
-            Text(names.prefix(3).joined(separator: ", ") + (names.count > 3 ? " +\(names.count - 3) more" : "")).lineLimit(1)
-        }
-        .testID("background-tasks")
-    }
-
-    private var compactionStrip: some View {
-        strip(border: Theme.sky.opacity(0.25), fill: Theme.sky.opacity(0.05)) {
-            Spinner(size: 12, color: Color(nsColor: NSColor(hex: 0x0084D1)))
-            Text("Compacting context…").fontWeight(.medium).foregroundStyle(Theme.foreground)
-        }
-    }
-
-    private func interruptedBanner(_ c: Conversation) -> some View {
-        strip(border: Theme.amber.opacity(0.25), fill: Theme.amber.opacity(0.05)) {
-            Text("Run interrupted").fontWeight(.medium).foregroundStyle(Theme.foreground)
-            Text("The last run was cut short by a restart.").lineLimit(1)
-            Spacer(minLength: 6)
-            Button {
-                app.controller.send(SendOptions(conversationId: c.id, text: "Continue from where you left off.", backend: c.backend, model: c.cliModel, effort: c.cliEffort, workspaceDir: c.workspaceDir))
-            } label: {
-                Text("Resume").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.background)
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Theme.foreground))
-            }
-            .buttonStyle(.plain)
-            Button { app.controller.markIdle(c.id) } label: {
-                Text("Dismiss").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .hoverFill(Theme.muted)
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-        }
-        .testID("interrupted-banner")
     }
 }
 

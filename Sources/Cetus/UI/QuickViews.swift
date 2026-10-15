@@ -141,7 +141,7 @@ struct QuickLauncher: View {
         QuickFlow(spacing: 8) {
             ForEach(m.attachments) { a in
                 QuickRemovable(onRemove: { m.attachments.removeAll { $0.id == a.id } }) {
-                    if a.isImage, let img = NSImage(contentsOfFile: a.path) {
+                    if a.isImage, let img = FileImageCache.image(a.path, maxPixel: 168) {
                         Image(nsImage: img).resizable().aspectRatio(contentMode: .fill).frame(width: 56, height: 56)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(ink.chipBorder, lineWidth: 1))

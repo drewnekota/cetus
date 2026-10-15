@@ -155,16 +155,27 @@ final class ScreenStore: @unchecked Sendable {
     }
 
     func insertScreenshot(_ s: ScreenFrame) {
+        // OCR text goes in through setScreenshotOCR, which also indexes it.
+        let ocr = s.ocrText.flatMap { $0.isEmpty ? nil : $0 }
         run("INSERT INTO screenshots (id, ts, app_name, window_title, file_path, phash, bytes, ocr_text, thumb_path, trigger) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-            [.s(s.id), .i(Int64(s.ts)), .s(s.appName), .s(s.windowTitle), .s(s.filePath), .i(s.phash), .i(s.bytes), .s(s.ocrText), .s(s.thumbPath), .s(s.trigger)])
-        if let t = s.ocrText, !t.isEmpty { setScreenshotOCR(s.id, t) }
+            [.s(s.id), .i(Int64(s.ts)), .s(s.appName), .s(s.windowTitle), .s(s.filePath), .i(s.phash), .i(s.bytes), .s(ocr == nil ? s.ocrText : nil), .s(s.thumbPath), .s(s.trigger)])
+        if let ocr { setScreenshotOCR(s.id, ocr) }
         changed()
     }
 
     func setScreenshotOCR(_ id: String, _ text: String) {
         transaction {
+            // `id` is UNINDEXED in the fts table, so this delete scans the whole index:
+            // only frames that already had OCR text (and so an fts row) need it.
+            var st: OpaquePointer?
+            var had = true
+            if sqlite3_prepare_v2(db, "SELECT ocr_text IS NOT NULL AND ocr_text != '' FROM screenshots WHERE id = ?1", -1, &st, nil) == SQLITE_OK {
+                bind(st, [.s(id)])
+                had = sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int(st, 0) != 0
+                sqlite3_finalize(st)
+            }
             _ = runLocked("UPDATE screenshots SET ocr_text = ?1 WHERE id = ?2", [.s(text), .s(id)])
-            _ = runLocked("DELETE FROM screenshots_fts WHERE id = ?1", [.s(id)])
+            if had { _ = runLocked("DELETE FROM screenshots_fts WHERE id = ?1", [.s(id)]) }
             _ = runLocked("INSERT INTO screenshots_fts (id, ocr_text) VALUES (?1, ?2)", [.s(id), .s(text)])
         }
         changed()

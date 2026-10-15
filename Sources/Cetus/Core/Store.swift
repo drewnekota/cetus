@@ -124,6 +124,8 @@ final class Store {
         path = dataDir.appendingPathComponent("cetus.db").path
         sqlite3_open(path, &db)
         exec("PRAGMA journal_mode = WAL")
+        // WAL stays consistent with NORMAL; FULL fsynced on every autocommit write.
+        exec("PRAGMA synchronous = NORMAL")
         exec("""
         CREATE TABLE IF NOT EXISTS conversations (
           id TEXT PRIMARY KEY,
@@ -184,6 +186,13 @@ final class Store {
 
     func exec(_ sql: String) {
         sqlite3_exec(db, sql, nil, nil, nil)
+    }
+
+    /// One commit for a batch of writes (a finished turn's messages).
+    func transaction(_ body: () -> Void) {
+        exec("BEGIN")
+        body()
+        exec("COMMIT")
     }
 
     @discardableResult
@@ -394,7 +403,15 @@ extension Store {
     /// The last assistant text of a conversation, whitespace-collapsed and cut
     /// to 220 characters (computeLastReplyPreview), for board cards.
     func lastReplyPreview(_ id: String) -> String? {
-        for m in messages(id).reversed() where m["role"].string == "assistant" {
+        // The reply is almost always among the last rows: read those before the whole transcript.
+        let tail = query("SELECT message_json FROM cli_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 24", [.text(id)])
+            .compactMap { JSON.parse($0.str("message_json")) }
+        if let hit = Self.preview(in: tail) { return hit }
+        return tail.count < 24 ? nil : Self.preview(in: Array(messages(id).reversed()))
+    }
+
+    private static func preview(in newestFirst: [JSON]) -> String? {
+        for m in newestFirst where m["role"].string == "assistant" {
             for b in (m["content"].array ?? []).reversed() where b["type"].string == "text" {
                 let t = b["text"].stringValue
                 guard !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }

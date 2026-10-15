@@ -6,6 +6,11 @@ struct PaletteView: View {
     @State private var query = ""
     @State private var index = 0
     @FocusState private var focused: Bool
+    /// Search results for `searched`: fetched when the query changes (debounced),
+    /// never per render — hover and arrow keys re-run the body.
+    @State private var chatHits: [(Conversation, String)] = []
+    @State private var screenHits: [ScreenFrame] = []
+    @State private var searched: String?
 
     private struct Row: Identifiable {
         let id: String
@@ -68,7 +73,7 @@ struct PaletteView: View {
         if q.isEmpty {
             out += app.controller.conversations.prefix(7).map { chatRow($0, group: "Recent") }
         } else {
-            let hits = app.controller.store.search(q, limit: 24)
+            let hits = chatHits
             let live = hits.filter { $0.0.archivedAt == nil }.prefix(12)
             let archived = hits.filter { $0.0.archivedAt != nil }
             out += live.map { chatRow($0.0, group: "Conversations · \(live.count)", snippet: $0.1) }
@@ -85,10 +90,16 @@ struct PaletteView: View {
             out.append(Row(id: "effort:\(l.3)", group: "Reasoning", icon: l.0, title: l.1, subtitle: l.2, checked: current == l.3) { setPiReasoning(l.3) })
         }
         // Screen-context frames by keyword (OCR text), or the most recent ones.
-        let hits = q.isEmpty ? ScreenStore.shared.recentScreenshots(limit: 6) : ScreenStore.shared.searchScreenshots(q, limit: 6)
+        let hits = screenHits
         let screenGroup = q.isEmpty ? "Screen history · recent" : "Screen history · \(hits.count)"
         out += hits.map { f in Row(id: "screen:\(f.id)", group: screenGroup, icon: "", title: f.appName ?? "", screen: f) { ScreenHistoryModel.shared.show(app, query: q, frame: f) } }
         return out
+    }
+
+    private func search(_ q: String) {
+        chatHits = q.isEmpty ? [] : app.controller.store.search(q, limit: 24)
+        screenHits = q.isEmpty ? ScreenStore.shared.recentScreenshots(limit: 6) : ScreenStore.shared.searchScreenshots(q, limit: 6)
+        searched = q
     }
 
     var body: some View {
@@ -107,11 +118,23 @@ struct PaletteView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 14))
                     .focused($focused)
-                    .onSubmit { pick(list) }
+                    .onSubmit {
+                        // Enter inside the debounce window: search now so the pick matches the query.
+                        let q = query.trimmingCharacters(in: .whitespaces)
+                        if searched != q { search(q); pick(rows) } else { pick(list) }
+                    }
                     .onKeyPress(.downArrow) { index = min(list.count - 1, index + 1); return .handled }
                     .onKeyPress(.upArrow) { index = max(0, index - 1); return .handled }
                     .onKeyPress(.escape) { close(); return .handled }
                     .onChange(of: query) { _, _ in index = 0 }
+                    .task(id: query.trimmingCharacters(in: .whitespaces)) {
+                        let q = query.trimmingCharacters(in: .whitespaces)
+                        if searched != nil, !q.isEmpty {
+                            try? await Task.sleep(for: .milliseconds(120))
+                            if Task.isCancelled { return }
+                        }
+                        search(q)
+                    }
                     .testID("palette-input")
             }
             .padding(.horizontal, 16)

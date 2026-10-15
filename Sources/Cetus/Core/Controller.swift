@@ -50,7 +50,26 @@ struct ContextUsage: Equatable { var used: Double; var window: Double }
 @Observable
 final class ChatModel {
     let id: String
-    var state = ChatState()
+    /// Changes on every streamed delta: only the transcript should read it.
+    /// Chrome around it (composer, footer, header) reads the flags below,
+    /// which change only when their value does.
+    var state = ChatState() {
+        didSet {
+            revision &+= 1
+            if streaming != state.isStreaming { streaming = state.isStreaming }
+            if compacting != state.isCompacting { compacting = state.isCompacting }
+            // Mid-turn only the tail can gain one; a full walk when idle (reset, turn end).
+            let scan = state.isStreaming ? state.messages.suffix(2) : state.messages[...]
+            let found = scan.contains { m in m.blocks.contains { b in b.kind == .toolUse && b.result.map { !ArtifactDetails.from($0.details).isEmpty } == true } }
+            let artifacts = state.isStreaming ? hasArtifacts || found : found
+            if hasArtifacts != artifacts { hasArtifacts = artifacts }
+        }
+    }
+    /// Bumped on every state change (not observed): memo key for derived layouts.
+    @ObservationIgnored private(set) var revision = 0
+    private(set) var streaming = false
+    private(set) var compacting = false
+    private(set) var hasArtifacts = false
     var controls: [JSON] = []
     var commands: [SlashCommand] = []
     var context: ContextUsage?
@@ -63,7 +82,7 @@ final class ChatModel {
 
     init(id: String) { self.id = id }
 
-    var isStreaming: Bool { state.isStreaming }
+    var isStreaming: Bool { streaming }
 }
 
 struct SendOptions {
@@ -138,7 +157,8 @@ final class Controller {
 
     func conversation(_ id: String?) -> Conversation? {
         guard let id else { return nil }
-        return conversations.first { $0.id == id } ?? store.get(id)
+        // Archived chats too, before the db: bodies call this on every keystroke.
+        return conversations.first { $0.id == id } ?? archived.first { $0.id == id } ?? store.get(id)
     }
 
     func setVisible(_ id: String?) {
@@ -484,7 +504,7 @@ final class Controller {
 
     private func settle(_ done: JSON) {
         guard let id = done["conv"].string, let conv = store.get(id) else { return }
-        for m in done["messages"].array ?? [] { store.append(id, m) }
+        store.transaction { for m in done["messages"].array ?? [] { store.append(id, m) } }
         let aborted = done["aborted"].truthy
         let streamed = done["streamed"].truthy
         var sessionFile = conv.sessionFile

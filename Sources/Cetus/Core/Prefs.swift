@@ -124,21 +124,31 @@ final class PrefStore {
         }
     }
 
+    /// Encoding and the atomic write run here, in order: saves follow typing pauses.
+    private let io = DispatchQueue(label: "cetus.prefs", qos: .utility)
+
     private func scheduleSave() {
         saveWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.flush() }
+        let work = DispatchWorkItem { [weak self] in self?.write(wait: false) }
         saveWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
-    func flush() {
+    /// Save now and wait for it (quit).
+    func flush() { write(wait: true) }
+
+    private func write(wait: Bool) {
         saveWork?.cancel()
         saveWork = nil
-        let enc = JSONEncoder()
-        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? enc.encode(value) else { return }
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
+        let snapshot = value, url = url
+        let job = {
+            let enc = JSONEncoder()
+            enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+            guard let data = try? enc.encode(snapshot) else { return }
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: url, options: .atomic)
+        }
+        if wait { io.sync(execute: job) } else { io.async(execute: job) }
     }
 }
 

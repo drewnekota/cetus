@@ -520,9 +520,17 @@ enum ProseBuilder {
         let str = s.string as NSString
         var fixes: [(NSRange, NSFont)] = []
         let italicRuns = s.length > 0 ? s : nil
+        var buf: [UniChar] = []
+        var glyphs: [CGGlyph] = []
         s.enumerateAttribute(.font, in: NSRange(location: 0, length: s.length)) { value, range, _ in
-            guard let font = value as? NSFont else { return }
+            guard let font = value as? NSFont, range.length > 0 else { return }
             let ct = font as CTFont
+            // One lookup for the whole run: when the font covers every character
+            // (the usual case) nothing needs a fallback, so skip the per-character walk.
+            buf = [UniChar](repeating: 0, count: range.length)
+            glyphs = [CGGlyph](repeating: 0, count: range.length)
+            str.getCharacters(&buf, range: range)
+            if CTFontGetGlyphsForCharacters(ct, buf, &glyphs, range.length) { return }
             var i = range.location
             var runStart = -1
             var runFont: NSFont?
@@ -533,11 +541,23 @@ enum ProseBuilder {
             }
             while i < NSMaxRange(range) {
                 let cr = str.rangeOfComposedCharacterSequence(at: i)
-                var chars = [UniChar](repeating: 0, count: cr.length)
-                str.getCharacters(&chars, range: cr)
-                var glyphs = [CGGlyph](repeating: 0, count: cr.length)
-                let covered = CTFontGetGlyphsForCharacters(ct, chars, &glyphs, cr.length)
-                let ch = chars.first ?? 0
+                let covered: Bool, ch: UniChar
+                if cr.location >= range.location, NSMaxRange(cr) <= NSMaxRange(range) {
+                    let off = cr.location - range.location
+                    covered = buf.withUnsafeBufferPointer { b in
+                        glyphs.withUnsafeMutableBufferPointer { g in
+                            CTFontGetGlyphsForCharacters(ct, b.baseAddress! + off, g.baseAddress! + off, cr.length)
+                        }
+                    }
+                    ch = buf[off]
+                } else {
+                    // A composed sequence straddling the run edge.
+                    var chars = [UniChar](repeating: 0, count: cr.length)
+                    str.getCharacters(&chars, range: cr)
+                    var gs = [CGGlyph](repeating: 0, count: cr.length)
+                    covered = CTFontGetGlyphsForCharacters(ct, chars, &gs, cr.length)
+                    ch = chars.first ?? 0
+                }
                 if covered || ch == 0x2028 || ch == 0x20 {
                     close(cr.location)
                 } else {

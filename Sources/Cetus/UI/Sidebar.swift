@@ -24,6 +24,9 @@ struct SidebarView: View {
         .background(Theme.sidebar)
     }
 
+    /// Decoded once (it was read from disk on every sidebar render).
+    static let icon = Theme.resource("icon-20@2x.png").flatMap { NSImage(contentsOf: $0) }
+
     // MARK: Header: drag spacer, brand row, Chats/Kanban, nav rows
 
     private var header: some View {
@@ -31,7 +34,7 @@ struct SidebarView: View {
             Color.clear.frame(height: 24)
             HStack(spacing: 4) {
                 // Pre-downsampled (Lanczos) like WebKit's high-quality image scaling.
-                if let icon = Theme.resource("icon-20@2x.png").flatMap({ NSImage(contentsOf: $0) }) {
+                if let icon = SidebarView.icon {
                     Image(nsImage: icon).resizable().interpolation(.high).frame(width: 20, height: 20)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
                 }
@@ -57,8 +60,8 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var groups: some View {
-        let order = app.order()
         let all = app.groups()
+        let order = all.filter { !app.prefs.collapsedGroups.contains($0.id) }.flatMap { app.visibleItems($0) }
         let folders = all.filter(\.isFolder).compactMap(\.dir)
         let shown = all.filter { !$0.isFolder } + reorder.order(folders).compactMap { d in all.first { $0.isFolder && $0.dir == d } }
         ForEach(shown) { g in
@@ -104,18 +107,51 @@ struct SidebarView: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: 4) {
-            MenuRow(icon: "settings", title: "Settings", active: false, testID: "open-settings") { app.settings = true }
-            Button { showResources.toggle() } label: {
-                Glyph(name: "activity", size: 14, color: Theme.mutedForeground)
-                    .frame(width: 24, height: 24)
-                    .hoverFill(Theme.sidebarAccent, active: showResources)
+        VStack(spacing: 4) {
+            if let version = AppShellUpdater.state.readyVersion {
+                RestartToUpdateRow(version: version)
             }
-            .buttonStyle(.plain)
-            .tip("Resources", side: .right)
-            .popover(isPresented: $showResources, arrowEdge: .trailing) { ResourcesView() }
+            HStack(spacing: 4) {
+                MenuRow(icon: "settings", title: "Settings", active: false, testID: "open-settings") { app.settings = true }
+                Button { showResources.toggle() } label: {
+                    Glyph(name: "activity", size: 14, color: Theme.mutedForeground)
+                        .frame(width: 24, height: 24)
+                        .hoverFill(Theme.sidebarAccent, active: showResources)
+                }
+                .buttonStyle(.plain)
+                .tip("Resources", side: .right)
+                .popover(isPresented: $showResources, arrowEdge: .trailing) { ResourcesView() }
+            }
         }
         .padding(8)
+    }
+}
+
+/// Footer row pinned above Settings once an update is downloaded (app-sidebar.tsx:
+/// `bg-primary/10 text-primary hover:bg-primary/15`).
+private struct RestartToUpdateRow: View {
+    let version: String
+    @State private var hover = false
+
+    var body: some View {
+        Button { AppShellUpdater.restartToUpdate() } label: {
+            HStack(spacing: 8) {
+                Glyph(name: "refresh-cw", size: 16, color: Theme.primary)
+                Text("Restart to update")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(8)
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.primary.opacity(hover ? 0.15 : 0.1)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .tip("Version \(version) downloaded — restart to apply", side: .right)
+        .testID("restart-to-update")
     }
 }
 

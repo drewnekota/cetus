@@ -8,7 +8,6 @@ import UserNotifications
 final class AgentHost {
     private var process: Process?
     private var stdin: FileHandle?
-    private var buffer = Data()
     var onMessage: ((JSON) -> Void)?
 
     static func binaryPath() -> String? {
@@ -34,16 +33,20 @@ final class AgentHost {
         p.standardInput = inPipe
         p.standardOutput = outPipe
         p.standardError = FileHandle.standardError
-        outPipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+        // Lines are split and parsed on the pipe's reader thread; main gets whole
+        // messages in batches (see Outbox), so a burst of streamed tokens is one UI update.
+        let reader = LineReader()
+        let outbox = Outbox { [weak self] batch in
+            guard let self else { return }
+            for m in batch { self.onMessage?(m) }
+        }
+        outPipe.fileHandleForReading.readabilityHandler = { h in
             let chunk = h.availableData
             if chunk.isEmpty { h.readabilityHandler = nil; return }
-            DispatchQueue.main.async { self?.consume(chunk) }
+            outbox.post(reader.feed(chunk))
         }
-        p.terminationHandler = { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.onMessage?(["type": "host_exited"])
-            }
-        }
+        // Through the outbox too: it must not overtake messages still waiting there.
+        p.terminationHandler = { _ in outbox.post([["type": "host_exited"]]) }
         do { try p.run() } catch {
             NSLog("failed to start agentd: \(error)")
             return
@@ -52,13 +55,57 @@ final class AgentHost {
         stdin = inPipe.fileHandleForWriting
     }
 
-    private func consume(_ chunk: Data) {
-        buffer.append(chunk)
-        while let nl = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[buffer.startIndex ..< nl]
-            buffer.removeSubrange(buffer.startIndex ... nl)
-            if line.isEmpty { continue }
-            if let msg = JSON.parse(Data(line)) { onMessage?(msg) }
+    /// Hands messages to main at most every 25ms: agentd writes a line per streamed
+    /// token, and each delivery re-renders the transcript.
+    private final class Outbox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var pending: [JSON] = []
+        private var scheduled = false
+        private let deliver: ([JSON]) -> Void
+        init(_ deliver: @escaping ([JSON]) -> Void) { self.deliver = deliver }
+
+        func post(_ messages: [JSON]) {
+            guard !messages.isEmpty else { return }
+            lock.lock()
+            pending += messages
+            let schedule = !scheduled
+            scheduled = true
+            lock.unlock()
+            guard schedule else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) {
+                self.lock.lock()
+                let batch = self.pending
+                self.pending = []
+                self.scheduled = false
+                self.lock.unlock()
+                self.deliver(batch)
+            }
+        }
+    }
+
+    /// Newline-delimited JSON from one agentd process. Only the new chunk is
+    /// scanned for newlines, so a multi-MB line (turn_done with images) arriving
+    /// in many chunks isn't rescanned from its start each time.
+    private final class LineReader {
+        private var buffer = Data()
+
+        func feed(_ chunk: Data) -> [JSON] {
+            let from = buffer.count
+            buffer.append(chunk)
+            var out: [JSON] = []
+            var lineStart = 0
+            buffer.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+                guard let base = raw.baseAddress else { return }
+                var i = from
+                while i < raw.count, let hit = memchr(base + i, 0x0A, raw.count - i) {
+                    let nl = base.distance(to: UnsafeRawPointer(hit))
+                    if nl > lineStart, let msg = JSON.parse(Data(bytes: base + lineStart, count: nl - lineStart)) { out.append(msg) }
+                    lineStart = nl + 1
+                    i = nl + 1
+                }
+            }
+            if lineStart > 0 { buffer = Data(buffer[(buffer.startIndex + lineStart)...]) }
+            return out
         }
     }
 

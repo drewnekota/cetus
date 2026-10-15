@@ -95,6 +95,8 @@ struct MarkdownView: View {
     var baseSize: CGFloat = 15
     /// Overrides the prose body color (muted narration rows).
     var bodyColor: Color? = nil
+    /// Text still streaming: render without filling the caches with every prefix.
+    var streaming = false
     @Environment(\.findHighlight) private var find
     @Environment(\.fontScale) private var scale
     @Environment(\.lineScale) private var lineScale
@@ -146,8 +148,8 @@ struct MarkdownView: View {
     /// chat (or re-rendering a row) reuses it. Find highlights are baked into the text,
     /// so a live query always rebuilds.
     private func renderedBlocks() -> [MDBox] {
-        let build = { blocks(MDParser.parse(text), counter: MDCounter()) }
-        guard (find?.query ?? "").isEmpty else { return build() }
+        let build = { blocks(MDParser.parse(text, cache: !streaming), counter: MDCounter()) }
+        guard (find?.query ?? "").isEmpty, !streaming else { return build() }
         let key = "\(unit)\u{1}\(baseSize)\u{1}\(scale)\u{1}\(lineScale)\u{1}\(bodyColor.map { "\($0)" } ?? "-")\u{1}\(text)" as NSString
         if let hit = MarkdownRenderCache.shared.object(forKey: key) { return hit.boxes }
         let boxes = build()
@@ -447,12 +449,61 @@ private struct MDTable: View {
         }
     }
 
-    private var cells: [[(NSAttributedString, Bool)]] {
+    /// Everything a layout needs, built once per table content: one layout pass
+    /// asks for the height several times and then lays out the content, and a
+    /// streaming answer re-renders finished tables on every delta.
+    final class Model {
+        let cells: [[(NSAttributedString, Bool)]]
+        /// Per column: CSS min-content / max-content widths, gutters included.
+        var minW: [CGFloat] = []
+        var maxW: [CGFloat] = []
+        var layouts: [CGFloat: (widths: [CGFloat], heights: [CGFloat])] = [:]
+        init(_ cells: [[(NSAttributedString, Bool)]]) { self.cells = cells }
+    }
+
+    private struct ModelKey: Hashable {
+        var head: [MDInline], rows: [[MDInline]], align: [MDAlign]
+        var size: CGFloat, lineScale: CGFloat, unitPrefix: String, firstUnit: Int
+        var colors: String, find: String
+    }
+    nonisolated(unsafe) private static var models: [ModelKey: Model] = [:]
+
+    private var model: Model {
+        let findKey = find.map { $0.query.isEmpty ? "" : "\($0.query)\u{1}\($0.active)\u{1}\($0.offsets["\(unitPrefix)\(firstUnit)"] ?? -1)" } ?? ""
+        let key = ModelKey(head: head, rows: rows, align: align, size: size, lineScale: lineScale, unitPrefix: unitPrefix, firstUnit: firstUnit,
+                           colors: "\(bodyColor.hash)\u{1}\(heading.hash)", find: findKey)
+        if let hit = Self.models[key] { return hit }
         var unit = firstUnit
-        var out: [[(NSAttributedString, Bool)]] = []
-        out.append(head.map { let a = attr($0, header: true, unit: unit); unit += 1; return a })
-        for r in rows { out.append(r.map { let a = attr($0, header: false, unit: unit); unit += 1; return a }) }
-        return out
+        var cells: [[(NSAttributedString, Bool)]] = []
+        cells.append(head.map { let a = attr($0, header: true, unit: unit); unit += 1; return a })
+        for r in rows { cells.append(r.map { let a = attr($0, header: false, unit: unit); unit += 1; return a }) }
+        let m = Model(cells)
+        let cols = align.count
+        m.minW = Array(repeating: 0, count: cols)
+        m.maxW = Array(repeating: 0, count: cols)
+        for (r, row) in cells.enumerated() {
+            for (c, cell) in row.enumerated() where c < cols {
+                let (l, t) = pad(c, cols)
+                let indent: CGFloat = cell.1 ? 4 : 0
+                let mx = ProseText.width(cell.0, metrics: metrics(header: r == 0), firstLineIndent: indent)
+                let mn = MDTable.minContent(cell.0) + indent
+                m.maxW[c] = max(m.maxW[c], ceil(mx * 64) / 64 + l + t)
+                m.minW[c] = max(m.minW[c], ceil(mn * 64) / 64 + l + t)
+            }
+        }
+        // Bounded: streaming tables leave a trail of partial versions behind.
+        if Self.models.count >= 64 { Self.models.removeAll(keepingCapacity: true) }
+        Self.models[key] = m
+        return m
+    }
+
+    /// Column widths and row heights for a width, memoized on the model.
+    private func layout(_ m: Model, width: CGFloat) -> (widths: [CGFloat], heights: [CGFloat]) {
+        if let hit = m.layouts[width] { return hit }
+        let w = columnWidths(width, m)
+        let l = (w, rowHeights(w, m.cells))
+        m.layouts[width] = l
+        return l
     }
 
     private func metrics(header: Bool) -> ProseMetrics {
@@ -460,21 +511,9 @@ private struct MDTable: View {
     }
 
     /// CSS auto table layout with `width: 100%`.
-    private func columnWidths(_ width: CGFloat, _ cells: [[(NSAttributedString, Bool)]]) -> [CGFloat] {
+    private func columnWidths(_ width: CGFloat, _ m: Model) -> [CGFloat] {
         let cols = align.count
-        var minW = Array(repeating: CGFloat(0), count: cols)
-        var maxW = Array(repeating: CGFloat(0), count: cols)
-        for (r, row) in cells.enumerated() {
-            for (c, cell) in row.enumerated() where c < cols {
-                let (l, t) = pad(c, cols)
-                let m = metrics(header: r == 0)
-                let indent: CGFloat = cell.1 ? 4 : 0
-                let mx = ProseText.width(cell.0, metrics: m, firstLineIndent: indent)
-                let mn = MDTable.minContent(cell.0) + indent
-                maxW[c] = max(maxW[c], ceil(mx * 64) / 64 + l + t)
-                minW[c] = max(minW[c], ceil(mn * 64) / 64 + l + t)
-            }
-        }
+        let minW = m.minW, maxW = m.maxW
         let sumMax = maxW.reduce(0, +), sumMin = minW.reduce(0, +)
         if sumMax <= width {
             guard sumMax > 0 else { return Array(repeating: width / CGFloat(max(cols, 1)), count: cols) }
@@ -523,16 +562,15 @@ private struct MDTable: View {
     }
 
     private func tableHeight(width: CGFloat) -> CGFloat {
-        let cs = cells
-        let w = columnWidths(width, cs)
-        let h = rowHeights(w, cs)
-        return h.reduce(0) { $0 + $1 + 16 } + CGFloat(max(0, cs.count - 1))
+        let m = model
+        let h = layout(m, width: width).heights
+        return h.reduce(0) { $0 + $1 + 16 } + CGFloat(max(0, m.cells.count - 1))
     }
 
     private func content(width: CGFloat) -> some View {
-        let cs = cells
-        let widths = columnWidths(width, cs)
-        let heights = rowHeights(widths, cs)
+        let m = model
+        let cs = m.cells
+        let (widths, heights) = layout(m, width: width)
         return ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(cs.enumerated()), id: \.offset) { r, row in
@@ -592,7 +630,19 @@ struct CodeBlockView: View {
     @Environment(\.lineScale) private var lineScale
     private var lineHeight: CGFloat { preSize * 1.6666667 * lineScale }
 
-    var body: some View {
+    /// Built text by size and code (no find highlights): bodies re-run on every
+    /// streamed delta of the message around them, and per-character font fallback isn't free.
+    private final class Built { let text: NSAttributedString; init(_ t: NSAttributedString) { text = t } }
+    nonisolated(unsafe) private static let built: NSCache<NSString, Built> = {
+        let c = NSCache<NSString, Built>()
+        c.countLimit = 200
+        return c
+    }()
+
+    private var attributed: NSAttributedString {
+        let finding = find.map { !$0.query.isEmpty && $0.offsets[unit] != nil } ?? false
+        let key = "\(fs)\u{1}\(code)" as NSString
+        if !finding, let hit = Self.built.object(forKey: key) { return hit.text }
         // `pre code`: 0.85em of the pre (10.93px) regular mono, inline (px-1) on the pre's 1.667 strut.
         let attr = NSMutableAttributedString(string: code, attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: fs, weight: .regular),
@@ -606,6 +656,12 @@ struct CodeBlockView: View {
             }
         }
         ProseBuilder.fallback(attr)
+        if !finding { Self.built.setObject(Built(attr), forKey: key) }
+        return attr
+    }
+
+    var body: some View {
+        let attr = attributed
         let m = ProseMetrics(font: .monospacedSystemFont(ofSize: preSize, weight: .regular), lineHeight: lineHeight)
         return ScrollView(.horizontal, showsIndicators: false) {
             ProseText(text: attr, metrics: m, fit: true)
