@@ -143,7 +143,12 @@ enum TranscriptControl {
             }
             return out.joined(separator: " ")
         case "pos":
-            return String(format: "offset %.0f max %.0f bottom %.0f rows %@", s.offset, s.maxOffset, s.maxOffset - s.offset, TranscriptWindowProbe.describe)
+            let top = TranscriptWindowProbe.firstVisible()
+            return String(format: "offset %.0f max %.0f bottom %.0f rows %@ top %@@%.0f", s.offset, s.maxOffset, s.maxOffset - s.offset, TranscriptWindowProbe.describe,
+                          String(top?.id.prefix(8) ?? "-"), top?.y ?? 0)
+        case "turns":
+            let items = TranscriptLayout.items(app.controller.chat(app.active ?? "").state)
+            return items.enumerated().compactMap { i, it in if case .user = it { "\(i):\(it.id.prefix(8))" } else { nil } }.joined(separator: " ")
         case "scrollers":
             var out: [String] = []
             func walk(_ v: NSView, _ depth: Int) {

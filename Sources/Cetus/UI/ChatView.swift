@@ -291,6 +291,9 @@ struct ConversationView: View {
     @State private var lo: Int?
     @State private var hi: Int?
     @State private var windowCheck = false
+    /// The turn navigator's active tick away from the bottom: the last user turn at or
+    /// above the top of the viewport.
+    @State private var topTurn = 0
     private static let firstChunk = 3, chunk = 2
 
     final class ScrollMetrics {
@@ -388,6 +391,8 @@ struct ConversationView: View {
                     // Correct it in this layout pass so the first frame is already at the end.
                     if v.minY > 0.5, hi == nil, TranscriptScroller.shared.pinned { position.scrollTo(edge: .bottom) }
                     scheduleWindowCheck()
+                    updateTopTurn()
+                    TranscriptScroller.shared.reattach(fromBottom: v.minY)
                 }
                 .testID("transcript")
                 if find != nil {
@@ -400,6 +405,13 @@ struct ConversationView: View {
                 }
             }
             .overlay(alignment: .bottom) { jumpButton }
+            .overlay(alignment: .leading) {
+                let turns = items.compactMap { if case .user = $0 { $0.id } else { nil } }
+                TurnNavigator(turns: turns, active: nearBottom && hi == nil ? turns.count - 1 : topTurn,
+                              preview: { [chat] key in TranscriptLayout.turnPreview(chat.state.messages, key: key) },
+                              jump: jumpToTurn)
+                    .equatable()
+            }
         }
         .onChange(of: tailSignature(state)) { _, _ in
             // Already flush (within a point): TranscriptScroller follows growth in the layout
@@ -447,6 +459,53 @@ struct ConversationView: View {
             TranscriptScroller.shared.onFollow = { [position = $position] in position.wrappedValue.scrollTo(edge: .bottom) }
             TranscriptWindowProbe.frames = rowFrames
             scheduleWindowCheck()
+        }
+    }
+
+    // MARK: Turn navigator
+
+    /// Topmost visible row (rows above the mounted window are above the viewport),
+    /// then the last user turn at or before it.
+    private func updateTopTurn() {
+        let items = memo.items(chat)
+        let r = bounds(items.count)
+        guard !r.isEmpty else { return }
+        // A few points of slack: a row scrolled flush to the top leaves the one above
+        // ending a sub-point inside the viewport.
+        let top = r.first { (rowFrames.frames[items[$0].id]?.maxY ?? 5) > 4 } ?? r.upperBound - 1
+        var turn = 0, active = 0
+        for (i, item) in items.enumerated() {
+            guard case .user = item else { continue }
+            if i <= top { active = turn } else { break }
+            turn += 1
+        }
+        if topTurn != active { topTurn = active }
+    }
+
+    /// Scrolls a user turn to the top (`scrollToIndex(align: start)`), remounting the
+    /// row window around it when it was dropped.
+    private func jumpToTurn(_ id: String) {
+        let items = memo.items(chat)
+        guard let t = items.firstIndex(where: { $0.id == id }) else { return }
+        // Off the tail (Cetus onNavigate): stop following and drop the bottom anchor so
+        // neither pulls the jump back down.
+        TranscriptScroller.shared.detach()
+        metrics.fromBottom = .greatestFiniteMagnitude
+        updateScrollFlags()
+        if bounds(items.count).contains(t) {
+            position.scrollTo(id: id, anchor: .top)
+        } else {
+            lo = max(0, t - Self.chunk)
+            hi = t + Self.chunk + 1 >= items.count ? nil : t + Self.chunk + 1
+        }
+        // scrollTo(id:) is dropped while the row isn't mounted yet, and the row window
+        // mounting or dropping rows around the landing nudges it: aim again as that settles,
+        // unless the reader has started scrolling.
+        let gen = TranscriptScroller.shared.jumpGen
+        for delay in [0, 0.05, 0.15, 0.3] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                if TranscriptScroller.shared.jumpGen == gen { position.scrollTo(id: id, anchor: .top) }
+            }
         }
     }
 

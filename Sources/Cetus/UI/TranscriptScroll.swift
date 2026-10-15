@@ -30,6 +30,30 @@ final class TranscriptScroller {
     /// Set by the transcript: points its ScrollPosition at the bottom edge.
     var onFollow: (() -> Void)?
     private var followQueued = false
+    /// A jump (turn navigator) took the reader off the tail: no following until they're
+    /// back at the bottom. Queued ScrollPosition syncs from before the jump are dropped.
+    private var detached = false
+    private var detachedAt = Date.distantPast
+    private var followGen = 0
+
+    /// Bumped by each jump and by any live scroll, so a jump's follow-up re-aims stop
+    /// once something newer moves the transcript.
+    private(set) var jumpGen = 0
+
+    func detach() {
+        jumpGen += 1
+        detached = true
+        detachedAt = Date()
+        followGen += 1
+        pinUntil = .distantPast
+    }
+
+    /// Called with the distance from the bottom on every scroll change. Ignores the
+    /// first moments after a jump, while the target scroll is still landing.
+    func reattach(fromBottom: Double) {
+        guard detached, fromBottom < 1, Date().timeIntervalSince(detachedAt) > 0.5 else { return }
+        detached = false
+    }
     private var liveScrolling = false
     private var endObserver: NSObjectProtocol?
     private var docObserver: NSObjectProtocol?
@@ -44,6 +68,7 @@ final class TranscriptScroller {
             MainActor.assumeIsolated {
                 TranscriptScroller.shared.pinUntil = .distantPast
                 TranscriptScroller.shared.liveScrolling = true
+                TranscriptScroller.shared.jumpGen += 1
             }
         }
         endObserver = NotificationCenter.default.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: sv, queue: .main) { _ in
@@ -66,7 +91,7 @@ final class TranscriptScroller {
     /// lands in the same pass. SwiftUI's next layout sets its own (equal or sub-point
     /// different) height.
     func contentGrew(_ v: NSView, by dh: CGFloat) {
-        guard followTail, !liveScrolling, let sv = scrollView, let doc = sv.documentView,
+        guard followTail, !detached, !liveScrolling, let sv = scrollView, let doc = sv.documentView,
               offset >= maxOffset - 1, v.isDescendant(of: doc) else { return }
         doc.setFrameSize(NSSize(width: doc.frame.width, height: doc.frame.height + dh))
     }
@@ -75,7 +100,7 @@ final class TranscriptScroller {
         guard let sv = scrollView, let doc = sv.documentView else { return }
         let h = doc.frame.height, old = docHeight
         docHeight = h
-        guard h != old, followTail, !liveScrolling else { return }
+        guard h != old, followTail, !detached, !liveScrolling else { return }
         let wasFromBottom = max(0, old - sv.contentView.bounds.height) - offset
         guard wasFromBottom < 60 else { return }
         if offset < maxOffset - 0.5 { scroll(to: .greatestFiniteMagnitude) }
@@ -83,9 +108,11 @@ final class TranscriptScroller {
         // itself and restores it on a later layout change, yanking the transcript back up.
         if !followQueued {
             followQueued = true
+            let gen = followGen
             DispatchQueue.main.async {
-                TranscriptScroller.shared.followQueued = false
-                TranscriptScroller.shared.onFollow?()
+                let s = TranscriptScroller.shared
+                s.followQueued = false
+                if gen == s.followGen { s.onFollow?() }
             }
         }
     }
