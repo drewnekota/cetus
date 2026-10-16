@@ -8,7 +8,12 @@ import {
   type QueuedMessage,
 } from "@/components/chat/composer";
 import { groupByWorkspace } from "@/components/sidebar/app-sidebar";
-import type { SidebarView } from "@/components/sidebar/view-toggle";
+import { threadWorkspaceOrder } from "@/components/sidebar/workspace-grouping";
+import {
+  isConversationMode,
+  type ConversationMode,
+  type SidebarView,
+} from "@/components/sidebar/view-toggle";
 import { api, type Screenshot } from "@/lib/tauri";
 import {
   useChatStore,
@@ -216,10 +221,28 @@ export function useHomeState({
     if (typeof window === "undefined") return "chat";
     try {
       const v = localStorage.getItem("cetus:lastView");
-      if (v === "chat" || v === "board" || v === "automations") return v;
+      if (
+        v === "chat" ||
+        v === "threads" ||
+        v === "board" ||
+        v === "automations"
+      )
+        return v;
     } catch {}
     return "chat";
   });
+  // The conversation layout the sidebar follows. Tracks `view` except while
+  // Automations is showing, which leaves the mode (and the sidebar) as is.
+  const [mode, setMode] = useState<ConversationMode>(() =>
+    isConversationMode(view)
+      ? view
+      : isConversationMode(initialViewState.mode)
+        ? initialViewState.mode
+        : "chat",
+  );
+  useEffect(() => {
+    if (isConversationMode(view)) setMode(view);
+  }, [view]);
   // Collapsed sidebar = focus mode: only the conversation stays. Persisted
   // like the view so a reload keeps the layout you chose.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -444,6 +467,7 @@ export function useHomeState({
         APP_VIEW_STATE_KEY,
         JSON.stringify({
           view,
+          mode,
           settingsOpen,
           historyOpen,
           detailId,
@@ -451,7 +475,7 @@ export function useHomeState({
         } satisfies PersistedAppViewState),
       );
     } catch {}
-  }, [view, settingsOpen, historyOpen, detailId, boardWorkspaceFilter]);
+  }, [view, mode, settingsOpen, historyOpen, detailId, boardWorkspaceFilter]);
   const [detailModelChoice, setDetailModelChoice] =
     useState<ModelChoice>(DEFAULT_MODEL_CHOICE);
   const [detailWorkspaceDir, setDetailWorkspaceDir] = useState<string | null>(
@@ -508,31 +532,46 @@ export function useHomeState({
   // Visible chat ids in the sidebar's visual order (workspace groups flattened),
   // mirrored into a ref so archive fallback and the identity-stable switchChat
   // handler both skip rows hidden by a folded workspace.
-  const orderedChatIds = useMemo(() => {
-    const groups = groupByWorkspace(
+  const workspaceGroups = useMemo(
+    () =>
+      groupByWorkspace(
+        conversations,
+        [...recentWorkspaces, ...temporaryWorkspaces],
+        hiddenWorkspaces.filter((dir) => !temporaryWorkspaces.includes(dir)),
+        defaultWorkspace,
+        autoSortConversations,
+      ),
+    [
       conversations,
-      [...recentWorkspaces, ...temporaryWorkspaces],
-      hiddenWorkspaces.filter((dir) => !temporaryWorkspaces.includes(dir)),
+      recentWorkspaces,
+      hiddenWorkspaces,
+      temporaryWorkspaces,
       defaultWorkspace,
       autoSortConversations,
-    );
-    return visibleConversationIds(
-      groups,
-      collapsedWorkspaceDirs,
-      expandedWorkspaceDirs,
-    );
-  }, [
-    conversations,
-    recentWorkspaces,
-    hiddenWorkspaces,
-    temporaryWorkspaces,
-    defaultWorkspace,
-    autoSortConversations,
-    collapsedWorkspaceDirs,
-    expandedWorkspaceDirs,
-  ]);
+    ],
+  );
+  const orderedChatIds = useMemo(
+    () =>
+      visibleConversationIds(
+        workspaceGroups,
+        collapsedWorkspaceDirs,
+        expandedWorkspaceDirs,
+      ),
+    [workspaceGroups, collapsedWorkspaceDirs, expandedWorkspaceDirs],
+  );
   const orderedChatIdsRef = useRef<string[]>([]);
   orderedChatIdsRef.current = orderedChatIds;
+  // The Threads view's workspace list, top to bottom as the sidebar draws it:
+  // Chat first, then the folders. ⌘1…⌘9 and ⌥⌘↑/↓ walk it there.
+  const orderedWorkspaceDirsRef = useRef<string[]>([]);
+  orderedWorkspaceDirsRef.current = useMemo(
+    () =>
+      threadWorkspaceOrder(
+        workspaceGroups.map((g) => g.dir),
+        defaultWorkspace,
+      ),
+    [workspaceGroups, defaultWorkspace],
+  );
   const selectChatRef = useRef<(id: string) => void>(() => {});
 
   // Mirror the live queue + send fn so the flush effect (deps: streaming sig
@@ -615,9 +654,11 @@ export function useHomeState({
     setHistoryOpen,
     archivingIdsRef,
     orderedChatIdsRef,
+    orderedWorkspaceDirsRef,
     selectChatRef,
     pendingSelectRef,
     setView,
+    mode,
     setWorkspaceDir,
     setActiveId,
     setFocusToken,

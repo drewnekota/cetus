@@ -898,6 +898,10 @@ export interface ConvPreview {
   lastReply: string | null;
   artifactCount: number;
   review: ReviewRequestDetails | null;
+  /** Opening user prompt and reply count, for the Threads feed. Optional:
+   *  records written before the feed existed lack them. */
+  firstPrompt?: string | null;
+  replyCount?: number;
 }
 
 /** Most recent assistant text, whitespace-collapsed and capped for card use. */
@@ -915,6 +919,30 @@ export function computeLastReplyPreview(
     }
   }
   return null;
+}
+
+/** First user text, whitespace-collapsed and capped for the Threads feed. */
+export function computeFirstPromptPreview(
+  messages: RenderedMessage[],
+): string | null {
+  for (const m of messages) {
+    if (m.role !== "user") continue;
+    for (const b of m.blocks) {
+      if (b.kind === "text" && b.text.trim()) {
+        return b.text.replace(/\s+/g, " ").trim().slice(0, 600);
+      }
+    }
+  }
+  return null;
+}
+
+/** User + assistant messages after the opening prompt. */
+export function computeReplyCount(messages: RenderedMessage[]): number {
+  let n = 0;
+  for (const m of messages) {
+    if (m.role === "user" || m.role === "assistant") n++;
+  }
+  return Math.max(0, n - 1);
 }
 
 export function computeArtifactCount(messages: RenderedMessage[]): number {
@@ -954,6 +982,8 @@ function computePreview(messages: RenderedMessage[]): ConvPreview {
     lastReply: computeLastReplyPreview(messages),
     artifactCount: computeArtifactCount(messages),
     review: computeLatestReviewRequest(messages),
+    firstPrompt: computeFirstPromptPreview(messages),
+    replyCount: computeReplyCount(messages),
   };
 }
 

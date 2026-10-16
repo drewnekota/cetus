@@ -5,7 +5,10 @@ import type { Dispatch, SetStateAction, RefObject } from "react";
 import type { ShortcutMap } from "@/lib/keyboard-shortcuts";
 import { useEffect, useRef } from "react";
 import { FIND_IN_CHAT_EVENT } from "@/components/chat/find-highlight";
-import type { SidebarView } from "@/components/sidebar/view-toggle";
+import type {
+  ConversationMode,
+  SidebarView,
+} from "@/components/sidebar/view-toggle";
 import {
   type WorkspaceTabKind,
   type WorkspaceLayout,
@@ -33,6 +36,13 @@ export function useHomeKeyboardShortcuts({
   automationDialogOpen,
   newTaskOpen,
   detailId,
+  onNewThread,
+  openNewTask,
+  mode,
+  stepThread,
+  archiveThread,
+  stepWorkspace,
+  selectWorkspaceSlot,
   navigateBack,
   navigateForward,
   chatSwitcherOpen,
@@ -70,6 +80,16 @@ export function useHomeKeyboardShortcuts({
   automationDialogOpen: boolean;
   newTaskOpen: boolean;
   detailId: string | null;
+  onNewThread: () => void;
+  /** Kanban's create-task dialog, seeded with the board's folder. */
+  openNewTask: () => void;
+  mode: ConversationMode;
+  stepThread: (direction: 1 | -1) => void;
+  stepWorkspace: (direction: 1 | -1) => void;
+  /** Open the Nth workspace's feed; -1 = the last one. */
+  selectWorkspaceSlot: (index: number) => void;
+  /** Archive the Threads view's open thread; false when none is open. */
+  archiveThread: () => boolean;
   navigateBack: () => void;
   navigateForward: () => void;
   chatSwitcherOpen: boolean;
@@ -253,6 +273,43 @@ export function useHomeKeyboardShortcuts({
         switchWorkspaceTab("side", 1);
         return;
       }
+      // Threads view: the feed is one folder, so the chat-walking keys walk
+      // folders instead (⌘1…⌘9 by position, ⌥⌘↑/↓ step), and the threads
+      // inside it get their own pair — ⌃K/⌃J, or bare K/J outside a field.
+      if (view === "threads") {
+        if (shortcut("previousChat") || shortcut("previousChatAlternate")) {
+          e.preventDefault();
+          stepWorkspace(-1);
+          return;
+        }
+        if (shortcut("nextChat") || shortcut("nextChatAlternate")) {
+          e.preventDefault();
+          stepWorkspace(1);
+          return;
+        }
+        const slot = CHAT_SLOT_SHORTCUT_IDS.findIndex((id) => shortcut(id));
+        if (slot >= 0 || shortcut("lastChat")) {
+          e.preventDefault();
+          selectWorkspaceSlot(slot >= 0 ? slot : -1);
+          return;
+        }
+        const bare =
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey &&
+          !e.shiftKey &&
+          !isEditableTarget(e.target);
+        if (shortcut("previousThread") || (bare && e.key === "k")) {
+          e.preventDefault();
+          stepThread(-1);
+          return;
+        }
+        if (shortcut("nextThread") || (bare && e.key === "j")) {
+          e.preventDefault();
+          stepThread(1);
+          return;
+        }
+      }
       if (shortcut("previousChat") || shortcut("previousChatAlternate")) {
         e.preventDefault();
         switchChat(-1);
@@ -303,27 +360,23 @@ export function useHomeKeyboardShortcuts({
         );
       } else if (shortcut("newChat")) {
         e.preventDefault();
-        // Cmd+N is contextual on Kanban: a concrete folder creates a task in
-        // that workspace; "All workspaces", Chat, or no selection opens the
-        // repository-free new-chat page. Use the board filter, not workspaceDir
-        // (which may still point at a previously opened conversation).
-        const taskWorkspace =
-          view === "board" &&
-          boardWorkspaceFilter &&
-          boardWorkspaceFilter !== defaultWorkspace
-            ? boardWorkspaceFilter
-            : null;
-        if (taskWorkspace) {
-          setWorkspaceDir(taskWorkspace);
-          setNewTaskOpen(true);
+        // ⌘N follows the mode, even from the Automations page: a thread in
+        // Threads, a task card on Kanban, a chat otherwise.
+        if (mode === "threads") {
+          setView("threads");
+          onNewThread();
+        } else if (mode === "board") {
+          openNewTask();
         } else {
-          onNew(view === "board" ? defaultWorkspace || undefined : undefined);
+          onNew();
         }
       } else if (shortcut("newDefaultChat")) {
         e.preventDefault();
         // ⌥⌘N always lands a new chat in Chat (the default workspace), even
         // from the board or with another folder selected.
         onNew(defaultWorkspace || undefined);
+      } else if (shortcut("archiveChat") && view === "threads") {
+        if (archiveThread()) e.preventDefault();
       } else if (shortcut("archiveChat")) {
         const c = conversationsRef.current.find(
           (x) => x.id === activeIdRef.current,
@@ -339,7 +392,7 @@ export function useHomeKeyboardShortcuts({
         e.preventDefault();
         setSettingsOpen(true);
       } else if (
-        view === "chat" &&
+        (view === "chat" || view === "threads") &&
         runtimeForShortcut(e, keyboardShortcuts, runtimeSlotsRef.current) !==
           undefined
       ) {
@@ -362,6 +415,9 @@ export function useHomeKeyboardShortcuts({
       } else if (shortcut("switchAutomations")) {
         e.preventDefault();
         setView("automations");
+      } else if (shortcut("switchThreads")) {
+        e.preventDefault();
+        setView("threads");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -381,9 +437,20 @@ export function useHomeKeyboardShortcuts({
     keyboardShortcuts,
     defaultWorkspace,
     boardWorkspaceFilter,
+    mode,
     requestBackendSwitch,
     stepChatSwitcher,
     navigateBack,
     navigateForward,
   ]);
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT"
+  );
 }

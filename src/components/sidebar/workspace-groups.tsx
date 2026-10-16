@@ -400,9 +400,13 @@ export function WorkspaceFilterButton({
   onSelect,
   handleProps,
   icon,
+  hint,
 }: {
   label: string;
   count: number;
+  /** Shortcut that opens this row (⌘1…), shown in place of the count while
+   *  its modifier is held. */
+  hint?: string;
   active: boolean;
   onSelect: () => void;
   handleProps?: Record<string, unknown>;
@@ -415,6 +419,8 @@ export function WorkspaceFilterButton({
       onClick={onSelect}
       isActive={active}
       className={cn(
+        // Same 12px glyph as the folder headers in the Chats list.
+        "[&>svg]:!size-3",
         handleProps &&
           "cursor-grab touch-none select-none active:cursor-grabbing",
       )}
@@ -423,13 +429,13 @@ export function WorkspaceFilterButton({
       <span className="truncate">{label}</span>
       <span
         className={cn(
-          "ml-auto text-xs",
+          "ml-auto text-xs tabular-nums",
           active
             ? "text-sidebar-accent-foreground/80"
             : "text-muted-foreground",
         )}
       >
-        {count}
+        {hint ?? count}
       </span>
     </SidebarMenuButton>
   );
@@ -443,12 +449,14 @@ export function SortableWorkspaceFilterRow({
   count,
   active,
   onSelect,
+  hint,
 }: {
   dir: string;
   label: string;
   count: number;
   active: boolean;
   onSelect: () => void;
+  hint?: string;
 }) {
   const {
     attributes,
@@ -467,6 +475,7 @@ export function SortableWorkspaceFilterRow({
       <WorkspaceFilterButton
         label={label}
         count={count}
+        hint={hint}
         active={active}
         onSelect={onSelect}
         handleProps={{ ...attributes, ...listeners }}

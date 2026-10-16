@@ -349,7 +349,11 @@ export function Composer({
   // model picker) hide when a CLI backend serves this conversation — the CLIs
   // run their own default models, so the picker would be a no-op there.
   const [backend, setBackend] = useState<BackendId>("pi");
-  const { entries: runtimeEntries, enabledBackendIds } = useRuntimeCatalog();
+  const {
+    entries: runtimeEntries,
+    enabledBackendIds,
+    orderedBackends,
+  } = useRuntimeCatalog();
   // Existing-conversation runtime is loaded asynchronously. Until it arrives,
   // omit runtime intent from a very fast send so the persisted backend remains
   // authoritative instead of accidentally treating the initial `pi` state as
@@ -794,6 +798,23 @@ export function Composer({
     if (want("function")) {
       out.push(...FUNCTION_MENTIONS.filter((f) => hit(f.label, f.subtitle)));
     }
+    // `@codex` etc. — only where the parent can apply a runtime switch.
+    if (want("runtime") && onRequestBackendSwitch) {
+      const rows = orderedBackends
+        .filter((b) => enabledBackendIds.has(b.id))
+        .map<MentionItem>((b) => ({
+          kind: "runtime",
+          label: RUNTIME_MENTION_SLUGS[b.id] ?? b.id,
+          id: b.id,
+          title: b.label,
+          subtitle: t(
+            conversationId ? "mention.runtimeSwitch" : "mention.runtimeNew",
+            { runtime: b.label },
+          ),
+        }))
+        .filter((r) => hit(r.label, r.title, r.id));
+      out.push(...cap(rows, 3));
+    }
     if (want("automation")) {
       const rows = mentionAutomations
         .filter((a) => hit(a.name, a.prompt))
@@ -859,6 +880,10 @@ export function Composer({
     mentionFiles,
     mentionConversations,
     conversationId,
+    orderedBackends,
+    enabledBackendIds,
+    onRequestBackendSwitch,
+    t,
   ]);
 
   const mentionVisible = mentionOpen;
@@ -980,6 +1005,21 @@ export function Composer({
     if (!item) return;
     const el = taRef.current;
     const caret = el?.selectionStart ?? text.length;
+    if (item.kind === "runtime") {
+      // A runtime pick is a command, not a reference: drop the `@query`
+      // token and switch the picker, as ⌃1…⌃9 would.
+      const next = text.slice(0, mentionStart) + text.slice(caret);
+      updateText(next);
+      closeMention();
+      onRequestBackendSwitch?.({ backend: item.id as BackendId });
+      requestAnimationFrame(() => {
+        const node = taRef.current;
+        if (!node) return;
+        node.focus({ preventScroll: true });
+        node.setSelectionRange(mentionStart, mentionStart);
+      });
+      return;
+    }
     const {
       title: _title,
       subtitle: _subtitle,
@@ -1502,3 +1542,14 @@ export function Composer({
     onAbort,
   });
 }
+
+/** The `@` slug each runtime answers to in the mention menu. */
+const RUNTIME_MENTION_SLUGS: Partial<Record<BackendId, string>> = {
+  pi: "cetus",
+  "claude-code": "claude",
+  codex: "codex",
+  opencode: "opencode",
+  grok: "grok",
+  kimi: "kimi",
+  dsh: "deepseek",
+};

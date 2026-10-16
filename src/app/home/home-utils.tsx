@@ -6,7 +6,11 @@ import {
   type FileAttachment,
   type ImageAttachment,
 } from "@/components/chat/composer";
-import type { SidebarView } from "@/components/sidebar/view-toggle";
+import {
+  isConversationMode,
+  type ConversationMode,
+  type SidebarView,
+} from "@/components/sidebar/view-toggle";
 import {
   createTerminalViewState,
   type WorkspaceTab,
@@ -24,6 +28,8 @@ export const SIDEBAR_OPEN_KEY = "cetus:sidebarOpen";
 
 export interface PersistedAppViewState {
   view?: SidebarView;
+  /** Last conversation mode — survives a reload onto Automations. */
+  mode?: ConversationMode;
   settingsOpen?: boolean;
   historyOpen?: boolean;
   detailId?: string | null;
@@ -78,7 +84,12 @@ export function ChatLoadingPane({ opticalCenter }: { opticalCenter: boolean }) {
 }
 
 function isSidebarView(value: unknown): value is SidebarView {
-  return value === "chat" || value === "board" || value === "automations";
+  return (
+    value === "chat" ||
+    value === "threads" ||
+    value === "board" ||
+    value === "automations"
+  );
 }
 
 export function readAppViewState(): PersistedAppViewState {
@@ -97,6 +108,7 @@ export function readAppViewState(): PersistedAppViewState {
     const parsed = JSON.parse(raw) as PersistedAppViewState;
     return {
       view: isSidebarView(parsed.view) ? parsed.view : readLegacyView(),
+      mode: isConversationMode(parsed.mode) ? parsed.mode : undefined,
       settingsOpen:
         typeof parsed.settingsOpen === "boolean"
           ? parsed.settingsOpen

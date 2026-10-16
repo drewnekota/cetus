@@ -233,6 +233,75 @@ fn op_browser_visible_open(app: &AppHandle, url: String) -> Result<Value, String
     Ok(json!({}))
 }
 
+/// PNG of one webview's own render via `-[WKWebView takeSnapshotWithConfiguration:
+/// completionHandler:]`. Unlike `screenshot` this needs no Screen Recording
+/// grant and works while the window is covered — handy for UI review.
+#[cfg(target_os = "macos")]
+async fn op_webview_shot(app: &AppHandle, label: String, path: String) -> Result<Value, String> {
+    use block2::RcBlock;
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| format!("no webview labelled {label}"))?;
+    let (tx, rx) = oneshot::channel::<Result<(), String>>();
+    let tx = Arc::new(Mutex::new(Some(tx)));
+    let out = path.clone();
+    webview
+        .with_webview(move |pw| unsafe {
+            let wk = pw.inner() as *mut AnyObject;
+            let tx = tx.clone();
+            let out = out.clone();
+            let done = RcBlock::new(move |image: *mut AnyObject, _error: *mut AnyObject| {
+                let result = (|| -> Result<(), String> {
+                    if image.is_null() {
+                        return Err("snapshot failed".to_string());
+                    }
+                    let tiff: *mut AnyObject = msg_send![image, TIFFRepresentation];
+                    let rep_cls =
+                        AnyClass::get(c"NSBitmapImageRep").ok_or("no NSBitmapImageRep")?;
+                    let rep: *mut AnyObject = msg_send![rep_cls, imageRepWithData: tiff];
+                    if rep.is_null() {
+                        return Err("no bitmap rep".to_string());
+                    }
+                    let dict_cls = AnyClass::get(c"NSDictionary").ok_or("no NSDictionary")?;
+                    let props: *mut AnyObject = msg_send![dict_cls, dictionary];
+                    // NSBitmapImageFileTypePNG = 4
+                    let png: *mut AnyObject =
+                        msg_send![rep, representationUsingType: 4usize, properties: props];
+                    if png.is_null() {
+                        return Err("png encode failed".to_string());
+                    }
+                    let len: usize = msg_send![png, length];
+                    let bytes: *const u8 = msg_send![png, bytes];
+                    std::fs::write(&out, std::slice::from_raw_parts(bytes, len))
+                        .map_err(|e| e.to_string())
+                })();
+                if let Some(tx) = tx.lock().ok().and_then(|mut g| g.take()) {
+                    let _ = tx.send(result);
+                }
+            });
+            let _: () = msg_send![
+                wk,
+                takeSnapshotWithConfiguration: std::ptr::null_mut::<AnyObject>(),
+                completionHandler: &*done
+            ];
+        })
+        .map_err(|e| e.to_string())?;
+    match tokio::time::timeout(Duration::from_secs(10), rx).await {
+        Ok(Ok(Ok(()))) => Ok(json!({ "path": path })),
+        Ok(Ok(Err(e))) => Err(e),
+        Ok(Err(_)) => Err("snapshot channel closed".to_string()),
+        Err(_) => Err("snapshot timed out".to_string()),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn op_webview_shot(_app: &AppHandle, _label: String, _path: String) -> Result<Value, String> {
+    Err("webviewShot is macOS-only".to_string())
+}
+
 fn op_webviews(app: &AppHandle) -> Value {
     let webviews = app
         .webviews()
@@ -667,6 +736,15 @@ async fn dispatch(app: &AppHandle, req: &Value) -> Value {
         },
 
         "webviews" => Ok(op_webviews(app)),
+
+        "webviewShot" => {
+            op_webview_shot(
+                app,
+                s("label").unwrap_or_else(|| "main".to_string()),
+                s("path").unwrap_or_else(|| "/tmp/cetus-webview.png".to_string()),
+            )
+            .await
+        }
 
         "agentSettings" => {
             let state = app.state::<AppState>();

@@ -1,8 +1,9 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Folder, MessageSquare, X, Inbox, PanelBottom, PanelRight } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Folder, MessageSquare, X, Inbox, PanelBottom, PanelRight } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChatPane } from "@/components/chat/chat-pane";
 import {
@@ -33,11 +34,9 @@ import { workspaceName } from "@/lib/paths";
 import { useShallow } from "zustand/react/shallow";
 import type { BackendId, Conversation, ModelChoice } from "@/lib/types";
 
-interface Props {
+interface DetailProps {
   /** Conversation row used to seed the header (title / workspace / timestamps). */
   conversation: Conversation | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   /** Switch the main chat view to this conversation and close the dialog. */
   onOpenInChat: (id: string) => void;
   /** Whether the parent has finished its lazy history fetch. */
@@ -70,10 +69,47 @@ interface Props {
   onRemoveQueued?: (id: string) => void;
 }
 
-export function SessionDetailDialog({
+interface Props extends DetailProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function SessionDetailDialog({ open, onOpenChange, ...rest }: Props) {
+  const { t } = useTranslation("board");
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        aria-describedby={undefined}
+        // Stronger animation: a 92vw / 90vh dialog scaling from 95% looks
+        // basically static — slide-up from -8 and fade with a longer duration
+        // makes it read as a deliberate "card came up" gesture.
+        className="flex h-[calc(100svh-2rem)] w-[calc(100svw-2rem)] max-w-none flex-col gap-0 overflow-hidden bg-background p-0 duration-250 data-[state=open]:slide-in-from-bottom-8 data-[state=closed]:slide-out-to-bottom-8 sm:max-w-none"
+      >
+        <DialogTitle className="sr-only">
+          {rest.conversation?.title || t("session.untitledTask")}
+        </DialogTitle>
+        <SessionDetailPanel
+          {...rest}
+          active={open}
+          onClose={() => onOpenChange(false)}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The session surface itself — header, transcript + composer, workspace
+ *  panel — shared by the Kanban detail dialog and the Threads view's docked
+ *  side pane. `active` gates window-level key handlers and the artifacts
+ *  dialog; `runtimeShortcuts` is off where page.tsx's global ⌃1…⌃9 handler is
+ *  already live (the Threads view), so one keypress doesn't switch twice. */
+export function SessionDetailPanel({
   conversation,
-  open,
-  onOpenChange,
+  active,
+  onClose,
+  runtimeShortcuts = true,
+  docked = false,
   onOpenInChat,
   loading,
   modelChoice,
@@ -91,7 +127,14 @@ export function SessionDetailDialog({
   onQueue,
   onSteerQueued,
   onRemoveQueued,
-}: Props) {
+}: DetailProps & {
+  active: boolean;
+  onClose: () => void;
+  runtimeShortcuts?: boolean;
+  /** Sits beside the Threads feed rather than in a modal: quieter header
+   *  actions, and Esc (handled by the feed) closes it. */
+  docked?: boolean;
+}) {
   const { t } = useTranslation("board");
   const { t: tc } = useTranslation("chat");
   const convId = conversation?.id ?? null;
@@ -109,7 +152,7 @@ export function SessionDetailDialog({
     backendSwitchToken.current += 1;
     setBackendSwitch({ token: backendSwitchToken.current, ...target });
   }, []);
-  useRuntimeShortcuts(requestBackendSwitch, open);
+  useRuntimeShortcuts(requestBackendSwitch, active && runtimeShortcuts);
   const hasChatEntry = useChatStore((s) =>
     convId ? convId in s.chats : false,
   );
@@ -147,7 +190,7 @@ export function SessionDetailDialog({
   workspaceActiveIdRef.current = workspaceActiveId;
 
   useEffect(() => {
-    if (!open || !workspaceOpen) return;
+    if (!active || !workspaceOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (
         e.metaKey &&
@@ -162,7 +205,7 @@ export function SessionDetailDialog({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, workspaceOpen]);
+  }, [active, workspaceOpen]);
 
   function workspaceTitle(kind: WorkspaceTabKind, index: number): string {
     if (kind === "files") {
@@ -287,188 +330,187 @@ export function SessionDetailDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        aria-describedby={undefined}
-        // Stronger animation: a 92vw / 90vh dialog scaling from 95% looks
-        // basically static — slide-up from -8 and fade with a longer duration
-        // makes it read as a deliberate "card came up" gesture.
-        className="flex h-[calc(100svh-2rem)] w-[calc(100svw-2rem)] max-w-none flex-col gap-0 overflow-hidden bg-background p-0 duration-250 data-[state=open]:slide-in-from-bottom-8 data-[state=closed]:slide-out-to-bottom-8 sm:max-w-none"
+    <>
+      <header
+        className={cn(
+          "flex items-center justify-between gap-4 border-b px-5 py-3",
+          docked ? "border-border/70" : "border-border",
+        )}
       >
-        <DialogTitle className="sr-only">
-          {conversation?.title || t("session.untitledTask")}
-        </DialogTitle>
-        <header className="flex items-center justify-between gap-4 border-b border-border px-5 py-3">
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">
-              {conversation?.title || t("session.untitled")}
-            </div>
-            <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-              {conversation && (
-                <>
-                  {conversation.workspaceDir === defaultWorkspace ? (
-                    <MessageSquare className="size-3" />
-                  ) : (
-                    <Folder className="size-3" />
-                  )}
-                  <span
-                    className="truncate"
-                    title={
-                      conversation.workspaceDir === defaultWorkspace
-                        ? undefined
-                        : conversation.workspaceDir
-                    }
-                  >
-                    {conversation.workspaceDir === defaultWorkspace
-                      ? t("card.defaultWorkspace")
-                      : workspaceName(conversation.workspaceDir)}
-                  </span>
-                  <span>·</span>
-                  <span>{t("session.updated", { time: formatTimestamp(conversation.updatedAt) })}</span>
-                </>
-              )}
-              {isStreaming && (
-                <>
-                  <span>·</span>
-                  <span className="inline-flex items-center gap-1.5 text-warning">
-                    <span className="size-1.5 animate-pulse rounded-full bg-warning" />
-                    {t("session.streaming")}
-                  </span>
-                </>
-              )}
-            </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">
+            {conversation?.title || t("session.untitled")}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {artifactCount > 0 && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => setArtifactsOpen((v) => !v)}
-                title={t("session.toggleArtifacts")}
-              >
-                <Inbox className="mr-1 size-3.5" />
-                {t("session.artifacts")}
-                <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-2xs tabular-nums">
-                  {artifactCount}
+          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+            {conversation && (
+              <>
+                {conversation.workspaceDir === defaultWorkspace ? (
+                  <MessageSquare className="size-3" />
+                ) : (
+                  <Folder className="size-3" />
+                )}
+                <span
+                  className="truncate"
+                  title={
+                    conversation.workspaceDir === defaultWorkspace
+                      ? undefined
+                      : conversation.workspaceDir
+                  }
+                >
+                  {conversation.workspaceDir === defaultWorkspace
+                    ? t("card.defaultWorkspace")
+                    : workspaceName(conversation.workspaceDir)}
                 </span>
-              </Button>
+                <span>·</span>
+                <span>{t("session.updated", { time: formatTimestamp(conversation.updatedAt) })}</span>
+              </>
             )}
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              onClick={() => openWorkspacePanel("side")}
-              title={tc("workspacePanel.openSide")}
-              aria-label={tc("workspacePanel.openSide")}
-            >
-              <PanelRight className="size-4" />
-            </Button>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              onClick={() => openWorkspacePanel("bottom")}
-              title={tc("workspacePanel.openBottom")}
-              aria-label={tc("workspacePanel.openBottom")}
-            >
-              <PanelBottom className="size-4" />
-            </Button>
+            {isStreaming && (
+              <>
+                <span>·</span>
+                <span className="inline-flex items-center gap-1.5 text-warning">
+                  <span className="size-1.5 animate-pulse rounded-full bg-warning" />
+                  {t("session.streaming")}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {artifactCount > 0 && (
             <Button
               type="button"
               size="sm"
-              onClick={() => conversation && onOpenInChat(conversation.id)}
-              disabled={!conversation}
-            >
-              {t("session.openInChat")}
-              <ArrowRight className="ml-1 size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              size="icon-sm"
               variant="ghost"
-              onClick={() => onOpenChange(false)}
-              title={t("session.close")}
+              onClick={() => setArtifactsOpen((v) => !v)}
+              title={t("session.toggleArtifacts")}
             >
-              <X className="size-4" />
+              <Inbox className="mr-1 size-3.5" />
+              {t("session.artifacts")}
+              <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-2xs tabular-nums">
+                {artifactCount}
+              </span>
             </Button>
-          </div>
-        </header>
-
-        {/* Show a skeleton transcript only while we have no chat entry yet AND
-            the parent says it's loading — once the entry exists, ChatPane's own
-            empty/hero state takes over and avoids a flash. A shaped skeleton
-            (vs a lone spinner) reads as "content is coming" and matches the
-            chat layout the dialog is about to show. */}
-        {loading && !hasChatEntry ? (
-          <ChatSkeleton />
-        ) : (
-          <div
-            className={
-              workspaceOpen && workspaceLayout === "bottom"
-                ? "flex min-h-0 flex-1 flex-col"
-                : "flex min-h-0 flex-1 flex-row"
-            }
+          )}
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => openWorkspacePanel("side")}
+            title={tc("workspacePanel.openSide")}
+            aria-label={tc("workspacePanel.openSide")}
           >
-            <div className="flex min-w-0 flex-1 flex-col">
-              <ChatPane
-                convId={convId}
-                backend={(conversation?.backend as BackendId | undefined) ?? "pi"}
-                modelChoice={modelChoice}
-                onModelChange={onModelChange}
-                workspaceDir={workspaceDir}
-                defaultWorkspace={defaultWorkspace}
-                onWorkspaceChange={onWorkspaceChange}
-                onSend={onSend}
-                onBash={openTerminalWithCommand}
-                onAbort={onAbort}
-                onRetry={onRetry}
-                retrying={retrying}
-                onForkMessage={onForkMessage}
-                queued={queued}
-                onQueue={onQueue}
-                onSteerQueued={onSteerQueued}
-                onRemoveQueued={onRemoveQueued}
-                backendSwitch={backendSwitch}
-                onRequestBackendSwitch={requestBackendSwitch}
-                focusToken={focusToken}
-                disabled={!conversation}
-              />
-            </div>
-            {workspaceOpen && (
-              <WorkspacePanel
-                tabs={workspaceTabs}
-                activeId={workspaceActiveId}
-                workspaceDir={workspaceDir}
-                defaultWorkspace={defaultWorkspace}
-                onSelect={(id) => {
-                  setWorkspaceActiveId(id);
-                  setWorkspaceOpen(true);
-                }}
-                onClose={closeWorkspaceTab}
-                onClosePanel={() => setWorkspaceOpen(false)}
-                onNewTab={(kind) => openWorkspaceTab(kind, true)}
-                layout={workspaceLayout}
-                onUpdateTerminalTab={updateTerminalWorkspaceTab}
-                onUpdateBrowserTab={updateBrowserWorkspaceTab}
-                onAnnotate={async (message) => {
-                  await onSend(message, []);
-                }}
-              />
+            <PanelRight className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => openWorkspacePanel("bottom")}
+            title={tc("workspacePanel.openBottom")}
+            aria-label={tc("workspacePanel.openBottom")}
+          >
+            <PanelBottom className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={docked ? "ghost" : "default"}
+            className={docked ? "text-muted-foreground" : undefined}
+            onClick={() => conversation && onOpenInChat(conversation.id)}
+            disabled={!conversation}
+          >
+            {t("session.openInChat")}
+            {docked ? (
+              <ArrowUpRight className="ml-0.5 size-3.5" />
+            ) : (
+              <ArrowRight className="ml-1 size-3.5" />
             )}
+          </Button>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            onClick={onClose}
+            title={t("session.close")}
+          >
+            <X className="size-4" />
+          </Button>
+        </div>
+      </header>
+
+      {/* Show a skeleton transcript only while we have no chat entry yet AND
+          the parent says it's loading — once the entry exists, ChatPane's own
+          empty/hero state takes over and avoids a flash. A shaped skeleton
+          (vs a lone spinner) reads as "content is coming" and matches the
+          chat layout the dialog is about to show. */}
+      {loading && !hasChatEntry ? (
+        <ChatSkeleton />
+      ) : (
+        <div
+          className={
+            workspaceOpen && workspaceLayout === "bottom"
+              ? "flex min-h-0 flex-1 flex-col"
+              : "flex min-h-0 flex-1 flex-row"
+          }
+        >
+          <div className="flex min-w-0 flex-1 flex-col">
+            <ChatPane
+              convId={convId}
+              backend={(conversation?.backend as BackendId | undefined) ?? "pi"}
+              modelChoice={modelChoice}
+              onModelChange={onModelChange}
+              workspaceDir={workspaceDir}
+              defaultWorkspace={defaultWorkspace}
+              onWorkspaceChange={onWorkspaceChange}
+              onSend={onSend}
+              onBash={openTerminalWithCommand}
+              onAbort={onAbort}
+              onRetry={onRetry}
+              retrying={retrying}
+              onForkMessage={onForkMessage}
+              queued={queued}
+              onQueue={onQueue}
+              onSteerQueued={onSteerQueued}
+              onRemoveQueued={onRemoveQueued}
+              backendSwitch={backendSwitch}
+              onRequestBackendSwitch={requestBackendSwitch}
+              focusToken={focusToken}
+              disabled={!conversation}
+            />
           </div>
-        )}
-        <ArtifactsDialog
-          convId={convId}
-          title={conversation?.title}
-          // Gate on the parent `open` too so closing the detail dialog can't
-          // leave a stale artifacts dialog queued for the next conversation.
-          open={open && artifactsOpen && artifactCount > 0}
-          onOpenChange={setArtifactsOpen}
-        />
-      </DialogContent>
-    </Dialog>
+          {workspaceOpen && (
+            <WorkspacePanel
+              tabs={workspaceTabs}
+              activeId={workspaceActiveId}
+              workspaceDir={workspaceDir}
+              defaultWorkspace={defaultWorkspace}
+              onSelect={(id) => {
+                setWorkspaceActiveId(id);
+                setWorkspaceOpen(true);
+              }}
+              onClose={closeWorkspaceTab}
+              onClosePanel={() => setWorkspaceOpen(false)}
+              onNewTab={(kind) => openWorkspaceTab(kind, true)}
+              layout={workspaceLayout}
+              onUpdateTerminalTab={updateTerminalWorkspaceTab}
+              onUpdateBrowserTab={updateBrowserWorkspaceTab}
+              onAnnotate={async (message) => {
+                await onSend(message, []);
+              }}
+            />
+          )}
+        </div>
+      )}
+      <ArtifactsDialog
+        convId={convId}
+        title={conversation?.title}
+        // Gate on `active` too so closing the detail surface can't leave a
+        // stale artifacts dialog queued for the next conversation.
+        open={active && artifactsOpen && artifactCount > 0}
+        onOpenChange={setArtifactsOpen}
+      />
+    </>
   );
 }
 

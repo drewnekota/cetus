@@ -10,11 +10,20 @@
 // reducer strips the block back off the displayed bubble (see
 // stripMentionRefs) and keeps the labels so the bubble can draw the pills.
 
-export type MentionKind = "function" | "automation" | "artifact" | "file" | "conversation";
+export type MentionKind =
+  | "function"
+  | "runtime"
+  | "automation"
+  | "artifact"
+  | "file"
+  | "conversation";
 
-/** Tab order in the menu — functions first, then the context kinds. */
+/** Tab order in the menu — functions first, then runtimes, then the context
+ *  kinds. A runtime row never becomes a ref: picking it switches the
+ *  composer's runtime and drops the `@` token (see the Composer). */
 export const MENTION_KINDS: MentionKind[] = [
   "function",
+  "runtime",
   "automation",
   "artifact",
   "file",
@@ -86,6 +95,8 @@ export function describeMention(ref: MentionRef, resolution?: MentionResolution)
   switch (ref.kind) {
     case "function":
       return ref.id === "goal" ? GOAL_DIRECTIVE : `Function "${ref.id}".`;
+    case "runtime":
+      return `Runtime "${ref.label}".`;
     case "automation":
       return (
         `Cetus scheduled automation "${ref.label}" (id ${ref.id}` +

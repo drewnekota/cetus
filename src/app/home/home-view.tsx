@@ -1,6 +1,12 @@
 "use client";
 
-import type { Dispatch, SetStateAction, RefObject, JSX } from "react";
+import type {
+  ComponentProps,
+  Dispatch,
+  SetStateAction,
+  RefObject,
+  JSX,
+} from "react";
 import type { ShortcutMap } from "@/lib/keyboard-shortcuts";
 import dynamic from "next/dynamic";
 import { Inbox, PanelBottom, PanelLeft, PanelRight } from "lucide-react";
@@ -15,13 +21,20 @@ import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
 import { CommandPalette } from "@/components/command-palette";
 import { ChatSwitcher } from "@/components/chat-switcher";
 import { AppSidebar } from "@/components/sidebar/app-sidebar";
-import type { SidebarView } from "@/components/sidebar/view-toggle";
+import type {
+  ConversationMode,
+  SidebarView,
+} from "@/components/sidebar/view-toggle";
 import { BoardView } from "@/components/board/board-view";
 import { CreateTaskDialog } from "@/components/board/create-task-dialog";
 import { AutomationsView } from "@/components/automation/automations-view";
 import { AutomationDialog } from "@/components/automation/automation-dialog";
 import { type WorkspaceLayout } from "@/components/workspace/workspace-panel";
-import { SessionDetailDialog } from "@/components/board/session-detail-dialog";
+import {
+  SessionDetailDialog,
+  SessionDetailPanel,
+} from "@/components/board/session-detail-dialog";
+import { ThreadsView } from "@/components/threads/threads-view";
 import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
 import { DialogHost } from "@/components/extension-ui/dialog-host";
 import { ZoomHud } from "@/components/zoom-hud";
@@ -115,6 +128,8 @@ export function renderHome({
   steerQueuedDetail,
   removeQueued,
   view,
+  mode,
+  onSidebarWorkspaceFilter,
   chatArtifactsOpen,
   activeHasArtifacts,
   setChatArtifactsOpen,
@@ -152,6 +167,9 @@ export function renderHome({
   onSelectChat,
   onNew,
   onNewSidebar,
+  onNewThread,
+  openNewTask,
+  onThreadsWorkspaceChange,
   onRevealWorkspace,
   onArchiveWorkspaceChats,
   onRemoveWorkspace,
@@ -251,6 +269,9 @@ export function renderHome({
   steerQueuedDetail: (id: string) => void;
   removeQueued: (convId: string, id: string) => void;
   view: SidebarView;
+  mode: ConversationMode;
+  /** Sidebar folder pick — leaves Automations for the mode's page. */
+  onSidebarWorkspaceFilter: (dir: string | null) => void;
   chatArtifactsOpen: boolean;
   activeHasArtifacts: boolean;
   setChatArtifactsOpen: Dispatch<SetStateAction<boolean>>;
@@ -265,7 +286,8 @@ export function renderHome({
   onCreateTask: (
     text: string,
     attachments: ComposerAttachment[],
-  ) => Promise<void>;
+    dir?: string,
+  ) => Promise<string>;
   automationDialogOpen: boolean;
   setAutomationDialogOpen: Dispatch<SetStateAction<boolean>>;
   editingAutomation: Automation | null;
@@ -294,6 +316,10 @@ export function renderHome({
   onSelectChat: (id: string) => void;
   onNew: (nextWorkspaceDir?: string) => void;
   onNewSidebar: (nextWorkspaceDir?: string) => void;
+  onNewThread: () => void;
+  openNewTask: () => void;
+  /** Switch the Threads feed's folder (closes a thread docked from another). */
+  onThreadsWorkspaceChange: (dir: string | null) => void;
   onRevealWorkspace: (dir: string) => Promise<void>;
   onArchiveWorkspaceChats: (dir: string) => Promise<void>;
   onRemoveWorkspace: (dir: string) => void;
@@ -344,6 +370,48 @@ export function renderHome({
   isStreaming: boolean;
   renderWorkspaceDock: (layout: WorkspaceLayout) => JSX.Element | null;
 }) {
+  // One session surface, two hosts: the Kanban detail dialog and the Threads
+  // view's side pane. Both drive the same detailId state.
+  const detailProps: Omit<
+    ComponentProps<typeof SessionDetailDialog>,
+    "open" | "onOpenChange"
+  > = {
+    conversation: conversations.find((c) => c.id === detailId) ?? null,
+    onOpenInChat: (id) => {
+      setDetailId(null);
+      setView("chat");
+      onSelect(id);
+    },
+    loading: detailLoading,
+    modelChoice: detailModelChoice,
+    onModelChange: onDetailModelChange,
+    workspaceDir: detailWorkspaceDir,
+    defaultWorkspace,
+    onWorkspaceChange: onDetailWorkspaceChange,
+    onSend: onDetailSend,
+    onAbort: onDetailAbort,
+    onForkMessage: (messageKey, messageIndex) => {
+      const c = conversationsRef.current.find((x) => x.id === detailId);
+      if (c) onFork(c, messageKey, messageIndex);
+    },
+    focusToken: detailFocusToken,
+    onRetry: onDetailRetry,
+    retrying,
+    queued: detailId ? queued[detailId] : undefined,
+    onQueue: (text, atts, runtime, beforeIds) => {
+      if (detailId) enqueueMessage(detailId, text, atts, runtime, beforeIds);
+    },
+    onSteerQueued:
+      detailConvBackend && !backendSupportsSteer(detailConvBackend)
+        ? undefined
+        : (id) => steerQueuedDetail(id),
+    onRemoveQueued: (id) => {
+      if (detailId) removeQueued(detailId, id);
+    },
+  };
+  // New sessions from the Threads feed land in the folder it shows.
+  const threadsWorkspace =
+    boardWorkspaceFilter ?? workspaceDir ?? defaultWorkspace;
   return (
     <SidebarProvider
       // Pin the shell to the window with `fixed inset-0` rather than a
@@ -436,43 +504,11 @@ export function renderHome({
         />
       )}
       <SessionDetailDialog
-        conversation={conversations.find((c) => c.id === detailId) ?? null}
-        open={detailId !== null}
+        {...detailProps}
+        // The Threads view docks the same session beside its feed instead.
+        open={detailId !== null && view !== "threads"}
         onOpenChange={(o) => {
           if (!o) setDetailId(null);
-        }}
-        onOpenInChat={(id) => {
-          setDetailId(null);
-          setView("chat");
-          onSelect(id);
-        }}
-        loading={detailLoading}
-        modelChoice={detailModelChoice}
-        onModelChange={onDetailModelChange}
-        workspaceDir={detailWorkspaceDir}
-        defaultWorkspace={defaultWorkspace}
-        onWorkspaceChange={onDetailWorkspaceChange}
-        onSend={onDetailSend}
-        onAbort={onDetailAbort}
-        onForkMessage={(messageKey, messageIndex) => {
-          const c = conversationsRef.current.find((x) => x.id === detailId);
-          if (c) onFork(c, messageKey, messageIndex);
-        }}
-        focusToken={detailFocusToken}
-        onRetry={onDetailRetry}
-        retrying={retrying}
-        queued={detailId ? queued[detailId] : undefined}
-        onQueue={(text, atts, runtime, beforeIds) => {
-          if (detailId)
-            enqueueMessage(detailId, text, atts, runtime, beforeIds);
-        }}
-        onSteerQueued={
-          detailConvBackend && !backendSupportsSteer(detailConvBackend)
-            ? undefined
-            : (id) => steerQueuedDetail(id)
-        }
-        onRemoveQueued={(id) => {
-          if (detailId) removeQueued(detailId, id);
         }}
       />
       <ArtifactsDialog
@@ -496,7 +532,9 @@ export function renderHome({
         pendingCliModel={pendingCliModel}
         pendingCliEffort={pendingCliEffort}
         onPendingTuningChange={onPendingTuningChange}
-        onSubmit={onCreateTask}
+        onSubmit={(text, attachments) => {
+          void onCreateTask(text, attachments);
+        }}
       />
       <AutomationDialog
         open={automationDialogOpen}
@@ -524,7 +562,8 @@ export function renderHome({
       />
       <AppSidebar
         conversations={conversations}
-        activeId={activeId}
+        // Under Automations no chat is the page being shown.
+        activeId={view === "automations" ? null : activeId}
         streamingIds={activityIds}
         unreadCompletedIds={unreadCompletedIds}
         workspaceDirs={[...recentWorkspaces, ...temporaryWorkspaces]}
@@ -535,16 +574,16 @@ export function renderHome({
         expandedWorkspaceDirs={expandedWorkspaceDirs}
         defaultWorkspace={defaultWorkspace}
         view={view}
+        mode={mode}
         onViewChange={setView}
         workspaceFilter={boardWorkspaceFilter}
-        onWorkspaceFilterChange={setBoardWorkspaceFilter}
+        onWorkspaceFilterChange={onSidebarWorkspaceFilter}
         onSelect={onSelectChat}
         onNewTask={() => {
-          if (view === "chat") {
-            onNew();
-          } else {
-            setNewTaskOpen(true);
-          }
+          // By mode, not page: from Automations it starts what the sidebar
+          // shows. (Threads has no New task row.)
+          if (mode === "board") openNewTask();
+          else onNew();
         }}
         onNew={onNewSidebar}
         onRevealWorkspace={onRevealWorkspace}
@@ -624,44 +663,50 @@ export function renderHome({
                   <Inbox className="size-3.5" />
                 </Button>
               )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={t("workspacePanel.openSide")}
-                    data-testid="workspace-open-side"
-                    onClick={() => openWorkspacePanelLayout("side")}
-                  >
-                    <PanelRight className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <span>{t("workspacePanel.openSide")}</span>
-                  <Kbd>
-                    {shortcutDisplay(keyboardShortcuts.toggleWorkspace)}
-                  </Kbd>
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={t("workspacePanel.openBottom")}
-                    data-testid="workspace-open-bottom"
-                    onClick={() => openWorkspacePanelLayout("bottom")}
-                  >
-                    <PanelBottom className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <span>{t("workspacePanel.openBottom")}</span>
-                  <Kbd>{shortcutDisplay(keyboardShortcuts.toggleTerminal)}</Kbd>
-                </TooltipContent>
-              </Tooltip>
+              {/* The Threads view's docked session has its own panel
+                  buttons; these drive the main chat's dock. */}
+              {view !== "threads" && (
+                <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label={t("workspacePanel.openSide")}
+                        data-testid="workspace-open-side"
+                        onClick={() => openWorkspacePanelLayout("side")}
+                      >
+                        <PanelRight className="size-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <span>{t("workspacePanel.openSide")}</span>
+                      <Kbd>
+                        {shortcutDisplay(keyboardShortcuts.toggleWorkspace)}
+                      </Kbd>
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label={t("workspacePanel.openBottom")}
+                        data-testid="workspace-open-bottom"
+                        onClick={() => openWorkspacePanelLayout("bottom")}
+                      >
+                        <PanelBottom className="size-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <span>{t("workspacePanel.openBottom")}</span>
+                      <Kbd>{shortcutDisplay(keyboardShortcuts.toggleTerminal)}</Kbd>
+                    </TooltipContent>
+                  </Tooltip>
+                </>
+              )}
             </header>
             {view === "automations" ? (
               <AutomationsView
@@ -676,6 +721,39 @@ export function renderHome({
                   setView("chat");
                   onSelect(id);
                 }}
+              />
+            ) : view === "threads" ? (
+              <ThreadsView
+                conversations={conversations}
+                workspaceFilter={boardWorkspaceFilter}
+                defaultWorkspace={defaultWorkspace}
+                streamingIds={activityIds}
+                unreadCompletedIds={unreadCompletedIds}
+                selectedId={detailId}
+                onSelect={setDetailId}
+                onCreate={onCreateTask}
+                workspaceDir={threadsWorkspace}
+                onWorkspaceChange={onThreadsWorkspaceChange}
+                modelChoice={modelChoice}
+                onModelChange={onModelChange}
+                pendingBackend={pendingBackend}
+                onPendingBackendChange={setPendingBackend}
+                pendingCliModel={pendingCliModel}
+                pendingCliEffort={pendingCliEffort}
+                onPendingTuningChange={onPendingTuningChange}
+                backendSwitch={backendSwitch}
+                onRequestBackendSwitch={requestBackendSwitch}
+                focusToken={focusToken}
+                disabled={!piReady}
+                thread={
+                  <SessionDetailPanel
+                    {...detailProps}
+                    active={detailId !== null}
+                    onClose={() => setDetailId(null)}
+                    runtimeShortcuts={false}
+                    docked
+                  />
+                }
               />
             ) : view === "board" ? (
               <BoardView

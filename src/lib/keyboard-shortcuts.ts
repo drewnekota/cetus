@@ -12,6 +12,9 @@ export type ShortcutId =
   | "switchChats"
   | "switchBoard"
   | "switchAutomations"
+  | "switchThreads"
+  | "previousThread"
+  | "nextThread"
   | "switchPreviousView"
   | "navigateBack"
   | "navigateForward"
@@ -160,6 +163,31 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     windowsAccelerator: "Ctrl+Shift+3",
   },
   {
+    id: "switchThreads",
+    label: "Switch to threads",
+    description: "Show a workspace's sessions as a thread feed",
+    defaultAccelerator: "Alt+Cmd+4",
+    windowsAccelerator: "Ctrl+Shift+4",
+  },
+  {
+    id: "previousThread",
+    label: "Previous thread",
+    description:
+      "In Threads, open the thread above (K also works outside a text field)",
+    // ⌘K is the command palette and ⌘J the terminal, so the vim pair rides
+    // on Control here; Windows keeps Ctrl+K for the palette.
+    defaultAccelerator: "Ctrl+K",
+    windowsAccelerator: "Alt+K",
+  },
+  {
+    id: "nextThread",
+    label: "Next thread",
+    description:
+      "In Threads, open the thread below (J also works outside a text field)",
+    defaultAccelerator: "Ctrl+J",
+    windowsAccelerator: "Alt+J",
+  },
+  {
     id: "switchPreviousView",
     label: "Switch between recent chats",
     description:
@@ -240,7 +268,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: "previousChat",
     label: "Previous chat",
-    description: "Move to the previous chat in the sidebar",
+    description:
+      "Move to the previous chat in the sidebar (the previous workspace in Threads)",
     defaultAccelerator: "Cmd+Alt+ArrowUp",
     // Avoid Windows' long-standing Ctrl+Alt+Arrow display-rotation chord.
     windowsAccelerator: "Ctrl+Shift+ArrowUp",
@@ -248,7 +277,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: "nextChat",
     label: "Next chat",
-    description: "Move to the next chat in the sidebar",
+    description:
+      "Move to the next chat in the sidebar (the next workspace in Threads)",
     defaultAccelerator: "Cmd+Alt+ArrowDown",
     windowsAccelerator: "Ctrl+Shift+ArrowDown",
   },

@@ -2,6 +2,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import {
   Archive,
+  Bot,
   CalendarClock,
   File as FileIcon,
   Folder,
@@ -41,6 +42,7 @@ interface Props {
 const KIND_LABEL_KEY: Record<MentionTab, string> = {
   all: "mention.tab.all",
   function: "mention.tab.functions",
+  runtime: "mention.tab.runtimes",
   automation: "mention.tab.automations",
   artifact: "mention.tab.artifacts",
   file: "mention.tab.files",
@@ -52,6 +54,8 @@ function KindIcon({ item }: { item: MentionItem }) {
   switch (item.kind) {
     case "function":
       return <Target className={cn(cls, "text-primary")} />;
+    case "runtime":
+      return <Bot className={cn(cls, "text-muted-foreground")} />;
     case "automation":
       return <CalendarClock className={cn(cls, "text-muted-foreground")} />;
     case "artifact":
@@ -136,7 +140,9 @@ export function MentionMenu({
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-2">
             <span className="truncate text-sm font-medium">
-              {item.kind === "function" ? `@${item.title}` : item.title}
+              {item.kind === "function" || item.kind === "runtime"
+                ? `@${item.title}`
+                : item.title}
             </span>
             {item.archived && (
               <span className="shrink-0 text-2xs uppercase tracking-wide text-muted-foreground">

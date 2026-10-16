@@ -49,7 +49,11 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { ViewToggle, type SidebarView } from "@/components/sidebar/view-toggle";
+import {
+  ModeSelect,
+  type ConversationMode,
+  type SidebarView,
+} from "@/components/sidebar/view-toggle";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -60,7 +64,11 @@ import { workspaceName } from "@/lib/paths";
 import { useConversationAutoSort } from "@/lib/conversation-order";
 import type { Conversation } from "@/lib/types";
 import { useSidebarWidth, SidebarResizeHandle } from "./sidebar-width";
-import { groupByWorkspace, PINNED_GROUP_DIR } from "./workspace-grouping";
+import {
+  groupByWorkspace,
+  PINNED_GROUP_DIR,
+  threadWorkspaceOrder,
+} from "./workspace-grouping";
 import { visibleConversationIds } from "@/lib/collapsed-workspaces";
 import { ChatSlotHintsProvider, useChatSlotHints } from "./chat-slot-hints";
 import {
@@ -85,7 +93,11 @@ interface Props {
   /** The backend's default workspace dir. Rendered as the standalone "Chat"
    *  section rather than a folder — users shouldn't perceive it as one. */
   defaultWorkspace: string;
+  /** The page showing — a conversation mode, or Automations. */
   view: SidebarView;
+  /** The conversation mode the sidebar's list follows; kept while the
+   *  Automations page is up. */
+  mode: ConversationMode;
   onViewChange: (v: SidebarView) => void;
   workspaceFilter: string | null;
   onWorkspaceFilterChange: (dir: string | null) => void;
@@ -120,6 +132,7 @@ export const AppSidebar = memo(function AppSidebar({
   expandedWorkspaceDirs,
   defaultWorkspace,
   view,
+  mode,
   onViewChange,
   workspaceFilter,
   onWorkspaceFilterChange,
@@ -141,6 +154,9 @@ export const AppSidebar = memo(function AppSidebar({
 }: Props) {
   const { t } = useTranslation("sidebar");
   const shortcuts = useKeyboardShortcuts();
+  // The list keeps the mode's shape under Automations, but nothing in it is
+  // the page being shown, so no row reads as selected.
+  const onAutomations = view === "automations";
   const shortcutLabels = useMemo(
     () => ({
       newChat: shortcutDisplay(shortcuts.newChat),
@@ -149,6 +165,7 @@ export const AppSidebar = memo(function AppSidebar({
       switchChats: shortcutDisplay(shortcuts.switchChats),
       switchBoard: shortcutDisplay(shortcuts.switchBoard),
       switchAutomations: shortcutDisplay(shortcuts.switchAutomations),
+      switchThreads: shortcutDisplay(shortcuts.switchThreads),
       toggleSidebar: shortcutDisplay(shortcuts.toggleSidebar),
     }),
     [shortcuts],
@@ -209,6 +226,19 @@ export const AppSidebar = memo(function AppSidebar({
     [groups, collapsedWorkspaceDirs, expandedWorkspaceDirs],
   );
   const chatSlotHints = useChatSlotHints(visibleChatIds, shortcuts);
+  // In Threads, ⌘1…⌘9 open folders instead of chats (see use-home-keyboard-
+  // shortcuts); the same held-modifier reveal labels the folder rows.
+  const threadWorkspaceDirs = useMemo(
+    () =>
+      mode === "threads"
+        ? threadWorkspaceOrder(
+            groups.map((g) => g.dir),
+            defaultWorkspace,
+          )
+        : [],
+    [mode, groups, defaultWorkspace],
+  );
+  const workspaceSlotHints = useChatSlotHints(threadWorkspaceDirs, shortcuts);
   const sortableIds = useMemo(
     () => folderGroups.map((g) => g.dir),
     [folderGroups],
@@ -332,20 +362,20 @@ export const AppSidebar = memo(function AppSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <ViewToggle
-          view={view}
+        <ModeSelect
+          mode={mode}
           onChange={onViewChange}
           hints={{
             chat: shortcutLabels.switchChats,
             board: shortcutLabels.switchBoard,
+            threads: shortcutLabels.switchThreads,
           }}
         />
-        {/* Automations completes the ⌥⌘1/⌥⌘2/⌥⌘3 destination sequence;
-            New task follows as an action. Both stay pinned while the list scrolls. */}
+        {/* Automations is its own page (scheduled prompts), not a layout of
+            the conversations: it swaps the main area and leaves the mode —
+            and so the list below — alone. New task follows as an action;
+            Threads has none, its feed's composer is where threads start. */}
         <SidebarMenu>
-          {/* Automations is its own destination (a scheduled-prompt feature),
-              not a layout of the conversations — so it lives as a nav row here
-              rather than in the Chat/Kanban toggle. */}
           <SidebarMenuItem>
             <SidebarMenuButton
               tooltip={t("nav.automations")}
@@ -359,50 +389,55 @@ export const AppSidebar = memo(function AppSidebar({
               </Kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
-          <SidebarMenuItem>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <SidebarMenuButton
-                  onClick={onNewTask}
-                  // Plain nav row (no standalone fill) so it sits flush with the
-                  // other sidebar actions; the hover/active states come from the
-                  // default SidebarMenuButton treatment.
-                  className="min-w-8"
-                >
-                  <PlusCircle />
-                  <span>{t("new.task")}</span>
-                  <Kbd className="ml-auto border-transparent">
-                    {shortcutLabels.newChat}
-                  </Kbd>
-                </SidebarMenuButton>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                <span>{t("new.chat")}</span>
-                <Kbd>{shortcutLabels.newDefaultChat}</Kbd>
-              </TooltipContent>
-            </Tooltip>
-          </SidebarMenuItem>
+          {mode !== "threads" && (
+            <SidebarMenuItem>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <SidebarMenuButton
+                    onClick={onNewTask}
+                    // Plain nav row (no standalone fill) so it sits flush with the
+                    // other sidebar actions; the hover/active states come from the
+                    // default SidebarMenuButton treatment.
+                    className="min-w-8"
+                  >
+                    <PlusCircle />
+                    <span>{t("new.task")}</span>
+                    <Kbd className="ml-auto border-transparent">
+                      {shortcutLabels.newChat}
+                    </Kbd>
+                  </SidebarMenuButton>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <span>{t("new.chat")}</span>
+                  <Kbd>{shortcutLabels.newDefaultChat}</Kbd>
+                </TooltipContent>
+              </Tooltip>
+            </SidebarMenuItem>
+          )}
         </SidebarMenu>
       </SidebarHeader>
 
       <SidebarContent>
-        {view === "board" ? (
+        {mode === "board" || mode === "threads" ? (
           <SidebarGroup>
             <SidebarGroupLabel>{t("section.workspaces")}</SidebarGroupLabel>
             <SidebarMenu>
               {/* "All workspaces" is a pseudo-filter (null), pinned at the very
-                  top and never reorderable. */}
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  onClick={() => onWorkspaceFilterChange(null)}
-                  isActive={workspaceFilter === null}
-                >
-                  <span className="truncate">{t("workspace.all")}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {conversations.length}
-                  </span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+                  top and never reorderable. Kanban only — a Threads feed is
+                  always one folder. */}
+              {mode === "board" && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    onClick={() => onWorkspaceFilterChange(null)}
+                    isActive={!onAutomations && workspaceFilter === null}
+                  >
+                    <span className="truncate">{t("workspace.all")}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {conversations.length}
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               {/* "Chat" (the default workspace) is pinned below "All" and never
                   reorderable — it isn't a folder to the user. */}
               <SidebarMenuItem>
@@ -410,7 +445,8 @@ export const AppSidebar = memo(function AppSidebar({
                   label={t("workspace.default")}
                   icon={<MessageSquare />}
                   count={workspaceCounts.get(defaultGroup.dir) ?? 0}
-                  active={workspaceFilter === defaultGroup.dir}
+                  hint={workspaceSlotHints?.get(defaultGroup.dir)}
+                  active={!onAutomations && workspaceFilter === defaultGroup.dir}
                   onSelect={() => onWorkspaceFilterChange(defaultGroup.dir)}
                 />
               </SidebarMenuItem>
@@ -431,7 +467,8 @@ export const AppSidebar = memo(function AppSidebar({
                       dir={g.dir}
                       label={workspaceName(g.dir)}
                       count={workspaceCounts.get(g.dir) ?? 0}
-                      active={workspaceFilter === g.dir}
+                      hint={workspaceSlotHints?.get(g.dir)}
+                      active={!onAutomations && workspaceFilter === g.dir}
                       onSelect={() => onWorkspaceFilterChange(g.dir)}
                     />
                   ))}

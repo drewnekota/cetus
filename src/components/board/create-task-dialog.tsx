@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { Composer, type ComposerAttachment } from "@/components/chat/composer";
 import {
   useRuntimeShortcuts,
@@ -35,8 +34,8 @@ interface Props {
   ) => void | Promise<void>;
 }
 
-/** Linear-style quick-create task dialog. Compact centered modal; opens with
- *  ⌘N from anywhere. Embeds the same <Composer> as the chat hero so the
+/** Linear-style quick-create task dialog, framed like the command palette;
+ *  opens with ⌘N on Kanban. Embeds the same <Composer> as the chat hero so the
  *  two "start something new" surfaces feel identical to compose in (attachments,
  *  slash menu, and runtime picker all shared). ⏎ submits and closes
  *  (or resets when "Create more" is on); Esc closes via Radix Dialog. */
@@ -96,60 +95,51 @@ export function CreateTaskDialog({
       <DialogContent
         showCloseButton={false}
         aria-describedby={undefined}
-        // Compact Linear-style modal: ~640px wide, centered, slides up.
-        className="flex w-[90vw] max-w-2xl flex-col gap-0 overflow-visible p-0 sm:max-w-2xl"
+        // Same frame as the command palette: anchored high rather than
+        // centred, so it doesn't jump as the composer grows, and sized in rem
+        // so it scales with the app's zoom like everything else.
+        className="top-[12vh] flex w-[calc(100%-2rem)] translate-y-0 flex-col gap-0 overflow-visible rounded-2xl p-2 shadow-2xl sm:max-w-[40rem]"
       >
         <DialogTitle className="sr-only">{t("create.srTitle")}</DialogTitle>
-
-        {/* Breadcrumb header + Create-more toggle */}
-        <div className="flex items-center gap-2 border-b border-border px-5 py-3">
-          <div className="rounded-md bg-muted px-2 py-0.5 text-xs font-semibold text-foreground">
-            cetus
-          </div>
-          <span className="text-xs text-muted-foreground">›</span>
-          <span className="text-xs font-medium text-foreground">
+        <div className="flex items-center gap-2 px-2 pb-2 pt-1 text-xs text-muted-foreground">
+          <span className="text-sm font-medium text-foreground">
             {t("create.newTask")}
           </span>
-          <div className="ml-auto flex items-center gap-2">
+          <label
+            htmlFor="create-more"
+            className="ml-auto flex cursor-pointer select-none items-center gap-2"
+          >
+            {t("create.createMore")}
             <Switch
               id="create-more"
+              size="sm"
               checked={createMore}
               onCheckedChange={setCreateMore}
-              className="scale-75 origin-right"
             />
-            <Label
-              htmlFor="create-more"
-              className="cursor-pointer select-none text-xs text-muted-foreground"
-            >
-              {t("create.createMore")}
-            </Label>
-          </div>
+          </label>
         </div>
-
         {/* Shared composer — same feature set as the chat hero. */}
-        <div className="p-4">
-          <Composer
-            variant="hero"
-            focusToken={focusToken}
-            streaming={false}
-            placeholder={t("create.placeholder")}
-            modelChoice={modelChoice}
-            onModelChange={onModelChange}
-            conversationId={null}
-            workspaceDir={workspaceDir}
-            defaultWorkspace={defaultWorkspace}
-            onWorkspaceChange={onWorkspaceChange}
-            onSend={handleSend}
-            onAbort={() => {}}
-            pendingBackend={pendingBackend}
-            onPendingBackendChange={onPendingBackendChange}
-            pendingCliModel={pendingCliModel}
-            pendingCliEffort={pendingCliEffort}
-            onPendingTuningChange={onPendingTuningChange}
-            backendSwitch={backendSwitch}
-            onRequestBackendSwitch={requestBackendSwitch}
-          />
-        </div>
+        <Composer
+          variant="hero"
+          focusToken={focusToken}
+          streaming={false}
+          placeholder={t("create.placeholder")}
+          modelChoice={modelChoice}
+          onModelChange={onModelChange}
+          conversationId={null}
+          workspaceDir={workspaceDir}
+          defaultWorkspace={defaultWorkspace}
+          onWorkspaceChange={onWorkspaceChange}
+          onSend={handleSend}
+          onAbort={() => {}}
+          pendingBackend={pendingBackend}
+          onPendingBackendChange={onPendingBackendChange}
+          pendingCliModel={pendingCliModel}
+          pendingCliEffort={pendingCliEffort}
+          onPendingTuningChange={onPendingTuningChange}
+          backendSwitch={backendSwitch}
+          onRequestBackendSwitch={requestBackendSwitch}
+        />
       </DialogContent>
     </Dialog>
   );

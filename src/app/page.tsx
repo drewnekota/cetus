@@ -7,6 +7,7 @@ import {
 } from "@/components/chat/composer";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
+import { threadFeed } from "@/components/threads/threads-view";
 import { api, onUpdateReady } from "@/lib/tauri";
 import {
   installChatPersistence,
@@ -104,6 +105,7 @@ export default function Home() {
     setHistoryOpen,
     archivingIdsRef,
     orderedChatIdsRef,
+    orderedWorkspaceDirsRef,
     selectChatRef,
     pendingSelectRef,
     setView,
@@ -115,6 +117,7 @@ export default function Home() {
     setLoadingChatId,
     setModelChoice,
     view,
+    mode,
     keyboardShortcuts,
     setPaletteOpen,
     automationDialogOpen,
@@ -341,11 +344,14 @@ export default function Home() {
       window.removeEventListener("storage", onStorage);
     };
   }, []);
+  const detailIdRef = useRef<string | null>(detailId);
+  detailIdRef.current = detailId;
   useAppEvents({
     setPiReady,
     conversationsRef,
     activeIdRef,
     viewRef,
+    detailIdRef,
     runStatusRef,
     markUnread,
     queuedRef,
@@ -687,12 +693,126 @@ export default function Home() {
     if (view !== "chat" || !activeId) return;
     markUnread(activeId, false);
   }, [activeId, view, markUnread]);
+
+  // Opening a thread in the Threads view reads it, like selecting a chat.
+  useEffect(() => {
+    if (view !== "threads" || !detailId) return;
+    markUnread(detailId, false);
+  }, [detailId, view, markUnread]);
+  // Threads view keyboard: ⌥⌘↑/↓ step through the feed's threads, ⌘D files
+  // the open one away. Refs keep the callbacks stable for the key handler.
+  const threadNavRef = useRef({ filter: boardWorkspaceFilter, detailId });
+  threadNavRef.current = { filter: boardWorkspaceFilter, detailId };
+  const stepThread = useCallback((direction: 1 | -1) => {
+    const feed = threadFeed(conversationsRef.current, threadNavRef.current.filter);
+    if (feed.length === 0) return;
+    const i = feed.findIndex((c) => c.id === threadNavRef.current.detailId);
+    // Nothing open yet: start from the newest, which sits at the bottom.
+    const next =
+      i < 0 ? feed.length - 1 : Math.min(feed.length - 1, Math.max(0, i + direction));
+    setDetailId(feed[next].id);
+  }, []);
+  const archiveThread = useCallback((): boolean => {
+    const { filter, detailId: id } = threadNavRef.current;
+    const c = id ? conversationsRef.current.find((x) => x.id === id) : null;
+    if (!c) return false;
+    const feed = threadFeed(conversationsRef.current, filter);
+    const i = feed.findIndex((x) => x.id === c.id);
+    // Land on a neighbour so a run of ⌘D files a backlog away in one go.
+    setDetailId((feed[i + 1] ?? feed[i - 1])?.id ?? null);
+    archiveConversation(c).catch((err) => {
+      console.error("archiveConversation failed", err);
+      toast.error("Couldn't archive that conversation.");
+    });
+    return true;
+  }, [archiveConversation]);
+
+  // A thread feed is always one folder: the Threads view has no "All
+  // workspaces" row, so land on the main chat's folder (else Chat).
+  useEffect(() => {
+    if (view !== "threads" || boardWorkspaceFilter !== null) return;
+    const dir = workspaceDir || defaultWorkspace;
+    if (dir) setBoardWorkspaceFilter(dir);
+  }, [view, boardWorkspaceFilter, workspaceDir, defaultWorkspace]);
+  const openWorkspaceFeed = useCallback((dir: string | undefined) => {
+    if (!dir || dir === threadNavRef.current.filter) return;
+    setBoardWorkspaceFilter(dir);
+    // The docked thread belongs to the folder being left.
+    setDetailId(null);
+  }, []);
+  /** Kanban's New task: the dialog starts in the board's folder when one is
+   *  picked (not "All"), else wherever the last chat was. */
+  const openNewTask = useCallback(() => {
+    const filter = threadNavRef.current.filter;
+    if (filter) setWorkspaceDir(filter);
+    setNewTaskOpen(true);
+  }, []);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const onSidebarWorkspaceFilter = useCallback(
+    (dir: string | null) => {
+      if (viewRef.current === "automations") setView(modeRef.current);
+      if (modeRef.current === "threads") openWorkspaceFeed(dir ?? undefined);
+      else setBoardWorkspaceFilter(dir);
+    },
+    [openWorkspaceFeed],
+  );
+  const onThreadsWorkspaceChange = useCallback(
+    (dir: string | null) => openWorkspaceFeed(dir ?? undefined),
+    [openWorkspaceFeed],
+  );
+  const stepWorkspace = useCallback(
+    (direction: 1 | -1) => {
+      const dirs = orderedWorkspaceDirsRef.current;
+      if (dirs.length === 0) return;
+      const i = dirs.indexOf(threadNavRef.current.filter ?? "");
+      openWorkspaceFeed(
+        dirs[i < 0 ? 0 : (i + direction + dirs.length) % dirs.length],
+      );
+    },
+    [openWorkspaceFeed],
+  );
+  const selectWorkspaceSlot = useCallback(
+    (index: number) => {
+      const dirs = orderedWorkspaceDirsRef.current;
+      openWorkspaceFeed(index < 0 ? dirs.at(-1) : dirs[index]);
+    },
+    [openWorkspaceFeed],
+  );
+
+  /** ⌘N / New task in the Threads view: close the docked thread and focus
+   *  the feed's composer, where sending starts the session. */
+  const onNewThread = useCallback(() => {
+    setDetailId(null);
+    setFocusToken((t) => t + 1);
+  }, []);
+
+  // The detail session is a modal on Kanban but a docked pane in Threads;
+  // crossing between them drops it so neither surface inherits the other's.
+  const prevViewRef = useRef(view);
+  useEffect(() => {
+    const prev = prevViewRef.current;
+    prevViewRef.current = view;
+    if (prev !== view && (prev === "threads" || view === "threads")) {
+      setDetailId(null);
+    }
+  }, [view]);
+
   useHomeKeyboardShortcuts({
     keyboardShortcuts,
     setPaletteOpen,
     automationDialogOpen,
     newTaskOpen,
-    detailId,
+    // The Threads view docks the detail session instead of a modal, so it
+    // mustn't trip the keyboard's modal guard.
+    detailId: view === "threads" ? null : detailId,
+    onNewThread,
+    openNewTask,
+    mode,
+    stepThread,
+    archiveThread,
+    stepWorkspace,
+    selectWorkspaceSlot,
     navigateBack,
     navigateForward,
     chatSwitcherOpen: chatSwitcher !== null,
@@ -1084,9 +1204,15 @@ export default function Home() {
 
   /** Create-task dialog handler: mint a conversation, optimistically seed the
    *  user bubble, fire-and-forget sendPrompt (the agent streams asynchronously
-   *  and shows up as a card on the kanban with a streaming dot). */
-  async function onCreateTask(text: string, attachments: ComposerAttachment[]) {
-    const c = await api.newConversation(workspaceDir ?? undefined);
+   *  and shows up as a card on the kanban with a streaming dot). `dir`
+   *  overrides the workspace (the Threads view creates in the feed's folder);
+   *  resolves to the new conversation's id. */
+  async function onCreateTask(
+    text: string,
+    attachments: ComposerAttachment[],
+    dir?: string,
+  ): Promise<string> {
+    const c = await api.newConversation(dir ?? workspaceDir ?? undefined);
     const id = c.id;
     // Runtime chosen in the dialog — the shared pending state (same one the chat
     // hero + quick launcher use). Applied before the first prompt goes out so it
@@ -1116,7 +1242,7 @@ export default function Home() {
       out = await prepareOutgoing(id, text, attachments);
     } catch (e) {
       chatStore.getState().setError(id, `attachment failed: ${e}`);
-      return;
+      return id;
     }
     store.userSent(id, text, out.localImages, out.savedFiles);
     // Don't await — let the agent stream in the background. The kanban card
@@ -1125,16 +1251,28 @@ export default function Home() {
       .sendPrompt(id, out.piMessage, out.piImages)
       .catch((e) => chatStore.getState().setError(id, String(e)))
       .finally(() => refreshList().catch(() => {}));
+    return id;
   }
 
   // --- Detail dialog (board card peek that supports chat) -----------------
+  // Seed the detail composer's model + folder from the row once it's known.
+  // A detailId restored on reload arrives before the conversation list, so
+  // this can't ride on the detailId change alone.
+  const detailSeededRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!detailId) {
+      detailSeededRef.current = null;
+      return;
+    }
+    if (detailSeededRef.current === detailId) return;
+    const conv = conversations.find((c) => c.id === detailId);
+    if (!conv) return;
+    detailSeededRef.current = detailId;
+    setDetailModelChoice(conv.model);
+    setDetailWorkspaceDir(conv.workspaceDir);
+  }, [detailId, conversations]);
   useEffect(() => {
     if (!detailId) return;
-    const conv = conversations.find((c) => c.id === detailId);
-    if (conv) {
-      setDetailModelChoice(conv.model);
-      setDetailWorkspaceDir(conv.workspaceDir);
-    }
     setDetailFocusToken((t) => t + 1);
     const id = detailId;
     let cancelled = false;
@@ -1419,6 +1557,11 @@ export default function Home() {
     onSelectChat,
     onNew,
     onNewSidebar,
+    onNewThread,
+    openNewTask,
+    onThreadsWorkspaceChange,
+    onSidebarWorkspaceFilter,
+    mode,
     onRevealWorkspace,
     onArchiveWorkspaceChats,
     onRemoveWorkspace,

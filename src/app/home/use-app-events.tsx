@@ -27,6 +27,7 @@ export function useAppEvents({
   conversationsRef,
   activeIdRef,
   viewRef,
+  detailIdRef,
   runStatusRef,
   markUnread,
   queuedRef,
@@ -41,6 +42,8 @@ export function useAppEvents({
   conversationsRef: RefObject<Conversation[]>;
   activeIdRef: RefObject<string | null>;
   viewRef: RefObject<SidebarView>;
+  /** Thread docked beside the Threads feed — on screen like the active chat. */
+  detailIdRef: RefObject<string | null>;
   runStatusRef: RefObject<
     Record<string, { running: boolean; outcome: "ok" | "errored" | "aborted" }>
   >;
@@ -68,7 +71,8 @@ export function useAppEvents({
       // When the window is focused and the event belongs to the chat the user
       // is already watching, an OS banner is just noise — suppress it there.
       const watchingNow = (cid: string) =>
-        cid === activeIdRef.current && viewRef.current === "chat";
+        (cid === activeIdRef.current && viewRef.current === "chat") ||
+        (cid === detailIdRef.current && viewRef.current === "threads");
 
       const notifyForPiEvent = (
         cid: string,

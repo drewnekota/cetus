@@ -61,3 +61,16 @@ export function groupByWorkspace(
     ? [{ dir: PINNED_GROUP_DIR, items: pinned }, ...groups]
     : groups;
 }
+
+/** Workspace filter rows in sidebar order for the Threads view: the default
+ *  workspace ("Chat") pinned first, then the folders — no "All" pseudo-row
+ *  and no Pinned section, since a thread feed is always one folder. */
+export function threadWorkspaceOrder(
+  groupDirs: readonly string[],
+  defaultWorkspace: string,
+): string[] {
+  const folders = groupDirs.filter(
+    (dir) => dir !== defaultWorkspace && dir !== PINNED_GROUP_DIR,
+  );
+  return defaultWorkspace ? [defaultWorkspace, ...folders] : folders;
+}
