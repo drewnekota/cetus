@@ -41,8 +41,9 @@ import { useTranslation } from "@/lib/i18n";
 
 const PROSE_CLASS = cn(
   // prose-sm pins the container to 14px; the `!` lets the app's chat-body
-  // token (text-base, 15px) win. Everything prose sizes in em follows it.
-  "prose prose-sm dark:prose-invert max-w-none text-base!",
+  // token (text-chat, the "Message font size") win. Everything prose sizes in
+  // em follows it.
+  "prose prose-sm dark:prose-invert max-w-none text-chat!",
   // The prose box itself must never become the horizontal scroller: doing so
   // puts a bar under an otherwise ordinary reply whenever any one descendant
   // is slightly too wide. Wide content gets its own scroller below instead.
@@ -60,7 +61,7 @@ const PROSE_CLASS = cn(
   "prose-pre:bg-secondary prose-pre:text-foreground",
   // Tables: prose-sm shrinks th/td to ~12px and prose-code drops another 15%.
   // Keep cell text at the bubble's base size and stop nested code from shrinking further.
-  "prose-th:text-base prose-th:py-2 prose-td:text-base prose-td:py-2",
+  "prose-th:text-chat prose-th:py-2 prose-td:text-chat prose-td:py-2",
   "[&_td_code]:text-[0.95em] [&_th_code]:text-[0.95em]",
 );
 
@@ -350,7 +351,7 @@ export function TextBlock({
 }) {
   const throttled = useThrottledText(text, streaming ?? false);
   return (
-    <div className="min-w-0 max-w-full break-words text-base leading-relaxed">
+    <div className="min-w-0 max-w-full break-words text-chat leading-relaxed">
       {isUser ? (
         // User messages are plain text; markdown rendering is for assistant
         // output where the model emits **bold** / code / lists. We still linkify

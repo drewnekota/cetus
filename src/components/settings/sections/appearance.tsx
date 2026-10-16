@@ -30,14 +30,19 @@ import {
 import { WallpaperSection } from "@/components/settings/wallpaper-section";
 import { SkinSection } from "@/components/settings/skin-section";
 import {
+  DEFAULT_MESSAGE_FONT_SIZE,
   DEFAULT_UI_FONT_SIZE,
+  MESSAGE_FONT_SIZES,
   DEFAULT_UI_LINE_HEIGHT,
   UI_FONT_SIZES,
   UI_LINE_HEIGHTS,
+  getMessageFontSize,
   getUiFontSize,
   getUiLineHeight,
+  setMessageFontSize,
   setUiFontSize,
   setUiLineHeight,
+  type MessageFontSize,
   type UiFontSize,
   type UiLineHeight,
 } from "@/lib/type-scale-prefs";
@@ -59,6 +64,9 @@ export function AppearanceSection() {
   const [theme, setThemeState] = useState<ThemePreference>(DEFAULT_THEME);
   const [permaLayers, setPermaLayers] = useState(true);
   const [fontSize, setFontSize] = useState<UiFontSize>(DEFAULT_UI_FONT_SIZE);
+  const [messageSize, setMessageSize] = useState<MessageFontSize>(
+    DEFAULT_MESSAGE_FONT_SIZE,
+  );
   const [lineHeight, setLineHeight] = useState<UiLineHeight>(
     DEFAULT_UI_LINE_HEIGHT,
   );
@@ -69,6 +77,7 @@ export function AppearanceSection() {
     setThemeState(getThemePreference());
     setPermaLayers(getPermaLayersEnabled());
     setFontSize(getUiFontSize());
+    setMessageSize(getMessageFontSize());
     setLineHeight(getUiLineHeight());
   }, []);
 
@@ -134,6 +143,38 @@ export function AppearanceSection() {
                 <SelectItem key={n} value={String(n)}>
                   {n === DEFAULT_UI_FONT_SIZE
                     ? t("appearance.fontSize.default", { size: n })
+                    : t("appearance.fontSize.option", { size: n })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 space-y-0.5">
+            <Label className="font-medium">
+              {t("appearance.messageFontSize.label")}
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              {t("appearance.messageFontSize.description")}
+            </p>
+          </div>
+          <Select
+            value={String(messageSize)}
+            onValueChange={(v) => {
+              const n = Number(v) as MessageFontSize;
+              setMessageFontSize(n); // persists + pins --text-chat on <html> live
+              setMessageSize(n);
+            }}
+          >
+            <SelectTrigger className="w-52 shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MESSAGE_FONT_SIZES.map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  {n === DEFAULT_MESSAGE_FONT_SIZE
+                    ? t("appearance.messageFontSize.followInterface")
                     : t("appearance.fontSize.option", { size: n })}
                 </SelectItem>
               ))}

@@ -31,6 +31,9 @@ interface Props {
   onNativePick?: (active: boolean) => void;
   /** Optional context rendered after the folder name and before the chevron. */
   context?: ReactNode;
+  /** Where focus goes when the menu (or the remote-host dialog) closes; the
+   *  composer passes one that lands back in its textarea. */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 /** Sentinel value for the "Add folder…" row — handled in onValueChange instead
@@ -46,6 +49,7 @@ export function WorkspacePicker({
   excludeDefault = false,
   onNativePick,
   context,
+  onCloseAutoFocus,
 }: Props) {
   const { t } = useTranslation("chat");
   // The default workspace surfaces as "Chat" (never its on-disk folder name) —
@@ -132,7 +136,11 @@ export function WorkspacePicker({
           <span className="truncate">{current ? displayName(current) : t("workspace.label")}</span>
           {context}
         </SelectTrigger>
-        <SelectContent align="start" className="max-w-[22rem]">
+        <SelectContent
+          align="start"
+          className="max-w-[22rem]"
+          onCloseAutoFocus={onCloseAutoFocus}
+        >
           {options.map((dir) => (
             <SelectItem key={dir} value={dir} className="text-xs">
               {dir === defaultWorkspace ? (
@@ -162,7 +170,10 @@ export function WorkspacePicker({
         </SelectContent>
       </Select>
       <Dialog open={remoteOpen} onOpenChange={setRemoteOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          className="sm:max-w-md"
+          onCloseAutoFocus={onCloseAutoFocus}
+        >
           <DialogHeader>
             <DialogTitle>{t("workspace.remoteTitle")}</DialogTitle>
           </DialogHeader>

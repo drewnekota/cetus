@@ -332,14 +332,26 @@ export function useHomeState({
   // Ctrl+Tab is MRU chat switching, most recent first. A tap toggles the last
   // chat; holding the modifier opens the switcher (see stepChatSwitcher).
   const mruChatsRef = useRef<string[]>([]);
-  const onChatPage = view === "chat" && !settingsOpen && activeId !== null;
+  // Kanban's card detail or the Threads pane; null when neither is open.
+  const [detailId, setDetailId] = useState<string | null>(
+    initialViewState.detailId ?? null,
+  );
+  // The conversation on screen in whichever mode is showing: the chat pane in
+  // Chat, the open card or thread in Kanban/Threads.
+  const shownChatId = settingsOpen
+    ? null
+    : view === "chat"
+      ? activeId
+      : view === "threads" || view === "board"
+        ? detailId
+        : null;
   useEffect(() => {
-    if (!onChatPage || !activeId || mruChatsRef.current[0] === activeId) return;
+    if (!shownChatId || mruChatsRef.current[0] === shownChatId) return;
     mruChatsRef.current = [
-      activeId,
-      ...mruChatsRef.current.filter((id) => id !== activeId),
+      shownChatId,
+      ...mruChatsRef.current.filter((id) => id !== shownChatId),
     ].slice(0, CHAT_SWITCHER_LIMIT);
-  }, [onChatPage, activeId]);
+  }, [shownChatId]);
   const navHistoryRef = useRef<NavEntry[]>([]);
   const navIndexRef = useRef(0);
   const navApplyingRef = useRef(false);
@@ -369,16 +381,15 @@ export function useHomeState({
   );
   const chatSwitcherRef = useRef<ChatSwitcherState | null>(null);
   chatSwitcherRef.current = chatSwitcher;
-  const onChatPageRef = useRef(onChatPage);
-  onChatPageRef.current = onChatPage;
+  const shownChatIdRef = useRef(shownChatId);
+  shownChatIdRef.current = shownChatId;
   const closeChatSwitcher = useCallback((id: string | null) => {
     if (!chatSwitcherRef.current) return;
     chatSwitcherRef.current = null;
     setChatSwitcher(null);
     if (!id) return;
     setSettingsOpen(false);
-    if (!onChatPageRef.current || id !== activeIdRef.current)
-      selectChatRef.current(id);
+    if (id !== shownChatIdRef.current) selectChatRef.current(id);
   }, []);
   const commitChatSwitcher = useCallback(() => {
     const s = chatSwitcherRef.current;
@@ -387,8 +398,8 @@ export function useHomeState({
   /** ⌃⇥ (+1) / ⌃⇧⇥ (-1): open on the previous chat, or step while the
    *  switcher is up. `stillHeld` reports whether the switcher's modifier is
    *  still down; a release before the reveal delay is a tap and just switches.
-   *  From Kanban, Automations or Settings the current chat isn't on screen, so
-   *  the switcher starts on it rather than the one before. */
+   *  With nothing open (Automations, Settings, an empty board) the last chat
+   *  isn't on screen, so the switcher starts on it rather than the one before. */
   const stepChatSwitcher = useCallback(
     (delta: 1 | -1, stillHeld: () => boolean) => {
       const open = chatSwitcherRef.current;
@@ -410,7 +421,8 @@ export function useHomeState({
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .map((c) => c.id);
       const ids = [...visited, ...rest].slice(0, CHAT_SWITCHER_LIMIT);
-      const skipCurrent = onChatPageRef.current && ids[0] === activeIdRef.current;
+      const skipCurrent =
+        shownChatIdRef.current !== null && ids[0] === shownChatIdRef.current;
       if (ids.length < (skipCurrent ? 2 : 1)) return;
       const state: ChatSwitcherState = {
         ids,
@@ -458,9 +470,6 @@ export function useHomeState({
     string | null
   >(initialViewState.boardWorkspaceFilter ?? null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(
-    initialViewState.detailId ?? null,
-  );
   useEffect(() => {
     try {
       localStorage.setItem(

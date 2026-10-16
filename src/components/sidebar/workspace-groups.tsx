@@ -1,5 +1,7 @@
 "use client";
 
+import type { ActivityCounts } from "@/lib/session-activity";
+import { ActivityBadges } from "@/components/threads/activity-badges";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -33,6 +35,7 @@ import {
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
+import { Kbd } from "@/components/ui/kbd";
 import { useTranslation } from "@/lib/i18n";
 import {
   visibleGroupItems,
@@ -395,7 +398,7 @@ export function SortableWorkspaceGroup(
  *  click-to-filter button and (when `handleProps` is supplied) a drag handle. */
 export function WorkspaceFilterButton({
   label,
-  count,
+  activity,
   active,
   onSelect,
   handleProps,
@@ -403,8 +406,9 @@ export function WorkspaceFilterButton({
   hint,
 }: {
   label: string;
-  count: number;
-  /** Shortcut that opens this row (⌘1…), shown in place of the count while
+  /** Running / waiting / unread-done sessions; the row stays bare when quiet. */
+  activity?: ActivityCounts;
+  /** Shortcut that opens this row (⌘1…), shown in place of the badges while
    *  its modifier is held. */
   hint?: string;
   active: boolean;
@@ -427,16 +431,22 @@ export function WorkspaceFilterButton({
     >
       {icon ?? <Folder />}
       <span className="truncate">{label}</span>
-      <span
-        className={cn(
-          "ml-auto text-xs tabular-nums",
-          active
-            ? "text-sidebar-accent-foreground/80"
-            : "text-muted-foreground",
-        )}
-      >
-        {hint ?? count}
-      </span>
+      {hint ? (
+        // Same badge as the chat rows' ⌘1… hints.
+        <Kbd className="ml-auto h-[18px] border-border bg-background px-1.5 text-foreground/80 shadow-xs">
+          {hint}
+        </Kbd>
+      ) : (
+        <ActivityBadges
+          counts={activity}
+          className={cn(
+            "ml-auto",
+            active
+              ? "text-sidebar-accent-foreground/80"
+              : "text-muted-foreground",
+          )}
+        />
+      )}
     </SidebarMenuButton>
   );
 }
@@ -446,14 +456,14 @@ export function WorkspaceFilterButton({
 export function SortableWorkspaceFilterRow({
   dir,
   label,
-  count,
+  activity,
   active,
   onSelect,
   hint,
 }: {
   dir: string;
   label: string;
-  count: number;
+  activity?: ActivityCounts;
   active: boolean;
   onSelect: () => void;
   hint?: string;
@@ -474,7 +484,7 @@ export function SortableWorkspaceFilterRow({
     >
       <WorkspaceFilterButton
         label={label}
-        count={count}
+        activity={activity}
         hint={hint}
         active={active}
         onSelect={onSelect}

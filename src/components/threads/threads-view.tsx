@@ -10,13 +10,27 @@ import {
   type ReactNode,
 } from "react";
 import {
+  AlertCircle,
+  Bot,
+  Brain,
+  Check,
   ChevronRight,
+  CircleHelp,
+  CircleSlash,
   Clock,
+  FileSearch,
   Folder,
+  Globe,
   Layers,
   MessageSquare,
+  Pencil,
+  SquareTerminal,
+  Wrench,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { summarizeArgs, subagentInfo } from "@/components/chat/tool-use-card";
 import {
   Composer,
   type ComposerAttachment,
@@ -35,9 +49,25 @@ import {
   useChatStore,
 } from "@/lib/chat-store";
 import type { ChatState } from "@/lib/chat-state";
+import {
+  computeDigest,
+  isStep,
+  turnStart,
+  type ActivityDigest,
+  type StepBlock,
+  type StepKind,
+} from "@/lib/thread-activity";
+import { toolActivityStatus, type ToolActivityStatus } from "@/lib/tool-status";
 import { useLocale, useTranslation } from "@/lib/i18n";
 import { workspaceName } from "@/lib/paths";
-import type { BackendId, Conversation, ModelChoice } from "@/lib/types";
+import { countActivity, useInputIds } from "@/lib/session-activity";
+import { ActivityBadges } from "./activity-badges";
+import type {
+  BackendId,
+  CliControlRequest,
+  Conversation,
+  ModelChoice,
+} from "@/lib/types";
 
 interface Props {
   conversations: Conversation[];
@@ -137,6 +167,13 @@ export const ThreadsView = memo(function ThreadsView({
   );
   const hidden = feed.length - visible.length;
 
+  const inputIds = useInputIds();
+  const activity = useMemo(
+    () =>
+      countActivity(feed, streamingIds, unreadCompletedIds, inputIds).get(null),
+    [feed, streamingIds, unreadCompletedIds, inputIds],
+  );
+
   // Warm the opening prompt / reply count / last reply from the small preview
   // records — same approach as the board, never a full-history hydrate.
   const attempted = useRef<Set<string>>(new Set());
@@ -220,11 +257,12 @@ export const ThreadsView = memo(function ThreadsView({
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId, onSelect]);
 
+  // Sending stays in the feed: the new thread's card shows its progress, and
+  // the composer is free for the next task. Open a card to follow along.
   async function handleSend(text: string, attachments: ComposerAttachment[]) {
     nearBottom.current = true;
     try {
-      const id = await onCreate(text, attachments, workspaceDir);
-      onSelect(id);
+      await onCreate(text, attachments, workspaceDir);
     } catch (e) {
       console.error("[threads] create failed", e);
     }
@@ -242,7 +280,7 @@ export const ThreadsView = memo(function ThreadsView({
       ? MessageSquare
       : Folder;
   // One column width for header, feed and composer so their edges line up.
-  const column = cn("mx-auto w-full px-6", !selectedId && "max-w-3xl");
+  const column = cn("mx-auto w-full px-6", !selectedId && "max-w-4xl");
 
   return (
     <div className="flex min-h-0 flex-1 flex-row">
@@ -254,19 +292,19 @@ export const ThreadsView = memo(function ThreadsView({
             : "flex-1",
         )}
       >
-        {/* Mirrors the docked thread's header (two lines, hairline below) so
-            the two panes line up side by side. */}
-        <div className="border-b border-border/70 py-3">
-          <div className={cn(column, "flex items-center gap-2.5")}>
+        {/* Mirrors the docked thread's header (one h-11 line, hairline
+            below) so the two panes line up side by side. */}
+        <div className="flex h-11 shrink-0 items-center border-b border-border/70">
+          <div className={cn(column, "flex min-w-0 items-center gap-2.5")}>
             <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-foreground">
-                {folderLabel}
-              </div>
-              <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">
-                {t("threads.count", { count: feed.length })}
-              </div>
-            </div>
+            <span className="min-w-0 truncate text-sm font-medium text-foreground">
+              {folderLabel}
+            </span>
+            <ActivityBadges
+              counts={activity}
+              labels
+              className="ml-auto text-muted-foreground"
+            />
           </div>
         </div>
         <div
@@ -372,6 +410,7 @@ function DayDivider({ label }: { label: string }) {
 
 type ThreadStatus =
   | "working"
+  | "input"
   | "failed"
   | "interrupted"
   | "review"
@@ -387,6 +426,11 @@ const STATUS_STYLE: Record<
     text: "text-warning",
     key: "threads.status.working",
   },
+  input: {
+    dot: "bg-[var(--brand)] animate-pulse",
+    text: "text-[var(--brand)]",
+    key: "threads.status.input",
+  },
   failed: {
     dot: "bg-destructive",
     text: "text-destructive",
@@ -399,8 +443,8 @@ const STATUS_STYLE: Record<
   },
   review: { dot: "bg-info", text: "text-info", key: "threads.status.review" },
   unread: {
-    dot: "bg-[var(--brand)]",
-    text: "text-foreground",
+    dot: "bg-success",
+    text: "text-success",
     key: "threads.status.unread",
   },
   idle: {
@@ -430,18 +474,22 @@ const ThreadItem = memo(function ThreadItem({
 }) {
   const { t } = useTranslation("board");
   const summary = useThreadSummary(c.id);
-  const failed = useChatStore((s) => !!s.chats[c.id]?.error);
-  const status: ThreadStatus = streaming
-    ? "working"
-    : failed
-      ? "failed"
-      : c.runState === "interrupted"
-        ? "interrupted"
-        : c.reviewState === "pending"
-          ? "review"
-          : unread && !selected
-            ? "unread"
-            : "idle";
+  const activity = useThreadActivity(c.id);
+  const error = useChatStore((s) => s.chats[c.id]?.error ?? null);
+  const question = useChatStore((s) => controlLabel(s.controlRequests[c.id]));
+  const status: ThreadStatus = question
+    ? "input"
+    : streaming
+      ? "working"
+      : error
+        ? "failed"
+        : c.runState === "interrupted"
+          ? "interrupted"
+          : c.reviewState === "pending"
+            ? "review"
+            : unread && !selected
+              ? "unread"
+              : "idle";
   const style = STATUS_STYLE[status];
   const runtime =
     BACKENDS.find((b) => b.id === ((c.backend as BackendId) || "pi")) ??
@@ -455,6 +503,9 @@ const ThreadItem = memo(function ThreadItem({
     summary.firstPrompt && summary.firstPrompt !== c.title
       ? summary.firstPrompt
       : null;
+  // While the turn runs the card is a live window onto it: the last few
+  // steps, then whatever answer has streamed so far.
+  const live = streaming && activity.recent.length > 0;
 
   return (
     <article
@@ -492,9 +543,26 @@ const ThreadItem = memo(function ThreadItem({
             {formatTimestamp(c.updatedAt)}
           </span>
         </div>
+        {live && <StepList steps={activity.recent} />}
+        {question && (
+          <div className="ml-[26px] mt-2 flex min-w-0 items-start gap-1.5 self-stretch rounded-md bg-[var(--brand)]/[0.08] px-2 py-1.5 text-xs leading-5">
+            <CircleHelp className="mt-[3px] size-3.5 shrink-0 text-[var(--brand)]" />
+            <span className="min-w-0 line-clamp-2 text-foreground">
+              <span className="font-medium">{t("threads.waiting")}</span>
+              {question !== true && (
+                <span className="text-muted-foreground"> — {question}</span>
+              )}
+            </span>
+          </div>
+        )}
         {summary.lastReply && (
-          <p className="mt-1 line-clamp-2 w-full pl-[26px] text-xs leading-5 text-muted-foreground">
+          <p className="mt-1.5 line-clamp-3 w-full pl-[26px] text-xs leading-5 text-muted-foreground">
             {plain(summary.lastReply)}
+          </p>
+        )}
+        {error && !streaming && (
+          <p className="mt-1.5 line-clamp-2 w-full break-words pl-[26px] text-xs leading-5 text-destructive/90">
+            {error}
           </p>
         )}
         <div className="mt-2 flex w-full min-w-0 items-center gap-1.5 pl-[26px] text-xs leading-4 text-muted-foreground">
@@ -507,6 +575,18 @@ const ThreadItem = memo(function ThreadItem({
             <span className={cn("size-1.5 rounded-full", style.dot)} />
             {t(style.key)}
           </span>
+          {streaming && activity.startedAt !== null && (
+            <>
+              <Sep />
+              <Elapsed since={activity.startedAt} />
+            </>
+          )}
+          {activity.toolCount > 0 && (
+            <>
+              <Sep />
+              <DigestChips digest={activity.digest} />
+            </>
+          )}
           {summary.replyCount > 0 && (
             <>
               <Sep />
@@ -555,6 +635,124 @@ const ThreadItem = memo(function ThreadItem({
     </article>
   );
 });
+
+/** The running turn's last few steps, one line each — a tool call with its
+ *  argument preview, or the tail of the reasoning. Older steps fade out. */
+function StepList({ steps }: { steps: ThreadStep[] }) {
+  const { t } = useTranslation("board");
+  return (
+    <ol className="ml-[7px] mt-2 flex min-w-0 flex-col gap-1 self-stretch border-l border-border/70 pl-[18px]">
+      {steps.map((step, i) => {
+        const fade = steps.length - 1 - i;
+        return (
+          <li
+            key={step.key}
+            className={cn(
+              "flex min-w-0 items-center gap-2 text-xs leading-5",
+              fade === 1 && "opacity-75",
+              fade >= 2 && "opacity-50",
+            )}
+          >
+            <StepIcon step={step} />
+            {step.kind === "thinking" ? (
+              <>
+                <span
+                  className={cn(
+                    "shrink-0 font-medium text-foreground/80",
+                    step.status === "running" && "animate-shimmer-text",
+                  )}
+                >
+                  {t("threads.thinking")}
+                </span>
+                {step.detail && (
+                  <span className="min-w-0 truncate italic text-muted-foreground">
+                    {step.detail}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="shrink-0 font-medium text-foreground/80">
+                  {step.name}
+                </span>
+                {step.detail && (
+                  <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                    {step.detail}
+                  </span>
+                )}
+              </>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function StepIcon({ step }: { step: ThreadStep }) {
+  const cls = "size-3 shrink-0";
+  if (step.status === "running") {
+    return step.kind === "thinking" ? (
+      <Brain className={cn(cls, "text-muted-foreground")} />
+    ) : (
+      <Spinner className={cn(cls, "text-muted-foreground")} />
+    );
+  }
+  if (step.status === "error")
+    return <AlertCircle className={cn(cls, "text-warning")} />;
+  if (step.status === "incomplete")
+    return <CircleSlash className={cn(cls, "text-muted-foreground")} />;
+  if (step.kind === "thinking")
+    return <Brain className={cn(cls, "text-muted-foreground/70")} />;
+  return <Check className={cn(cls, "text-muted-foreground/70")} />;
+}
+
+const DIGEST_ORDER: { kind: StepKind; icon: LucideIcon }[] = [
+  { kind: "explore", icon: FileSearch },
+  { kind: "edit", icon: Pencil },
+  { kind: "run", icon: SquareTerminal },
+  { kind: "web", icon: Globe },
+  { kind: "agent", icon: Bot },
+  { kind: "other", icon: Wrench },
+];
+
+/** The latest turn's tool calls by kind — icon + count, labelled on hover. */
+function DigestChips({ digest }: { digest: ActivityDigest }) {
+  const { t } = useTranslation("board");
+  return (
+    <span className="inline-flex shrink-0 items-center gap-2 tabular-nums">
+      {DIGEST_ORDER.map(({ kind, icon: Icon }) => {
+        const n = digest[kind];
+        if (!n) return null;
+        return (
+          <span
+            key={kind}
+            title={t(`threads.digest.${kind}`, { count: n })}
+            className="inline-flex items-center gap-0.5"
+          >
+            <Icon className="size-3" />
+            {n}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const s = Math.max(0, Math.floor((now - since) / 1000));
+  const m = Math.floor(s / 60);
+  return (
+    <span className="shrink-0 tabular-nums">
+      {m > 0 ? `${m}m ${s % 60}s` : `${s}s`}
+    </span>
+  );
+}
 
 /** Previews are raw Markdown cut mid-stream; drop the syntax that reads as
  *  noise on one or two lines (emphasis, headings, code ticks, list bullets). */
@@ -618,6 +816,129 @@ function useThreadSummary(convId: string): ThreadSummary {
     }
     return v;
   });
+}
+
+interface ThreadStep {
+  key: string;
+  kind: "thinking" | "tool";
+  /** Tool name; "" for thinking. */
+  name: string;
+  /** Argument preview for a tool, the tail of the reasoning for thinking. */
+  detail: string;
+  status: ToolActivityStatus;
+}
+
+interface ThreadActivity {
+  /** The latest turn's last few steps, oldest first. */
+  recent: ThreadStep[];
+  toolCount: number;
+  digest: ActivityDigest;
+  /** When the latest turn was sent; the live elapsed timer counts from it. */
+  startedAt: number | null;
+}
+
+const RECENT_STEPS = 3;
+const EMPTY_ACTIVITY: ThreadActivity = {
+  recent: [],
+  toolCount: 0,
+  digest: {},
+  startedAt: null,
+};
+const activityCache = new WeakMap<ChatState, ThreadActivity>();
+const previewActivityCache = new WeakMap<object, ThreadActivity>();
+
+function toStep(b: StepBlock, key: string): ThreadStep {
+  if (b.kind === "thinking") {
+    const flat = b.text.replace(/\s+/g, " ").trim();
+    return {
+      key,
+      kind: "thinking",
+      name: "",
+      detail: flat.length > 160 ? `…${flat.slice(-160)}` : flat,
+      status: b.streaming ? "running" : "settled",
+    };
+  }
+  // A running subagent streams its live status into the result; prefer it
+  // over the frozen launch args.
+  const sub = subagentInfo(b.result?.details);
+  const content = b.result?.content;
+  const liveStatus =
+    sub && Array.isArray(content) && content[0]?.type === "text"
+      ? content[0].text
+      : "";
+  return {
+    key,
+    kind: "tool",
+    name: b.name,
+    detail: sub
+      ? (liveStatus || sub.description || "").replace(/\s+/g, " ").trim()
+      : summarizeArgs(b.args),
+    status: toolActivityStatus(b),
+  };
+}
+
+function computeActivity(c: ChatState): ThreadActivity {
+  const messages = c.messages;
+  const start = turnStart(messages);
+  const steps: ThreadStep[] = [];
+  let toolCount = 0;
+  for (let i = start; i < messages.length; i++) {
+    const m = messages[i];
+    m.blocks.forEach((b, j) => {
+      if (!isStep(b)) return;
+      if (b.kind === "tool_use") toolCount++;
+      steps.push(toStep(b, `${m.key}:${j}`));
+    });
+  }
+  return {
+    recent: steps.slice(-RECENT_STEPS),
+    toolCount,
+    digest: computeDigest(messages),
+    startedAt: messages[start]?.createdAt ?? null,
+  };
+}
+
+/** The latest turn's steps when the conversation is resident (a thread that
+ *  ran this session streams into the store even while closed), else the tool
+ *  digest from its preview record. */
+function useThreadActivity(convId: string): ThreadActivity {
+  return useChatStore((s) => {
+    const c = s.chats[convId];
+    if (c && c.messages.length > 0) {
+      let v = activityCache.get(c);
+      if (!v) {
+        v = computeActivity(c);
+        activityCache.set(c, v);
+      }
+      return v;
+    }
+    const p = s.previews[convId];
+    if (!p?.digest) return EMPTY_ACTIVITY;
+    let v = previewActivityCache.get(p);
+    if (!v) {
+      const digest = p.digest;
+      v = {
+        ...EMPTY_ACTIVITY,
+        digest,
+        toolCount: Object.values(digest).reduce((n, k) => n + (k ?? 0), 0),
+      };
+      previewActivityCache.set(p, v);
+    }
+    return v;
+  });
+}
+
+/** What a pending control request asks, for the card's callout: the first
+ *  question's text, else the tool waiting for permission; `true` when there
+ *  is a request with nothing to quote, null when there is none. */
+function controlLabel(
+  reqs: CliControlRequest[] | undefined,
+): string | true | null {
+  const req = reqs?.[0];
+  if (!req) return null;
+  const q = req.input.questions?.[0]?.question;
+  if (typeof q === "string" && q.trim()) return q.replace(/\s+/g, " ").trim();
+  return req.toolName || true;
 }
 
 function dayLabel(

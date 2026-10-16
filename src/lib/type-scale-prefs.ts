@@ -2,6 +2,8 @@
 // from which every Tailwind text token derives. globals.css declares the ramp
 // at the default size; any other size is applied as inline custom properties
 // on <html>, which override the `:root` theme vars the `text-*` utilities read.
+// The sidebar reads one notch down (see app-sidebar.tsx) and the chat body has
+// its own size (Message font size, below).
 // Stored in localStorage and applied before first paint (see the no-FOUC script
 // in layout.tsx — its ramp table must stay in sync with TYPE_RAMP below).
 
@@ -122,4 +124,51 @@ export function applyUiFontSize(size: UiFontSize) {
     if (ratio === 1) html.style.removeProperty(token);
     else html.style.setProperty(token, `${Math.round(px * ratio)}px`);
   }
+}
+
+// ── Message font size ───────────────────────────────────────────────────────
+// The chat body (messages + composer) reads its own `--text-chat` token. Unset,
+// it follows text-base and so the UI size above; a stored size pins it on
+// <html>. Same persistence and pre-paint model (layout.tsx) as the UI size.
+
+export const MESSAGE_FONT_SIZE_STORAGE_KEY = "cetus.messageFontSize";
+
+/** 0 = follow the interface size. */
+export const DEFAULT_MESSAGE_FONT_SIZE = 0;
+export const MESSAGE_FONT_SIZES = [0, 13, 14, 15, 16, 17, 18] as const;
+export type MessageFontSize = (typeof MESSAGE_FONT_SIZES)[number];
+
+export function isMessageFontSize(n: number): n is MessageFontSize {
+  return (MESSAGE_FONT_SIZES as readonly number[]).includes(n);
+}
+
+export function getMessageFontSize(): MessageFontSize {
+  if (typeof window === "undefined") return DEFAULT_MESSAGE_FONT_SIZE;
+  try {
+    const n = Number(localStorage.getItem(MESSAGE_FONT_SIZE_STORAGE_KEY));
+    return isMessageFontSize(n) ? n : DEFAULT_MESSAGE_FONT_SIZE;
+  } catch {
+    return DEFAULT_MESSAGE_FONT_SIZE;
+  }
+}
+
+export function setMessageFontSize(size: MessageFontSize) {
+  try {
+    if (size === DEFAULT_MESSAGE_FONT_SIZE) {
+      localStorage.removeItem(MESSAGE_FONT_SIZE_STORAGE_KEY);
+    } else {
+      localStorage.setItem(MESSAGE_FONT_SIZE_STORAGE_KEY, String(size));
+    }
+  } catch {
+    // Private mode / quota: still apply for this session.
+  }
+  applyMessageFontSize(size);
+}
+
+/** Pins (or clears, when following the interface) `--text-chat` on <html>. */
+export function applyMessageFontSize(size: MessageFontSize) {
+  if (typeof document === "undefined") return;
+  const html = document.documentElement;
+  if (size === DEFAULT_MESSAGE_FONT_SIZE) html.style.removeProperty("--text-chat");
+  else html.style.setProperty("--text-chat", `${size}px`);
 }

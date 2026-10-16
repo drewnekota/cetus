@@ -41,7 +41,6 @@ export function useHomeKeyboardShortcuts({
   mode,
   stepThread,
   archiveThread,
-  stepWorkspace,
   selectWorkspaceSlot,
   navigateBack,
   navigateForward,
@@ -85,7 +84,6 @@ export function useHomeKeyboardShortcuts({
   openNewTask: () => void;
   mode: ConversationMode;
   stepThread: (direction: 1 | -1) => void;
-  stepWorkspace: (direction: 1 | -1) => void;
   /** Open the Nth workspace's feed; -1 = the last one. */
   selectWorkspaceSlot: (index: number) => void;
   /** Archive the Threads view's open thread; false when none is open. */
@@ -131,7 +129,6 @@ export function useHomeKeyboardShortcuts({
   //   ⌘N    — new chat / new board task
   //   ⌘D    — archive current conversation
   //   ⌘,    — open settings
-  //   ⌥⌘1…⌥⌘3 — switch sidebar view (Chats / Kanban / Automations)
   //   ⌘[/⌘] — go back / forward through the page history (views + settings)
   //   ⌃⇥    — tap: previous chat; hold ⌃: MRU switcher over recent chats
   //           (⇥ / ⇧⇥ step, release ⌃ to switch, esc to cancel)
@@ -273,18 +270,26 @@ export function useHomeKeyboardShortcuts({
         switchWorkspaceTab("side", 1);
         return;
       }
-      // Threads view: the feed is one folder, so the chat-walking keys walk
-      // folders instead (⌘1…⌘9 by position, ⌥⌘↑/↓ step), and the threads
-      // inside it get their own pair — ⌃K/⌃J, or bare K/J outside a field.
+      // Threads view: the chat-walking keys walk the feed's threads
+      // (⌥⌘↑/↓, also ⌃K/⌃J or bare K/J outside a field); folders are few, so
+      // they only get ⌘1…⌘9 by position.
       if (view === "threads") {
-        if (shortcut("previousChat") || shortcut("previousChatAlternate")) {
+        if (
+          shortcut("previousChat") ||
+          shortcut("previousChatAlternate") ||
+          shortcut("previousThread")
+        ) {
           e.preventDefault();
-          stepWorkspace(-1);
+          stepThread(-1);
           return;
         }
-        if (shortcut("nextChat") || shortcut("nextChatAlternate")) {
+        if (
+          shortcut("nextChat") ||
+          shortcut("nextChatAlternate") ||
+          shortcut("nextThread")
+        ) {
           e.preventDefault();
-          stepWorkspace(1);
+          stepThread(1);
           return;
         }
         const slot = CHAT_SLOT_SHORTCUT_IDS.findIndex((id) => shortcut(id));
@@ -299,12 +304,12 @@ export function useHomeKeyboardShortcuts({
           !e.altKey &&
           !e.shiftKey &&
           !isEditableTarget(e.target);
-        if (shortcut("previousThread") || (bare && e.key === "k")) {
+        if (bare && e.key === "k") {
           e.preventDefault();
           stepThread(-1);
           return;
         }
-        if (shortcut("nextThread") || (bare && e.key === "j")) {
+        if (bare && e.key === "j") {
           e.preventDefault();
           stepThread(1);
           return;
@@ -406,18 +411,6 @@ export function useHomeKeyboardShortcuts({
           runtimeSlotsRef.current,
         );
         if (entry) requestBackendSwitch(runtimeSwitchTarget(entry));
-      } else if (shortcut("switchChats")) {
-        e.preventDefault();
-        setView("chat");
-      } else if (shortcut("switchBoard")) {
-        e.preventDefault();
-        setView("board");
-      } else if (shortcut("switchAutomations")) {
-        e.preventDefault();
-        setView("automations");
-      } else if (shortcut("switchThreads")) {
-        e.preventDefault();
-        setView("threads");
       }
     };
     window.addEventListener("keydown", onKey);

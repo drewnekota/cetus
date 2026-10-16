@@ -699,7 +699,7 @@ export default function Home() {
     if (view !== "threads" || !detailId) return;
     markUnread(detailId, false);
   }, [detailId, view, markUnread]);
-  // Threads view keyboard: ⌥⌘↑/↓ step through the feed's threads, ⌘D files
+  // Threads view keyboard: ⌥⌘↑/↓ (or ⌃K/⌃J, bare K/J) step through the feed, ⌘D files
   // the open one away. Refs keep the callbacks stable for the key handler.
   const threadNavRef = useRef({ filter: boardWorkspaceFilter, detailId });
   threadNavRef.current = { filter: boardWorkspaceFilter, detailId };
@@ -735,7 +735,10 @@ export default function Home() {
     if (dir) setBoardWorkspaceFilter(dir);
   }, [view, boardWorkspaceFilter, workspaceDir, defaultWorkspace]);
   const openWorkspaceFeed = useCallback((dir: string | undefined) => {
-    if (!dir || dir === threadNavRef.current.filter) return;
+    if (!dir) return;
+    // Landing in a folder means typing into its feed next.
+    setFocusToken((t) => t + 1);
+    if (dir === threadNavRef.current.filter) return;
     setBoardWorkspaceFilter(dir);
     // The docked thread belongs to the folder being left.
     setDetailId(null);
@@ -761,17 +764,6 @@ export default function Home() {
     (dir: string | null) => openWorkspaceFeed(dir ?? undefined),
     [openWorkspaceFeed],
   );
-  const stepWorkspace = useCallback(
-    (direction: 1 | -1) => {
-      const dirs = orderedWorkspaceDirsRef.current;
-      if (dirs.length === 0) return;
-      const i = dirs.indexOf(threadNavRef.current.filter ?? "");
-      openWorkspaceFeed(
-        dirs[i < 0 ? 0 : (i + direction + dirs.length) % dirs.length],
-      );
-    },
-    [openWorkspaceFeed],
-  );
   const selectWorkspaceSlot = useCallback(
     (index: number) => {
       const dirs = orderedWorkspaceDirsRef.current;
@@ -793,7 +785,12 @@ export default function Home() {
   useEffect(() => {
     const prev = prevViewRef.current;
     prevViewRef.current = view;
-    if (prev !== view && (prev === "threads" || view === "threads")) {
+    // Entering Threads from anywhere but Kanban keeps a thread opened on the
+    // way in (onSelectChat from Automations or Settings).
+    if (
+      prev !== view &&
+      (prev === "threads" || (prev === "board" && view === "threads"))
+    ) {
       setDetailId(null);
     }
   }, [view]);
@@ -811,7 +808,6 @@ export default function Home() {
     mode,
     stepThread,
     archiveThread,
-    stepWorkspace,
     selectWorkspaceSlot,
     navigateBack,
     navigateForward,
@@ -922,9 +918,27 @@ export default function Home() {
   // Identity-stable handlers handed to the memoized AppSidebar / BoardView /
   // ConversationRow / Card. They read the live view via viewRef so none of them
   // need a `view` dependency that would break memoization on every view switch.
+  // Every "open this conversation" path (⌃⇥ switcher, ⌘1…⌘9, ⌥⌘↑/↓,
+  // notifications, the palette, Automations) keeps the mode the user picked:
+  // Threads docks it in its folder's feed, Kanban opens its card, and only
+  // Chat mode shows it in the chat pane.
   const onSelectChat = useCallback(
     (id: string) => {
       markUnread(id, false);
+      const m = modeRef.current;
+      if (m === "threads") {
+        const dir = conversationsRef.current.find((c) => c.id === id)
+          ?.workspaceDir;
+        setView("threads");
+        if (dir) setBoardWorkspaceFilter(dir);
+        setDetailId(id);
+        return;
+      }
+      if (m === "board") {
+        setView("board");
+        setDetailId(id);
+        return;
+      }
       setView("chat");
       onSelect(id);
     },
@@ -1473,8 +1487,9 @@ export default function Home() {
     if (!existing || existing.messages.length === 0) {
       chatStore.getState().userSent(conv.id, a.prompt, [], []);
     }
-    setView("chat");
-    onSelect(conv.id);
+    // The Threads/Kanban hosts look the run up before the next render lands it.
+    conversationsRef.current = mergeConversation(conversationsRef.current, conv);
+    onSelectChat(conv.id);
   }
   async function onDeleteAutomation(a: Automation) {
     await api.deleteAutomation(a.id);

@@ -1,5 +1,7 @@
 "use client";
 
+import { countActivity, useInputIds } from "@/lib/session-activity";
+import { ActivityBadges } from "@/components/threads/activity-badges";
 import {
   memo,
   useCallback,
@@ -162,10 +164,6 @@ export const AppSidebar = memo(function AppSidebar({
       newChat: shortcutDisplay(shortcuts.newChat),
       newDefaultChat: shortcutDisplay(shortcuts.newDefaultChat),
       archiveChat: shortcutDisplay(shortcuts.archiveChat),
-      switchChats: shortcutDisplay(shortcuts.switchChats),
-      switchBoard: shortcutDisplay(shortcuts.switchBoard),
-      switchAutomations: shortcutDisplay(shortcuts.switchAutomations),
-      switchThreads: shortcutDisplay(shortcuts.switchThreads),
       toggleSidebar: shortcutDisplay(shortcuts.toggleSidebar),
     }),
     [shortcuts],
@@ -278,12 +276,12 @@ export const AppSidebar = memo(function AppSidebar({
     },
     [sortableIds, onReorderWorkspaces],
   );
-  const workspaceCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const c of conversations)
-      m.set(c.workspaceDir, (m.get(c.workspaceDir) ?? 0) + 1);
-    return m;
-  }, [conversations]);
+  const inputIds = useInputIds();
+  const workspaceActivity = useMemo(
+    () =>
+      countActivity(conversations, streamingIds, unreadCompletedIds, inputIds),
+    [conversations, streamingIds, unreadCompletedIds, inputIds],
+  );
 
   return (
     <Sidebar
@@ -301,9 +299,11 @@ export const AppSidebar = memo(function AppSidebar({
         // every repaint (and it compounded with a long conversation list into
         // scroll jank).
         "bg-sidebar",
-        // Rows keep shadcn's 14px text + 16px icons (same scale as the Codex
-        // desktop sidebar), so the row ⋯ dropdown — also 14px / 16px — reads as
-        // the same size as the row it came from.
+        // The sidebar sits one notch under the UI text (13px at the default
+        // size) so it doesn't outweigh the chat body: everything in here that
+        // reads text-sm resolves to text-md instead, still following the
+        // "Interface font size" setting. Portaled menus keep 14px.
+        "[--text-sm:var(--text-md)] [--text-sm--line-height:var(--text-md--line-height)]",
         // The row archive action is a shared primitive that ships a 20px box +
         // 16px glyph; trim it a notch so the hover cluster stays lighter than
         // the row's own leading icon. Scoped to this sidebar.
@@ -362,15 +362,7 @@ export const AppSidebar = memo(function AppSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <ModeSelect
-          mode={mode}
-          onChange={onViewChange}
-          hints={{
-            chat: shortcutLabels.switchChats,
-            board: shortcutLabels.switchBoard,
-            threads: shortcutLabels.switchThreads,
-          }}
-        />
+        <ModeSelect mode={mode} onChange={onViewChange} />
         {/* Automations is its own page (scheduled prompts), not a layout of
             the conversations: it swaps the main area and leaves the mode —
             and so the list below — alone. New task follows as an action;
@@ -384,9 +376,6 @@ export const AppSidebar = memo(function AppSidebar({
             >
               <Clock />
               <span>{t("nav.automations")}</span>
-              <Kbd className="ml-auto border-transparent">
-                {shortcutLabels.switchAutomations}
-              </Kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
           {mode !== "threads" && (
@@ -432,9 +421,10 @@ export const AppSidebar = memo(function AppSidebar({
                     isActive={!onAutomations && workspaceFilter === null}
                   >
                     <span className="truncate">{t("workspace.all")}</span>
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      {conversations.length}
-                    </span>
+                    <ActivityBadges
+                      counts={workspaceActivity.get(null)}
+                      className="ml-auto text-muted-foreground"
+                    />
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               )}
@@ -444,7 +434,7 @@ export const AppSidebar = memo(function AppSidebar({
                 <WorkspaceFilterButton
                   label={t("workspace.default")}
                   icon={<MessageSquare />}
-                  count={workspaceCounts.get(defaultGroup.dir) ?? 0}
+                  activity={workspaceActivity.get(defaultGroup.dir)}
                   hint={workspaceSlotHints?.get(defaultGroup.dir)}
                   active={!onAutomations && workspaceFilter === defaultGroup.dir}
                   onSelect={() => onWorkspaceFilterChange(defaultGroup.dir)}
@@ -466,7 +456,7 @@ export const AppSidebar = memo(function AppSidebar({
                       key={g.dir}
                       dir={g.dir}
                       label={workspaceName(g.dir)}
-                      count={workspaceCounts.get(g.dir) ?? 0}
+                      activity={workspaceActivity.get(g.dir)}
                       hint={workspaceSlotHints?.get(g.dir)}
                       active={!onAutomations && workspaceFilter === g.dir}
                       onSelect={() => onWorkspaceFilterChange(g.dir)}

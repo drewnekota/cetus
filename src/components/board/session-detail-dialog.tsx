@@ -1,6 +1,16 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, ArrowUpRight, Folder, MessageSquare, X, Inbox, PanelBottom, PanelRight } from "lucide-react";
+import {
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  Folder,
+  MessageSquare,
+  X,
+  Inbox,
+  PanelBottom,
+  PanelRight,
+} from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -31,6 +41,7 @@ import { artifactsFromDetails } from "@/lib/artifact";
 import { formatTimestamp } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
 import { workspaceName } from "@/lib/paths";
+import { shortcutDisplay, useKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import { useShallow } from "zustand/react/shallow";
 import type { BackendId, Conversation, ModelChoice } from "@/lib/types";
 
@@ -110,6 +121,8 @@ export function SessionDetailPanel({
   onClose,
   runtimeShortcuts = true,
   docked = false,
+  onPrevious,
+  onNext,
   onOpenInChat,
   loading,
   modelChoice,
@@ -134,9 +147,14 @@ export function SessionDetailPanel({
   /** Sits beside the Threads feed rather than in a modal: quieter header
    *  actions, and Esc (handled by the feed) closes it. */
   docked?: boolean;
+  /** Docked only: step to the thread above / below in the feed. Shown when
+   *  either is set; a missing one (feed edge) renders disabled. */
+  onPrevious?: () => void;
+  onNext?: () => void;
 }) {
   const { t } = useTranslation("board");
   const { t: tc } = useTranslation("chat");
+  const shortcuts = useKeyboardShortcuts();
   const convId = conversation?.id ?? null;
   const isStreaming = useIsStreaming(convId);
 
@@ -333,15 +351,26 @@ export function SessionDetailPanel({
     <>
       <header
         className={cn(
-          "flex items-center justify-between gap-4 border-b px-5 py-3",
-          docked ? "border-border/70" : "border-border",
+          "flex items-center justify-between gap-4 border-b px-5",
+          // Docked beside the Threads feed: one h-11 line matching its header.
+          docked ? "h-11 shrink-0 border-border/70" : "border-border py-3",
         )}
       >
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">
+        <div
+          className={cn(
+            "min-w-0 flex-1",
+            docked && "flex items-baseline gap-2.5",
+          )}
+        >
+          <div className="min-w-0 truncate text-sm font-medium">
             {conversation?.title || t("session.untitled")}
           </div>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+          <div
+            className={cn(
+              "flex items-center gap-2 text-xs text-muted-foreground",
+              docked ? "min-w-0 shrink-0" : "mt-0.5",
+            )}
+          >
             {conversation && (
               <>
                 {conversation.workspaceDir === defaultWorkspace ? (
@@ -392,41 +421,66 @@ export function SessionDetailPanel({
               </span>
             </Button>
           )}
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => openWorkspacePanel("side")}
-            title={tc("workspacePanel.openSide")}
-            aria-label={tc("workspacePanel.openSide")}
-          >
-            <PanelRight className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => openWorkspacePanel("bottom")}
-            title={tc("workspacePanel.openBottom")}
-            aria-label={tc("workspacePanel.openBottom")}
-          >
-            <PanelBottom className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={docked ? "ghost" : "default"}
-            className={docked ? "text-muted-foreground" : undefined}
-            onClick={() => conversation && onOpenInChat(conversation.id)}
-            disabled={!conversation}
-          >
-            {t("session.openInChat")}
-            {docked ? (
-              <ArrowUpRight className="ml-0.5 size-3.5" />
-            ) : (
-              <ArrowRight className="ml-1 size-3.5" />
-            )}
-          </Button>
+          {docked && (onPrevious || onNext) && (
+            <>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                onClick={onPrevious}
+                disabled={!onPrevious}
+                title={`${t("session.previousThread")} (${shortcutDisplay(shortcuts.previousChat)})`}
+                aria-label={t("session.previousThread")}
+              >
+                <ChevronUp className="size-4" />
+              </Button>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                onClick={onNext}
+                disabled={!onNext}
+                title={`${t("session.nextThread")} (${shortcutDisplay(shortcuts.nextChat)})`}
+                aria-label={t("session.nextThread")}
+              >
+                <ChevronDown className="size-4" />
+              </Button>
+            </>
+          )}
+          {/* Docked in Threads the header stays minimal: step + close. */}
+          {!docked && (
+            <>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => openWorkspacePanel("side")}
+                title={tc("workspacePanel.openSide")}
+                aria-label={tc("workspacePanel.openSide")}
+              >
+                <PanelRight className="size-4" />
+              </Button>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => openWorkspacePanel("bottom")}
+                title={tc("workspacePanel.openBottom")}
+                aria-label={tc("workspacePanel.openBottom")}
+              >
+                <PanelBottom className="size-4" />
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => conversation && onOpenInChat(conversation.id)}
+                disabled={!conversation}
+              >
+                {t("session.openInChat")}
+                <ArrowRight className="ml-1 size-3.5" />
+              </Button>
+            </>
+          )}
           <Button
             type="button"
             size="icon-sm"

@@ -34,7 +34,7 @@ import {
   SessionDetailDialog,
   SessionDetailPanel,
 } from "@/components/board/session-detail-dialog";
-import { ThreadsView } from "@/components/threads/threads-view";
+import { ThreadsView, threadFeed } from "@/components/threads/threads-view";
 import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
 import { DialogHost } from "@/components/extension-ui/dialog-host";
 import { ZoomHud } from "@/components/zoom-hud";
@@ -412,6 +412,20 @@ export function renderHome({
   // New sessions from the Threads feed land in the folder it shows.
   const threadsWorkspace =
     boardWorkspaceFilter ?? workspaceDir ?? defaultWorkspace;
+  // The docked thread's ↑/↓ buttons: its neighbours in the feed (same order
+  // as the ⌥⌘↑/↓ stepping in page.tsx).
+  const threadNav: { prev: string | null; next: string | null } = {
+    prev: null,
+    next: null,
+  };
+  if (view === "threads" && detailId) {
+    const feed = threadFeed(conversations, boardWorkspaceFilter);
+    const i = feed.findIndex((c) => c.id === detailId);
+    if (i >= 0) {
+      threadNav.prev = feed[i - 1]?.id ?? null;
+      threadNav.next = feed[i + 1]?.id ?? null;
+    }
+  }
   return (
     <SidebarProvider
       // Pin the shell to the window with `fixed inset-0` rather than a
@@ -454,9 +468,8 @@ export function renderHome({
           activeId={activeId}
           modelChoice={modelChoice}
           onSelectConversation={(id) => {
-            setView("chat");
             setPaletteOpen(false);
-            onSelect(id);
+            onSelectChat(id);
           }}
           onSelectArchivedConversation={async (conv) => {
             setPaletteOpen(false);
@@ -472,8 +485,7 @@ export function renderHome({
                 conversationsRef.current,
                 restored,
               );
-              setView("chat");
-              onSelect(restored.id);
+              onSelectChat(restored.id);
             } catch (e) {
               console.error("restore archived conversation failed", conv.id, e);
               toast.error(String(e));
@@ -717,10 +729,7 @@ export function renderHome({
                 onToggle={onToggleAutomation}
                 onRunNow={onRunAutomation}
                 onDelete={onDeleteAutomation}
-                onOpenConversation={(id) => {
-                  setView("chat");
-                  onSelect(id);
-                }}
+                onOpenConversation={onSelectChat}
               />
             ) : view === "threads" ? (
               <ThreadsView
@@ -750,6 +759,16 @@ export function renderHome({
                     {...detailProps}
                     active={detailId !== null}
                     onClose={() => setDetailId(null)}
+                    onPrevious={
+                      threadNav.prev
+                        ? () => setDetailId(threadNav.prev)
+                        : undefined
+                    }
+                    onNext={
+                      threadNav.next
+                        ? () => setDetailId(threadNav.next)
+                        : undefined
+                    }
                     runtimeShortcuts={false}
                     docked
                   />

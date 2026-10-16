@@ -9,10 +9,6 @@ export type ShortcutId =
   | "newDefaultChat"
   | "archiveChat"
   | "openSettings"
-  | "switchChats"
-  | "switchBoard"
-  | "switchAutomations"
-  | "switchThreads"
   | "previousThread"
   | "nextThread"
   | "switchPreviousView"
@@ -142,38 +138,10 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     defaultAccelerator: "Cmd+Comma",
   },
   {
-    id: "switchChats",
-    label: "Switch to chats",
-    description: "Show the chat list",
-    defaultAccelerator: "Alt+Cmd+1",
-    windowsAccelerator: "Ctrl+Shift+1",
-  },
-  {
-    id: "switchBoard",
-    label: "Switch to Kanban",
-    description: "Show the Kanban board",
-    defaultAccelerator: "Alt+Cmd+2",
-    windowsAccelerator: "Ctrl+Shift+2",
-  },
-  {
-    id: "switchAutomations",
-    label: "Switch to automations",
-    description: "Show scheduled automations",
-    defaultAccelerator: "Alt+Cmd+3",
-    windowsAccelerator: "Ctrl+Shift+3",
-  },
-  {
-    id: "switchThreads",
-    label: "Switch to threads",
-    description: "Show a workspace's sessions as a thread feed",
-    defaultAccelerator: "Alt+Cmd+4",
-    windowsAccelerator: "Ctrl+Shift+4",
-  },
-  {
     id: "previousThread",
     label: "Previous thread",
     description:
-      "In Threads, open the thread above (K also works outside a text field)",
+      "In Threads, open the thread above (also ⌥⌘↑, or K outside a text field)",
     // ⌘K is the command palette and ⌘J the terminal, so the vim pair rides
     // on Control here; Windows keeps Ctrl+K for the palette.
     defaultAccelerator: "Ctrl+K",
@@ -183,7 +151,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: "nextThread",
     label: "Next thread",
     description:
-      "In Threads, open the thread below (J also works outside a text field)",
+      "In Threads, open the thread below (also ⌥⌘↓, or J outside a text field)",
     defaultAccelerator: "Ctrl+J",
     windowsAccelerator: "Alt+J",
   },
@@ -269,7 +237,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: "previousChat",
     label: "Previous chat",
     description:
-      "Move to the previous chat in the sidebar (the previous workspace in Threads)",
+      "Move to the previous chat in the sidebar (the thread above in Threads)",
     defaultAccelerator: "Cmd+Alt+ArrowUp",
     // Avoid Windows' long-standing Ctrl+Alt+Arrow display-rotation chord.
     windowsAccelerator: "Ctrl+Shift+ArrowUp",
@@ -278,7 +246,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: "nextChat",
     label: "Next chat",
     description:
-      "Move to the next chat in the sidebar (the next workspace in Threads)",
+      "Move to the next chat in the sidebar (the thread below in Threads)",
     defaultAccelerator: "Cmd+Alt+ArrowDown",
     windowsAccelerator: "Ctrl+Shift+ArrowDown",
   },
@@ -414,14 +382,10 @@ export function readKeyboardShortcuts(): ShortcutMap {
   }
 }
 
-/** Former defaults that moved: the sidebar/workspace toggles, and the view
- *  switches that gave ⌘1…⌘3 up to the chat slots after 0.4.4. */
+/** Former defaults that moved: the sidebar and workspace toggles. */
 const SUPERSEDED_DEFAULTS: Partial<Record<ShortcutId, string>> = {
   toggleSidebar: "Shift+Cmd+S",
   toggleWorkspace: "Cmd+B",
-  switchChats: "Cmd+1",
-  switchBoard: "Cmd+2",
-  switchAutomations: "Cmd+3",
 };
 
 /** Merge a persisted partial map with current platform defaults. Exported so

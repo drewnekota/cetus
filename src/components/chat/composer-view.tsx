@@ -450,10 +450,10 @@ export function renderComposer({
           ref={highlightRef}
           text={text}
           labels={mentionLabels}
-          // Mirror the textarea's type ramp exactly (the shared Textarea adds
-          // md:text-sm) — the pills only line up if both layers wrap alike.
+          // Mirror the textarea's type exactly — the pills only line up if
+          // both layers wrap alike.
           className={cn(
-            "min-h-14 text-base md:text-sm",
+            "min-h-14 text-chat",
             variant === "hero" ? "px-3 py-3" : "px-2.5 py-2",
           )}
         />
@@ -682,9 +682,10 @@ export function renderComposer({
           disabled={disabled}
           className={cn(
             "relative min-h-14 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent",
-            variant === "hero"
-              ? "px-3 py-3 text-base"
-              : "px-2.5 py-2 text-base",
+            // md:text-chat overrides the shared Textarea's md:text-sm, so the
+            // draft is set at the "Message font size" like the messages.
+            "text-chat md:text-chat",
+            variant === "hero" ? "px-3 py-3" : "px-2.5 py-2",
           )}
         />
       </div>
@@ -720,6 +721,10 @@ export function renderComposer({
             defaultWorkspace={defaultWorkspace}
             onChange={onWorkspaceChange}
             disabled={disabled}
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              taRef.current?.focus({ preventScroll: true });
+            }}
             context={
               <GitBranchIndicator
                 conversationId={conversationId ?? null}

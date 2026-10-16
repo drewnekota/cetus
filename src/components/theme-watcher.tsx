@@ -13,9 +13,12 @@ import {
 import { SKIN_STORAGE_KEY } from "@/lib/skin-prefs";
 import {
   LINE_HEIGHT_STORAGE_KEY,
+  MESSAGE_FONT_SIZE_STORAGE_KEY,
   TYPE_SCALE_STORAGE_KEY,
+  applyMessageFontSize,
   applyUiFontSize,
   applyUiLineHeight,
+  getMessageFontSize,
   getUiFontSize,
   getUiLineHeight,
 } from "@/lib/type-scale-prefs";
@@ -30,6 +33,7 @@ export function ThemeWatcher() {
   useEffect(() => {
     applyTheme(getThemePreference());
     applyUiFontSize(getUiFontSize());
+    applyMessageFontSize(getMessageFontSize());
     applyUiLineHeight(getUiLineHeight());
     // Same lifecycle as the theme: apply the persisted compositing-layer A/B
     // choice on mount and follow cross-window changes below. Logged (console
@@ -59,6 +63,9 @@ export function ThemeWatcher() {
       }
       if (e.key === null || e.key === TYPE_SCALE_STORAGE_KEY) {
         applyUiFontSize(getUiFontSize());
+      }
+      if (e.key === null || e.key === MESSAGE_FONT_SIZE_STORAGE_KEY) {
+        applyMessageFontSize(getMessageFontSize());
       }
       if (e.key === null || e.key === LINE_HEIGHT_STORAGE_KEY) {
         applyUiLineHeight(getUiLineHeight());

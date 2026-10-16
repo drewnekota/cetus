@@ -32,6 +32,7 @@ import {
   persistContextUsage,
 } from "./context-usage-store";
 import { isReviewRequestDetails, type ReviewRequestDetails } from "./review";
+import { computeDigest, type ActivityDigest } from "./thread-activity";
 import type {
   BashResult,
   CliBackgroundTask,
@@ -902,6 +903,8 @@ export interface ConvPreview {
    *  records written before the feed existed lack them. */
   firstPrompt?: string | null;
   replyCount?: number;
+  /** The latest turn's tool calls by kind, for the Threads feed card. */
+  digest?: ActivityDigest;
 }
 
 /** Most recent assistant text, whitespace-collapsed and capped for card use. */
@@ -984,6 +987,7 @@ function computePreview(messages: RenderedMessage[]): ConvPreview {
     review: computeLatestReviewRequest(messages),
     firstPrompt: computeFirstPromptPreview(messages),
     replyCount: computeReplyCount(messages),
+    digest: computeDigest(messages),
   };
 }
 

@@ -6,7 +6,6 @@ export const board = {
   en: {
     // Threads view
     "threads.allWorkspaces": "All workspaces",
-    "threads.count": "{count} sessions",
     "threads.showEarlier": "Show {count} earlier",
     "threads.empty.title": "No sessions here yet",
     "threads.empty.body": "Describe a task below. Each message starts its own session, which shows up here as a thread.",
@@ -21,8 +20,17 @@ export const board = {
     "threads.status.failed": "Failed",
     "threads.status.interrupted": "Interrupted",
     "threads.status.review": "Needs review",
-    "threads.status.unread": "New reply",
+    "threads.status.unread": "Done",
     "threads.status.idle": "Idle",
+    "threads.status.input": "Needs input",
+    "threads.waiting": "Waiting for you",
+    "threads.thinking": "Thinking",
+    "threads.digest.explore": "{count} file reads and searches",
+    "threads.digest.edit": "{count} edits",
+    "threads.digest.run": "{count} commands",
+    "threads.digest.web": "{count} web lookups",
+    "threads.digest.agent": "{count} subagents",
+    "threads.digest.other": "{count} other tool calls",
     // Column headers
     "column.inProgress": "In progress",
     "column.needsReview": "Needs review",
@@ -61,6 +69,8 @@ export const board = {
     "session.artifacts": "Artifacts",
     "session.openInChat": "Open in chat",
     "session.close": "Close (Esc)",
+    "session.previousThread": "Previous thread",
+    "session.nextThread": "Next thread",
 
     // Artifacts dialog
     "artifacts.title": "Artifacts",
@@ -71,7 +81,6 @@ export const board = {
   zh: {
     // Threads view
     "threads.allWorkspaces": "全部工作区",
-    "threads.count": "{count} 个会话",
     "threads.showEarlier": "显示更早的 {count} 个",
     "threads.empty.title": "这里还没有会话",
     "threads.empty.body": "在下面描述一个任务。每条消息都会开一个独立会话，并作为 thread 显示在这里。",
@@ -86,8 +95,17 @@ export const board = {
     "threads.status.failed": "失败",
     "threads.status.interrupted": "已中断",
     "threads.status.review": "待评审",
-    "threads.status.unread": "有新回复",
+    "threads.status.unread": "已完成",
     "threads.status.idle": "空闲",
+    "threads.status.input": "等待输入",
+    "threads.waiting": "等你回复",
+    "threads.thinking": "思考中",
+    "threads.digest.explore": "{count} 次读取与搜索",
+    "threads.digest.edit": "{count} 处修改",
+    "threads.digest.run": "{count} 条命令",
+    "threads.digest.web": "{count} 次联网查询",
+    "threads.digest.agent": "{count} 个子代理",
+    "threads.digest.other": "{count} 次其他工具调用",
     "column.inProgress": "进行中",
     "column.needsReview": "待审核",
     "column.done": "已完成",
@@ -122,6 +140,8 @@ export const board = {
     "session.artifacts": "产物",
     "session.openInChat": "在对话中打开",
     "session.close": "关闭（Esc）",
+    "session.previousThread": "上一个 thread",
+    "session.nextThread": "下一个 thread",
 
     "artifacts.title": "产物",
     "artifacts.count": "此任务中有 {count} 个项目",

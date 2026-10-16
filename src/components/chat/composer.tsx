@@ -73,6 +73,10 @@ import {
   fileToBase64,
   formatQuoteMarkdown,
 } from "./composer-utils";
+import {
+  lastInputWasBareKey,
+  registerComposerAutofocus,
+} from "./composer-autofocus";
 import { renderComposer } from "./composer-view";
 
 /** A composer attachment. Images ride pi's `images` channel (→ native model input);
@@ -1075,6 +1079,31 @@ export function Composer({
       taRef.current?.focus({ preventScroll: true });
   }, [focusToken, disabled]);
 
+  // Switching chats (or threads) in place lands in the composer too — unless
+  // a bare key did it (Threads' J/K), where grabbing focus would type the
+  // next J into the draft instead of stepping again.
+  const focusedConversationRef = useRef(conversationId);
+  useEffect(() => {
+    if (focusedConversationRef.current === conversationId) return;
+    focusedConversationRef.current = conversationId;
+    if (focusToken === undefined || disabled || lastInputWasBareKey()) return;
+    taRef.current?.focus({ preventScroll: true });
+    // Only the conversation switch should trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    return registerComposerAutofocus({
+      root,
+      textarea: () => taRef.current,
+      enabled: () => !disabledRef.current,
+    });
+  }, []);
+
   useEffect(() => {
     if (!quoteRequest || quoteRequest.id === lastQuoteIdRef.current) return;
     lastQuoteIdRef.current = quoteRequest.id;
@@ -1523,7 +1552,14 @@ export function Composer({
     fileInputRef,
     workspaceDir,
     defaultWorkspace,
-    onWorkspaceChange,
+    onWorkspaceChange: (dir: string) => {
+      onWorkspaceChange(dir);
+      // Also covers the async paths (native folder picker, remote host) that
+      // finish after the menu's own close-focus has run.
+      requestAnimationFrame(() =>
+        taRef.current?.focus({ preventScroll: true }),
+      );
+    },
     pendingBackend,
     onPendingTuningChange,
     backendSwitch,

@@ -307,11 +307,15 @@ export const en = {
   "appearance.theme.label": "Theme",
   "appearance.theme.description":
     "Follow the system appearance, or lock to light or dark.",
-  "appearance.fontSize.label": "Font size",
+  "appearance.fontSize.label": "Interface font size",
   "appearance.fontSize.description":
-    "Base size for interface text; chat text and labels scale with it. Independent of ⌘+/⌘− window zoom.",
+    "Base size for menus, labels and the sidebar. Independent of ⌘+/⌘− window zoom.",
   "appearance.fontSize.default": "{size} px (default)",
   "appearance.fontSize.option": "{size} px",
+  "appearance.messageFontSize.label": "Message font size",
+  "appearance.messageFontSize.description":
+    "Size of chat messages and the composer.",
+  "appearance.messageFontSize.followInterface": "Match interface",
   "appearance.lineHeight.label": "Line height",
   "appearance.lineHeight.description":
     "Spacing between lines of interface and chat text.",

@@ -71,7 +71,8 @@
 @theme {
   /* Type ramp, in px (Codex desktop's scale, shifted one notch up so the
      default fits a 16" display at 100%): 2xs 11 for badges/kbd, xs 12 for
-     meta, md 13 for dense chrome, sm 14 for UI text, base 15 for chat body.
+     meta, md 13 for dense chrome and the sidebar, sm 14 for UI text, base 15
+     (and chat, its own token) for chat body.
      Line-heights are unitless so the ramp scales cleanly. The "UI font size"
      setting overrides the sizes and the "Line height" setting the
      line-heights on <html> — keep type-scale-prefs.ts TYPE_RAMP /
@@ -86,6 +87,10 @@
   --text-sm--line-height: 1.43;
   --text-base: 15px;
   --text-base--line-height: 1.5;
+  /* Chat body (messages + composer). Follows text-base — and so the "UI font
+     size" setting — until the "Message font size" setting pins it on <html>. */
+  --text-chat: var(--text-base);
+  --text-chat--line-height: var(--text-base--line-height);
   --text-lg: 18px;
   --text-lg--line-height: 1.5;
   --text-xl: 20px;
