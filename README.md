@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg"><img alt="Download Cetus for macOS" src="https://img.shields.io/badge/Download-Cetus-111111?style=for-the-badge&logo=apple" /></a>
-  <a href="https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="Download Cetus Swift for macOS" src="https://img.shields.io/badge/Download-Cetus_Swift_(native)-F05138?style=for-the-badge&logo=swift&logoColor=white" /></a>
+  <a href="https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="Download Cetus Swift (Beta) for macOS" src="https://img.shields.io/badge/Download-Cetus_Swift_(Beta)-F05138?style=for-the-badge&logo=swift&logoColor=white" /></a>
 </p>
 
 <p align="center">
@@ -51,7 +51,7 @@ Cetus runs on **Apple Silicon** Macs. There are two builds of the same app:
 | Build | Download | Requires |
 | --- | --- | --- |
 | **Cetus** — the original app, built with Tauri | [Cetus.dmg](https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg) | macOS 13+ |
-| **Cetus Swift** — a native SwiftUI build | [Cetus-Swift.dmg](https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg) | macOS 15+ |
+| **Cetus Swift** (Beta) — a native SwiftUI build, still missing some polish | [Cetus-Swift.dmg](https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg) | macOS 15+ |
 
 Both update themselves. Then:
 
@@ -157,7 +157,7 @@ pnpm tauri build
 
 Outputs `.app` / `.dmg` on macOS. A real multi-size icon set is required for `tauri build` (lives under `src-tauri/icons/`, regenerate with `pnpm tauri icon <path-to-1024px.png>`).
 
-### Cetus Swift
+### Cetus Swift (Beta)
 
 The native build lives in [`swift/`](swift) as a SwiftPM package (macOS 15+). `swift build` compiles it; `swift/bundle.sh` assembles `swift/build/Cetus.app` and expects a `cetus-agentd` binary at `$CETUS_AGENTD`.
 

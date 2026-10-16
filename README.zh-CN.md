@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg"><img alt="下载 Cetus macOS 版" src="https://img.shields.io/badge/下载-Cetus-111111?style=for-the-badge&logo=apple" /></a>
-  <a href="https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="下载 Cetus Swift macOS 版" src="https://img.shields.io/badge/下载-Cetus_Swift_(原生)-F05138?style=for-the-badge&logo=swift&logoColor=white" /></a>
+  <a href="https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="下载 Cetus Swift (Beta) macOS 版" src="https://img.shields.io/badge/下载-Cetus_Swift_(Beta)-F05138?style=for-the-badge&logo=swift&logoColor=white" /></a>
 </p>
 
 <p align="center">
@@ -51,7 +51,7 @@ Cetus 支持 **Apple Silicon** Mac，同一个 app 有两个版本：
 | 版本 | 下载 | 系统要求 |
 | --- | --- | --- |
 | **Cetus** —— 最早的版本，基于 Tauri | [Cetus.dmg](https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg) | macOS 13+ |
-| **Cetus Swift** —— 原生 SwiftUI 版本 | [Cetus-Swift.dmg](https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg) | macOS 15+ |
+| **Cetus Swift**（Beta）—— 原生 SwiftUI 版本，仍在打磨中 | [Cetus-Swift.dmg](https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg) | macOS 15+ |
 
 两个版本都会自动更新。然后：
 
@@ -157,7 +157,7 @@ pnpm tauri build
 
 在 macOS 上输出 `.app` / `.dmg`。`tauri build` 需要一套完整的多尺寸图标（存于 `src-tauri/icons/`，用 `pnpm tauri icon <path-to-1024px.png>` 重新生成）。
 
-### Cetus Swift
+### Cetus Swift（Beta）
 
 原生版本在 [`swift/`](swift) 目录下，是一个 SwiftPM 包（macOS 15+）。`swift build` 编译；`swift/bundle.sh` 会组装出 `swift/build/Cetus.app`，需要通过 `$CETUS_AGENTD` 指定 `cetus-agentd` 二进制。
 

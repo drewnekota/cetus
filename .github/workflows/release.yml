@@ -425,9 +425,9 @@ jobs:
           | Build | File | Requires |
           | --- | --- | --- |
           | **Cetus** ${VERSION} (Tauri) | [Cetus.dmg](https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.dmg) | Apple Silicon, macOS 13+ |
-          | **Cetus Swift** ${SWIFT_VERSION} (native) | [Cetus-Swift.dmg](https://github.com/${GITHUB_REPOSITORY}/releases/download/swift/Cetus-Swift.dmg) | Apple Silicon, macOS 15+ |
+          | **Cetus Swift** ${SWIFT_VERSION} (Beta, native) | [Cetus-Swift.dmg](https://github.com/${GITHUB_REPOSITORY}/releases/download/swift/Cetus-Swift.dmg) | Apple Silicon, macOS 15+ |
 
-          Both builds update themselves. Cetus Swift releases are published under the [swift](https://github.com/${GITHUB_REPOSITORY}/releases/tag/swift) tag.
+          Both builds update themselves. Cetus Swift is in beta; its releases are published under the [swift](https://github.com/${GITHUB_REPOSITORY}/releases/tag/swift) tag.
 
           NOTES
             gh release create "$RELEASE_TAG" \
