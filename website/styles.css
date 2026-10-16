@@ -75,3 +75,4 @@
  .theme-toggle{min-height:44px}.download-button{flex-wrap:wrap;max-width:100%}
 }
 @media(hover:none){.button:hover,.runtime-options button:hover{transform:none}}
+.download-buttons{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:27px}.download-buttons .download-button{margin-top:0}

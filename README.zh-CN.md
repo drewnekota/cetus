@@ -4,18 +4,17 @@
 
 <p align="center"><a href="https://cetus.run">官方网站 · cetus.run</a></p>
 
-<p align="center"><strong>把你惯用的 agent runtime，变成一个常驻桌面的智能助手。</strong></p>
+<p align="center"><strong>一个桌面客户端，管好你在用的所有 agent。</strong></p>
 
-<p align="center">Codex、Claude Code、DeepSeek Harness 或内置 runtime 仍是核心；Cetus 在它们之外补上桌面助手这一层：从任何 app 随时唤起、定时安排工作，并理解你在屏幕上看过的内容。</p>
-
-<p align="center"><strong>Quick Launcher</strong> · <strong>Automations</strong> · <strong>Global Quick Reply</strong> · <strong>Screen Context</strong></p>
+<p align="center">Claude Code、Codex、DeepSeek Harness、OpenCode、Grok Build、Kimi CLI，或内置 runtime —— 都在同一个 Mac app 里，在同一个地方批准、回答、审阅它们做的事。</p>
 
 <p align="center">
-  <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="下载 macOS 版" src="https://img.shields.io/badge/下载_macOS_版-Apple_Silicon-111111?style=for-the-badge&logo=apple" /></a>
+  <a href="https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg"><img alt="下载 Cetus macOS 版" src="https://img.shields.io/badge/下载-Cetus-111111?style=for-the-badge&logo=apple" /></a>
+  <a href="https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="下载 Cetus Swift macOS 版" src="https://img.shields.io/badge/下载-Cetus_Swift_(原生)-F05138?style=for-the-badge&logo=swift&logoColor=white" /></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/drewnekota/cetus" /></a>
+  <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="最新版本" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdrewnekota%2Fcetus%2Fmain%2Fsrc-tauri%2Ftauri.conf.json&query=%24.version&prefix=v&label=release&color=blue" /></a>
   <a href="https://github.com/drewnekota/cetus/releases"><img alt="下载量" src="https://img.shields.io/github/downloads/drewnekota/cetus/total" /></a>
   <a href="https://github.com/drewnekota/cetus/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/drewnekota/cetus/ci.yml" /></a>
   <a href="https://github.com/drewnekota/cetus/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/drewnekota/cetus" /></a>
@@ -24,137 +23,91 @@
 
 <p align="center"><a href="./README.md">English</a> · <strong>简体中文</strong></p>
 
-<h2 align="center">加入 Cetus 社区群聊</h2>
-
-<p align="center">微信扫码加入群聊，交流使用体验和建议。</p>
-
-<p align="center"><img src="docs/cetus-community-wechat.jpg" width="360" alt="Cetus 社区微信群二维码" /></p>
-
 ![Cetus runtime 选择器 —— Claude Code、Codex、DeepSeek Harness、OpenCode、Grok Build、Kimi CLI 都在同一个 macOS app 里](docs/screenshot-runtime-picker.png)
+
+## 为什么做 Cetus
+
+coding agent 已经不是慢的那一环了。Claude Code、Codex、DeepSeek Harness 都能自己连续干一个小时。真正拖慢进度的是 **human in the loop**：agent 停下来要权限、问一个澄清问题、或者做完了等你审阅 —— 而你根本没注意到，因为它躲在十几个终端标签页里的某一个。
+
+认真用 agent 的人，基本都不止用一个：这个任务用 Codex，那个用 Claude Code，再换个模型听听第二意见。每个 runtime 都有自己的终端、自己的审批提示、自己表达"我做完了"的方式。agent 开得越多，你一天里花在切标签页上的时间就越多，agent 等你的时间也越多。
+
+所以 Cetus 做的第一件事，是给它们一个统一的客户端：
+
+- **所有 runtime 在一个窗口里。** 直接用你已经装好、登录好的 CLI。Cetus 复用它的登录、模型和工具，不用再配第二个账号。
+- **在一个地方响应。** 任何 runtime 的权限请求、提问和计划，都以卡片形式出现在对话里。turn 还在跑也能插话引导，或者把下一条消息排进队列。
+- **在一块看板上审阅。** 每个对话都是 **进行中 · 待审阅 · 已完成** 里的一张卡片。做完的工作会等着你，不会在终端里被滚走。
+- **并行但不打架。** 每个对话可以有独立的 git worktree，多个 agent 能同时改同一个仓库。
+
+![Cetus 看板](docs/screenshot-kanban.png)
+
+当你所有的 agent 都跑在一个客户端里，它自然就成了承载周边一切的地方。Cetus 的其它能力都是从这里长出来的。
 
 ![Cetus 操作演示 —— 唤起 agent、创建自动化任务并切换 runtime](docs/cetus-demo.gif)
 
-## 保持关注
+## 立即使用
 
-⭐️ 给 Cetus 点个 Star，第一时间收到新版本发布通知，也能让更多人发现它。
+Cetus 支持 **Apple Silicon** Mac，同一个 app 有两个版本：
 
-<p align="center"><a href="https://github.com/drewnekota/cetus"><img src="docs/star-us.gif" width="720" alt="在 GitHub 上为 Cetus 仓库点 Star" /></a></p>
+| 版本 | 下载 | 系统要求 |
+| --- | --- | --- |
+| **Cetus** —— 最早的版本，基于 Tauri | [Cetus.dmg](https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg) | macOS 13+ |
+| **Cetus Swift** —— 原生 SwiftUI 版本 | [Cetus-Swift.dmg](https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg) | macOS 15+ |
 
-## Cetus 为你的 agent 补上的四件事
+两个版本都会自动更新。然后：
+
+1. 打开 DMG，把 Cetus 拖进「应用程序」。
+2. 使用内置 runtime，或选择一个已安装并登录的 `claude`、`codex` 或 `dsh`（DeepSeek Harness）CLI。
+3. 选一个工作区，给 agent 布置第一个任务。
+
+> **早期版本：** Cetus 仍在快速迭代中。遇到问题或缺少某个工作流，欢迎[提 issue](https://github.com/drewnekota/cetus/issues)。
+
+## 从这里长出来的能力
 
 ### Quick Launcher：一个快捷键，随时叫出 agent
 
-**同时按住左右 ⌘**，即可在任意 app 之上唤出 agent。Cetus 会把当前截图、前台 app、浏览器 URL 和选中文字作为可移除的 context 一起带进来，让你直接就地提问，不必先花时间解释自己正在看什么。
+**同时按住左右 ⌘**，即可在任意 app 之上唤出 agent。Cetus 会把当前截图、前台 app、浏览器 URL 和选中文字作为可移除的 context 一起带进来，让你就地提问，不必先解释自己正在看什么。
 
 ![Cetus 快捷启动器演示](docs/quick-launcher.gif)
 
 ### Automations：你不在时，也让它继续工作
 
-把任意 prompt 变成单次或周期任务（`at` / `every` / `cron` / `daily`）。每次运行都保留所选 runtime 和模型设置，在新的后台对话中完成工作，并把结果留在审阅队列里。
+把任意 prompt 变成单次或周期任务（`at` / `every` / `cron` / `daily`）。每次运行都保留所选 runtime 和模型设置，在新的后台对话中完成，结果落到看板上等你审阅。
 
 ![Cetus 自动化任务演示](docs/automation.gif)
 
-### Global Quick Reply：不用离开对话，就把回复写好
-
-在任意对话上**双击右 ⌥** —— 团队频道、邮件、工单后台都行 —— Cetus 会读懂屏幕上正在发生什么，然后把草稿流式写进一个可编辑的面板。它跟随对话本身的语言和语气，并且是真的在回答对方问的问题：对面抛了三个待决问题，回来的就不会是一句"好的"。按 **⏎** 直接填进你原本所在的输入框，按 **⇥** 则用另一个 runtime 重写同一屏。
-
-![Cetus 全局快速回复演示](docs/quick-reply.gif)
-
 ### Screen Context：让它记得你之前在做什么
 
-开启后，Cetus 会定期截帧、去重，并在设备端使用 Apple Vision 完成 OCR。Agent 之后可以回忆屏幕上出现过什么，也可以按文字或 app 检索历史。图片和文字都留在你的 Mac 上；这项能力默认关闭，并提供保留时长和敏感 app 排除列表。
+开启屏幕上下文后，Cetus 会采集画面、去重，并用 Apple Vision 在本地做 OCR。agent 之后可以回忆屏幕上出现过什么，或按文字和 app 检索历史。所有数据都留在你的 Mac 上；采集需要手动开启，并提供保留时长设置和排除 app 列表。
 
-![Cetus 屏幕 context 设置](docs/screenshot-screen-history.png)
-
-## 立即使用
-
-预编译版本支持 **Apple Silicon** 和 **macOS 13 或更高版本**。
-
-1. [下载最新版本](https://github.com/drewnekota/cetus/releases/latest)。
-2. 打开 DMG，将 Cetus 移入 Applications。
-3. 使用 Cetus 内置 runtime，或选择本机已经安装并登录的 `claude` / `codex` / `dsh`（DeepSeek Harness）CLI。
-4. 选择一个 workspace，交给 agent 第一个任务。
-
-Claude Code、Codex 和 DeepSeek Harness 会复用现有 CLI 登录，不需要再配置一个账号。从源码构建请参阅[参与开发](#参与开发)。
-
-> **早期版本：** Cetus 仍在快速开发。如果遇到问题或缺少需要的工作流，欢迎[提交 Issue](https://github.com/drewnekota/cetus/issues)。
-
-## 其它能力
-
-### 继续用你已经信任的 runtime
-
-内置 pi runtime、**Claude Code**、**Codex** 或 **DeepSeek Harness** 都可以直接使用，并沿用你现有的模型、工具和登录状态。Cetus 把不同 runtime 的事件转换成一致的桌面工作流，同时让对话 context 和后台终端跨回复继续存在。
-
-选择 **workspace** 和 runtime，可选附上文件或截图，然后发送。并行处理代码任务时，还可以为每个对话启用独立 git worktree。
-
-![Cetus 对话](docs/screenshot-chat.png)
-
-### 在一个地方审阅所有后台工作
-
-每个对话都是一张卡片，按**进行中 · 待审阅 · 已完成**跟踪。自动化任务、长时间运行的工作和并行解法都会集中到这里，不会埋在终端 session 中。
-
-![Cetus 看板](docs/screenshot-kanban.png)
-
-### 继续扩展你的 runtime
-
-- **持久记忆**：用户和 agent 都能编辑，并注入未来的对话
-- **并行解法**：把一个 prompt 铺开成 N 个候选运行，然后留一个、归档其余
-- **独立 git worktree**：隔离每个 coding session 的改动
-- **视觉快速回复**：根据当前屏幕起草回复，不必启动完整 agent run
-- **Cetus Remote**：可选的 Tailscale 手机伴侣，用于跟踪运行和处理确认
-- **语音听写**与**会议记忆**：在设备端完成处理
-- **电脑与浏览器控制**：执行有后果的操作前请求确认
-- **30+ 模型供应商**：包括 Anthropic、OpenAI、Google、Bedrock、Ollama、LM Studio 和 OpenRouter
+![Cetus 屏幕上下文设置](docs/screenshot-screen-history.png)
 
 ### 在任意 app 中听写
 
-在任意 app 里按住热键开口说话 —— Cetus 弹出一个随声音起伏的悬浮均衡器 HUD，在设备端用 Seed-ASR 转写，并把整理好的文字落到你光标所在的位置。和 app 内麦克风用同一套管线，只不过它跟着你跑遍整个桌面。
+在任何地方按住快捷键说话。Cetus 会弹出一个小的均衡器 HUD，用 Seed-ASR 转写，再把整理好的文字输入到光标所在位置。
 
 ![Cetus 语音听写 HUD](docs/voice-hud.jpeg)
 
-这张图是用手机拍的，因为这个悬浮层截不到。
-
 ### 把会议变成可搜索的上下文
 
-打开**会议记忆**，Cetus 会安静地把通话转写成可搜索的纪要 —— 全程设备端、只存文字、不保存音频。
+开启 **meeting memory** 后，Cetus 会在本地把通话转写成可搜索的笔记 —— 只存文字，不存音频。当其它 app 占用麦克风（Zoom、Teams、FaceTime、飞书……）时自动开始，也可以用快捷键（默认 **⌘⇧M**）手动开始；麦克风和系统音频分开采集，转写能分清谁说了什么。问一句"发布日期最后怎么定的？"，agent 就会在本地检索会议历史。默认关闭。
 
-- **自动识别** —— 当别的 app 占用麦克风（Zoom、Teams、FaceTime、飞书……），Cetus 自己开始会话，通话结束时停止。什么都不用按。
-- **手动** —— 全局热键（默认 **⌘⇧M**）手动开关，用于无法被自动识别的线下面对面会议。
-- **对话双方都收录** —— 你的麦克风是你；系统音频是其他所有人，分轨采集，纪要知道每句话是谁说的（需 macOS 14.2+；更低版本回退为仅麦克风）。
+![Cetus 会议记忆 —— 设置 → 会议](docs/screenshot-meetings.png)
 
-转写 100% 在设备端完成，走 Apple 的 Speech 框架，流式、带标点、在自然停顿处分段。会话进行中，屏幕顶部浮出一个小药丸（红点 + 计时 + 停止按钮），不抢焦点。
+### 还有更多
 
-这些纪要会成为 agent 能触达的 context：直接问"我们关于上线日期定了什么？"，Cetus 就会检索会议历史（`search_meeting_history`）—— 全部来自本地日志，没有东西离开这台机器。默认关闭；总开关意味着在你显式开启前，Cetus 绝不监听。目前仅支持 macOS。
+- **持久记忆**：你和 agent 都能编辑，会带进之后的对话
+- **并行方案**：一个 prompt 分出 N 个候选运行，留一个、归档其余
+- **Cetus Remote**：可选的手机端伴侣（基于 Tailscale），随时跟进运行、处理审批
+- **电脑与浏览器控制**：执行任何关键操作前都会确认，停止按钮始终可用
+- 内置 runtime 支持 **30+ 模型供应商**，包括 Anthropic、OpenAI、Google、Bedrock、Ollama、LM Studio 和 OpenRouter
 
-![Cetus 会议记忆](docs/screenshot-meetings.png)
+所有涉及屏幕、麦克风或其它 app 的能力都需要你手动开启。
 
-### 始终保有控制权
+## 社区
 
-每项能力都是显式开启的。**Computer & Browser control** 让 agent 通过编号的元素列表（而非原始像素）驱动你的浏览器和 Mac app，在任何有后果的操作（发送、删除、购买、提交、认证）前需要确认，Stop 按钮始终触手可及。
+⭐️ 给仓库点个 Star，第一时间收到新版本通知。想交流使用体验和建议，欢迎微信扫码加入群聊。
 
-![Cetus 设置](docs/screenshot-settings.png)
-
-## 为什么做 Cetus
-
-Codex、Claude Code、DeepSeek Harness 这样的通用 agent 已经足够强大，Cetus 并不打算取代它们。它补上那些不适合待在终端里的桌面助手能力：随时可用的入口、来自 Mac 的环境 context、跨 session 的连续性、后台调度，以及统一审阅完成结果的地方。
-
-Runtime 继续负责智能与执行，Cetus 则成为包在它周围的 assistant layer。你可以为每项任务选择合适的 runtime，只加入自己愿意提供的 context，并让那些跨越数小时甚至数天的工作始终可见、可检查。
-
-这样，一些不适合塞在终端标签页里的工作流就变得可行：
-
-- 你离开时继续运行 agent，回来后审阅结果。
-- 比较彼此独立的方案，而不让 git 改动相互冲突。
-- 把项目决策与个人偏好带入下一次对话。
-- 把编码工作与周围的会议、屏幕和 app 连接起来。
-
-### Memory 与 Dreaming
-
-上面三样东西描述的是某一个时刻。让 agent 跨时间真正有用的，是它能不能积累什么。
-
-![Cetus — the agent loop](docs/agent-loop.png)
-
-- **Memory（记忆）** 是 agent 写回给自己的 context —— 下一个 session 从上次停下的地方继续，而不是从零开始。
-- **Dreaming（做梦）** 在你闲着的时候跑：Cetus 回顾最近的对话，把它们整合成持久的笔记，让原始聊天记录沉淀为可以复用的偏好。默认开启。
+<p align="center"><img src="docs/cetus-community-wechat.jpg" width="280" alt="Cetus 社区微信群二维码" /></p>
 
 ## 参与开发
 
@@ -182,7 +135,7 @@ export DEEPSEEK_API_KEY=sk-...
 pnpm tauri dev
 ```
 
-Tauri 会启动 Next.js 开发服务器（端口 3000）并打开一个指向它的窗口。pi sidecar 会从打包好的二进制自动派生。
+Tauri 会启动 Next.js 开发服务器（端口 17381）并打开一个指向它的窗口。pi sidecar 会从打包好的二进制自动派生。
 
 #### 开发后门：`PI_BIN`
 
@@ -204,6 +157,10 @@ pnpm tauri build
 
 在 macOS 上输出 `.app` / `.dmg`。`tauri build` 需要一套完整的多尺寸图标（存于 `src-tauri/icons/`，用 `pnpm tauri icon <path-to-1024px.png>` 重新生成）。
 
+### Cetus Swift
+
+原生版本在 [`swift/`](swift) 目录下，是一个 SwiftPM 包（macOS 15+）。`swift build` 编译；`swift/bundle.sh` 会组装出 `swift/build/Cetus.app`，需要通过 `$CETUS_AGENTD` 指定 `cetus-agentd` 二进制。
+
 ## 架构
 
 ```
@@ -215,7 +172,7 @@ pnpm tauri build
 │  │ - ConversationList      │ ───────► │  (list, new, switch, send,           │ │
 │  │ - Chat (text/thinking/  │          │   archive, set_model,                │ │
 │  │   tool cards), Composer │ ◄─────── │   extension_ui_respond, …)           │ │
-│  │ - ModelPicker (DeepSeek)│  event   │                                      │ │
+│  │ - ModelPicker           │  event   │                                      │ │
 │  │ - DialogHost (ext UI)   │          │  PiRpc: sidecar(plugin-shell) OR     │ │
 │  │ - chatReducer (deltas → │          │    PI_BIN(tokio::process)            │ │
 │  │   RenderedMessage[])    │          │  Store: SQLite metadata              │ │
@@ -244,7 +201,7 @@ host/extension bridge 被拆成了两个独立、与具体 provider 无关的包
 - **[`cetus-bridge`](src-tauri/cetus-bridge)**（Rust crate）—— 产品无关的 host 运行时：围绕 `pi --mode rpc` 的 JSONL 子进程 RPC、确定性的 extension 加载、host tunnel 分类，以及可注入的 `EventSink` / `TaskSpawner` trait。Tauri、app 存储、模型 provider 选择都留在 crate 之外，由 app 侧适配器承接（`tauri_bridge.rs`、`app_event.rs`、`model_bridge.rs`）。`examples/minimal_host.rs` 给出了最小集成示例。
 - **[`@cetus/bridge-protocol`](packages/cetus-bridge-protocol)**（TypeScript）—— extension 侧协议：共享的 `HOST_TUNNELS` 哨兵列表、`callHost()`、`toolResult()`，以及 host tunnel 的类型定义。
 
-两个包都是 MIT 协议，且不含任何 Cetus / DeepSeek 专属代码，其他 agent host 也可以复用同一套 bridge。协议与安全边界详见 [docs/bridge.md](docs/bridge.md)。
+两个包都是 MIT 协议，且不含任何 Cetus / DeepSeek 专属代码，其他 agent host 也可以复用同一套 bridge。
 
 <details>
 <summary>友情链接</summary>

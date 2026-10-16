@@ -15,7 +15,7 @@ Open http://127.0.0.1:4178. The included `main.js` is already built.
 
 ## Product scenes
 
-The hero has Chat, Kanban, Automations, and Quick Launcher tabs. The smaller feature scenes depict the launcher, screenshot attachment, dictation, screen history, meetings, automations, quick replies, memory, workspaces, and runtime conversations. All use local example content; no agent runtime is called.
+The hero has Chat, Kanban, Automations, and Quick Launcher tabs. The smaller feature scenes depict the launcher, screenshot attachment, dictation, screen history, meetings, automations, approvals, memory, workspaces, and runtime conversations. All use local example content; no agent runtime is called.
 
 - `index.html`: copy and SVG/HTML scene markup.
 - `styles.css`: marketing layout and theme.
@@ -27,7 +27,7 @@ The hero has Chat, Kanban, Automations, and Quick Launcher tabs. The smaller fea
 
 Image placeholders have been replaced by coded UI; the previous `media.json` is retained but is no longer loaded. To customize visuals, edit the scene markup and styles.
 
-Shortcut copy distinguishes holding both Command keys, holding both Option keys for the screenshot launcher, and double-tapping right Option for Quick Reply. These actions can be assigned in app Settings; the screenshot launcher is not enabled by default in the current source.
+Shortcut copy distinguishes holding both Command keys and holding both Option keys for the screenshot launcher. These actions can be assigned in app Settings; the screenshot launcher is not enabled by default in the current source.
 
 Run `npm run build` after JavaScript changes and `npm run check` for syntax, references, and local resources.
 

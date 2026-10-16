@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, 'dist');
-const files = new Set(['index.html','main.js','styles.css','product-demo.css','feature-scenes.css']);
+const files = new Set(['index.html','main.js','styles.css','product-demo.css','feature-scenes.css','assets/og.png']);
 const html = await readFile(path.join(root,'index.html'),'utf8');
 for (const match of html.matchAll(/(?:src|href)="([^"#]+)"/g)) if (!/^(https?:|data:)/.test(match[1])) files.add(match[1]);
 for (const css of ['styles.css','product-demo.css','feature-scenes.css']) {

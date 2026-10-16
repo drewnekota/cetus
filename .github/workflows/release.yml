@@ -256,6 +256,9 @@ jobs:
           set -euo pipefail
           mkdir release-assets
           cp "$DMG" release-assets/
+          # Stable name so README and cetus.run can link
+          # releases/latest/download/Cetus.dmg without knowing the version.
+          cp "$DMG" release-assets/Cetus.dmg
           cp "$MAC_UPDATER" "$MAC_UPDATER.sig" release-assets/
 
       - name: Upload macOS release assets
@@ -414,10 +417,24 @@ jobs:
             if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
               gh release delete "$RELEASE_TAG" --yes
             fi
+            VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+            SWIFT_VERSION="$(tr -d '[:space:]' < swift/VERSION)"
+            cat > "$RUNNER_TEMP/notes.md" <<NOTES
+          ## Download
+
+          | Build | File | Requires |
+          | --- | --- | --- |
+          | **Cetus** ${VERSION} (Tauri) | [Cetus.dmg](https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.dmg) | Apple Silicon, macOS 13+ |
+          | **Cetus Swift** ${SWIFT_VERSION} (native) | [Cetus-Swift.dmg](https://github.com/${GITHUB_REPOSITORY}/releases/download/swift/Cetus-Swift.dmg) | Apple Silicon, macOS 15+ |
+
+          Both builds update themselves. Cetus Swift releases are published under the [swift](https://github.com/${GITHUB_REPOSITORY}/releases/tag/swift) tag.
+
+          NOTES
             gh release create "$RELEASE_TAG" \
               release-assets/* \
               --repo "$GITHUB_REPOSITORY" \
-              --title "$RELEASE_TAG" \
+              --title "Cetus ${VERSION}" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
               --generate-notes \
               --latest
           else
