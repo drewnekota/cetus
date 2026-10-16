@@ -679,6 +679,12 @@ export function renderComposer({
                 )
           }
           rows={1}
+          // Spell/grammar checking and autocorrect re-check the whole draft on
+          // every keystroke through a sync IPC to the UI process, which stalls
+          // both processes while IMEs like Doubao are waiting on text queries.
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
           disabled={disabled}
           className={cn(
             "relative min-h-14 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent",

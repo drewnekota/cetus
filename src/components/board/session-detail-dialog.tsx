@@ -352,8 +352,8 @@ export function SessionDetailPanel({
       <header
         className={cn(
           "flex items-center justify-between gap-4 border-b px-5",
-          // Docked beside the Threads feed: one h-11 line matching its header.
-          docked ? "h-11 shrink-0 border-border/70" : "border-border py-3",
+          // Docked beside the Threads feed: one h-10 line matching its header.
+          docked ? "h-10 shrink-0 border-border/70" : "border-border py-3",
         )}
       >
         <div
@@ -512,6 +512,9 @@ export function SessionDetailPanel({
             <ChatPane
               convId={convId}
               backend={(conversation?.backend as BackendId | undefined) ?? "pi"}
+              // Same key as the main chat, so a thread keeps its own unsent
+              // text across thread switches and both views share it.
+              draftKey={convId ? `chat:${convId}` : undefined}
               modelChoice={modelChoice}
               onModelChange={onModelChange}
               workspaceDir={workspaceDir}

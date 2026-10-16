@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import type {
   ComponentProps,
   Dispatch,
@@ -617,7 +618,17 @@ export function renderHome({
       <SidebarInset className="m-2 flex min-h-0 flex-col overflow-hidden rounded-xl border-[0.5px] border-border bg-background shadow-[inset_0_1px_0_rgb(255_255_255_/_0.45),0_3px_16px_rgb(0_0_0_/_0.045)] dark:shadow-[inset_0_1px_0_rgb(255_255_255_/_0.10),0_4px_18px_rgb(0_0_0_/_0.14)]">
         <div className="flex min-h-0 flex-1 flex-row">
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className="flex h-10 items-center justify-end gap-3 px-4 text-xs text-muted-foreground">
+            {/* Threads draws its own h-10 header (also a drag strip), so with
+                nothing else to show here the shell header shrinks to a
+                sliver instead of stacking a second empty bar on top. */}
+            <header
+              className={cn(
+                "flex items-center justify-end gap-3 px-4 text-xs text-muted-foreground",
+                view === "threads" && sidebarOpen && piReady
+                  ? "h-2 overflow-hidden"
+                  : "h-10",
+              )}
+            >
               {/* With the sidebar collapsed, nothing else clears the macOS
                   traffic lights, so the content card takes over: a drag spacer
                   wide enough for the three lights, then the expand button in

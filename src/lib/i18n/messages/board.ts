@@ -6,7 +6,6 @@ export const board = {
   en: {
     // Threads view
     "threads.allWorkspaces": "All workspaces",
-    "threads.showEarlier": "Show {count} earlier",
     "threads.empty.title": "No sessions here yet",
     "threads.empty.body": "Describe a task below. Each message starts its own session, which shows up here as a thread.",
     "threads.placeholder": "Start a new thread — @ picks the runtime",
@@ -23,6 +22,7 @@ export const board = {
     "threads.status.unread": "Done",
     "threads.status.idle": "Idle",
     "threads.status.input": "Needs input",
+    "threads.jumpTo": "Jump to next: {status}",
     "threads.waiting": "Waiting for you",
     "threads.thinking": "Thinking",
     "threads.digest.explore": "{count} file reads and searches",
@@ -81,7 +81,6 @@ export const board = {
   zh: {
     // Threads view
     "threads.allWorkspaces": "全部工作区",
-    "threads.showEarlier": "显示更早的 {count} 个",
     "threads.empty.title": "这里还没有会话",
     "threads.empty.body": "在下面描述一个任务。每条消息都会开一个独立会话，并作为 thread 显示在这里。",
     "threads.placeholder": "开一个新 thread — 输入 @ 选择 runtime",
@@ -98,6 +97,7 @@ export const board = {
     "threads.status.unread": "已完成",
     "threads.status.idle": "空闲",
     "threads.status.input": "等待输入",
+    "threads.jumpTo": "跳到下一个：{status}",
     "threads.waiting": "等你回复",
     "threads.thinking": "思考中",
     "threads.digest.explore": "{count} 次读取与搜索",

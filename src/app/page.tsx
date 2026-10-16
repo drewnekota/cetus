@@ -734,14 +734,25 @@ export default function Home() {
     const dir = workspaceDir || defaultWorkspace;
     if (dir) setBoardWorkspaceFilter(dir);
   }, [view, boardWorkspaceFilter, workspaceDir, defaultWorkspace]);
+  // The thread each folder had docked, so switching back reopens it (its chat
+  // resumes its own reading position).
+  const threadByFolderRef = useRef(new Map<string, string | null>());
   const openWorkspaceFeed = useCallback((dir: string | undefined) => {
     if (!dir) return;
     // Landing in a folder means typing into its feed next.
     setFocusToken((t) => t + 1);
-    if (dir === threadNavRef.current.filter) return;
+    const { filter, detailId: open } = threadNavRef.current;
+    if (dir === filter) return;
+    if (filter) threadByFolderRef.current.set(filter, open);
     setBoardWorkspaceFilter(dir);
-    // The docked thread belongs to the folder being left.
-    setDetailId(null);
+    // The docked thread belongs to the folder being left; bring back the one
+    // this folder had open if it is still in its feed.
+    const back = threadByFolderRef.current.get(dir) ?? null;
+    setDetailId(
+      back && threadFeed(conversationsRef.current, dir).some((c) => c.id === back)
+        ? back
+        : null,
+    );
   }, []);
   /** Kanban's New task: the dialog starts in the board's folder when one is
    *  picked (not "All"), else wherever the last chat was. */
