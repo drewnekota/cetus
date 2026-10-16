@@ -285,12 +285,6 @@ export const en = {
   "launcher.fn.shot.label": "Quick launch + screenshot",
   "launcher.fn.shot.description":
     "Select a screen area to attach — click for the full screen — then launch.",
-  "launcher.fn.reply.label": "Visual quick reply",
-  "launcher.fn.reply.description":
-    "Capture the current screen and AX context, ask your chosen agent runtime for reply options, and insert one back into the focused app.",
-  "launcher.replyRuntime.label": "Quick-reply runtime",
-  "launcher.replyRuntime.description":
-    "Use one of the agent runtimes enabled in Settings → Runtimes.",
   "launcher.summon.label": "Summon Cetus",
   "launcher.summon.description":
     "Global shortcut to bring Cetus to the front, switching desktops if it's on another.",
@@ -398,7 +392,7 @@ export const en = {
     "Cetus reassigns Caps Lock to dictation while it's running and restores it when you quit.",
   "voice.handsfreeShortcut.label": "Hands-free double-tap shortcut",
   "voice.handsfreeShortcut.description":
-    "Optional and off by default. Double-tap {gesture} to start or stop hands-free dictation. If that double-tap is assigned to quick reply or the launcher, that action takes priority. Requires Doubao.",
+    "Optional and off by default. Double-tap {gesture} to start or stop hands-free dictation. If that double-tap is assigned to the launcher, the launcher takes priority. Requires Doubao.",
   "voice.insert.label": "Insert with",
   "voice.insert.description":
     "Type sends synthetic keystrokes; Paste uses the clipboard + ⌘V (more robust in some apps, briefly replaces your clipboard).",

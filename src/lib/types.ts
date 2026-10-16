@@ -106,11 +106,6 @@ export interface QuickSettings {
   gesturePlain: QuickGesture;
   /** Gesture that opens the launcher *with* a screenshot attached. */
   gestureShot: QuickGesture;
-  /** Gesture that captures the current UI and directly drafts reply options
-   *  with the selected agent runtime. */
-  gestureReply: QuickGesture;
-  /** Agent runtime used for the one-shot quick-reply turn. */
-  replyBackend: BackendId;
   /** Configurable global hotkey (for example "Cmd+Shift+K" on macOS or
    *  "Ctrl+Shift+K" on Windows) that
    *  brings cetus to the front, switching desktops if it's on another. Empty
@@ -122,7 +117,7 @@ export interface QuickSettings {
   /** Push-to-talk modifier held while speaking. */
   voiceGesture: VoiceGesture;
   /** Opt-in double-tap of the voice trigger for hands-free mode. Off by
-   *  default so double right-Option belongs to quick reply only. */
+   *  default. */
   voiceHandsfreeShortcut: boolean;
   /** How a global transcript is inserted into the focused app. */
   voiceInsertMode: VoiceInsertMode;
@@ -157,8 +152,6 @@ export const DEFAULT_QUICK_SETTINGS: QuickSettings = {
   enabled: true,
   gesturePlain: "both_cmd",
   gestureShot: "off",
-  gestureReply: "double_opt",
-  replyBackend: "pi",
   summonHotkey: "",
   sessionMode: "new",
   voiceEnabled: false,
@@ -246,48 +239,6 @@ export interface QuickOpenUrlPayload {
   url: string;
   title: string;
   openId: number;
-}
-
-/** Initial loading event for the direct visual quick-reply surface. Carries
- *  the full captured input so the panel can show what the model receives. */
-export interface QuickReplyOpenPayload {
-  openId: number;
-  app: string;
-  screenshotPermission: boolean;
-  screenshot: QuickScreenshot | null;
-  context: QuickContext | null;
-  /** Characters of focused-window AX text sent alongside the screenshot.
-   *  Zero at open time — the AX walk runs after the panel presents and reports
-   *  its volume in `quick-reply-context`. */
-  axChars: number;
-  /** Runtime answering this turn, already resolved against the enabled set. */
-  backend: BackendId;
-}
-
-/** The pid-keyed half of the capture, read once the panel is already up: window
- *  title / browser URL merged into the context chips, plus the AX text volume. */
-export interface QuickReplyContextPayload {
-  openId: number;
-  context: QuickContext | null;
-  axChars: number;
-}
-
-export interface QuickReplyOutput {
-  reply: string;
-  provider: string;
-}
-
-/** Streamed slice of the reply draft for the matching quick-reply open. */
-export interface QuickReplyDeltaPayload {
-  openId: number;
-  delta: string;
-}
-
-/** One-shot completion for the matching quick-reply open. */
-export interface QuickReplyResultPayload {
-  openId: number;
-  output: QuickReplyOutput | null;
-  error: string | null;
 }
 
 /** Coding-agent runtime for a conversation. "pi" is the built-in Cetus

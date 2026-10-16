@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { AppWindow, ArrowUp, Check, CornerDownLeft, File, Globe, ImageOff, Paperclip, ScanText, TextSelect, X } from "lucide-react";
+import { ArrowUp, Check, File, Globe, ImageOff, Paperclip, TextSelect, X } from "lucide-react";
 import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -15,7 +15,6 @@ import {
   BACKENDS,
   backendSupportsTuning,
   CliTuningMenu,
-  nextBackend,
   nextRuntimeTarget,
   RuntimeShortcutHint,
   runtimePresetLabel,
@@ -42,10 +41,6 @@ import {
   type QuickAttachment,
   type QuickOpenPayload,
   type QuickOpenUrlPayload,
-  type QuickReplyContextPayload,
-  type QuickReplyDeltaPayload,
-  type QuickReplyOpenPayload,
-  type QuickReplyResultPayload,
   type QuickScreenshot,
   type QuickSessionMode,
 } from "@/lib/types";
@@ -150,16 +145,6 @@ export function QuickPanel() {
   const [launchedTick, setLaunchedTick] = useState(0);
   // Whether any non-archived chat exists — gates the "Last" session option.
   const [hasLastChat, setHasLastChat] = useState(true);
-  const [surface, setSurface] = useState<"launcher" | "reply">("launcher");
-  const [replyOpen, setReplyOpen] = useState<QuickReplyOpenPayload | null>(null);
-  const [replyResult, setReplyResult] = useState<QuickReplyResultPayload | null>(null);
-  const [replyDraft, setReplyDraft] = useState("");
-  const [insertingReply, setInsertingReply] = useState(false);
-  // Runtime the reply surface is drafting on. Seeded from the open payload (the
-  // resolved `replyBackend` setting) and re-runnable: picking another one
-  // re-sends the same capture, so the user can compare drafts without having to
-  // re-trigger the gesture — the screen it was reading is gone by then.
-  const [replyBackend, setReplyBackend] = useState<BackendId>("pi");
 
   const taRef = useRef<HTMLTextAreaElement>(null);
   // Wraps everything the launcher renders. Its natural height drives the
@@ -425,36 +410,9 @@ export function QuickPanel() {
     [backend],
   );
 
-  /** Re-draft on another runtime against the capture already in flight. The
-   *  turn streams into the same draft, so clear it back to the loading shell
-   *  first; a superseded turn's late deltas are dropped natively. */
-  const onReplyBackendChange = useCallback(
-    (id: string) => {
-      const next = BACKENDS.find((b) => b.id === id);
-      if (!next || next.id === replyBackend) return;
-      setReplyBackend(next.id);
-      setReplyResult(null);
-      setReplyDraft("");
-      api.quickReplyRegenerate(next.id).catch((error) => {
-        setReplyResult((current) =>
-          current ?? { openId: replyOpen?.openId ?? 0, output: null, error: String(error) },
-        );
-      });
-    },
-    [replyBackend, replyOpen],
-  );
-
   // ⌃1…⌃9 (user-editable) switch the runtime, mirroring the main composer.
-  // This window only receives keys while the panel is up, and the two surfaces
-  // own separate runtime choices — the reply surface re-drafts on switch (and
-  // has no tuning, so a preset slot there just selects its runtime).
-  const onReplyRuntimeSwitch = useCallback(
-    (target: RuntimeSwitchTarget) => onReplyBackendChange(target.backend),
-    [onReplyBackendChange],
-  );
-  useRuntimeShortcuts(
-    surface === "reply" ? onReplyRuntimeSwitch : onRuntimeSwitch,
-  );
+  // This window only receives keys while the panel is up.
+  useRuntimeShortcuts(onRuntimeSwitch);
 
   const onWorkspaceChange = useCallback((dir: string) => {
     setWorkspaceDir(dir);
@@ -474,7 +432,6 @@ export function QuickPanel() {
     let cancelled = false;
     listen<QuickOpenPayload>("quick-open", (e) => {
       const p = e.payload;
-      setSurface("launcher");
       openIdRef.current = p.openId;
       // The native side resets to the compact base box on every open; the
       // observer only fires on change, so re-report once the reset lays out.
@@ -520,66 +477,6 @@ export function QuickPanel() {
       unlisten?.();
     };
   }, [focusSoon, reportHeight]);
-
-  // Direct visual reply is a separate state of the same warm, non-activating
-  // window. The open event paints a loading shell immediately; the turn then
-  // streams draft deltas and settles with one result, both accepted only for
-  // the matching capture token.
-  useEffect(() => {
-    let unlisteners: (() => void)[] | undefined;
-    let cancelled = false;
-    Promise.all([
-      listen<QuickReplyOpenPayload>("quick-reply-open", (e) => {
-        setSurface("reply");
-        setReplyOpen(e.payload);
-        setReplyBackend(e.payload.backend ?? "pi");
-        setReplyResult(null);
-        setReplyDraft("");
-        setInsertingReply(false);
-        openingRef.current = true;
-        window.setTimeout(() => { openingRef.current = false; }, 400);
-      }),
-      // The AX walk and browser probe land after the panel is already up; fold
-      // their result into the captured-input band the user is looking at.
-      listen<QuickReplyContextPayload>("quick-reply-context", (e) => {
-        setReplyOpen((current) =>
-          current && current.openId === e.payload.openId
-            ? { ...current, context: e.payload.context, axChars: e.payload.axChars }
-            : current,
-        );
-      }),
-      listen<QuickReplyDeltaPayload>("quick-reply-delta", (e) => {
-        setReplyOpen((current) => {
-          if (!current || current.openId !== e.payload.openId) return current;
-          setReplyResult((result) => {
-            if (!result) setReplyDraft((draft) => draft + e.payload.delta);
-            return result;
-          });
-          return current;
-        });
-      }),
-      listen<QuickReplyResultPayload>("quick-reply-result", (e) => {
-        setReplyOpen((current) => {
-          if (!current || current.openId !== e.payload.openId) return current;
-          setReplyResult(e.payload);
-          // The settled text is authoritative over the streamed concatenation
-          // (some runtimes normalize whitespace or emit preamble blocks).
-          setReplyDraft(e.payload.output?.reply ?? "");
-          return current;
-        });
-      }),
-    ]).then((fns) => {
-      if (cancelled) {
-        fns.forEach((fn) => fn());
-      } else {
-        unlisteners = fns;
-      }
-    });
-    return () => {
-      cancelled = true;
-      unlisteners?.forEach((fn) => fn());
-    };
-  }, []);
 
   // The browser URL is fetched after the panel presents (off the first-paint
   // path) and streamed in here. Merge it into the existing context only — if the
@@ -686,24 +583,6 @@ export function QuickPanel() {
       submittingRef.current = false;
     }
   }, [text, attachments, includeScreenshot, screenshot, context, sessionMode, workspaceDir, modelChoice, backend, cliModel, cliEffort, keepOpen, openMain, focusSoon]);
-
-  const insertReply = useCallback(async () => {
-    const value = replyDraft.trim();
-    // The draft is insertable only once the turn settled; a partial stream
-    // could otherwise send half a sentence into the focused app.
-    if (!value || insertingReply || !replyResult?.output) return;
-    setInsertingReply(true);
-    submittingRef.current = true;
-    try {
-      await api.quickReplyInsert(value);
-      setReplyDraft("");
-      setReplyResult(null);
-      setReplyOpen(null);
-    } catch {
-      setInsertingReply(false);
-      submittingRef.current = false;
-    }
-  }, [replyDraft, insertingReply, replyResult]);
 
   /** Append absolute paths to the draft so the agent opens them off disk. */
   const insertPathRefs = useCallback((paths: string[]) => {
@@ -832,22 +711,6 @@ export function QuickPanel() {
       e.preventDefault();
       void submit();
     }
-  }
-
-  if (surface === "reply") {
-    return (
-      <QuickReplySurface
-        open={replyOpen}
-        result={replyResult}
-        draft={replyDraft}
-        inserting={insertingReply}
-        backend={replyBackend}
-        onBackendChange={onReplyBackendChange}
-        onDraftChange={setReplyDraft}
-        onInsert={() => { void insertReply(); }}
-        onDismiss={() => { api.quickDismiss().catch(() => {}); }}
-      />
-    );
   }
 
   // Every action-strip control shares one quiet language: borderless ghost
@@ -1105,164 +968,6 @@ export function QuickPanel() {
   );
 }
 
-function QuickReplySurface({
-  open,
-  result,
-  draft,
-  inserting,
-  backend,
-  onBackendChange,
-  onDraftChange,
-  onInsert,
-  onDismiss,
-}: {
-  open: QuickReplyOpenPayload | null;
-  result: QuickReplyResultPayload | null;
-  draft: string;
-  inserting: boolean;
-  backend: BackendId;
-  onBackendChange: (id: string) => void;
-  onDraftChange: (value: string) => void;
-  onInsert: () => void;
-  onDismiss: () => void;
-}) {
-  const { t } = useTranslation("quick");
-  const enabledBackendIds = useEnabledBackendIds();
-  // The turn streams the draft in before the result settles; show the text as
-  // soon as the first delta lands and keep the footer in "reading" state.
-  const streaming = !result && draft.length > 0;
-  const status = open?.app
-    ? t("reply.readingApp", { app: open.app })
-    : t("reply.readingScreen");
-
-  function onKeyDown(e: React.KeyboardEvent) {
-    if (e.defaultPrevented) return;
-    if (e.key === "Escape") {
-      e.preventDefault();
-      onDismiss();
-      return;
-    }
-    // Tab re-drafts on the next runtime, same key that cycles runtimes in the
-    // launcher and the main composer.
-    if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      onBackendChange(nextBackend(backend, enabledBackendIds));
-      return;
-    }
-    if (e.key === "Enter" && !e.shiftKey) {
-      if ((e.nativeEvent as KeyboardEvent).isComposing) return;
-      e.preventDefault();
-      onInsert();
-    }
-  }
-
-  // Same quiet shell as the launcher: no header, the editable draft owns the
-  // region above a thin muted action strip.
-  return (
-    <div
-      tabIndex={-1}
-      autoFocus
-      onKeyDown={onKeyDown}
-      className="flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground outline-none dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-xs dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]"
-    >
-      {!result && !streaming ? (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-          <Spinner className="size-5" />
-          <span>{open?.screenshotPermission === false ? t("reply.permission") : t("reply.generating")}</span>
-        </div>
-      ) : result?.error ? (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-10 text-center">
-          <ImageOff className="size-5 text-warning" />
-          <div className="max-w-xl text-sm text-foreground">{result.error}</div>
-          <div className="text-xs text-muted-foreground">{t("reply.retryRuntime")}</div>
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col px-6 pt-5">
-          <textarea
-            autoFocus
-            value={draft}
-            onChange={(e) => onDraftChange(e.target.value)}
-            onKeyDown={onKeyDown}
-            aria-label={t("reply.edit")}
-            className="w-full flex-1 resize-none overflow-x-hidden overflow-y-auto bg-transparent text-lg font-medium leading-7 text-foreground outline-none"
-          />
-        </div>
-      )}
-
-      {/* Captured-input band — mirrors the launcher's attachments row: exactly
-          what rode along to the model (screenshot, frontmost app, page, AX
-          text volume), visible from the first loading frame. Read-only: the
-          capture is already in flight. */}
-      {(open?.screenshot || open?.context || (open?.axChars ?? 0) > 0) && (
-        <div className="flex shrink-0 items-end gap-2 px-6 pb-2.5 pt-2">
-          {open?.screenshot && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={`data:${open.screenshot.mimeType};base64,${open.screenshot.data}`}
-              alt={t("screenshot.alt")}
-              className="h-14 rounded-md border border-black/[0.06] object-cover dark:border-white/[0.08]"
-            />
-          )}
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            {open?.context?.app && (
-              <ContextChip
-                icon={<AppWindow className="size-3" />}
-                label={open.context.app}
-                title={open.context.title ? `${open.context.app}\n${open.context.title}` : open.context.app}
-              />
-            )}
-            {open?.context?.url && (
-              <ContextChip
-                icon={<Globe className="size-3" />}
-                label={hostOf(open.context.url)}
-                title={open.context.title ? `${open.context.title}\n${open.context.url}` : open.context.url}
-              />
-            )}
-            {open?.context?.selection && (
-              <ContextChip
-                icon={<TextSelect className="size-3" />}
-                label={t("context.selection", { count: open.context.selection.length })}
-                title={open.context.selection}
-              />
-            )}
-            {(open?.axChars ?? 0) > 0 && (
-              <ContextChip
-                icon={<ScanText className="size-3" />}
-                label={t("reply.screenText", { count: open?.axChars ?? 0 })}
-              />
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Same action strip as the launcher, minus everything a one-shot turn
-          doesn't have: just the runtime, which doubles as the re-draft control. */}
-      <div className="flex shrink-0 items-center gap-2.5 border-t border-black/[0.06] px-4 py-2.5 text-md text-muted-foreground dark:border-white/[0.06] [&_[data-slot=select-trigger]]:!h-7 [&_[data-slot=select-trigger]]:!text-xs [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3">
-        <BackendSelect value={backend} onChange={onBackendChange} />
-        <span className="min-w-0 truncate text-muted-foreground/70">
-          {result?.output ? t("reply.drafted") : status}
-        </span>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-4 pr-1">
-          {result?.output && (
-            <>
-              <Kbd>
-                <CornerDownLeft className="size-2.5" />
-              </Kbd>
-              {inserting ? t("reply.inserting") : t("reply.insert")}
-              <span className="text-muted-foreground/40">·</span>
-            </>
-          )}
-          <Kbd>⇥</Kbd>
-          {t("reply.redraft")}
-          <span className="text-muted-foreground/40">·</span>
-          <Kbd>esc</Kbd>
-          {t("footer.dismiss")}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1273,8 +978,7 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 /** Compact coding-agent picker for the launcher's action strip. With
- *  `includePresets` the user's runtime presets are interleaved in the list
- *  (the reply surface has no tuning, so it leaves them out). */
+ *  `includePresets` the user's runtime presets are interleaved in the list. */
 function BackendSelect({
   value,
   onChange,
@@ -1363,9 +1067,8 @@ function hostOf(url: string): string {
   }
 }
 
-/** An ambient-context chip. Removable in the launcher (where dropping a chip
- *  edits the prompt); read-only in the reply surface (the capture is already
- *  in flight, so there is nothing to remove). */
+/** An ambient-context chip. Removable when `onRemove` is given (dropping a
+ *  chip edits the prompt). */
 function ContextChip({
   icon,
   label,

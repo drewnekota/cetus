@@ -121,10 +121,8 @@ pub async fn open_panel(app: &AppHandle, capture: bool) {
 /// fills the space above the bottom action strip. The height is a floor — the
 /// panel reports its real content height (the same 240 floor is baked into its
 /// layout) and the window grows downward past it when the draft or attachments
-/// need more room. Reply mode is a fixed taller box for the streamed draft plus
-/// the captured-input band.
+/// need more room.
 const LAUNCHER_BASE: (f64, f64) = (760.0, 240.0);
-pub(super) const REPLY_BASE: (f64, f64) = (760.0, 400.0);
 /// Cap so a huge paste can't push the launcher off the screen.
 const LAUNCHER_MAX_H: f64 = 640.0;
 
@@ -169,12 +167,7 @@ pub async fn quick_set_scale(app: AppHandle, scale: f64) -> Result<(), String> {
     let state = app.state::<AppState>();
     state.quick.scale_pct.store(pct, Ordering::Relaxed);
     if state.quick.shown.load(Ordering::Relaxed) {
-        // A live reply stash means the taller reply surface is what's up.
-        let size = if state.quick.reply_stash.lock().unwrap().is_some() {
-            scaled_size(&app, REPLY_BASE)
-        } else {
-            launcher_size(&app)
-        };
+        let size = launcher_size(&app);
         if let Some(win) = app.get_webview_window("quick") {
             #[cfg(target_os = "macos")]
             {
@@ -193,8 +186,7 @@ pub async fn quick_set_scale(app: AppHandle, scale: f64) -> Result<(), String> {
 
 /// The launcher reports its natural content height (CSS px, pre-zoom) whenever
 /// it changes — more lines typed, an attachment chip added. The window hugs
-/// that height, anchored at its top edge. Ignored while the reply surface is
-/// up (it has its own fixed geometry).
+/// that height, anchored at its top edge.
 #[tauri::command]
 pub async fn quick_set_content_height(app: AppHandle, height: f64) -> Result<(), String> {
     let h = height.max(0.0).round() as u32;
@@ -202,9 +194,7 @@ pub async fn quick_set_content_height(app: AppHandle, height: f64) -> Result<(),
     if state.quick.content_height.swap(h, Ordering::Relaxed) == h {
         return Ok(());
     }
-    if state.quick.shown.load(Ordering::Relaxed)
-        && state.quick.reply_stash.lock().unwrap().is_none()
-    {
+    if state.quick.shown.load(Ordering::Relaxed) {
         if let Some(win) = app.get_webview_window("quick") {
             resize_anchored_top(&win, launcher_size(&app));
         }

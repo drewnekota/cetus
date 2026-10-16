@@ -595,15 +595,6 @@ export const api = {
     invoke<void>("snip_finish", { rect }),
   /** Dismiss the region-select overlay without capturing (Esc). */
   snipCancel: () => invoke<void>("snip_cancel"),
-  /** Accept a direct visual reply and type it back into the previously focused app. */
-  quickReplyInsert: (text: string) =>
-    invoke<void>("quick_reply_insert", { text }),
-  /** Re-draft the reply on another runtime, reusing the capture the panel
-   *  opened with (the screen is long gone by now). Also makes that runtime the
-   *  default for the next quick reply. Resolves when the new turn settles; the
-   *  draft itself streams in over the usual delta/result events. */
-  quickReplyRegenerate: (backend: BackendId) =>
-    invoke<void>("quick_reply_regenerate", { backend }),
   // Native notification: clicking it routes back as a `notification-activate`
   // event carrying `conversationId` (see notify.rs).
   postNotification: (p: {

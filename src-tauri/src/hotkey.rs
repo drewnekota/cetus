@@ -500,10 +500,9 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
 
             // --- double-tap ⌥ ---
             // Same clean-double-tap logic as ⌘, but specifically keyed to right
-            // Option. Right Option is the shared quick-input key: double-tap is
-            // visual reply, while a hold is voice. The voice recognizer does not
-            // claim the double-tap unless its legacy hands-free shortcut is
-            // explicitly enabled.
+            // Option. Right Option is also the default voice key (hold to talk);
+            // when a launcher action is assigned to this double-tap, the voice
+            // recognizer does not claim it for its legacy hands-free shortcut.
             if act_dopt != quick::ACT_NONE {
                 let alt_any = (bits & DEV_RALT) != 0;
                 let mut a = alt.borrow_mut();
@@ -574,9 +573,7 @@ fn run_tap(app: AppHandle, runtime: QuickRuntime) {
 fn trigger(app: &AppHandle, action: u8) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        if action == quick::ACT_REPLY {
-            quick::open_reply(&app).await;
-        } else if action == quick::ACT_SHOT {
+        if action == quick::ACT_SHOT {
             // Contextful mode goes through region-select first: drag to snip,
             // click for the full screen, Esc to cancel.
             crate::snip::begin(&app).await;
@@ -1111,12 +1108,12 @@ mod tests {
     }
 
     #[test]
-    fn quick_reply_owns_double_right_option_over_handsfree() {
+    fn launcher_action_owns_double_right_option_over_handsfree() {
         assert!(!handsfree_tap_allowed(
             true,
             quick::VOICE_RIGHT_OPTION,
             quick::ACT_NONE,
-            quick::ACT_REPLY,
+            quick::ACT_PLAIN,
         ));
         assert!(handsfree_tap_allowed(
             true,

@@ -7,7 +7,6 @@
 // a scrollable content pane. Opened from the sidebar, the command palette, or
 // ⌘, ; closed with Back or Esc.
 import { useEffect, useState } from "react";
-import { useRuntimeCatalog } from "@/components/chat/backend-picker";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -21,7 +20,6 @@ import { useTranslation } from "@/lib/i18n";
 import { api } from "@/lib/tauri";
 import {
   DEFAULT_QUICK_SETTINGS,
-  type BackendId,
   type QuickGesture,
   type QuickSessionMode,
   type QuickSettings,
@@ -36,7 +34,6 @@ import { SectionHeading, ToggleRow, SegmentRow } from "../settings-controls";
 
 export function LauncherSection() {
   const { t } = useTranslation("settings");
-  const { orderedBackends, enabledBackendIds } = useRuntimeCatalog();
   const [settings, setSettings] = useState<QuickSettings>(
     DEFAULT_QUICK_SETTINGS,
   );
@@ -102,17 +99,11 @@ export function LauncherSection() {
   const gestureLabel = gestureName(
     settings.gesturePlain !== "off"
       ? settings.gesturePlain
-      : settings.gestureShot !== "off"
-        ? settings.gestureShot
-        : settings.gestureReply,
+      : settings.gestureShot,
   );
 
-  // Screenshot launch and direct visual replies both need Screen Recording.
-  const wantsScreenshot =
-    settings.gestureShot !== "off" || settings.gestureReply !== "off";
-  const replyBackends = orderedBackends.filter((runtime) =>
-    enabledBackendIds.has(runtime.id),
-  );
+  // Screenshot launch needs Screen Recording.
+  const wantsScreenshot = settings.gestureShot !== "off";
 
   return (
     <section>
@@ -211,7 +202,7 @@ export function LauncherSection() {
                 (g) =>
                   g === "off" ||
                   g === settings.gesturePlain ||
-                  (g !== settings.gestureShot && g !== settings.gestureReply),
+                  g !== settings.gestureShot,
               ).map((g) => (
                 <SelectItem key={g} value={g}>
                   {gestureName(g)}
@@ -240,73 +231,10 @@ export function LauncherSection() {
                 (g) =>
                   g === "off" ||
                   g === settings.gestureShot ||
-                  (g !== settings.gesturePlain && g !== settings.gestureReply),
+                  g !== settings.gesturePlain,
               ).map((g) => (
                 <SelectItem key={g} value={g}>
                   {gestureName(g)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 space-y-0.5">
-            <Label className="font-medium">
-              {t("launcher.fn.reply.label")}
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              {t("launcher.fn.reply.description")}
-            </p>
-          </div>
-          <Select
-            value={settings.gestureReply}
-            onValueChange={(v) => update({ gestureReply: v as QuickGesture })}
-          >
-            <SelectTrigger className="w-52 shrink-0">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {GESTURE_OPTS.filter(
-                (g) =>
-                  g === "off" ||
-                  g === settings.gestureReply ||
-                  (g !== settings.gesturePlain && g !== settings.gestureShot),
-              ).map((g) => (
-                <SelectItem key={g} value={g}>
-                  {gestureName(g)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 space-y-0.5">
-            <Label className="font-medium">
-              {t("launcher.replyRuntime.label")}
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              {t("launcher.replyRuntime.description")}
-            </p>
-          </div>
-          <Select
-            value={
-              enabledBackendIds.has(settings.replyBackend)
-                ? settings.replyBackend
-                : "pi"
-            }
-            onValueChange={(value) =>
-              update({ replyBackend: value as BackendId })
-            }
-          >
-            <SelectTrigger className="w-52 shrink-0">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {replyBackends.map((runtime) => (
-                <SelectItem key={runtime.id} value={runtime.id}>
-                  {runtime.label}
                 </SelectItem>
               ))}
             </SelectContent>

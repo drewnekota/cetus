@@ -6,8 +6,6 @@
 
 mod permissions;
 pub(crate) use permissions::*;
-mod reply;
-pub(crate) use reply::*;
 mod panel;
 pub(crate) use panel::*;
 mod screenshot;
@@ -35,19 +33,9 @@ pub struct QuickSettings {
     pub gesture_plain: String,
     /// Gesture that opens the launcher *with* a screenshot attached. Same option
     /// set as `gesture_plain`. Off by default; the compact launcher can attach a
-    /// screenshot interactively and visual quick reply already captures one.
+    /// screenshot interactively.
     #[serde(default = "default_gesture_shot")]
     pub gesture_shot: String,
-    /// Gesture that captures the screen and asks a vision model for send-ready
-    /// replies without starting a full agent conversation. Defaults to
-    /// double-tap Option, mirroring the fastest common reply-assistant gesture.
-    #[serde(default = "default_gesture_reply")]
-    pub gesture_reply: String,
-    /// Agent runtime used for one-shot quick replies. Uses the same stable ids
-    /// as conversations ("pi" | "claude-code" | "codex" | ACP runtimes).
-    /// Disabled or unknown runtimes fall back to Cetus at invocation time.
-    #[serde(default = "crate::store::default_backend")]
-    pub reply_backend: String,
     /// Optional configurable global hotkey that brings the main cetus window to
     /// the front (switching to its Space/desktop if it's on another one). A
     /// Tauri accelerator string, e.g. "Cmd+Shift+K"; empty = no hotkey. Unlike
@@ -68,8 +56,7 @@ pub struct QuickSettings {
     #[serde(default = "default_voice_gesture")]
     pub voice_gesture: String,
     /// Opt-in legacy shortcut: double-tap the voice trigger to toggle
-    /// hands-free dictation. Off by default so the same double-tap can belong
-    /// exclusively to visual quick reply.
+    /// hands-free dictation. Off by default.
     #[serde(default)]
     pub voice_handsfree_shortcut: bool,
     /// How the transcript is inserted into the focused app:
@@ -153,10 +140,6 @@ fn default_gesture_shot() -> String {
     "off".into()
 }
 
-fn default_gesture_reply() -> String {
-    "double_opt".into()
-}
-
 fn default_voice_gesture() -> String {
     "right_option".into()
 }
@@ -175,8 +158,6 @@ impl Default for QuickSettings {
             enabled: true,
             gesture_plain: default_gesture_plain(),
             gesture_shot: default_gesture_shot(),
-            gesture_reply: default_gesture_reply(),
-            reply_backend: crate::store::default_backend(),
             summon_hotkey: String::new(),
             session_mode: "new".into(),
             voice_enabled: false,
@@ -207,7 +188,6 @@ pub fn load_settings(store: &crate::store::Store) -> QuickSettings {
         .flatten()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
-    normalize_reply_gesture(&mut settings);
     settings.voice_cleanup = true;
     settings.voice_cleanup_model.clear();
     settings.voice_insert_mode = default_voice_insert_mode();
@@ -215,28 +195,8 @@ pub fn load_settings(store: &crate::store::Store) -> QuickSettings {
     settings
 }
 
-/// Older settings can already use the new default (double right Option) for one of
-/// the two launcher actions. Preserve those assignments and move quick reply to
-/// the first free gesture instead of silently stealing the user's shortcut.
-fn normalize_reply_gesture(settings: &mut QuickSettings) {
-    if settings.gesture_reply == "off"
-        || (settings.gesture_reply != settings.gesture_plain
-            && settings.gesture_reply != settings.gesture_shot)
-    {
-        return;
-    }
-    settings.gesture_reply = ["double_opt", "double_cmd", "both_opt", "both_cmd"]
-        .into_iter()
-        .find(|candidate| {
-            *candidate != settings.gesture_plain && *candidate != settings.gesture_shot
-        })
-        .unwrap_or("off")
-        .to_string();
-}
-
 fn save_settings(store: &crate::store::Store, s: &QuickSettings) -> anyhow::Result<()> {
     let mut s = s.clone();
-    normalize_reply_gesture(&mut s);
     s.voice_cleanup = true;
     s.voice_cleanup_model.clear();
     s.voice_insert_mode = default_voice_insert_mode();
@@ -282,9 +242,7 @@ pub fn migrate_shortcut_defaults(store: &crate::store::Store) {
             tracing::warn!("shortcut defaults migration failed: {error}");
             return;
         }
-        tracing::info!(
-            "shortcut defaults migration: launcher=both Cmd, reply=double right Option, voice=hold right Option"
-        );
+        tracing::info!("shortcut defaults migration: launcher=both Cmd, voice=hold right Option");
     }
     let _ = store.set_setting(MARKER, "1");
 }
@@ -292,7 +250,6 @@ pub fn migrate_shortcut_defaults(store: &crate::store::Store) {
 fn apply_shortcut_defaults_v3(settings: &mut QuickSettings) -> bool {
     let untouched_old_defaults = settings.gesture_plain == "both_cmd"
         && settings.gesture_shot == "both_opt"
-        && settings.gesture_reply == "double_opt"
         && settings.voice_gesture == "right_cmd";
     if !untouched_old_defaults {
         return false;
@@ -306,17 +263,15 @@ fn apply_shortcut_defaults_v3(settings: &mut QuickSettings) -> bool {
 // ---- Gesture runtime ------------------------------------------------------
 
 /// What a detected gesture should do. Each supported gesture (both-⌘,
-/// both-⌥, double-⌘, double-right-⌥) is independently mapped from the three
-/// per-function assignments (`gesture_plain` / `gesture_shot` /
-/// `gesture_reply`).
+/// both-⌥, double-⌘, double-right-⌥) is independently mapped from the two
+/// per-function assignments (`gesture_plain` / `gesture_shot`).
 pub const ACT_NONE: u8 = 0;
 pub const ACT_PLAIN: u8 = 1; // open the launcher without a screenshot
 pub const ACT_SHOT: u8 = 2; // open the launcher with a screenshot
-pub const ACT_REPLY: u8 = 3; // direct screenshot → vision model → reply candidates
 
-/// Resolve the three per-function gesture assignments into a per-gesture action
-/// table: `(both_cmd, both_opt, double_cmd, double_opt)`. Reply is applied last
-/// as a safety fallback, though the settings UI prevents duplicate assignments.
+/// Resolve the per-function gesture assignments into a per-gesture action
+/// table: `(both_cmd, both_opt, double_cmd, double_opt)`. The screenshot
+/// action wins a collision, though the settings UI prevents duplicates.
 pub fn gesture_actions(s: &QuickSettings) -> (u8, u8, u8, u8) {
     fn assign(g: &str, act: u8, bcmd: &mut u8, bopt: &mut u8, dcmd: &mut u8, dopt: &mut u8) {
         match g {
@@ -339,14 +294,6 @@ pub fn gesture_actions(s: &QuickSettings) -> (u8, u8, u8, u8) {
     assign(
         &s.gesture_shot,
         ACT_SHOT,
-        &mut bcmd,
-        &mut bopt,
-        &mut dcmd,
-        &mut dopt,
-    );
-    assign(
-        &s.gesture_reply,
-        ACT_REPLY,
         &mut bcmd,
         &mut bopt,
         &mut dcmd,
@@ -430,15 +377,6 @@ pub struct QuickRuntime {
     /// overlay's `snip_finish` command. Written on the main thread before the
     /// overlay presents, so the finish command always sees it populated.
     pub snip_stash: Arc<std::sync::Mutex<Option<crate::snip::SnipStash>>>,
-    /// The capture behind the quick-reply surface currently on screen, kept so
-    /// switching the runtime in the panel can re-run the turn against the same
-    /// screen. Re-capturing would be wrong — by then the frontmost app is the
-    /// panel itself.
-    pub reply_stash: Arc<std::sync::Mutex<Option<ReplyStash>>>,
-    /// Bumped for every quick-reply turn (first run and each regenerate). Deltas
-    /// and results carrying a stale run are dropped, so a superseded turn can't
-    /// stream into the draft the user is now watching.
-    pub reply_run: Arc<AtomicU32>,
     /// Main-window zoom (⌘+/⌘−) as a percentage, reported by the panel's
     /// webview on mount and whenever it changes. The launcher's logical window
     /// size scales with it so a zoomed-in UI doesn't clip inside a fixed box.
@@ -451,7 +389,7 @@ pub struct QuickRuntime {
     pub voice_enabled: Arc<AtomicBool>,
     pub voice_gesture: Arc<AtomicU8>,
     /// Whether clean double-taps of `voice_gesture` may toggle hands-free.
-    /// Disabled by default; quick reply owns double right-Option instead.
+    /// Disabled by default.
     pub voice_handsfree_shortcut: Arc<AtomicBool>,
     pub voice_insert_mode: Arc<AtomicU8>,
     pub voice_cleanup: Arc<AtomicBool>,
@@ -489,8 +427,6 @@ impl QuickRuntime {
             last_open_ms: Arc::new(AtomicI64::new(0)),
             snip_active: Arc::new(AtomicBool::new(false)),
             snip_stash: Arc::new(std::sync::Mutex::new(None)),
-            reply_stash: Arc::new(std::sync::Mutex::new(None)),
-            reply_run: Arc::new(AtomicU32::new(0)),
             scale_pct: Arc::new(AtomicU32::new(100)),
             content_height: Arc::new(AtomicU32::new(0)),
             voice_enabled: Arc::new(AtomicBool::new(s.voice_enabled)),
@@ -555,9 +491,8 @@ pub async fn get_quick_settings(state: State<'_, AppState>) -> Result<QuickSetti
 pub async fn set_quick_settings(
     app: AppHandle,
     state: State<'_, AppState>,
-    mut settings: QuickSettings,
+    settings: QuickSettings,
 ) -> Result<(), String> {
-    normalize_reply_gesture(&mut settings);
     save_settings(&state.store, &settings).map_err(|e| e.to_string())?;
     state.quick.apply(&settings);
     // Caps Lock as the voice trigger needs an HID remap to suppress its system
@@ -610,15 +545,11 @@ pub async fn quick_recapture_screenshot(
 pub(crate) fn park_quick(app: &AppHandle) {
     let state = app.state::<AppState>();
     // Mid re-capture the panel is intentionally hidden; the focus loss (and any
-    // outside click landing in that sub-second gap) must not park it and drop
-    // the stash that's being rebuilt.
+    // outside click landing in that sub-second gap) must not park it.
     if state.quick.recapturing.load(Ordering::Relaxed) {
         return;
     }
     state.quick.shown.store(false, Ordering::Relaxed);
-    // The reply capture belongs to the panel that just went away; dropping it
-    // keeps a stale screen from being re-sent by a late runtime switch.
-    *state.quick.reply_stash.lock().unwrap() = None;
     #[cfg(target_os = "macos")]
     {
         let app2 = app.clone();
@@ -722,8 +653,7 @@ pub async fn quick_submit(app: AppHandle, payload: QuickSubmit) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_shortcut_defaults_v3, gesture_actions, normalize_reply_gesture, QuickSettings,
-        ACT_NONE, ACT_PLAIN, ACT_REPLY,
+        apply_shortcut_defaults_v3, gesture_actions, QuickSettings, ACT_NONE, ACT_PLAIN, ACT_SHOT,
     };
 
     #[test]
@@ -731,20 +661,21 @@ mod tests {
         let settings = QuickSettings::default();
         let actions = gesture_actions(&settings);
         // both Cmd, both Option, double Cmd, double right Option
-        assert_eq!(actions, (ACT_PLAIN, ACT_NONE, ACT_NONE, ACT_REPLY));
+        assert_eq!(actions, (ACT_PLAIN, ACT_NONE, ACT_NONE, ACT_NONE));
         assert_eq!(settings.voice_gesture, "right_option");
         assert!(!settings.voice_handsfree_shortcut);
     }
 
     #[test]
-    fn visual_reply_collision_moves_to_a_free_gesture() {
-        let mut settings = QuickSettings::default();
-        settings.gesture_reply = settings.gesture_plain.clone();
-        normalize_reply_gesture(&mut settings);
-        assert_eq!(settings.gesture_reply, "double_opt");
-        let (both_cmd, _, _, double_opt) = gesture_actions(&settings);
-        assert_eq!(both_cmd, ACT_PLAIN);
-        assert_eq!(double_opt, ACT_REPLY);
+    fn screenshot_gesture_maps_independently() {
+        let settings = QuickSettings {
+            gesture_shot: "both_opt".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            gesture_actions(&settings),
+            (ACT_PLAIN, ACT_SHOT, ACT_NONE, ACT_NONE)
+        );
     }
 
     #[test]

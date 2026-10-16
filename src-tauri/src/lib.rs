@@ -63,7 +63,6 @@ mod plugins;
 mod prompts;
 mod provider;
 mod quick;
-mod quick_reply;
 mod remote;
 mod resources;
 mod scheduler;
@@ -1208,8 +1207,6 @@ pub fn run() {
         updater::relaunch_app,
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,
-        quick::quick_reply_insert,
-        quick::quick_reply_regenerate,
         quick::quick_submit,
         quick::quick_set_scale,
         quick::quick_set_content_height,
@@ -1401,8 +1398,6 @@ pub fn run() {
         updater::relaunch_app,
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,
-        quick::quick_reply_insert,
-        quick::quick_reply_regenerate,
         quick::quick_submit,
         quick::quick_set_scale,
         quick::quick_set_content_height,

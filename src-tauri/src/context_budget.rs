@@ -1,6 +1,6 @@
 //! Character budgets for screen context that rides along with a prompt.
 //!
-//! Every on-demand context path (quick reply, the launcher's `<context>` fence,
+//! Every on-demand context path (the launcher's `<context>` fence,
 //! `cetus context now`) attaches the same kinds of fields — app, window title,
 //! URL, selected text, the focused window's AX text — and every one of them
 //! used to clamp with a bare `chars().take(n)`. That silently drops the tail

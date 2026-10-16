@@ -28,16 +28,6 @@ pub(super) fn screen_recording_effective() -> bool {
 
 // ---- Screen capture -------------------------------------------------------
 
-/// Everything a quick-reply turn reads, kept alive for the life of the panel so
-/// the same screen can be re-sent to a different runtime.
-#[derive(Clone)]
-pub struct ReplyStash {
-    pub open_id: i64,
-    pub screenshot: Screenshot,
-    pub context: Option<crate::ocr::AmbientContext>,
-    pub visible_text: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Screenshot {

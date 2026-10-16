@@ -258,12 +258,6 @@ export const zh = {
   "launcher.fn.shot.label": "快速启动 + 截图",
   "launcher.fn.shot.description":
     "先框选屏幕区域作为截图（单击=全屏），再唤出启动器。",
-  "launcher.fn.reply.label": "视觉快速回复",
-  "launcher.fn.reply.description":
-    "读取当前屏幕与 AX 上下文，交给所选 agent runtime 生成回复候选，并将选中的回复写回原应用。",
-  "launcher.replyRuntime.label": "快速回复 Runtime",
-  "launcher.replyRuntime.description":
-    "从「设置 → Runtimes」中已启用的 agent runtime 里选择。",
   "launcher.summon.label": "唤起 Cetus",
   "launcher.summon.description":
     "全局快捷键，将 Cetus 切到最前；若它在其他桌面会直接切换过去。",
@@ -362,7 +356,7 @@ export const zh = {
     "选用后，Cetus 运行期间会把 Caps Lock 专用于语音听写，退出时自动恢复。",
   "voice.handsfreeShortcut.label": "双击进入免手持模式",
   "voice.handsfreeShortcut.description":
-    "可选，默认关闭。双击 {gesture} 可开始或停止免手持听写。若同一双击已分配给快速回复或启动器，则后者优先。仅豆包引擎支持。",
+    "可选，默认关闭。双击 {gesture} 可开始或停止免手持听写。若同一双击已分配给启动器，则启动器优先。仅豆包引擎支持。",
   "voice.insert.label": "插入方式",
   "voice.insert.description":
     "“键入”发送模拟按键；“粘贴”使用剪贴板 + ⌘V（在某些应用中更可靠，但会短暂占用剪贴板）。",
