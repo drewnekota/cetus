@@ -42,8 +42,6 @@ Cetus is built for the human side of the loop: a real desktop app where every ag
 - **One board for review.** Every conversation is a card in **In progress · Needs review · Done**. Finished work waits for you instead of scrolling away in a terminal.
 - **Parallel without collisions.** Per-conversation git worktrees let several agents edit the same repo at once.
 
-![Cetus Kanban board](docs/screenshot-kanban.png)
-
 ## Built around the same loop
 
 Everything else in Cetus exists to make your part of the loop shorter.
