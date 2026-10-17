@@ -271,7 +271,7 @@ function terminalTheme(): ITheme {
   const css = getComputedStyle(root);
   const seed = (name: string, fallback: string) =>
     css.getPropertyValue(name).trim() || fallback;
-  const background = seed("--surface", dark ? "#0f0f11" : "#fcfcfd");
+  const background = seed("--surface", dark ? "#1f1f24" : "#fcfcfd");
   const foreground = seed("--ink", dark ? "#e3e4e6" : "#1b1b1b");
   return {
     background,

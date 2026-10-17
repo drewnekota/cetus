@@ -68,7 +68,6 @@ import {
   detectSlashToken,
   detectMentionToken,
   cleanQuoteText,
-  FOCUS_TRIGGER_CHARS,
   MAX_FILE_BYTES,
   fileToBase64,
   formatQuoteMarkdown,
@@ -201,17 +200,6 @@ interface Props {
 
 const FIELD_SIZING =
   typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName.toLowerCase();
-  return (
-    tag === "input" ||
-    tag === "textarea" ||
-    tag === "select" ||
-    target.isContentEditable
-  );
-}
 
 export function Composer({
   disabled,
@@ -1060,15 +1048,62 @@ export function Composer({
     // which is what makes fast typing stutter beside a long transcript.
     if (FIELD_SIZING) {
       el.style.maxHeight = (variant === "hero" ? 320 : 240) + "px";
-      return;
+    } else {
+      const scrollTop = el.scrollTop;
+      el.style.height = "auto";
+      el.style.height =
+        Math.min(el.scrollHeight, variant === "hero" ? 320 : 240) + "px";
+      el.scrollTop = scrollTop;
+      if (highlightRef.current) highlightRef.current.scrollTop = el.scrollTop;
     }
-    const scrollTop = el.scrollTop;
-    el.style.height = "auto";
-    el.style.height =
-      Math.min(el.scrollHeight, variant === "hero" ? 320 : 240) + "px";
-    el.scrollTop = scrollTop;
-    if (highlightRef.current) highlightRef.current.scrollTop = el.scrollTop;
+    if (!text) releaseHeldHeight();
+    else if (composingRef.current) holdHeight();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, variant]);
+
+  // Voice input (Doubao and the like) streams its interim transcript as one
+  // long IME composition, rewriting it many times a second. Each revision can
+  // land a line shorter or longer, so the field — and the transcript or feed
+  // above it — would bounce on every one. While composing the field only
+  // grows; it settles back shortly after the composition ends.
+  const composingRef = useRef(false);
+  const releaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function holdHeight() {
+    const el = taRef.current;
+    if (!el) return;
+    const held = parseFloat(el.style.minHeight) || 0;
+    if (el.offsetHeight > held) el.style.minHeight = `${el.offsetHeight}px`;
+  }
+  function releaseHeldHeight() {
+    if (releaseTimer.current) clearTimeout(releaseTimer.current);
+    releaseTimer.current = null;
+    if (taRef.current) taRef.current.style.minHeight = "";
+  }
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    const onStart = () => {
+      composingRef.current = true;
+      if (releaseTimer.current) clearTimeout(releaseTimer.current);
+      releaseTimer.current = null;
+      holdHeight();
+    };
+    const onEnd = () => {
+      composingRef.current = false;
+      if (releaseTimer.current) clearTimeout(releaseTimer.current);
+      // Dictation commits a phrase and starts the next composition right
+      // away; only let go once it has gone quiet.
+      releaseTimer.current = setTimeout(releaseHeldHeight, 600);
+    };
+    el.addEventListener("compositionstart", onStart);
+    el.addEventListener("compositionend", onEnd);
+    return () => {
+      el.removeEventListener("compositionstart", onStart);
+      el.removeEventListener("compositionend", onEnd);
+      if (releaseTimer.current) clearTimeout(releaseTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     // preventScroll: after a send/steer the textarea often doesn't have focus
@@ -1101,6 +1136,10 @@ export function Composer({
       root,
       textarea: () => taRef.current,
       enabled: () => !disabledRef.current,
+      onTrigger: () => {
+        slashSuppress.current = false;
+        mentionSuppress.current = false;
+      },
     });
   }, []);
 
@@ -1167,45 +1206,6 @@ export function Composer({
     updateMentionRefs,
     updateQuote,
   ]);
-
-  useEffect(() => {
-    if (disabled) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (
-        e.defaultPrevented ||
-        e.metaKey ||
-        e.ctrlKey ||
-        e.altKey ||
-        e.isComposing ||
-        !FOCUS_TRIGGER_CHARS.has(e.key) ||
-        isEditableTarget(e.target)
-      ) {
-        return;
-      }
-
-      const root = rootRef.current;
-      const el = taRef.current;
-      if (!root || !el) return;
-      const openDialogs = Array.from(
-        document.querySelectorAll<HTMLElement>(
-          "[role='dialog'][data-state='open']",
-        ),
-      );
-      const topDialog = openDialogs.at(-1);
-      if (topDialog && !topDialog.contains(root)) return;
-      if (!topDialog && root.closest("[role='dialog']")) return;
-
-      e.preventDefault();
-      slashSuppress.current = false;
-      mentionSuppress.current = false;
-      requestAnimationFrame(() => {
-        el.focus({ preventScroll: true });
-      });
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [disabled]);
 
   // Revoke preview URLs on unmount so we don't leak object URLs.
   useEffect(() => {

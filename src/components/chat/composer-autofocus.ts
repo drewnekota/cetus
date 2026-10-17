@@ -9,12 +9,19 @@
  * Several composers can be mounted at once (Threads: feed + docked thread),
  * so one shared listener picks the composer closest in the DOM to the click,
  * breaking ties toward the one the user typed in last.
+ *
+ * Typing `/` outside a field also jumps into a composer: the most recently
+ * mounted one, so an open thread beats the feed behind it.
  */
+
+import { FOCUS_TRIGGER_CHARS } from "@/components/chat/composer-utils";
 
 type Entry = {
   root: HTMLElement;
   textarea: () => HTMLTextAreaElement | null;
   enabled: () => boolean;
+  /** Called when a trigger key (`/`) is about to land focus in this composer. */
+  onTrigger?: () => void;
 };
 
 const entries = new Set<Entry>();
@@ -125,6 +132,17 @@ function pick(near: Node | null): HTMLTextAreaElement | null {
   return best?.ta ?? null;
 }
 
+/** The newest usable composer — the one mounted last (a docked thread over
+ *  the Threads feed). */
+function newest(): { entry: Entry; ta: HTMLTextAreaElement } | null {
+  let found: { entry: Entry; ta: HTMLTextAreaElement } | null = null;
+  for (const entry of entries) {
+    const ta = usable(entry);
+    if (ta) found = { entry, ta };
+  }
+  return found;
+}
+
 function focus(ta: HTMLTextAreaElement) {
   if (document.activeElement === ta) return;
   // A textarea keeps its caret across blur, so this resumes where the user
@@ -138,6 +156,25 @@ function install() {
   const onKeyDown = (e: KeyboardEvent) => {
     bareKey =
       !e.metaKey && !e.ctrlKey && !e.altKey && !isEditable(e.target as Element);
+  };
+
+  // Bubble phase, so anything that handles the key itself gets first say.
+  const onTriggerKey = (e: KeyboardEvent) => {
+    if (
+      e.defaultPrevented ||
+      e.metaKey ||
+      e.ctrlKey ||
+      e.altKey ||
+      e.isComposing ||
+      !FOCUS_TRIGGER_CHARS.has(e.key) ||
+      isEditable(e.target as Element)
+    )
+      return;
+    const target = newest();
+    if (!target) return;
+    e.preventDefault();
+    target.entry.onTrigger?.();
+    requestAnimationFrame(() => target.ta.focus({ preventScroll: true }));
   };
 
   const onPointerDown = (e: PointerEvent) => {
@@ -197,12 +234,14 @@ function install() {
   };
 
   window.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("keydown", onTriggerKey);
   window.addEventListener("pointerdown", onPointerDown, true);
   window.addEventListener("click", onClick);
   window.addEventListener("focus", onWindowFocus);
   document.addEventListener("focusin", onFocusIn);
   return () => {
     window.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("keydown", onTriggerKey);
     window.removeEventListener("pointerdown", onPointerDown, true);
     window.removeEventListener("click", onClick);
     window.removeEventListener("focus", onWindowFocus);

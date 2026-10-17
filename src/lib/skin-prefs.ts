@@ -70,7 +70,7 @@ export const SKIN_PRESETS: SkinPreset[] = [
       skill: "#8160d8",
     },
     dark: {
-      surface: "#0f0f11",
+      surface: "#1f1f24",
       ink: "#e3e4e6",
       accent: "#827be6",
       contrast: 50,

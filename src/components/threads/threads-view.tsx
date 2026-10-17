@@ -432,8 +432,9 @@ const ThreadList = memo(function ThreadList({
   }, [feed.length, workspaceFilter, virtualizer, nearBottom]);
 
   // Cards get measured (and previews arrive) after the first paint, changing
-  // the list's height; stay pinned to the bottom through that as long as the
-  // reader hasn't scrolled away.
+  // the list's height, and the composer below grows and shrinks the viewport;
+  // stay pinned to the bottom through both as long as the reader hasn't
+  // scrolled away.
   useEffect(() => {
     const el = scrollRef.current;
     const content = contentRef.current;
@@ -442,6 +443,7 @@ const ThreadList = memo(function ThreadList({
       if (nearBottom.current) el.scrollTop = el.scrollHeight;
     });
     ro.observe(content);
+    ro.observe(el);
     return () => ro.disconnect();
   }, [nearBottom]);
 
@@ -692,7 +694,9 @@ const ThreadItem = memo(function ThreadItem({
           "focus-visible:ring-2 focus-visible:ring-ring/50",
           selected
             ? "border-[var(--brand)]/45 bg-[var(--brand)]/[0.06]"
-            : "border-border/70 bg-card hover:border-border hover:bg-accent/40",
+            : // Light --card equals the page surface, so the card needs a full
+              // border and a soft shadow to read as a card at all.
+              "border-border bg-card shadow-[0_1px_2px_rgb(0_0_0/0.05)] hover:border-input hover:bg-accent/40 dark:border-border/70 dark:shadow-none dark:hover:border-border",
         )}
       >
         <div className="flex w-full min-w-0 items-center gap-2.5">
