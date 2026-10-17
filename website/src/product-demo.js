@@ -5,7 +5,7 @@ const app = demo.querySelector('.demo-app');
 const menu = document.getElementById('demo-runtime-menu');
 const picker = document.getElementById('demo-runtime-toggle');
 const sceneTabs = [...demo.querySelectorAll('[data-demo-scene]')];
-const names = { home: '', chat: 'Launch meeting recap', board: '', automations: '', quick: '' };
+const names = { home: '', chat: 'Launch meeting recap', threads: '', board: '', automations: '', quick: '' };
 const storyNames = { meeting: 'Turn a meeting into next steps', screen: 'Find what I was looking at', briefing: 'Start my day with a briefing' };
 let scale = 1;
 function closePicker(focus = false) {
@@ -19,6 +19,8 @@ function showView(view, story = 'meeting') {
   demo.querySelectorAll('[data-demo-panel]').forEach(panel => { panel.hidden = panel.dataset.demoPanel !== view; });
   demo.querySelector('.demo-sidebar').hidden = view === 'quick';
   demo.querySelector('.demo-workspace').hidden = view === 'quick';
+  // Threads draws its own header row, like the app's shell shrinking to a sliver.
+  demo.querySelector('.demo-toolbar').hidden = view === 'threads';
   demo.querySelectorAll('[data-demo-view][aria-pressed]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.demoView === scene)));
   sceneTabs.forEach(tab => {
     tab.setAttribute('aria-selected', String(tab.dataset.demoScene === scene));
@@ -35,8 +37,11 @@ function showView(view, story = 'meeting') {
     else button.removeAttribute('aria-current');
   });
   stage.scrollLeft = 0;
+  // The feed reads like a channel: newest at the bottom, right above its composer.
+  if (view === 'threads') { const list = demo.querySelector('.demo-threads-list'); list.scrollTop = list.scrollHeight; }
   closePicker();
 }
+{ const list = demo.querySelector('.demo-threads-list'); requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; }); }
 demo.querySelectorAll('[data-demo-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.demoView)));
 sceneTabs.forEach((tab, index) => {
   tab.addEventListener('click', () => showView(tab.dataset.demoScene));
@@ -90,6 +95,46 @@ demo.querySelector('[data-demo-approve]').addEventListener('click', event => {
   demo.querySelector('[data-column=done] .demo-column-cards').append(card);
   demo.querySelectorAll('.demo-column').forEach(column => { column.querySelector('header small').textContent = column.querySelectorAll('.demo-task').length; });
 });
+// Threads: open a card to dock its session; answer the pending approval in place.
+function openThread(id) {
+  demo.querySelectorAll('[data-demo-open-thread]').forEach(card => card.setAttribute('aria-pressed', String(card.dataset.demoOpenThread === id)));
+  demo.querySelectorAll('[data-thread-body]').forEach(body => { body.hidden = body.dataset.threadBody !== id; });
+}
+function setThreadStatus(id, status, label, line) {
+  const card = demo.querySelector(`[data-demo-open-thread="${id}"]`);
+  card.querySelector('.demo-thread-ask')?.remove();
+  card.querySelector('.demo-thread-ask-actions')?.remove();
+  const reply = document.createElement('p'); reply.className = 'demo-thread-reply'; reply.innerHTML = line;
+  card.querySelector('.demo-thread-head').after(reply);
+  const badge = card.querySelector('.demo-thread-status');
+  badge.className = `demo-thread-status ${status}`; badge.querySelector('b').textContent = label;
+  const docked = demo.querySelector(`[data-thread-body="${id}"] .demo-thread-ask`);
+  if (docked) { const note = document.createElement('p'); note.innerHTML = line; docked.replaceWith(note); }
+  const counts = { input: 0, working: 0, done: 0 };
+  demo.querySelectorAll('.demo-thread-status').forEach(item => { for (const key in counts) if (item.classList.contains(key)) counts[key]++; });
+  demo.querySelectorAll('.demo-thread-badges > span').forEach(item => {
+    const key = item.className, n = counts[key];
+    item.hidden = n === 0;
+    item.lastChild.textContent = `${n} ${key === 'input' ? 'needs you' : key}`;
+  });
+}
+demo.addEventListener('click', event => {
+  const approve = event.target.closest('[data-demo-thread-approve]');
+  const deny = event.target.closest('[data-demo-thread-deny]');
+  if (approve || deny) {
+    event.stopPropagation();
+    if (approve) setThreadStatus('migrate', 'working', 'Working', 'Allowed. Running <code>pnpm db:migrate</code>…');
+    else setThreadStatus('migrate', 'idle', 'Denied', 'Denied. Waiting for your next message.');
+    return;
+  }
+  const card = event.target.closest('[data-demo-open-thread]');
+  if (card) openThread(card.dataset.demoOpenThread);
+});
+demo.addEventListener('keydown', event => {
+  const card = event.target.closest('[data-demo-open-thread]');
+  if (card && event.target === card && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openThread(card.dataset.demoOpenThread); }
+});
+
 // Real document browsing over the sample files shown in the preview.
 const fileDialog = demo.querySelector('.demo-file-dialog:not(.demo-artifacts-dialog)');
 const artifactsDialog = demo.querySelector('.demo-artifacts-dialog');
