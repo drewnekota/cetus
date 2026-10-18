@@ -948,11 +948,12 @@ pub fn run() {
             // Register the user's summon hotkey (if any) now the plugin is up.
             apply_summon_hotkey(app.handle(), &quick_settings.summon_hotkey);
             // Check for an app update in the background. When auto-update is on
-            // it installs silently (applied on next launch); when off it only
-            // surfaces a passive "update-available" toast. Release builds only —
-            // dev never self-updates.
+            // it downloads silently (installed on quit or restart); when off it
+            // only surfaces a passive "update-available" toast. Release builds
+            // only — dev never self-updates.
             #[cfg(not(debug_assertions))]
             {
+                updater::clear_legacy_ready_marker(app.handle());
                 let updater_handle = app.handle().clone();
                 tauri::async_runtime::spawn(updater::startup_check(
                     updater_handle,
@@ -1472,6 +1473,8 @@ pub fn run() {
                 // is exiting and spawned tasks wouldn't run).
                 let _ = _app.state::<AppState>().store.mark_running_interrupted();
                 _app.state::<AppState>().kill_all_cli_sessions();
+                // Last: on Windows the installer takes over and exits us.
+                updater::apply_pending_update();
             }
             // cetus is resident: closing the window only hides it. A macOS dock
             // click (Reopen) with nothing visible should bring the main window

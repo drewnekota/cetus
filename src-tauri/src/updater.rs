@@ -24,8 +24,10 @@ use tauri::Manager;
 /// Store key holding the one update version the user dismissed from the passive
 /// toast. We re-prompt only once a *newer* version than this ships.
 const IGNORED_KEY: &str = "updater_ignored_version";
+/// Persisted by builds that swapped the bundle the moment a download finished.
+/// Only read now to clear a stale value.
 #[cfg(not(debug_assertions))]
-const READY_KEY: &str = "updater_ready_version";
+const LEGACY_READY_KEY: &str = "updater_ready_version";
 #[cfg(not(debug_assertions))]
 const LAST_CHECK_KEY: &str = "updater_last_check_secs";
 #[cfg(not(debug_assertions))]
@@ -52,6 +54,17 @@ static DOWNLOADING: AtomicBool = AtomicBool::new(false);
 /// remounts) mid-download can pick it up instead of showing a fresh idle state.
 #[cfg(not(debug_assertions))]
 static PROGRESS: Mutex<Option<UpdateDownloadProgress>> = Mutex::new(None);
+/// A verified package waiting to be installed when the app quits or restarts.
+///
+/// The swap must not happen while this process is running. Installing moves
+/// the running bundle into a temp directory that macOS later deletes. After
+/// that, TCC cannot resolve the app as the responsible process for its
+/// helpers, so `screencapture` is denied Screen Recording (the screenshot
+/// launcher reports a missing permission) and syspolicyd starts killing
+/// helper launches. Kept in memory: if the process dies before installing,
+/// the next launch simply finds the update again.
+#[cfg(not(debug_assertions))]
+static PENDING: Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>> = Mutex::new(None);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,11 +128,6 @@ fn now_secs() -> u64 {
 }
 
 #[cfg(not(debug_assertions))]
-fn current_version(app: &AppHandle) -> String {
-    app.package_info().version.to_string()
-}
-
-#[cfg(not(debug_assertions))]
 fn mark_check_started(app: &AppHandle) {
     let _ = app
         .state::<AppState>()
@@ -141,28 +149,40 @@ fn recently_checked(app: &AppHandle, min_interval: Duration) -> bool {
 }
 
 #[cfg(not(debug_assertions))]
-fn remember_ready(app: &AppHandle, version: &str) {
-    let _ = app
-        .state::<AppState>()
-        .store
-        .set_setting(READY_KEY, version);
+fn pending_version() -> Option<String> {
+    PENDING
+        .lock()
+        .ok()
+        .and_then(|slot| slot.as_ref().map(|(u, _)| u.version.clone()))
 }
 
+/// Install the downloaded update, if any. Called on the way out (quit or
+/// "Restart to update"); a no-op when nothing is pending, so calling it twice
+/// is safe.
 #[cfg(not(debug_assertions))]
-fn clear_ready_if_applied(app: &AppHandle) {
-    let current = current_version(app);
-    let ready = app
-        .state::<AppState>()
-        .store
-        .get_setting(READY_KEY)
-        .ok()
-        .flatten();
-    if ready.as_deref() == Some(current.as_str()) {
-        let _ = app.state::<AppState>().store.delete_setting(READY_KEY);
+pub fn apply_pending_update() {
+    let Some((update, bytes)) = PENDING.lock().ok().and_then(|mut slot| slot.take()) else {
+        return;
+    };
+    match update.install(&bytes) {
+        Ok(()) => tracing::info!("cetus: update {} installed", update.version),
+        Err(e) => tracing::warn!("cetus: update {} install failed: {e}", update.version),
     }
 }
 
-/// Download the update, verify it and stage the swap, reporting throttled
+#[cfg(debug_assertions)]
+pub fn apply_pending_update() {}
+
+/// Drop the ready marker an older build left behind.
+#[cfg(not(debug_assertions))]
+pub fn clear_legacy_ready_marker(app: &AppHandle) {
+    let _ = app
+        .state::<AppState>()
+        .store
+        .delete_setting(LEGACY_READY_KEY);
+}
+
+/// Download the update, verify it and hold it for [`apply_pending_update`], reporting throttled
 /// progress to the main window the whole way.
 ///
 /// `Ok(false)` means another download is already in flight and this call was a
@@ -198,7 +218,7 @@ async fn download_update(
     let mut total: Option<u64> = None;
     let mut last_emit: Option<Instant> = None;
     let outcome = update
-        .download_and_install(
+        .download(
             |chunk_len, content_len| {
                 downloaded += chunk_len as u64;
                 if content_len.is_some() {
@@ -223,22 +243,27 @@ async fn download_update(
         )
         .await;
 
-    if let Err(e) = outcome {
-        let _ = app.emit_to(
-            "main",
-            "update-download-progress",
-            UpdateDownloadProgress {
-                downloaded,
-                total,
-                finished: false,
-                failed: true,
-                version: Some(version.clone()),
-            },
-        );
-        return Err(e.to_string());
-    }
+    let bytes = match outcome {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            let _ = app.emit_to(
+                "main",
+                "update-download-progress",
+                UpdateDownloadProgress {
+                    downloaded,
+                    total,
+                    finished: false,
+                    failed: true,
+                    version: Some(version.clone()),
+                },
+            );
+            return Err(e.to_string());
+        }
+    };
 
-    remember_ready(app, &version);
+    if let Ok(mut slot) = PENDING.lock() {
+        *slot = Some((update.clone(), bytes));
+    }
     let _ = app.emit_to(
         "main",
         "update-download-progress",
@@ -266,7 +291,7 @@ async fn download_update(
 
 /// Background check at launch.
 ///
-/// - auto on  → download + swap silently (applies on next launch, no nag).
+/// - auto on  → download silently; installs on the next quit or restart, no nag.
 /// - auto off → only emit a non-intrusive `update-available` event to the main
 ///   window, and only for a version the user hasn't already dismissed.
 ///
@@ -293,7 +318,6 @@ async fn check_once(app: AppHandle, auto: bool) {
         Ok(Some(u)) => u,
         Ok(None) => {
             tracing::debug!("cetus: already up to date");
-            clear_ready_if_applied(&app);
             return;
         }
         Err(e) => {
@@ -302,17 +326,10 @@ async fn check_once(app: AppHandle, auto: bool) {
         }
     };
 
-    // The updater still reports this version as available until the process
-    // relaunches into the swapped bundle. If it is already on disk, the
-    // persistent sidebar affordance is the only prompt we need; re-downloading
-    // it or emitting another passive toast would duplicate that state.
-    let ready = app
-        .state::<AppState>()
-        .store
-        .get_setting(READY_KEY)
-        .ok()
-        .flatten();
-    if ready.as_deref() == Some(update.version.as_str()) {
+    // Already downloaded and waiting for a restart: the persistent sidebar
+    // affordance is the only prompt we need; re-downloading it or emitting
+    // another passive toast would duplicate that state.
+    if pending_version().as_deref() == Some(update.version.as_str()) {
         return;
     }
 
@@ -321,7 +338,7 @@ async fn check_once(app: AppHandle, auto: bool) {
         tracing::info!("cetus: update {v} available — installing in background");
         match download_update(&app, &update).await {
             Ok(true) => {
-                tracing::info!("cetus: update {v} installed; applies on next launch");
+                tracing::info!("cetus: update {v} downloaded; installs on quit or restart");
             }
             Ok(false) => {
                 tracing::debug!("cetus: update {v} already downloading");
@@ -418,15 +435,12 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateMeta>, Stri
                 current_version: u.current_version.clone(),
                 notes: u.body.clone(),
             })),
-            None => {
-                clear_ready_if_applied(&app);
-                Ok(None)
-            }
+            None => Ok(None),
         }
     }
 }
 
-/// Download + install the available update (applies on next launch). Re-checks
+/// Download the available update (installs on the next quit or restart). Re-checks
 /// internally so it's safe to call from either the toast or the button.
 ///
 /// Resolves to `false` when a download (a background one, or one started from
@@ -488,19 +502,13 @@ pub async fn pending_update_version(app: AppHandle) -> Result<Option<String>, St
     }
     #[cfg(not(debug_assertions))]
     {
-        let store = &app.state::<AppState>().store;
-        let ready = store.get_setting(READY_KEY).map_err(|e| e.to_string())?;
-        if ready.as_deref() == Some(current_version(&app).as_str()) {
-            store.delete_setting(READY_KEY).map_err(|e| e.to_string())?;
-            return Ok(None);
-        }
-        Ok(ready)
+        let _ = app;
+        Ok(pending_version())
     }
 }
 
-/// Relaunch the app to apply a downloaded update. The updater swaps the bundle
-/// in place, so a plain restart boots the new version. Drives the sidebar's
-/// "Restart to update" button.
+/// Relaunch the app to apply a downloaded update: install it, then restart so
+/// the new bundle boots. Drives the sidebar's "Restart to update" button.
 ///
 /// On macOS this must NOT be Tauri's `app.restart()`: that is a bare
 /// `Command::new(current_exe).spawn()`, so the new process is not launched by
@@ -513,6 +521,7 @@ pub async fn pending_update_version(app: AppHandle) -> Result<Option<String>, St
 /// the new one does not race us for the control socket and remote port.
 #[tauri::command]
 pub fn relaunch_app(app: AppHandle) {
+    apply_pending_update();
     #[cfg(target_os = "macos")]
     {
         if let Some(bundle) = macos_bundle_path() {
