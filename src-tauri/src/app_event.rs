@@ -82,6 +82,16 @@ pub enum AppEvent {
         request_id: String,
         params: Value,
     },
+    /// The coordinator-tools extension is asking the frontend (which owns
+    /// sessions) to start, message, list, read, or stop one of its threads.
+    /// Answered with `extension_ui_respond`.
+    CoordinatorToolRequest {
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        params: Value,
+    },
     /// Internal: the skill-tools extension is asking the host to create, list,
     /// update, or delete a skill on the agent's behalf.
     SkillToolRequest {
@@ -146,6 +156,11 @@ impl From<crate::bridge::RuntimeEvent> for AppEvent {
                     params,
                 },
                 HostTunnelKind::Skill => Self::SkillToolRequest {
+                    conversation_id,
+                    request_id,
+                    params,
+                },
+                HostTunnelKind::Coordinator => Self::CoordinatorToolRequest {
                     conversation_id,
                     request_id,
                     params,

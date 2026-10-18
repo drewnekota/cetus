@@ -7,7 +7,8 @@ import {
 } from "@/components/chat/composer";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
-import { threadFeed } from "@/components/threads/threads-view";
+import { folderSessions, groupSessions } from "@/lib/folder-sessions";
+import { useInputIds } from "@/lib/session-activity";
 import { api, onUpdateReady } from "@/lib/tauri";
 import {
   installChatPersistence,
@@ -65,6 +66,8 @@ import { useConversationActions } from "./home/use-conversation-actions";
 import { renderHome } from "./home/home-view";
 import { useHomeState } from "./home/use-home-state";
 import { useConversationSelection } from "./home/use-conversation-selection";
+import { useCoordinator } from "./home/use-coordinator";
+import { isCoordinatorId, OPEN_THREAD_EVENT, useCoordinatorStore } from "@/lib/coordinator";
 
 export default function Home() {
   useZoom();
@@ -210,6 +213,11 @@ export default function Home() {
     [conversations, detailId],
   );
 
+  // Set once useCoordinator below has run; read only from event handlers.
+  const startDirectRef = useRef<
+    ReturnType<typeof useCoordinator>["startDirect"]
+  >(async () => {});
+
   /** Park a message in the follow-up queue (typed while the agent is mid-run). */
   function enqueueMessage(
     convId: string,
@@ -218,6 +226,8 @@ export default function Home() {
     runtime: ComposerRuntimeSelection | undefined,
     beforeIds: string[] = [],
   ) {
+    // A runtime picked in Cetus's composer runs now, beside Cetus's turn.
+    if (sendDirectFromCetus(convId, text, attachments, runtime)) return;
     // The composer's `streaming` prop is a rendered snapshot. A completion can
     // settle the store after that render but just before Enter reaches here;
     // queueing from the stale prop would miss the already-fired active→idle
@@ -699,33 +709,44 @@ export default function Home() {
     if (view !== "threads" || !detailId) return;
     markUnread(detailId, false);
   }, [detailId, view, markUnread]);
-  // Threads view keyboard: ⌥⌘↑/↓ (or ⌃K/⌃J, bare K/J) step through the feed, ⌘D files
-  // the open one away. Refs keep the callbacks stable for the key handler.
+  // Threads view keyboard: ⌥⌘↑/↓ (or ⌃K/⌃J, bare K/J) step through the
+  // session list beside Cetus, ⌘D files the open one away. Refs keep the
+  // callbacks stable for the key handler.
+  const inputIds = useInputIds();
   const threadNavRef = useRef({ filter: boardWorkspaceFilter, detailId });
   threadNavRef.current = { filter: boardWorkspaceFilter, detailId };
-  const stepThread = useCallback((direction: 1 | -1) => {
-    const feed = threadFeed(conversationsRef.current, threadNavRef.current.filter);
-    if (feed.length === 0) return;
-    const i = feed.findIndex((c) => c.id === threadNavRef.current.detailId);
-    // Nothing open yet: start from the newest, which sits at the bottom.
-    const next =
-      i < 0 ? feed.length - 1 : Math.min(feed.length - 1, Math.max(0, i + direction));
-    setDetailId(feed[next].id);
+  const sessionSetsRef = useRef({ inputIds, activityIds });
+  sessionSetsRef.current = { inputIds, activityIds };
+  /** The Threads view's session list, in its display order. */
+  const sessionOrder = useCallback((dir: string | null): Conversation[] => {
+    if (!dir) return [];
+    const { inputIds: input, activityIds: running } = sessionSetsRef.current;
+    return groupSessions(folderSessions(conversationsRef.current, dir), input, running).map(
+      (s) => s.conv,
+    );
   }, []);
+  const stepThread = useCallback((direction: 1 | -1) => {
+    const order = sessionOrder(threadNavRef.current.filter);
+    if (order.length === 0) return;
+    const i = order.findIndex((c) => c.id === threadNavRef.current.detailId);
+    // Nothing open yet: start from the top of the list.
+    const next = i < 0 ? 0 : Math.min(order.length - 1, Math.max(0, i + direction));
+    setDetailId(order[next].id);
+  }, [sessionOrder]);
   const archiveThread = useCallback((): boolean => {
     const { filter, detailId: id } = threadNavRef.current;
     const c = id ? conversationsRef.current.find((x) => x.id === id) : null;
     if (!c) return false;
-    const feed = threadFeed(conversationsRef.current, filter);
-    const i = feed.findIndex((x) => x.id === c.id);
+    const order = sessionOrder(filter);
+    const i = order.findIndex((x) => x.id === c.id);
     // Land on a neighbour so a run of ⌘D files a backlog away in one go.
-    setDetailId((feed[i + 1] ?? feed[i - 1])?.id ?? null);
+    setDetailId((order[i + 1] ?? order[i - 1])?.id ?? null);
     archiveConversation(c).catch((err) => {
       console.error("archiveConversation failed", err);
       toast.error("Couldn't archive that conversation.");
     });
     return true;
-  }, [archiveConversation]);
+  }, [archiveConversation, sessionOrder]);
 
   // A thread feed is always one folder: the Threads view has no "All
   // workspaces" row, so land on the main chat's folder (else Chat).
@@ -739,17 +760,17 @@ export default function Home() {
   const threadByFolderRef = useRef(new Map<string, string | null>());
   const openWorkspaceFeed = useCallback((dir: string | undefined) => {
     if (!dir) return;
-    // Landing in a folder means typing into its feed next.
+    // Landing in a folder means typing to its Cetus next.
     setFocusToken((t) => t + 1);
     const { filter, detailId: open } = threadNavRef.current;
     if (dir === filter) return;
     if (filter) threadByFolderRef.current.set(filter, open);
     setBoardWorkspaceFilter(dir);
     // The docked thread belongs to the folder being left; bring back the one
-    // this folder had open if it is still in its feed.
+    // this folder had open if it is still one of its sessions.
     const back = threadByFolderRef.current.get(dir) ?? null;
     setDetailId(
-      back && threadFeed(conversationsRef.current, dir).some((c) => c.id === back)
+      back && folderSessions(conversationsRef.current, dir).some((c) => c.id === back)
         ? back
         : null,
     );
@@ -771,10 +792,6 @@ export default function Home() {
     },
     [openWorkspaceFeed],
   );
-  const onThreadsWorkspaceChange = useCallback(
-    (dir: string | null) => openWorkspaceFeed(dir ?? undefined),
-    [openWorkspaceFeed],
-  );
   const selectWorkspaceSlot = useCallback(
     (index: number) => {
       const dirs = orderedWorkspaceDirsRef.current;
@@ -783,8 +800,8 @@ export default function Home() {
     [openWorkspaceFeed],
   );
 
-  /** ⌘N / New task in the Threads view: close the docked thread and focus
-   *  the feed's composer, where sending starts the session. */
+  /** ⌘N / New task in the Threads view: close the docked session and focus
+   *  Cetus's composer. */
   const onNewThread = useCallback(() => {
     setDetailId(null);
     setFocusToken((t) => t + 1);
@@ -1126,7 +1143,28 @@ export default function Home() {
     return useMessageActionsResult.maybeRunCodexCommand(...args);
   }
   function onSend(...args: Parameters<typeof useMessageActionsResult.onSend>) {
+    const [text, attachments, runtime] = args;
+    if (activeId && sendDirectFromCetus(activeId, text, attachments ?? [], runtime)) {
+      return Promise.resolve();
+    }
     return useMessageActionsResult.onSend(...args);
+  }
+  /** In Cetus (a folder's coordinator), picking another runtime in the
+   *  composer means "run this there", not "switch Cetus's runtime": the
+   *  message starts that runtime's session directly. True when handled. */
+  function sendDirectFromCetus(
+    convId: string,
+    text: string,
+    attachments: ComposerAttachment[],
+    runtime: ComposerRuntimeSelection | undefined,
+  ): boolean {
+    if (!runtime || runtime.backend === "pi") return false;
+    if (!isCoordinatorId(useCoordinatorStore.getState().registry, convId)) return false;
+    startDirectRef.current(convId, text, attachments, runtime).catch((e) => {
+      console.error("[cetus] direct start failed", e);
+      toast.error(String(e));
+    });
+    return true;
   }
   function onBash(...args: Parameters<typeof useMessageActionsResult.onBash>) {
     return useMessageActionsResult.onBash(...args);
@@ -1236,16 +1274,37 @@ export default function Home() {
     text: string,
     attachments: ComposerAttachment[],
     dir?: string,
+    opts?: {
+      /** Runtime override (a coordinator's thread); default = pending runtime. */
+      backend?: BackendId;
+      /** CLI model / effort for that runtime; unset = the pending pick (same
+       *  runtime) or the CLI's own default. */
+      cliModel?: string;
+      cliEffort?: string;
+      title?: string;
+      /** Runs after the row exists, before the prompt goes out. */
+      beforeSend?: (id: string) => Promise<void>;
+    },
   ): Promise<string> {
-    const c = await api.newConversation(dir ?? workspaceDir ?? undefined);
+    let c = await api.newConversation(dir ?? workspaceDir ?? undefined);
     const id = c.id;
+    // Named before the first send so auto-titling keeps it.
+    if (opts?.title) c = await api.renameConversation(id, opts.title);
     // Runtime chosen in the dialog — the shared pending state (same one the chat
     // hero + quick launcher use). Applied before the first prompt goes out so it
     // already routes through Claude Code / Codex.
-    if (pendingBackend !== "pi") {
+    const backend = opts?.backend ?? pendingBackend;
+    if (backend !== "pi") {
       try {
-        await api.setConversationBackend(id, pendingBackend);
-        if (pendingCliModel || pendingCliEffort) {
+        await api.setConversationBackend(id, backend);
+        c = { ...c, backend };
+        if (opts?.cliModel || opts?.cliEffort) {
+          await api.setConversationCliModel(
+            id,
+            opts.cliModel ?? "",
+            opts.cliEffort ?? (backend === pendingBackend ? pendingCliEffort : ""),
+          );
+        } else if (backend === pendingBackend && (pendingCliModel || pendingCliEffort)) {
           await api.setConversationCliModel(
             id,
             pendingCliModel,
@@ -1269,6 +1328,7 @@ export default function Home() {
       chatStore.getState().setError(id, `attachment failed: ${e}`);
       return id;
     }
+    if (opts?.beforeSend) await opts.beforeSend(id);
     store.userSent(id, text, out.localImages, out.savedFiles);
     // Don't await — let the agent stream in the background. The kanban card
     // shows a live "streaming" dot via streamingIds.
@@ -1506,6 +1566,54 @@ export default function Home() {
     await api.deleteAutomation(a.id);
     setAutomations((as) => as.filter((x) => x.id !== a.id));
   }
+  // --- Coordinator (Threads view's second mode) ---------------------------
+  const pendingBackendRef = useRef(pendingBackend);
+  pendingBackendRef.current = pendingBackend;
+  const { ensureCoordinator, startDirect } = useCoordinator({
+    chatStore,
+    conversationsRef,
+    setConversations,
+    createThread: (text, attachments, dir, opts) => onCreateTask(text, attachments, dir, opts),
+    enqueueMessage: (convId, text) => enqueueMessage(convId, text, [], undefined),
+    defaultBackendRef: pendingBackendRef,
+  });
+  startDirectRef.current = startDirect;
+  // The Cetus conversation of the folder the Threads view shows. The view
+  // opens it as the active chat, so the chat pane drives it.
+  const [coordinatorId, setCoordinatorId] = useState<string | null>(null);
+  const coordinatorDir = boardWorkspaceFilter ?? workspaceDir ?? defaultWorkspace;
+  const coordinatorOn = view === "threads";
+  useEffect(() => {
+    if (!coordinatorOn || !piReady || !coordinatorDir) return;
+    let stale = false;
+    ensureCoordinator(coordinatorDir)
+      .then((id) => {
+        if (stale) return;
+        setCoordinatorId(id);
+        void onSelect(id);
+      })
+      .catch((e) => {
+        console.error("[coordinator] open failed", e);
+        toast.error("Couldn't open the coordinator.");
+      });
+    return () => {
+      stale = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coordinatorOn, piReady, coordinatorDir]);
+  // A thread card in a coordinator transcript asks to open its thread.
+  useEffect(() => {
+    const open = (e: Event) => {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id;
+      if (!id) return;
+      if (viewRef.current !== "threads") setView("threads");
+      setDetailId(id);
+    };
+    window.addEventListener(OPEN_THREAD_EVENT, open);
+    return () => window.removeEventListener(OPEN_THREAD_EVENT, open);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return renderHome({
     chatSwitcher,
     closeChatSwitcher,
@@ -1558,6 +1666,7 @@ export default function Home() {
     pendingCliEffort,
     onPendingTuningChange,
     onCreateTask,
+    coordinatorId: coordinatorOn ? coordinatorId : null,
     automationDialogOpen,
     setAutomationDialogOpen,
     editingAutomation,
@@ -1572,6 +1681,7 @@ export default function Home() {
     historyQuery,
     historyFrame,
     activityIds,
+    inputIds,
     unreadCompletedIds,
     recentWorkspaces,
     temporaryWorkspaces,
@@ -1585,7 +1695,6 @@ export default function Home() {
     onNewSidebar,
     onNewThread,
     openNewTask,
-    onThreadsWorkspaceChange,
     onSidebarWorkspaceFilter,
     mode,
     onRevealWorkspace,

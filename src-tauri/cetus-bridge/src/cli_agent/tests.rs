@@ -1,4 +1,7 @@
-use super::acp_session::{acp_permission_response, acp_stop_reason_error};
+use super::acp_session::{
+    acp_permission_answer_response, acp_permission_response, acp_stop_reason_error,
+    AcpPermissionAnswer,
+};
 use super::artifacts::{
     artifact_details, extracted_artifact_details, ARTIFACT_SEQUENCE, TOOL_OUTPUT_FLUSH_INTERVAL,
     TOOL_OUTPUT_PREVIEW_BYTES,

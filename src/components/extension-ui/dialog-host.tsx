@@ -1,6 +1,8 @@
 "use client";
-// Listens for extension_ui_request events emitted by pi extensions and renders
-// the matching shadcn Dialog. Replies via api.extensionUiRespond.
+// Listens for extension_ui_request events emitted by pi extensions. Dialogs
+// that belong to a conversation go to its control queue (see lib/pi-dialog);
+// this renders the rest as a shadcn Dialog and shows `notify` toasts. Replies
+// via api.extensionUiRespond.
 //
 // Design:
 // - Only one dialog visible at a time; concurrent requests queue up. This matches
@@ -69,6 +71,10 @@ export function DialogHost() {
           case "confirm":
           case "input":
           case "editor":
+            // A conversation's dialogs join its control queue (answered on
+            // the chat pane or its Threads card); only orphans with no
+            // conversation to show them in still get the modal.
+            if (conversationId) break;
             setQueue((q) => [...q, { ...e, conversationId }]);
             // The modal is only useful when the window is visible; when it's in
             // the background, nudge the user so a blocked agent doesn't stall

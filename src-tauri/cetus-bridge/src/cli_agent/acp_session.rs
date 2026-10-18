@@ -30,7 +30,7 @@ enum AcpSessionCommand {
     },
     RespondPermission {
         request_id: Value,
-        allow: bool,
+        answer: AcpPermissionAnswer,
     },
     Abort,
     Shutdown,
@@ -56,8 +56,21 @@ impl AcpSessionHandle {
     }
 
     pub fn respond_permission(&self, request_id: Value, allow: bool) -> Result<()> {
+        let answer = if allow {
+            AcpPermissionAnswer::AllowOnce
+        } else {
+            AcpPermissionAnswer::Reject
+        };
+        self.respond_permission_answer(request_id, answer)
+    }
+
+    pub fn respond_permission_answer(
+        &self,
+        request_id: Value,
+        answer: AcpPermissionAnswer,
+    ) -> Result<()> {
         self.tx
-            .send(AcpSessionCommand::RespondPermission { request_id, allow })
+            .send(AcpSessionCommand::RespondPermission { request_id, answer })
             .map_err(|_| anyhow::anyhow!("ACP session has exited"))
     }
 
@@ -157,17 +170,27 @@ async fn acp_handshake_request(
     }
 }
 
-/// The option id matching the user's answer. Once-scoped kinds win over
-/// always-scoped ones so a single Allow can never silently become a standing
-/// grant. There is deliberately NO "just take the first option" fallback: an
-/// agent that offers nothing matching the answer must get `cancelled`, because
-/// guessing here would turn a Deny into an Allow.
-fn acp_allow_option(params: &Value, allow: bool) -> Option<Value> {
+/// How the user answered a `session/request_permission`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpPermissionAnswer {
+    AllowOnce,
+    /// "Always allow": the agent's standing-grant option when it offers one,
+    /// else a one-time allow — never more than the user asked for.
+    AllowAlways,
+    Reject,
+}
+
+/// The option id matching the user's answer. For a plain Allow, once-scoped
+/// kinds win over always-scoped ones so a single Allow can never silently
+/// become a standing grant. There is deliberately NO "just take the first
+/// option" fallback: an agent that offers nothing matching the answer must get
+/// `cancelled`, because guessing here would turn a Deny into an Allow.
+fn acp_allow_option(params: &Value, answer: AcpPermissionAnswer) -> Option<Value> {
     let options = params.get("options")?.as_array()?;
-    let wanted: [&str; 2] = if allow {
-        ["allow_once", "allow"]
-    } else {
-        ["reject_once", "reject"]
+    let wanted: &[&str] = match answer {
+        AcpPermissionAnswer::AllowOnce => &["allow_once", "allow"],
+        AcpPermissionAnswer::AllowAlways => &["allow_always", "allow_once", "allow"],
+        AcpPermissionAnswer::Reject => &["reject_once", "reject"],
     };
     wanted
         .iter()
@@ -201,7 +224,16 @@ pub(super) fn acp_stop_reason_error(response: &Value) -> Option<String> {
 }
 
 pub(super) fn acp_permission_response(params: &Value, allow: bool) -> Value {
-    match acp_allow_option(params, allow) {
+    let answer = if allow {
+        AcpPermissionAnswer::AllowOnce
+    } else {
+        AcpPermissionAnswer::Reject
+    };
+    acp_permission_answer_response(params, answer)
+}
+
+pub(super) fn acp_permission_answer_response(params: &Value, answer: AcpPermissionAnswer) -> Value {
+    match acp_allow_option(params, answer) {
         Some(option_id) => json!({
             "outcome": { "outcome": "selected", "optionId": option_id }
         }),
@@ -634,10 +666,10 @@ pub fn spawn_acp_session(
                         }
                         active = Some(ActiveAcpTurn { request_id, sink, outcome, translator });
                     }
-                    Some(AcpSessionCommand::RespondPermission { request_id, allow }) => {
+                    Some(AcpSessionCommand::RespondPermission { request_id, answer }) => {
                         let key = request_id.to_string();
                         if let Some(params) = permission_params.remove(&key) {
-                            let result = acp_permission_response(&params, allow);
+                            let result = acp_permission_answer_response(&params, answer);
                             let _ = acp_write(
                                 &mut stdin,
                                 &json!({ "jsonrpc": "2.0", "id": request_id, "result": result }),

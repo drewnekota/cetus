@@ -31,6 +31,13 @@ USAGE
                                        window-level timeline with durations
   cetus context search <words> [flags] Full-text search over captured screen text
   cetus context get <id>               Full captured text of one entry
+  cetus thread start [--title <t>] [--runtime <r>] [--model <m>] <task…>
+                                       Start a thread: a separate agent session in
+                                       this folder that reports back to you here
+  cetus thread send <id> <message…>    Follow-up / correction to a thread
+  cetus thread list                    Your threads: id, title, runtime, status
+  cetus thread read <id>               A thread's task + latest full reply
+  cetus thread stop <id>               Interrupt a thread's running turn
   cetus meeting list [--limit <n>]     Recorded meetings (on-device transcription)
   cetus meeting transcript <id|latest> One meeting: summary + full transcript
   cetus ping | version | help
@@ -42,6 +49,7 @@ WHEN TO REACH FOR WHAT
   The user refers to something said in a meeting or call → `cetus meeting`
   You made or fetched a file the user should receive    → `cetus artifact`
   Recurring or scheduled work                           → `cetus cron`
+  Long or parallel work best done in its own session    → `cetus thread`
 
 CONTEXT — `now` is a live probe of the user's current window (no collector
 needed): when Cetus itself is frontmost it reads the app the user was in just
@@ -70,6 +78,14 @@ MEETING — Cetus transcribes meetings on-device (opt-in). In a transcript,
 audio. `list` shows recent sessions (LIVE = still recording); `transcript`
 prints one meeting's summary plus its full timestamped transcript — grep it
 for specifics. Text only; audio, when kept, never leaves the machine.
+
+THREAD — a thread is an ordinary Cetus session (shown in the user's Threads
+view) that works on one task and posts a <thread-report> message back into
+YOUR conversation when it finishes, fails, or needs the user. It can't see
+your conversation, so `start` must carry everything: the user's request
+verbatim, then the context it needs. Runtime: cetus | claude-code | codex
+(default: the user's). --model only for claude-code/codex, and only one the
+user named. Don't poll; wait for the report.
 
 INPUT JSON — create requires name/prompt/schedule; edit takes any subset:
   {"name":"…","prompt":"…","schedule":<schedule>,
@@ -114,6 +130,11 @@ fn run_inner(args: &[String]) -> Result<String, String> {
         | ["meeting"]
         | ["meeting", "help"] => Ok(HELP.to_string()),
         ["context", rest @ ..] => context_cmd(rest),
+        ["thread"] | ["thread", "help" | "--help" | "-h"] => Ok(HELP.to_string()),
+        ["thread", _, rest @ ..] if rest.iter().any(|a| matches!(*a, "--help" | "-h")) => {
+            Ok(HELP.to_string())
+        }
+        ["thread", rest @ ..] => thread_cmd(rest),
         ["meeting", "list"] => request(&json!({ "op": "meeting.list" })).map(text_field),
         ["meeting", "list", "--limit", n] => {
             let n: u64 = n.parse().map_err(|_| format!("bad --limit {n:?}"))?;
@@ -158,6 +179,63 @@ fn run_inner(args: &[String]) -> Result<String, String> {
             other.join(" ")
         )),
     }
+}
+
+/// `cetus thread …`: the coordinator's thread tools for any runtime. The app
+/// answers with `{ok, …}`; a refusal (`ok: false`) exits non-zero.
+fn thread_cmd(rest: &[&str]) -> Result<String, String> {
+    let params = match rest {
+        ["start", args @ ..] => {
+            let mut params = serde_json::Map::new();
+            params.insert("op".into(), json!("start"));
+            let mut task = Vec::new();
+            let mut it = args.iter();
+            while let Some(a) = it.next() {
+                match *a {
+                    "--title" | "--runtime" | "--model" => {
+                        let v = it.next().ok_or_else(|| format!("{a} needs a value"))?;
+                        params.insert(a.trim_start_matches("--").into(), json!(v));
+                    }
+                    // Before the task starts, a dash word is a mistyped flag,
+                    // not the task (`start --runtme codex …`).
+                    other if task.is_empty() && other.starts_with('-') => {
+                        return Err(format!(
+                            "unknown flag {other:?} — start takes --title, --runtime, --model"
+                        ))
+                    }
+                    other => task.push(other),
+                }
+            }
+            let task = task.join(" ");
+            if task.trim().is_empty() {
+                return Err("missing task — usage: cetus thread start [flags] <task…>".into());
+            }
+            params.insert("task".into(), json!(task));
+            Value::Object(params)
+        }
+        ["send", id, message @ ..] if !message.is_empty() => {
+            json!({ "op": "send", "thread_id": id, "message": message.join(" ") })
+        }
+        ["list"] => json!({ "op": "list" }),
+        ["read", id] => json!({ "op": "read", "thread_id": id }),
+        ["stop", id] => json!({ "op": "stop", "thread_id": id }),
+        other => {
+            return Err(format!(
+                "unknown thread command: {:?} — run `cetus help`",
+                other.join(" ")
+            ))
+        }
+    };
+    let conv = std::env::var("CETUS_CONVERSATION_ID").unwrap_or_default();
+    let reply = request(&json!({ "op": "thread", "conversationId": conv, "params": params }))?;
+    if reply.get("ok").and_then(Value::as_bool) == Some(false) {
+        let err = reply
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("refused");
+        return Err(err.to_string());
+    }
+    Ok(pretty(reply))
 }
 
 /// `cetus context …`: query the app's ambient screen memory. All formatting is
@@ -497,6 +575,24 @@ mod tests {
         assert_eq!(parse_duration_ms("90").unwrap(), 5_400_000); // bare = minutes
         assert!(parse_duration_ms("soon").is_err());
         assert!(parse_duration_ms("-5m").is_err());
+    }
+
+    #[test]
+    fn thread_help_and_bad_flags_never_start_a_thread() {
+        // Both return before any socket request is made.
+        for args in [
+            vec!["thread", "start", "--help"],
+            vec!["thread", "send", "-h"],
+            vec!["thread", "--help"],
+        ] {
+            let args: Vec<String> = args.into_iter().map(String::from).collect();
+            assert!(run_inner(&args).unwrap().contains("cetus thread start"));
+        }
+        let args: Vec<String> = ["thread", "start", "--runtme", "codex", "do it"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert!(run_inner(&args).unwrap_err().contains("unknown flag"));
     }
 
     #[test]

@@ -158,3 +158,19 @@ describe("runtime event and historical parity", () => {
     expect(visibleText(buildAssistantSegments(cancelled.messages.slice(2), false))).toEqual(["Partial reply"]);
   });
 });
+
+describe("coordinator thread cards", () => {
+  const threadTool = (id, name, isError = false) =>
+    tool(id, { name, result: { content: [{ type: "text", text: "{}" }], isError } });
+
+  test("successful thread_start / thread_send stay visible instead of folding into steps", () => {
+    const segments = build([thinking(), threadTool("t1", "thread_start"), threadTool("t2", "thread_send"), text("Started it.")]);
+    const answers = segments.filter((s) => s.type === "answer").map((s) => s.block.id ?? s.block.text);
+    expect(answers).toEqual(["t1", "t2", "Started it."]);
+  });
+
+  test("a failed thread_start folds like any other step", () => {
+    const segments = build([threadTool("t1", "thread_start", true), text("That failed.")]);
+    expect(segments[0].type).toBe("activity");
+  });
+});

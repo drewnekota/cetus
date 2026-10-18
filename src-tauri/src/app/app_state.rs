@@ -383,6 +383,16 @@ impl AppState {
         for (k, v) in self.conv_agent_env(conv_id, &workspace) {
             env.push((k, v));
         }
+        // A folder's coordinator gets the thread tools and its brief; the
+        // coordinator-tools extension stays inert in every other pi.
+        if crate::coordinator::is_coordinator(&self.store, conv_id) {
+            env.push(("CETUS_COORDINATOR".into(), "1".into()));
+            let instructions = crate::coordinator::instructions_path(&self.app_data_dir);
+            env.push((
+                "CETUS_COORDINATOR_INSTRUCTIONS".into(),
+                instructions.to_string_lossy().into_owned(),
+            ));
+        }
         let mut extra = String::new();
         if let Some(p) = plugins::extra_system_prompt(&self.store) {
             extra.push_str(&p);

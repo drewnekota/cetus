@@ -210,6 +210,9 @@ async fn sweep(state: &AppState, handle: &AppHandle, settings: &AutoArchiveSetti
         .list(false)
         .map_err(|e| anyhow!("list conversations: {e}"))?;
     let visible_conversation_id = state.active_conversation().await;
+    // A folder's Cetus conversation is the long-lived home its threads report
+    // into; archiving it would orphan them and mint a fresh one next visit.
+    let coordinators = crate::coordinator::load(&state.store);
 
     for c in active {
         // Already-old-enough rows only.
@@ -220,6 +223,9 @@ async fn sweep(state: &AppState, handle: &AppHandle, settings: &AutoArchiveSetti
         // place until they navigate away, even if its last persisted activity is
         // older than the auto-archive threshold.
         if visible_conversation_id.as_deref() == Some(c.id.as_str()) {
+            continue;
+        }
+        if coordinators.coordinators.values().any(|id| id == &c.id) {
             continue;
         }
         // Leave automation-generated conversations alone — the user may not have

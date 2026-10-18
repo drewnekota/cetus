@@ -5,6 +5,7 @@ export const HOST_TUNNELS = {
   automation: "__cetus_automation__",
   mcp: "__cetus_mcp__",
   skill: "__cetus_skill__",
+  coordinator: "__cetus_coordinator__",
 } as const;
 
 export type HostTunnelTitle = (typeof HOST_TUNNELS)[keyof typeof HOST_TUNNELS];

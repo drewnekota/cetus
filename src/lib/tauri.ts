@@ -10,6 +10,7 @@ import type {
   BackendId,
   BashResult,
   Conversation,
+  CoordinatorRegistry,
   DiscoverySettings,
   McpImportEntry,
   CustomProvider,
@@ -391,6 +392,23 @@ export const api = {
     id: string,
     payload: ExtensionUIResponseBody,
   ) => invoke<void>("extension_ui_respond", { conversationId, id, payload }),
+  coordinatorRegistry: () =>
+    invoke<CoordinatorRegistry>("coordinator_registry"),
+  coordinatorRegister: (workspaceDir: string, conversationId: string) =>
+    invoke<CoordinatorRegistry>("coordinator_register", {
+      workspaceDir,
+      conversationId,
+    }),
+  coordinatorInstructions: () => invoke<string>("coordinator_instructions"),
+  setCoordinatorInstructions: (text: string) =>
+    invoke<void>("set_coordinator_instructions", { text }),
+  coordinatorCliRespond: (requestId: string, value: string) =>
+    invoke<void>("coordinator_cli_respond", { requestId, value }),
+  coordinatorLinkThread: (threadId: string, coordinatorId: string) =>
+    invoke<CoordinatorRegistry>("coordinator_link_thread", {
+      threadId,
+      coordinatorId,
+    }),
   listApiKeys: () => invoke<string[]>("list_api_keys"),
   getCliRuntimeStatus: () =>
     invoke<{

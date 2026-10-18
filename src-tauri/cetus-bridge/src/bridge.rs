@@ -32,6 +32,11 @@ pub const SKILL_TOOL_TITLE: &str = "__cetus_skill__";
 /// Sentinel `ctx.ui.input` title used by MCP tools to mutate the host MCP store.
 pub const MCP_TOOL_TITLE: &str = "__cetus_mcp__";
 
+/// Sentinel `ctx.ui.input` title used by the coordinator's thread tools to
+/// start, message, and read the sessions it runs. The frontend owns sessions,
+/// so these requests are answered there rather than in Rust.
+pub const COORDINATOR_TOOL_TITLE: &str = "__cetus_coordinator__";
+
 /// Directory under the pi install tree that contains Cetus-owned extensions.
 pub const CETUS_EXTENSIONS_DIR: &str = "cetus-extensions";
 
@@ -86,6 +91,7 @@ pub enum HostTunnelKind {
     Automation,
     Mcp,
     Skill,
+    Coordinator,
     AgentStep,
     Cua,
     Browser,
@@ -143,6 +149,7 @@ pub fn host_tunnel_kind(value: &Value) -> Option<HostTunnelKind> {
         Some(AUTOMATION_TOOL_TITLE) => Some(HostTunnelKind::Automation),
         Some(MCP_TOOL_TITLE) => Some(HostTunnelKind::Mcp),
         Some(SKILL_TOOL_TITLE) => Some(HostTunnelKind::Skill),
+        Some(COORDINATOR_TOOL_TITLE) => Some(HostTunnelKind::Coordinator),
         Some(AGENT_STEP_TITLE) => Some(HostTunnelKind::AgentStep),
         Some(CUA_REQUEST_TITLE) => Some(HostTunnelKind::Cua),
         Some(BROWSER_REQUEST_TITLE) => Some(HostTunnelKind::Browser),
@@ -187,6 +194,10 @@ mod tests {
         assert_eq!(
             host_tunnel_kind(&req(SKILL_TOOL_TITLE)),
             Some(HostTunnelKind::Skill)
+        );
+        assert_eq!(
+            host_tunnel_kind(&req(COORDINATOR_TOOL_TITLE)),
+            Some(HostTunnelKind::Coordinator)
         );
         assert_eq!(
             host_tunnel_kind(&req(AGENT_STEP_TITLE)),

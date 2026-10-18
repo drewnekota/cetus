@@ -16,11 +16,12 @@
 // waiting either way). The turn blocks until each is answered; a turn ending
 // (agent_end) clears any stragglers, since the child process is then gone.
 
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Blocks,
   Check,
+  ClipboardList,
   ExternalLink,
   Image as ImageIcon,
   KeyRound,
@@ -35,9 +36,39 @@ import { blobToBase64, prepareImageAttachment } from "@/lib/image-attachment";
 import { useChatStore, useControlRequests } from "@/lib/chat-store";
 import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import type { CliAskQuestion, CliControlRequest } from "@/lib/types";
+import { TextBlock } from "@/components/chat/message-blocks";
+import { piDialogOf, type PiDialog } from "@/lib/pi-dialog";
+import type {
+  CliAskQuestion,
+  CliControlRequest,
+  ExtensionUIResponseBody,
+} from "@/lib/types";
 
-export function CliControlCard({ convId }: { convId: string }) {
+const STANDALONE_CHROME = "rounded-xl border bg-card p-3 shadow-sm";
+// Inside a Threads feed card the request sits within the card's own border, so
+// it gets a tinted panel instead of a second card.
+const INLINE_CHROME =
+  "rounded-lg border border-[var(--brand)]/25 bg-[var(--brand)]/[0.05] p-2.5";
+const CardChrome = createContext(STANDALONE_CHROME);
+
+export function CliControlCard({
+  convId,
+  variant = "standalone",
+}: {
+  convId: string;
+  /** "inline": answering from a Threads feed card rather than the chat pane. */
+  variant?: "standalone" | "inline";
+}) {
+  return (
+    <CardChrome.Provider
+      value={variant === "inline" ? INLINE_CHROME : STANDALONE_CHROME}
+    >
+      <ControlRequestCard convId={convId} />
+    </CardChrome.Provider>
+  );
+}
+
+function ControlRequestCard({ convId }: { convId: string }) {
   const { t } = useTranslation("chat");
   const queue = useControlRequests(convId);
   const current = queue[0] ?? null;
@@ -49,13 +80,22 @@ export function CliControlCard({ convId }: { convId: string }) {
     // answer the running turn over stdin.
     useChatStore.getState().clearControlRequest(convId, req.requestId);
     try {
-      await api.cliControlRespond(
-        convId,
-        req.requestId,
-        response,
-        req.source,
-        installPluginId,
-      );
+      if (req.source === "pi") {
+        // pi dialogs answer the extension directly, not a CLI turn.
+        await api.extensionUiRespond(
+          convId,
+          String(req.requestId),
+          response as ExtensionUIResponseBody,
+        );
+      } else {
+        await api.cliControlRespond(
+          convId,
+          req.requestId,
+          response,
+          req.source,
+          installPluginId,
+        );
+      }
     } catch (e) {
       // The answer never reached the CLI, which is still blocked waiting on
       // it — silently eating this leaves the conversation wedged on a request
@@ -66,7 +106,38 @@ export function CliControlCard({ convId }: { convId: string }) {
     }
   }
 
+  const dialog = piDialogOf(current);
+  if (dialog) {
+    return (
+      <PiDialogCard
+        key={current.requestId}
+        dialog={dialog}
+        onRespond={(body) => respond(body)}
+      />
+    );
+  }
+
   if (current.source === "codex") {
+    if (
+      current.requestKind === "command_approval" ||
+      current.requestKind === "file_change_approval"
+    ) {
+      return (
+        <ApprovalCard
+          key={current.requestId}
+          request={current}
+          title={t(
+            current.requestKind === "command_approval"
+              ? "cliControl.codexCommandTitle"
+              : "cliControl.codexFileChangeTitle",
+          )}
+          preview={codexApprovalPreview(current)}
+          onAllow={() => respond({ decision: "accept" })}
+          onAllowAlways={() => respond({ decision: "acceptForSession" })}
+          onDeny={() => respond({ decision: "decline" })}
+        />
+      );
+    }
     if (current.requestKind === "mcp_elicitation" && isToolSuggestion(current)) {
       return (
         <PluginSuggestionCard
@@ -119,8 +190,30 @@ export function CliControlCard({ convId }: { convId: string }) {
       <ApprovalCard
         key={current.requestId}
         request={current}
+        title={t("cliControl.agentApprovalTitle", { tool: current.toolName })}
+        preview={acpPreview(current)}
         onAllow={() => respond({ behavior: "allow" })}
+        onAllowAlways={
+          offersStandingGrant(current)
+            ? () => respond({ behavior: "allow_always" })
+            : undefined
+        }
         onDeny={() => respond({ behavior: "deny" })}
+      />
+    );
+  }
+
+  if (current.toolName === "ExitPlanMode") {
+    return (
+      <PlanCard
+        key={current.requestId}
+        plan={typeof current.input.plan === "string" ? current.input.plan : ""}
+        onApprove={() =>
+          respond({ behavior: "allow", updatedInput: current.input })
+        }
+        onKeepPlanning={() =>
+          respond({ behavior: "deny", message: t("cliControl.keepPlanningMessage") })
+        }
       />
     );
   }
@@ -195,6 +288,7 @@ function PluginSuggestionCard({
   onDecline: () => void;
 }) {
   const { t } = useTranslation("chat");
+  const chrome = useContext(CardChrome);
   const meta = suggestionMeta(request);
   const name = meta.tool_name || meta.tool_id || request.toolName;
   const reason =
@@ -228,7 +322,7 @@ function PluginSuggestionCard({
   }
 
   return (
-    <div className="rounded-xl border bg-card p-3 shadow-sm">
+    <div className={chrome}>
       <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-primary">
         <Blocks className="size-3.5" />
         {t("cliControl.pluginTitle")}
@@ -393,6 +487,7 @@ function CodexQuestionCard({
   onSubmit: (answers: Record<string, { answers: string[] }>) => void;
 }) {
   const { t } = useTranslation("chat");
+  const chrome = useContext(CardChrome);
   const questions = useMemo<CodexQuestion[]>(
     () => (Array.isArray(request.input.questions) ? request.input.questions as unknown as CodexQuestion[] : []),
     [request],
@@ -458,7 +553,7 @@ function CodexQuestionCard({
   }
 
   return (
-    <div className="rounded-xl border bg-card p-3 shadow-sm">
+    <div className={chrome}>
       <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-primary">
         <span className="flex items-center gap-1.5">
           <MessageCircleQuestion className="size-3.5" />
@@ -546,6 +641,7 @@ function AskQuestionCard({
   onSubmit: (answers: Record<string, string>) => void;
 }) {
   const { t } = useTranslation("chat");
+  const chrome = useContext(CardChrome);
   const questions = useMemo<CliAskQuestion[]>(
     () => request.input.questions ?? [],
     [request],
@@ -625,7 +721,7 @@ function AskQuestionCard({
   if (!q) return null;
 
   return (
-    <div className="rounded-xl border bg-card p-3 shadow-sm">
+    <div className={chrome}>
       <div className="mb-2 flex items-center justify-between gap-2 text-xs font-medium text-primary">
         <span className="flex items-center gap-1.5">
           <MessageCircleQuestion className="size-3.5" />
@@ -736,20 +832,29 @@ function AskQuestionCard({
 /** Any other tool asking for permission: show the call, Allow / Deny. */
 function ApprovalCard({
   request,
+  title,
+  preview: previewOverride,
   onAllow,
+  onAllowAlways,
   onDeny,
 }: {
   request: CliControlRequest;
+  /** Defaults to Claude Code's "Allow Claude Code to use {tool}?". */
+  title?: string;
+  preview?: string;
   onAllow: () => void;
+  /** Shown only when the runtime offers a standing grant. */
+  onAllowAlways?: () => void;
   onDeny: () => void;
 }) {
   const { t } = useTranslation("chat");
-  const preview = toolPreview(request);
+  const chrome = useContext(CardChrome);
+  const preview = previewOverride ?? toolPreview(request);
   return (
-    <div className="rounded-xl border bg-card p-3 shadow-sm">
+    <div className={chrome}>
       <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
         <ShieldQuestion className="size-3.5" />
-        {t("cliControl.approvalTitle", { tool: request.toolName })}
+        {title ?? t("cliControl.approvalTitle", { tool: request.toolName })}
       </div>
       {preview && (
         <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/60 px-2 py-1.5 font-mono text-xs leading-relaxed text-foreground/90">
@@ -760,9 +865,213 @@ function ApprovalCard({
         <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onDeny}>
           {t("cliControl.deny")}
         </Button>
+        {onAllowAlways && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={onAllowAlways}
+          >
+            {t("cliControl.allowAlways")}
+          </Button>
+        )}
         <Button size="sm" className="h-7 text-xs" onClick={onAllow}>
           {t("cliControl.allow")}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+/** ACP permission options carry a `kind`; offer "Always allow" only when the
+ *  agent has a standing grant to give. */
+function offersStandingGrant(request: CliControlRequest): boolean {
+  return (
+    Array.isArray(request.suggestions) &&
+    request.suggestions.some(
+      (option) =>
+        !!option &&
+        typeof option === "object" &&
+        (option as { kind?: unknown }).kind === "allow_always",
+    )
+  );
+}
+
+/** An ACP tool call: its command or the files it touches, else its raw input.
+ *  The title (already in the heading) and protocol ids aren't worth showing. */
+function acpPreview(request: CliControlRequest): string {
+  const input = request.input as Record<string, unknown>;
+  const raw = (input.rawInput ?? {}) as Record<string, unknown>;
+  for (const key of ["command", "cmd"]) {
+    const v = raw[key];
+    if (typeof v === "string") return v;
+    if (Array.isArray(v)) return v.join(" ");
+  }
+  const paths = Array.isArray(input.locations)
+    ? input.locations
+        .map((l) => (l && typeof l === "object" ? (l as { path?: unknown }).path : null))
+        .filter((p): p is string => typeof p === "string")
+    : [];
+  if (paths.length > 0) return paths.join("\n");
+  if (typeof raw.file_path === "string") return raw.file_path;
+  if (typeof raw.path === "string") return raw.path;
+  if (Object.keys(raw).length === 0) return "";
+  try {
+    return truncate(JSON.stringify(raw, null, 1), 800);
+  } catch {
+    return "";
+  }
+}
+
+/** What a Codex approval is about: the command (and where it runs), or the
+ *  reason / write root for a file change, which arrives without its diff. */
+function codexApprovalPreview(request: CliControlRequest): string {
+  const input = request.input as Record<string, unknown>;
+  const lines: string[] = [];
+  if (typeof input.command === "string") lines.push(input.command);
+  if (typeof input.cwd === "string" && request.requestKind === "command_approval") {
+    lines.push(`in ${input.cwd}`);
+  }
+  if (typeof input.grantRoot === "string") lines.push(`write access: ${input.grantRoot}`);
+  if (typeof input.reason === "string" && input.reason.trim()) lines.push(input.reason.trim());
+  return lines.join("\n");
+}
+
+/** Claude's ExitPlanMode: the plan to approve before the agent starts. */
+function PlanCard({
+  plan,
+  onApprove,
+  onKeepPlanning,
+}: {
+  plan: string;
+  onApprove: () => void;
+  onKeepPlanning: () => void;
+}) {
+  const { t } = useTranslation("chat");
+  const chrome = useContext(CardChrome);
+  return (
+    <div className={chrome}>
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
+        <ClipboardList className="size-3.5" />
+        {t("cliControl.planTitle")}
+      </div>
+      {plan && (
+        <div className="mb-2 max-h-64 overflow-auto rounded-md bg-muted/60 px-3 py-2 text-sm">
+          <TextBlock text={plan} isUser={false} />
+        </div>
+      )}
+      <div className="flex justify-end gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          onClick={onKeepPlanning}
+        >
+          {t("cliControl.keepPlanning")}
+        </Button>
+        <Button size="sm" className="h-7 text-xs" onClick={onApprove}>
+          {t("cliControl.approvePlan")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** A pi extension dialog: pick one of the options, confirm, or type. */
+function PiDialogCard({
+  dialog,
+  onRespond,
+}: {
+  dialog: PiDialog;
+  onRespond: (body: ExtensionUIResponseBody) => void;
+}) {
+  const { t } = useTranslation("chat");
+  const chrome = useContext(CardChrome);
+  const [value, setValue] = useState(
+    dialog.method === "editor" ? (dialog.prefill ?? "") : "",
+  );
+  const title = typeof dialog.title === "string" ? dialog.title : "";
+  const cancel = () => onRespond({ cancelled: true });
+  return (
+    <div className={chrome}>
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
+        <MessageCircleQuestion className="size-3.5" />
+        {t("cliControl.agentQuestionTitle")}
+      </div>
+      {title && (
+        <p className="mb-2 whitespace-pre-wrap text-sm font-medium leading-6">
+          {title}
+        </p>
+      )}
+      {dialog.method === "confirm" && dialog.message && (
+        <p className="mb-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+          {dialog.message}
+        </p>
+      )}
+      {dialog.method === "select" && (
+        <div className="mb-2 flex flex-col gap-1.5">
+          {dialog.options.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => onRespond({ value: option })}
+              className="rounded-lg border bg-background px-3 py-2 text-left text-sm transition-colors hover:border-primary/50 hover:bg-primary/5"
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+      {(dialog.method === "input" || dialog.method === "editor") && (
+        <textarea
+          autoFocus
+          value={value}
+          rows={dialog.method === "editor" ? 6 : 2}
+          placeholder={dialog.method === "input" ? dialog.placeholder : undefined}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (
+              dialog.method === "input" &&
+              e.key === "Enter" &&
+              !e.shiftKey &&
+              !e.nativeEvent.isComposing
+            ) {
+              e.preventDefault();
+              onRespond({ value });
+            }
+          }}
+          className="mb-2 w-full resize-y rounded-md border bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        />
+      )}
+      <div className="flex justify-end gap-2">
+        {dialog.method === "confirm" ? (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => onRespond({ confirmed: false })}
+            >
+              {t("cliControl.no")}
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => onRespond({ confirmed: true })}
+            >
+              {t("cliControl.yes")}
+            </Button>
+          </>
+        ) : (
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={cancel}>
+            {t("cliControl.cancel")}
+          </Button>
+        )}
+        {(dialog.method === "input" || dialog.method === "editor") && (
+          <Button size="sm" className="h-7 text-xs" onClick={() => onRespond({ value })}>
+            {t("cliControl.submit")}
+          </Button>
+        )}
       </div>
     </div>
   );

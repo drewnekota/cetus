@@ -35,7 +35,8 @@ import {
   SessionDetailDialog,
   SessionDetailPanel,
 } from "@/components/board/session-detail-dialog";
-import { ThreadsView, threadFeed } from "@/components/threads/threads-view";
+import { ThreadsView } from "@/components/threads/threads-view";
+import { folderSessions, groupSessions } from "@/lib/folder-sessions";
 import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
 import { DialogHost } from "@/components/extension-ui/dialog-host";
 import { ZoomHud } from "@/components/zoom-hud";
@@ -143,6 +144,7 @@ export function renderHome({
   pendingCliEffort,
   onPendingTuningChange,
   onCreateTask,
+  coordinatorId,
   automationDialogOpen,
   setAutomationDialogOpen,
   editingAutomation,
@@ -157,6 +159,7 @@ export function renderHome({
   historyQuery,
   historyFrame,
   activityIds,
+  inputIds,
   unreadCompletedIds,
   recentWorkspaces,
   temporaryWorkspaces,
@@ -170,7 +173,6 @@ export function renderHome({
   onNewSidebar,
   onNewThread,
   openNewTask,
-  onThreadsWorkspaceChange,
   onRevealWorkspace,
   onArchiveWorkspaceChats,
   onRemoveWorkspace,
@@ -289,6 +291,9 @@ export function renderHome({
     attachments: ComposerAttachment[],
     dir?: string,
   ) => Promise<string>;
+  /** The shown folder's Cetus conversation while the Threads view is open
+   *  (it is then the active chat), else null. */
+  coordinatorId: string | null;
   automationDialogOpen: boolean;
   setAutomationDialogOpen: Dispatch<SetStateAction<boolean>>;
   editingAutomation: Automation | null;
@@ -306,6 +311,8 @@ export function renderHome({
   historyQuery: string;
   historyFrame: Screenshot | null;
   activityIds: Set<string>;
+  /** Sessions waiting on the user (a question or permission prompt). */
+  inputIds: ReadonlySet<string>;
   unreadCompletedIds: Set<string>;
   recentWorkspaces: string[];
   temporaryWorkspaces: string[];
@@ -320,7 +327,6 @@ export function renderHome({
   onNewThread: () => void;
   openNewTask: () => void;
   /** Switch the Threads feed's folder (closes a thread docked from another). */
-  onThreadsWorkspaceChange: (dir: string | null) => void;
   onRevealWorkspace: (dir: string) => Promise<void>;
   onArchiveWorkspaceChats: (dir: string) => Promise<void>;
   onRemoveWorkspace: (dir: string) => void;
@@ -410,23 +416,83 @@ export function renderHome({
       if (detailId) removeQueued(detailId, id);
     },
   };
-  // New sessions from the Threads feed land in the folder it shows.
+  // The folder the Threads view shows.
   const threadsWorkspace =
     boardWorkspaceFilter ?? workspaceDir ?? defaultWorkspace;
-  // The docked thread's ↑/↓ buttons: its neighbours in the feed (same order
-  // as the ⌥⌘↑/↓ stepping in page.tsx).
+  // The docked session's ↑/↓ buttons: its neighbours in the session list
+  // beside Cetus (same order as the ⌥⌘↑/↓ stepping in page.tsx).
   const threadNav: { prev: string | null; next: string | null } = {
     prev: null,
     next: null,
   };
   if (view === "threads" && detailId) {
-    const feed = threadFeed(conversations, boardWorkspaceFilter);
-    const i = feed.findIndex((c) => c.id === detailId);
+    const order = groupSessions(
+      folderSessions(conversations, threadsWorkspace),
+      inputIds,
+      activityIds,
+    );
+    const i = order.findIndex((s) => s.conv.id === detailId);
     if (i >= 0) {
-      threadNav.prev = feed[i - 1]?.id ?? null;
-      threadNav.next = feed[i + 1]?.id ?? null;
+      threadNav.prev = order[i - 1]?.conv.id ?? null;
+      threadNav.next = order[i + 1]?.conv.id ?? null;
     }
   }
+  // The active chat's pane: the Chat view's transcript, and the coordinator's
+  // conversation in the Threads view's coordinator mode.
+  const renderChatPane = (opticalCenter: boolean) => (
+    <ChatPane
+      convId={activeId}
+      backend={activeConvBackend ?? pendingBackend}
+      opticalCenter={opticalCenter}
+      draftKey={activeId ? `chat:${activeId}` : "chat:new"}
+      modelChoice={modelChoice}
+      onModelChange={onModelChange}
+      workspaceDir={workspaceDir}
+      defaultWorkspace={defaultWorkspace}
+      onWorkspaceChange={onWorkspaceChange}
+      onSend={onSend}
+      onBash={onBash}
+      onAbort={onAbort}
+      onRetry={onRetry}
+      interrupted={activeConvInterrupted}
+      onResumeInterrupted={onResumeInterrupted}
+      onDismissInterrupted={onDismissInterrupted}
+      onForkMessage={(messageKey, messageIndex) => {
+        const c = conversationsRef.current.find(
+          (x) => x.id === activeIdRef.current,
+        );
+        if (c) onFork(c, messageKey, messageIndex);
+      }}
+      retrying={retrying}
+      queued={activeId ? queued[activeId] : undefined}
+      onQueue={(text, atts, runtime, beforeIds) => {
+        if (activeId)
+          enqueueMessage(activeId, text, atts, runtime, beforeIds);
+      }}
+      onSteerQueued={
+        // pi steers via RPC, claude-code over stdin, and codex uses
+        // Codex-app-style interrupt + resume. Hide this only for any
+        // future backend that lacks a running-turn steer path.
+        activeConvBackend && !backendSupportsSteer(activeConvBackend)
+          ? undefined
+          : (id) => {
+              if (activeId) steerQueued(activeId, id);
+            }
+      }
+      onRemoveQueued={(id) => {
+        if (activeId) removeQueued(activeId, id);
+      }}
+      focusToken={focusToken}
+      disabled={!piReady}
+      pendingBackend={pendingBackend}
+      onPendingBackendChange={setPendingBackend}
+      pendingCliModel={pendingCliModel}
+      pendingCliEffort={pendingCliEffort}
+      onPendingTuningChange={onPendingTuningChange}
+      backendSwitch={backendSwitch}
+      onRequestBackendSwitch={requestBackendSwitch}
+    />
+  );
   return (
     <SidebarProvider
       // Pin the shell to the window with `fixed inset-0` rather than a
@@ -744,27 +810,22 @@ export function renderHome({
               />
             ) : view === "threads" ? (
               <ThreadsView
-                conversations={conversations}
-                workspaceFilter={boardWorkspaceFilter}
+                dir={threadsWorkspace}
                 defaultWorkspace={defaultWorkspace}
+                conversations={conversations}
                 streamingIds={activityIds}
                 unreadCompletedIds={unreadCompletedIds}
                 selectedId={detailId}
                 onSelect={setDetailId}
-                onCreate={onCreateTask}
-                workspaceDir={threadsWorkspace}
-                onWorkspaceChange={onThreadsWorkspaceChange}
-                modelChoice={modelChoice}
-                onModelChange={onModelChange}
-                pendingBackend={pendingBackend}
-                onPendingBackendChange={setPendingBackend}
-                pendingCliModel={pendingCliModel}
-                pendingCliEffort={pendingCliEffort}
-                onPendingTuningChange={onPendingTuningChange}
-                backendSwitch={backendSwitch}
-                onRequestBackendSwitch={requestBackendSwitch}
-                focusToken={focusToken}
-                disabled={!piReady}
+                coordinator={
+                  coordinatorId && activeId === coordinatorId ? (
+                    loadingChatId === activeId && !hasMessages ? (
+                      <ChatLoadingPane opticalCenter={false} />
+                    ) : (
+                      renderChatPane(false)
+                    )
+                  ) : null
+                }
                 thread={
                   <SessionDetailPanel
                     {...detailProps}
@@ -803,58 +864,7 @@ export function renderHome({
                 opticalCenter={sidebarOpen && !sideWorkspace.open}
               />
             ) : hasMessages ? (
-              <ChatPane
-                convId={activeId}
-                backend={activeConvBackend ?? pendingBackend}
-                opticalCenter={sidebarOpen && !sideWorkspace.open}
-                draftKey={activeId ? `chat:${activeId}` : "chat:new"}
-                modelChoice={modelChoice}
-                onModelChange={onModelChange}
-                workspaceDir={workspaceDir}
-                defaultWorkspace={defaultWorkspace}
-                onWorkspaceChange={onWorkspaceChange}
-                onSend={onSend}
-                onBash={onBash}
-                onAbort={onAbort}
-                onRetry={onRetry}
-                interrupted={activeConvInterrupted}
-                onResumeInterrupted={onResumeInterrupted}
-                onDismissInterrupted={onDismissInterrupted}
-                onForkMessage={(messageKey, messageIndex) => {
-                  const c = conversationsRef.current.find(
-                    (x) => x.id === activeIdRef.current,
-                  );
-                  if (c) onFork(c, messageKey, messageIndex);
-                }}
-                retrying={retrying}
-                queued={activeId ? queued[activeId] : undefined}
-                onQueue={(text, atts, runtime, beforeIds) => {
-                  if (activeId)
-                    enqueueMessage(activeId, text, atts, runtime, beforeIds);
-                }}
-                onSteerQueued={
-                  // pi steers via RPC, claude-code over stdin, and codex uses
-                  // Codex-app-style interrupt + resume. Hide this only for any
-                  // future backend that lacks a running-turn steer path.
-                  activeConvBackend && !backendSupportsSteer(activeConvBackend)
-                    ? undefined
-                    : (id) => {
-                        if (activeId) steerQueued(activeId, id);
-                      }
-                }
-                onRemoveQueued={(id) => {
-                  if (activeId) removeQueued(activeId, id);
-                }}
-                focusToken={focusToken}
-                disabled={!piReady}
-                pendingBackend={pendingBackend}
-                onPendingBackendChange={setPendingBackend}
-                pendingCliModel={pendingCliModel}
-                pendingCliEffort={pendingCliEffort}
-                onPendingTuningChange={onPendingTuningChange}
-                backendSwitch={backendSwitch}
-                onRequestBackendSwitch={requestBackendSwitch}
-              />
+              renderChatPane(sidebarOpen && !sideWorkspace.open)
             ) : (
               <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
                 <GlyphBackdrop />

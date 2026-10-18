@@ -278,15 +278,24 @@ export interface CliAskQuestion {
   multiSelect: boolean;
 }
 
-/** A blocking CLI-host request surfaced in the chat. Claude Code sends its
- *  stream-json control_request shape; Codex app-server sends reverse JSON-RPC
- *  requests such as request_user_input and MCP elicitations. Both are answered
- *  via api.cliControlRespond. */
+/** A blocking request from any runtime that waits on the human, surfaced in
+ *  the chat and on Threads cards. Claude Code sends its stream-json
+ *  control_request shape; Codex app-server sends reverse JSON-RPC requests
+ *  (request_user_input, MCP elicitations, command / file-change approvals);
+ *  ACP runtimes send session/request_permission. These are answered via
+ *  api.cliControlRespond. pi extension dialogs (`source: "pi"`, kind
+ *  `extension_ui`, the dialog itself in `input`) are answered via
+ *  api.extensionUiRespond instead. */
 export interface CliControlRequest {
   type: "cli_control_request";
   requestId: string | number;
-  source?: "claude-code" | "codex" | "acp" | "dsh";
-  requestKind?: "request_user_input" | "mcp_elicitation";
+  source?: "claude-code" | "codex" | "acp" | "dsh" | "pi";
+  requestKind?:
+    | "request_user_input"
+    | "mcp_elicitation"
+    | "command_approval"
+    | "file_change_approval"
+    | "extension_ui";
   toolName: string;
   input: Record<string, unknown> & { questions?: CliAskQuestion[] };
   toolUseId: string | number | null;
@@ -1017,7 +1026,25 @@ export type AppEvent =
       meetingId: string;
       app: string | null;
       title: string | null;
+    }
+  // A coordinator's thread tool (coordinator-tools extension) is asking the
+  // frontend, which owns sessions, to start / message / list / read / stop one
+  // of its threads. Answered with extensionUiRespond({ value }).
+  | {
+      type: "coordinator_tool_request";
+      conversationId: string;
+      requestId: string;
+      params: Record<string, unknown> | null;
     };
+
+/** Which conversation coordinates each folder, and which threads it started.
+ *  Mirrors src-tauri/src/coordinator.rs. */
+export interface CoordinatorRegistry {
+  /** Folder → coordinator conversation id. */
+  coordinators: Record<string, string>;
+  /** Thread conversation id → coordinator id. */
+  threads: Record<string, string>;
+}
 
 // Extension UI sub-protocol (pi RPC docs: "Extension UI Protocol").
 // pi sends these on stdout to ask the client for user interaction.

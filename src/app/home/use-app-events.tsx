@@ -21,6 +21,7 @@ import {
   type PiEvent,
 } from "@/lib/types";
 import { mergeAutomation, mergeConversation } from "./home-utils";
+import { isPiDialog, piDialogRequest } from "@/lib/pi-dialog";
 
 export function useAppEvents({
   setPiReady,
@@ -176,8 +177,8 @@ export function useAppEvents({
           }
           case "pi_event": {
             const cid = evt.conversationId;
-            // extension_ui_request → DialogHost; cli_control_request → the
-            // CliControlCard in the chat pane; cli_background_tasks → the
+            // extension_ui_request dialogs and cli_control_request → the
+            // control queue (chat pane card, Threads cards); cli_background_tasks → the
             // task strip. None of these belong in the reducer.
             const eventType = evt.event.type as string;
             if (
@@ -252,6 +253,18 @@ export function useAppEvents({
             // can't be dropped by a per-card listener's async registration. The
             // card reads it back; agent_end clears any that went unanswered
             // (the child is gone, so there's nothing left to answer).
+            if (cid && evt.event.type === "extension_ui_request") {
+              const e = evt.event as ExtensionUIRequest;
+              if (isPiDialog(e)) {
+                store.pushControlRequest(cid, piDialogRequest(e));
+                dispatchNotification("awaiting_input", {
+                  title: t("cliControl.notifyTitle"),
+                  body: typeof e.title === "string" ? e.title : "",
+                  suppressWhenFocused: true,
+                  conversationId: cid,
+                });
+              }
+            }
             if (cid && eventType === "cli_control_request") {
               const req = evt.event as unknown as CliControlRequest;
               store.pushControlRequest(cid, req);

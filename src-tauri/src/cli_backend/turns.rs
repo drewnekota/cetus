@@ -224,6 +224,8 @@ pub fn dispatch_turn(
             std::env::var("PATH").unwrap_or_default()
         ),
     ));
+    // Who's calling, for `cetus thread …` (threads report back here).
+    env.push(("CETUS_CONVERSATION_ID".to_string(), conv.id.clone()));
     // Every dispatch advances the conversation's generation, standing down any
     // auto-retry scheduled against the previous turn's transient failure —
     // whatever is dispatching now (user send, steer redispatch, the retry
@@ -587,6 +589,7 @@ pub async fn compact_codex_conversation(
                     std::env::var("PATH").unwrap_or_default()
                 ),
             ));
+            env.push(("CETUS_CONVERSATION_ID".to_string(), conv.id.clone()));
             let opts = cetus_bridge::cli_agent::CliRunOpts {
                 model: (!conv.cli_model.trim().is_empty())
                     .then(|| conv.cli_model.trim().to_string()),

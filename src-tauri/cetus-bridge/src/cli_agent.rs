@@ -19,7 +19,7 @@ use artifacts::{
 mod claude_session;
 pub use claude_session::{spawn_claude_session, ClaudeSessionHandle};
 mod acp_session;
-pub use acp_session::{spawn_acp_session, AcpSessionHandle};
+pub use acp_session::{spawn_acp_session, AcpPermissionAnswer, AcpSessionHandle};
 mod codex_session;
 use codex_session::codex_text_phase;
 pub use codex_session::{probe_codex_skills, spawn_codex_session, CodexSessionHandle};

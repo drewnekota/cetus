@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
+import { ThreadToolCard, threadCardInfo } from "@/components/threads/thread-cards";
 
 const PROSE_CLASS = cn(
   // prose-sm pins the container to 14px; the `!` lets the app's chat-body
@@ -472,6 +473,9 @@ export const AnswerBlock = memo(function AnswerBlock({
         </span>
       </button>
     );
+  if (block.kind === "tool_use" && threadCardInfo(block)) {
+    return <ThreadToolCard block={block} />;
+  }
   if (block.kind === "tool_use") {
     const artifacts = block.result ? artifactsFromDetails(block.result.details) : [];
     if (artifacts.length > 0) {

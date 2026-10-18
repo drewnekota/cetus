@@ -1014,7 +1014,9 @@ fn route_host_tunnel(
                 );
             }
         }
-        crate::bridge::HostTunnelKind::Mcp | crate::bridge::HostTunnelKind::Skill => {
+        crate::bridge::HostTunnelKind::Mcp
+        | crate::bridge::HostTunnelKind::Skill
+        | crate::bridge::HostTunnelKind::Coordinator => {
             // The MCP/skill tools tunnel store mutations through sentinel
             // ctx.ui.input calls. Route them to the Rust handlers so they mutate
             // host state and reply, never reaching the dialog host.

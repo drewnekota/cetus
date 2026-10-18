@@ -64,6 +64,30 @@ fn acp_updates_translate_text_tools_and_commands() {
 }
 
 #[test]
+fn acp_permission_always_prefers_the_standing_grant() {
+    let params = json!({ "options": [
+        { "optionId": "once", "kind": "allow_once" },
+        { "optionId": "always", "kind": "allow_always" },
+        { "optionId": "no", "kind": "reject_once" },
+    ]});
+    assert_eq!(
+        acp_permission_answer_response(&params, AcpPermissionAnswer::AllowAlways)["outcome"]
+            ["optionId"],
+        json!("always")
+    );
+    // No standing grant on offer: fall back to a one-time allow, never a reject.
+    let once_only = json!({ "options": [
+        { "optionId": "once", "kind": "allow_once" },
+        { "optionId": "no", "kind": "reject_once" },
+    ]});
+    assert_eq!(
+        acp_permission_answer_response(&once_only, AcpPermissionAnswer::AllowAlways)["outcome"]
+            ["optionId"],
+        json!("once")
+    );
+}
+
+#[test]
 fn acp_permission_never_upgrades_a_deny_into_an_allow() {
     let params = json!({ "options": [
         { "optionId": "always", "kind": "allow_always" },

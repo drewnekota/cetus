@@ -192,18 +192,22 @@ pub async fn cli_control_respond(
     // "dsh" is the pre-0.1.2 bridge's source tag; dsh now answers through the
     // generic ACP path like every other ACP runtime.
     if matches!(source.as_deref(), Some("acp") | Some("dsh")) {
-        let allow = response
-            .get("behavior")
+        use cetus_bridge::cli_agent::AcpPermissionAnswer;
+        let behavior = response.get("behavior").and_then(Value::as_str);
+        let accepted = response
+            .get("action")
             .and_then(Value::as_str)
-            .is_some_and(|behavior| behavior == "allow")
-            || response
-                .get("action")
-                .and_then(Value::as_str)
-                .is_some_and(|action| action == "accept");
+            .is_some_and(|action| action == "accept");
+        let answer = match behavior {
+            Some("allow_always") => AcpPermissionAnswer::AllowAlways,
+            Some("allow") => AcpPermissionAnswer::AllowOnce,
+            _ if accepted => AcpPermissionAnswer::AllowOnce,
+            _ => AcpPermissionAnswer::Reject,
+        };
         return state
             .acp_session(&id)
             .ok_or_else(|| "ACP session is no longer running".to_string())?
-            .respond_permission(request_id, allow)
+            .respond_permission_answer(request_id, answer)
             .map_err(|error| error.to_string());
     }
     if source.as_deref() == Some("codex") {

@@ -16,8 +16,15 @@ export type AssistantSegment =
     }
   | { type: "answer"; key: string; block: RenderedBlock };
 
+/** A coordinator's successful thread_start / thread_send: shown as a thread
+ *  card, never folded into steps. */
+function isThreadCard(b: RenderedBlock): boolean {
+  return b.kind === "tool_use" && (b.name === "thread_start" || b.name === "thread_send") &&
+    !!b.result && !b.result.isError;
+}
+
 function isProcess(b: RenderedBlock): b is Extract<ProcessBlock, { kind: "thinking" | "tool_use" }> {
-  return b.kind === "thinking" || (b.kind === "tool_use" &&
+  return b.kind === "thinking" || (b.kind === "tool_use" && !isThreadCard(b) &&
     !(b.result && artifactsFromDetails(b.result.details).length > 0));
 }
 

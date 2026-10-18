@@ -22,6 +22,7 @@ import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
@@ -59,6 +60,55 @@ const ROW_ACTION_CLASS =
   "fade-layer flex size-4 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-hidden transition-opacity " +
   "hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring " +
   "group-hover/project-row:opacity-100 group-has-[[data-state=open]]/project-row:opacity-100 group-has-[:focus-visible]/project-row:opacity-100";
+
+/** A folder's ⋯ menu entries, shared by the Chats list's folder headers and
+ *  the Kanban / Threads filter rows. Reveal / Remove are folder actions — the
+ *  standalone Chat section keeps only Archive so it never reads as a folder. */
+function WorkspaceMenuItems({
+  dir,
+  isDefault,
+  empty,
+  onRevealWorkspace,
+  onArchiveWorkspaceChats,
+  onRemoveWorkspace,
+}: WorkspaceActions & { dir: string; isDefault: boolean; empty: boolean }) {
+  const { t } = useTranslation("sidebar");
+  return (
+    <>
+      {!isDefault && (
+        <DropdownMenuItem onSelect={() => onRevealWorkspace(dir)}>
+          <FolderOpen />
+          <span>{t("action.reveal")}</span>
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuItem
+        disabled={empty}
+        onSelect={() => onArchiveWorkspaceChats(dir)}
+      >
+        <Archive />
+        <span>{t("action.archiveChats")}</span>
+      </DropdownMenuItem>
+      {!isDefault && (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            onSelect={() => onRemoveWorkspace(dir)}
+          >
+            <X />
+            <span>{t("action.remove")}</span>
+          </DropdownMenuItem>
+        </>
+      )}
+    </>
+  );
+}
+
+export interface WorkspaceActions {
+  onRevealWorkspace: (dir: string) => void;
+  onArchiveWorkspaceChats: (dir: string) => void;
+  onRemoveWorkspace: (dir: string) => void;
+}
 
 /** The global "Pinned" section: a collapsible label (no folder actions) over
  *  the pinned chats, newest pin first. Rendered inside a <SidebarGroup> by the
@@ -280,33 +330,14 @@ export function WorkspaceGroupView({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="right" align="start" className="w-52">
-              {/* Reveal / Remove are folder actions — the standalone Chat
-                  section keeps only Archive so it never reads as a folder. */}
-              {!isDefault && (
-                <DropdownMenuItem onSelect={() => onRevealWorkspace(group.dir)}>
-                  <FolderOpen />
-                  <span>{t("action.reveal")}</span>
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                disabled={group.items.length === 0}
-                onSelect={() => onArchiveWorkspaceChats(group.dir)}
-              >
-                <Archive />
-                <span>{t("action.archiveChats")}</span>
-              </DropdownMenuItem>
-              {!isDefault && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onSelect={() => onRemoveWorkspace(group.dir)}
-                  >
-                    <X />
-                    <span>{t("action.remove")}</span>
-                  </DropdownMenuItem>
-                </>
-              )}
+              <WorkspaceMenuItems
+                dir={group.dir}
+                isDefault={!!isDefault}
+                empty={group.items.length === 0}
+                onRevealWorkspace={onRevealWorkspace}
+                onArchiveWorkspaceChats={onArchiveWorkspaceChats}
+                onRemoveWorkspace={onRemoveWorkspace}
+              />
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -404,6 +435,7 @@ export function WorkspaceFilterButton({
   handleProps,
   icon,
   hint,
+  menu,
 }: {
   label: string;
   /** Running / waiting / unread-done sessions; the row stays bare when quiet. */
@@ -416,8 +448,17 @@ export function WorkspaceFilterButton({
   handleProps?: Record<string, unknown>;
   /** Overrides the folder glyph — the pinned "Chat" row shows a chat icon. */
   icon?: ReactNode;
+  /** The row's ⋯ menu; when present its trigger takes the badges' spot on
+   *  hover (see WorkspaceFilterMenu). */
+  menu?: ReactNode;
 }) {
+  // While the ⋯ trigger shows (hover / open menu / keyboard focus), the
+  // badges and ⌘ hint step aside rather than sit underneath it.
+  const yieldToMenu =
+    menu &&
+    "group-hover/menu-item:invisible group-has-[[data-state=open]]/menu-item:invisible group-has-[:focus-visible]/menu-item:invisible";
   return (
+    <>
     <SidebarMenuButton
       {...handleProps}
       onClick={onSelect}
@@ -433,7 +474,12 @@ export function WorkspaceFilterButton({
       <span className="truncate">{label}</span>
       {hint ? (
         // Same badge as the chat rows' ⌘1… hints.
-        <Kbd className="ml-auto h-[18px] border-border bg-background px-1.5 text-foreground/80 shadow-xs">
+        <Kbd
+          className={cn(
+            "ml-auto h-[18px] border-border bg-background px-1.5 text-foreground/80 shadow-xs",
+            yieldToMenu,
+          )}
+        >
           {hint}
         </Kbd>
       ) : (
@@ -445,10 +491,38 @@ export function WorkspaceFilterButton({
             active
               ? "text-sidebar-accent-foreground/80"
               : "text-muted-foreground",
+            yieldToMenu,
           )}
         />
       )}
     </SidebarMenuButton>
+    {menu}
+    </>
+  );
+}
+
+/** The ⋯ menu on a Kanban / Threads filter row: the same folder actions the
+ *  Chats list's folder headers offer, revealed on hover. Lives beside (not
+ *  inside) the row button, so pressing it never starts a reorder drag. */
+export function WorkspaceFilterMenu(
+  props: WorkspaceActions & { dir: string; isDefault: boolean; empty: boolean },
+) {
+  const { t } = useTranslation("sidebar");
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarMenuAction
+          showOnHover
+          className="!right-1 !top-1/2 !w-6 !-translate-y-1/2 rounded-sm !text-muted-foreground/80 hover:!bg-transparent hover:!text-muted-foreground data-[state=open]:!text-muted-foreground"
+        >
+          <MoreHorizontal />
+          <span className="sr-only">{t("action.more")}</span>
+        </SidebarMenuAction>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="right" align="start" className="w-52">
+        <WorkspaceMenuItems {...props} />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -461,6 +535,7 @@ export function SortableWorkspaceFilterRow({
   active,
   onSelect,
   hint,
+  menu,
 }: {
   dir: string;
   label: string;
@@ -468,6 +543,7 @@ export function SortableWorkspaceFilterRow({
   active: boolean;
   onSelect: () => void;
   hint?: string;
+  menu?: ReactNode;
 }) {
   const {
     attributes,
@@ -490,6 +566,7 @@ export function SortableWorkspaceFilterRow({
         active={active}
         onSelect={onSelect}
         handleProps={{ ...attributes, ...listeners }}
+        menu={menu}
       />
     </SidebarMenuItem>
   );

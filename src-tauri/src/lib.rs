@@ -34,6 +34,7 @@ mod control;
 #[cfg(not(unix))]
 #[path = "control_stub.rs"]
 mod control;
+mod coordinator;
 mod corrections;
 mod cua;
 mod custom_models;
@@ -1105,6 +1106,12 @@ pub fn run() {
         commands::set_model_choice,
         commands::get_model_choice,
         commands::extension_ui_respond,
+        coordinator::coordinator_registry,
+        coordinator::coordinator_register,
+        coordinator::coordinator_link_thread,
+        coordinator::coordinator_instructions,
+        coordinator::set_coordinator_instructions,
+        coordinator::coordinator_cli_respond,
         commands::list_api_keys,
         commands::list_api_keys_masked,
         commands::reveal_api_key,
@@ -1296,6 +1303,12 @@ pub fn run() {
         commands::set_model_choice,
         commands::get_model_choice,
         commands::extension_ui_respond,
+        coordinator::coordinator_registry,
+        coordinator::coordinator_register,
+        coordinator::coordinator_link_thread,
+        coordinator::coordinator_instructions,
+        coordinator::set_coordinator_instructions,
+        coordinator::coordinator_cli_respond,
         commands::list_api_keys,
         commands::list_api_keys_masked,
         commands::reveal_api_key,

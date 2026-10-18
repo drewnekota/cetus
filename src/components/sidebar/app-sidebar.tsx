@@ -75,6 +75,7 @@ import { visibleConversationIds } from "@/lib/collapsed-workspaces";
 import { ChatSlotHintsProvider, useChatSlotHints } from "./chat-slot-hints";
 import {
   WorkspaceFilterButton,
+  WorkspaceFilterMenu,
   SortableWorkspaceFilterRow,
   WorkspaceDragGhost,
   PinnedGroupView,
@@ -192,6 +193,11 @@ export const AppSidebar = memo(function AppSidebar({
   // first; only the real workspace folders below it are draggable. Keep a
   // synthetic empty group during the first paint while the backend's default
   // directory is still resolving, so the Chat section never disappears.
+  const workspaceActions = {
+    onRevealWorkspace,
+    onArchiveWorkspaceChats,
+    onRemoveWorkspace,
+  };
   const defaultGroup = useMemo(
     () =>
       groups.find((g) => g.dir === defaultWorkspace) ?? {
@@ -439,6 +445,14 @@ export const AppSidebar = memo(function AppSidebar({
                   hint={workspaceSlotHints?.get(defaultGroup.dir)}
                   active={!onAutomations && workspaceFilter === defaultGroup.dir}
                   onSelect={() => onWorkspaceFilterChange(defaultGroup.dir)}
+                  menu={
+                    <WorkspaceFilterMenu
+                      dir={defaultGroup.dir}
+                      isDefault
+                      empty={defaultGroup.items.length === 0}
+                      {...workspaceActions}
+                    />
+                  }
                 />
               </SidebarMenuItem>
               <DndContext
@@ -461,6 +475,14 @@ export const AppSidebar = memo(function AppSidebar({
                       hint={workspaceSlotHints?.get(g.dir)}
                       active={!onAutomations && workspaceFilter === g.dir}
                       onSelect={() => onWorkspaceFilterChange(g.dir)}
+                      menu={
+                        <WorkspaceFilterMenu
+                          dir={g.dir}
+                          isDefault={false}
+                          empty={g.items.length === 0}
+                          {...workspaceActions}
+                        />
+                      }
                     />
                   ))}
                 </SortableContext>

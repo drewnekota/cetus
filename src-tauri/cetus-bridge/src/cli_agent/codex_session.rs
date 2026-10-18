@@ -594,6 +594,13 @@ pub fn spawn_codex_session(
             } else {
                 "workspace-write"
             };
+            // With approvals on, Codex asks before stepping outside the
+            // sandbox; those asks arrive as item/*/requestApproval below.
+            let approval_policy = if opts.bypass_approvals {
+                "never"
+            } else {
+                "on-request"
+            };
             let method = if opts.resume.is_some() {
                 "thread/resume"
             } else {
@@ -601,7 +608,7 @@ pub fn spawn_codex_session(
             };
             let mut params = json!({
                 "cwd": cwd_string.clone(),
-                "approvalPolicy": "never",
+                "approvalPolicy": approval_policy,
                 "sandbox": policy,
                 "threadSource": "appServer",
             });
@@ -973,6 +980,26 @@ pub fn spawn_codex_session(
                                     "toolName": "request_user_input",
                                     "input": params,
                                     "toolUseId": tool_use_id,
+                                })]);
+                            }
+                            "item/commandExecution/requestApproval"
+                            | "item/fileChange/requestApproval" => {
+                                // Answered with `{ decision: accept |
+                                // acceptForSession | decline }`, passed
+                                // through from the card as-is.
+                                let (kind, tool_name) = if method == "item/fileChange/requestApproval" {
+                                    ("file_change_approval", "Edit")
+                                } else {
+                                    ("command_approval", "Bash")
+                                };
+                                emit(sink, vec![json!({
+                                    "type": "cli_control_request",
+                                    "requestId": request_id,
+                                    "source": "codex",
+                                    "requestKind": kind,
+                                    "toolName": tool_name,
+                                    "input": params,
+                                    "toolUseId": params.get("itemId").cloned().unwrap_or(Value::Null),
                                 })]);
                             }
                             "mcpServer/elicitation/request" => {

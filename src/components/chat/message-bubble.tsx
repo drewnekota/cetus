@@ -1,4 +1,10 @@
 "use client";
+import {
+  StartedThreadCard,
+  ThreadReportCard,
+  reportFromText,
+} from "@/components/threads/thread-cards";
+import { STARTED_NOTE_TYPE } from "@/lib/coordinator";
 import { ArrowLeftRight, CornerDownRight, RotateCw } from "lucide-react";
 import type { RenderedBlock, RenderedMessage } from "@/lib/types";
 import { useMessage } from "@/lib/chat-store";
@@ -73,6 +79,22 @@ function MessageBubbleView({
       ? continuationNoticeKind(message.blocks[0].text)
       : null;
   if (continuation) return <ContinuationNotice kind={continuation} />;
+  // A thread report Cetus posted into a coordinator: from Cetus, not the
+  // user, so a card on the left rather than a user bubble.
+  const report =
+    isUser && message.blocks.length === 1 && message.blocks[0].kind === "text"
+      ? reportFromText(message.blocks[0].text)
+      : null;
+  if (report)
+    return report.status === "started" ? (
+      <div className="flex w-full justify-end py-2">
+        <StartedThreadCard report={report} />
+      </div>
+    ) : (
+      <div className="flex w-full justify-start py-2">
+        <ThreadReportCard report={report} />
+      </div>
+    );
   // A user message that leads with a `>` blockquote was composed via "Add to
   // chat": lift the quote back out and show it as a ChatGPT-style header above
   // the bubble instead of raw `> ` lines inside it.
@@ -89,6 +111,20 @@ function MessageBubbleView({
     const runtimeSwitch = message.blocks.find(
       (b) => b.kind === "custom" && b.customType === "runtime_switch",
     );
+    // A thread the user started directly from Cetus's composer: their words,
+    // on their side, with where they went.
+    const started = message.blocks.find(
+      (b) => b.kind === "custom" && b.customType === STARTED_NOTE_TYPE,
+    );
+    const startedReport =
+      started && started.kind === "custom" ? reportFromText(started.text) : null;
+    if (startedReport) {
+      return (
+        <div className="flex w-full justify-end py-2">
+          <StartedThreadCard report={startedReport} />
+        </div>
+      );
+    }
     if (runtimeSwitch && runtimeSwitch.kind === "custom") {
       return (
         <RuntimeSwitchDivider text={runtimeSwitch.text} details={runtimeSwitch.details} />
