@@ -1,6 +1,6 @@
 use super::{
-    err, now_ms, AppState, CmdResult, Conversation, ModelChoice, Path, PathBuf, Serialize, State,
-    Uuid, Value,
+    err, now_ms, AppState, CmdResult, Conversation, ModelChoice, Path, Serialize, State, Uuid,
+    Value,
 };
 
 #[tauri::command]
@@ -11,18 +11,59 @@ pub async fn list_conversations(
     state.store.list(include_archived).map_err(err)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationSummary {
+    first_prompt: Option<String>,
+    last_reply: Option<String>,
+}
+
+/// Opening prompt and latest reply of the given conversations (unknown ids
+/// are left out). Read-only: nothing is spawned or switched, so the Threads
+/// timeline can fill cards for sessions it has never rendered.
+#[tauri::command]
+pub async fn conversation_summaries(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> CmdResult<std::collections::HashMap<String, ConversationSummary>> {
+    let store = state.store.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut out = std::collections::HashMap::new();
+        for id in ids {
+            let Ok(Some(conv)) = store.get(&id) else {
+                continue;
+            };
+            let (first_prompt, last_reply) =
+                crate::search_index::prompt_and_reply(&store, &app_data_dir, &conv, 600);
+            out.insert(
+                id,
+                ConversationSummary {
+                    first_prompt,
+                    last_reply,
+                },
+            );
+        }
+        out
+    })
+    .await
+    .map_err(err)
+}
+
 #[tauri::command]
 pub async fn new_conversation(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     workspace_dir: Option<String>,
     model: Option<ModelChoice>,
 ) -> CmdResult<Conversation> {
-    let workspace = workspace_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state.default_workspace.clone());
-    if cetus_bridge::remote::parse_remote_workspace(&workspace.to_string_lossy()).is_none() {
-        std::fs::create_dir_all(&workspace).map_err(err)?;
-    }
+    let workspace = match workspace_dir {
+        Some(dir) => crate::folders::ensure_workspace(&app, &dir)?,
+        None => {
+            std::fs::create_dir_all(&state.default_workspace).map_err(err)?;
+            state.default_workspace.clone()
+        }
+    };
 
     // Mint the id up front; the pi is spawned lazily by `pi_for` on first use
     // (send_prompt / switch) rather than here. Spawning a pi eagerly costs a

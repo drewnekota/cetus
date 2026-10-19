@@ -131,6 +131,44 @@ pub fn conversation_body(
     join_capped(&messages)
 }
 
+/// The opening user prompt and the latest assistant reply of a conversation,
+/// each cut to `max_chars`, for timeline cards of sessions this client has no
+/// cached render of. Same sources as [`conversation_body`].
+pub fn prompt_and_reply(
+    store: &Store,
+    app_data_dir: &Path,
+    conv: &Conversation,
+    max_chars: usize,
+) -> (Option<String>, Option<String>) {
+    let mut messages = store.list_cli_messages(&conv.id).unwrap_or_default();
+    let is_cli = cetus_bridge::cli_agent::CliBackend::from_id(&conv.backend).is_some();
+    if !is_cli && !conv.session_file.is_empty() {
+        let mut path = PathBuf::from(&conv.session_file);
+        if path.is_relative() {
+            path = app_data_dir.join("sessions").join(&path);
+        }
+        if let Ok(pi) = crate::commands::read_pi_session_messages(&path) {
+            // A runtime switch can leave both; pi history came first.
+            messages.splice(0..0, pi);
+        }
+    }
+    let role_is =
+        |m: &&serde_json::Value, role: &str| m.get("role").and_then(|r| r.as_str()) == Some(role);
+    let cut = |t: String| t.chars().take(max_chars).collect::<String>();
+    let prompt = messages
+        .iter()
+        .filter(|m| role_is(m, "user"))
+        .find_map(message_text)
+        .map(cut);
+    let reply = messages
+        .iter()
+        .rev()
+        .filter(|m| role_is(m, "assistant"))
+        .find_map(message_text)
+        .map(cut);
+    (prompt, reply)
+}
+
 /// Rebuild one conversation's index row from its current transcript.
 pub fn reindex(store: &Store, app_data_dir: Option<&Path>, conv: &Conversation) {
     let body = conversation_body(store, app_data_dir, conv);

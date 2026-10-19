@@ -1,5 +1,6 @@
 "use client";
 
+import { useCoordinatorStore } from "@/lib/coordinator";
 import { countActivity, useInputIds } from "@/lib/session-activity";
 import { ActivityBadges } from "@/components/threads/activity-badges";
 import {
@@ -172,17 +173,25 @@ export const AppSidebar = memo(function AppSidebar({
   const { width, startResize, resetWidth } = useSidebarWidth();
   const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
   const autoSortConversations = useConversationAutoSort();
+  // Each folder's Cetus lives in the Threads view, where it is the folder's
+  // timeline; listing it as a chat too would add a "Cetus" row to every
+  // folder that was ever opened there.
+  const registry = useCoordinatorStore((s) => s.registry);
+  const listed = useMemo(() => {
+    const cetus = new Set(Object.values(registry.coordinators));
+    return cetus.size ? conversations.filter((c) => !cetus.has(c.id)) : conversations;
+  }, [conversations, registry]);
   const groups = useMemo(
     () =>
       groupByWorkspace(
-        conversations,
+        listed,
         workspaceDirs,
         hiddenWorkspaceDirs,
         defaultWorkspace,
         autoSortConversations,
       ),
     [
-      conversations,
+      listed,
       workspaceDirs,
       hiddenWorkspaceDirs,
       defaultWorkspace,
@@ -254,6 +263,11 @@ export const AppSidebar = memo(function AppSidebar({
       activationConstraint: { delay: 250, tolerance: 8 },
     }),
   );
+  // The Kanban / Threads folder list has no collapse toggle to protect, so a
+  // drag starts as soon as the pointer moves a few pixels — no hold to learn.
+  const filterSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
   const [activeDragDir, setActiveDragDir] = useState<string | null>(null);
   // Releasing a reorder drag fires a click on the folder header (it's both the
   // drag handle and the collapse toggle), which would fold the group you just
@@ -285,8 +299,8 @@ export const AppSidebar = memo(function AppSidebar({
   const inputIds = useInputIds();
   const workspaceActivity = useMemo(
     () =>
-      countActivity(conversations, streamingIds, unreadCompletedIds, inputIds),
-    [conversations, streamingIds, unreadCompletedIds, inputIds],
+      countActivity(listed, streamingIds, unreadCompletedIds, inputIds),
+    [listed, streamingIds, unreadCompletedIds, inputIds],
   );
 
   return (
@@ -456,7 +470,7 @@ export const AppSidebar = memo(function AppSidebar({
                 />
               </SidebarMenuItem>
               <DndContext
-                sensors={sensors}
+                sensors={filterSensors}
                 collisionDetection={closestCenter}
                 onDragStart={(e) => setActiveDragDir(String(e.active.id))}
                 onDragCancel={() => setActiveDragDir(null)}
@@ -474,7 +488,12 @@ export const AppSidebar = memo(function AppSidebar({
                       activity={workspaceActivity.get(g.dir)}
                       hint={workspaceSlotHints?.get(g.dir)}
                       active={!onAutomations && workspaceFilter === g.dir}
-                      onSelect={() => onWorkspaceFilterChange(g.dir)}
+                      onSelect={() => {
+                        // Dropping a dragged row also clicks it; that's a
+                        // reorder, not a pick.
+                        if (Date.now() - lastDragEndAtRef.current < 250) return;
+                        onWorkspaceFilterChange(g.dir);
+                      }}
                       menu={
                         <WorkspaceFilterMenu
                           dir={g.dir}

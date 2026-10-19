@@ -184,8 +184,7 @@ pub fn dispatch_turn(
         // Idle: fall through to a normal turn.
     }
 
-    let ws = PathBuf::from(&conv.workspace_dir);
-    std::fs::create_dir_all(&ws).ok();
+    let ws = crate::folders::ensure_workspace(handle, &conv.workspace_dir)?;
     let settings = load_settings(&state.store);
     // Run in the workspace itself by default; opt-in setting isolates each
     // conversation in its own git worktree (the Superset/Conductor pattern).
@@ -561,8 +560,7 @@ pub async fn compact_codex_conversation(
     let session = match state.codex_session(&conv.id) {
         Some(session) => session,
         None => {
-            let ws = PathBuf::from(&conv.workspace_dir);
-            std::fs::create_dir_all(&ws).ok();
+            let ws = crate::folders::ensure_workspace(handle, &conv.workspace_dir)?;
             let settings = load_settings(&state.store);
             let cwd = if cetus_bridge::worktree::is_git_repo(&ws) {
                 let existing = cetus_bridge::worktree::worktree_path(&ws, &conv.id);

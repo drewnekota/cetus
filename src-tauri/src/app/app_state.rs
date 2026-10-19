@@ -1,6 +1,6 @@
 use super::{
     locale, mcp, model_bridge, pi_rpc, plugins, prompts, provider, scheduler, secrets, skills,
-    tauri_bridge, AppHandle, AppState, Arc, CliInput, CliSteer, CliTurnHandle, Path, PathBuf,
+    tauri_bridge, AppHandle, AppState, Arc, CliInput, CliSteer, CliTurnHandle, Path,
 };
 
 impl AppState {
@@ -363,10 +363,8 @@ impl AppState {
             .store
             .get(conv_id)?
             .ok_or_else(|| anyhow::anyhow!("conversation not found: {conv_id}"))?;
-        let workspace = PathBuf::from(&conv.workspace_dir);
-        if cetus_bridge::remote::parse_remote_workspace(&conv.workspace_dir).is_none() {
-            std::fs::create_dir_all(&workspace).ok();
-        }
+        let workspace = crate::folders::ensure_workspace(&self.handle, &conv.workspace_dir)
+            .map_err(anyhow::Error::msg)?;
         let mut env = secrets::load_env();
         // Custom DeepSeek endpoint (proxy / self-host / region). The
         // deepseek-endpoint extension reads this and overrides the provider's

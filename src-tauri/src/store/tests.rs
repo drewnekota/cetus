@@ -373,3 +373,20 @@ fn unread_marker_persists_and_clears_on_archive() {
     drop(store);
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn rebase_workspace_dirs_moves_folder_and_subfolders_only() {
+    let (store, path) = temp_store();
+    for (id, dir) in [("a", "/w/foo"), ("b", "/w/foo/sub"), ("c", "/w/foobar")] {
+        let mut c = search_conv(id, id, false);
+        c.workspace_dir = dir.into();
+        store.insert(&c).unwrap();
+    }
+    store.rebase_workspace_dirs("/w/foo", "/w/bar").unwrap();
+    let dir = |id: &str| store.get(id).unwrap().unwrap().workspace_dir;
+    assert_eq!(dir("a"), "/w/bar");
+    assert_eq!(dir("b"), "/w/bar/sub");
+    assert_eq!(dir("c"), "/w/foobar");
+    assert_eq!(store.get("a").unwrap().unwrap().updated_at, 2);
+    let _ = std::fs::remove_file(path);
+}

@@ -5,13 +5,14 @@ use super::{
 
 #[tauri::command]
 pub async fn set_workspace(
+    app: AppHandle,
     state: State<'_, AppState>,
     id: String,
     workspace_dir: String,
 ) -> CmdResult<Conversation> {
-    if cetus_bridge::remote::parse_remote_workspace(&workspace_dir).is_none() {
-        std::fs::create_dir_all(&workspace_dir).map_err(err)?;
-    }
+    let workspace_dir = crate::folders::ensure_workspace(&app, &workspace_dir)?
+        .to_string_lossy()
+        .to_string();
     state
         .store
         .set_workspace(&id, &workspace_dir, now_ms())

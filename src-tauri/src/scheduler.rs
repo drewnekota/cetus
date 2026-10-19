@@ -287,11 +287,11 @@ async fn fire_cli(
     guard: InFlightGuard,
 ) -> Result<Conversation, String> {
     let workspace = if auto.workspace_dir.trim().is_empty() {
+        std::fs::create_dir_all(&ctx.default_workspace).map_err(|e| e.to_string())?;
         ctx.default_workspace.clone()
     } else {
-        PathBuf::from(&auto.workspace_dir)
+        crate::folders::ensure_workspace(&ctx.handle, &auto.workspace_dir)?
     };
-    std::fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
     let now = now_ms();
     let conv = Conversation {
         id: Uuid::new_v4().to_string(),
@@ -378,13 +378,11 @@ async fn create_conversation(
     auto: &Automation,
 ) -> Result<(Conversation, Arc<PiRpc>), String> {
     let workspace = if auto.workspace_dir.trim().is_empty() {
+        std::fs::create_dir_all(&ctx.default_workspace).map_err(|e| e.to_string())?;
         ctx.default_workspace.clone()
     } else {
-        PathBuf::from(&auto.workspace_dir)
+        crate::folders::ensure_workspace(&ctx.handle, &auto.workspace_dir)?
     };
-    if cetus_bridge::remote::parse_remote_workspace(&workspace.to_string_lossy()).is_none() {
-        std::fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
-    }
 
     let id = Uuid::new_v4().to_string();
     let env = secrets::load_env();

@@ -303,6 +303,31 @@ impl Store {
         Ok(())
     }
 
+    /// Point every conversation and automation in `from` (or a folder inside
+    /// it) at `to` after the folder moved on disk. `updated_at` moves by one
+    /// so list refreshes pick up the new path without reordering anything.
+    pub fn rebase_workspace_dirs(&self, from: &str, to: &str) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let matches = "workspace_dir = ?1 OR substr(workspace_dir, 1, length(?1) + 1) = ?1 || '/'";
+        tx.execute(
+            &format!(
+                "UPDATE conversations SET workspace_dir = ?2 || substr(workspace_dir, length(?1) + 1), \
+                 updated_at = updated_at + 1 WHERE {matches}"
+            ),
+            params![from, to],
+        )?;
+        tx.execute(
+            &format!(
+                "UPDATE automations SET workspace_dir = ?2 || substr(workspace_dir, length(?1) + 1) \
+                 WHERE {matches}"
+            ),
+            params![from, to],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn delete(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])?;

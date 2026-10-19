@@ -12,6 +12,8 @@ import {
   ChevronRight,
   Folder,
   FolderOpen,
+  FolderSearch,
+  FolderX,
   MessageSquare,
   MoreHorizontal,
   Pin,
@@ -22,7 +24,6 @@ import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
-  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
@@ -45,6 +46,12 @@ import {
 import type { Conversation } from "@/lib/types";
 import { PINNED_GROUP_DIR } from "./workspace-grouping";
 import { ConversationRow } from "./conversation-row";
+import { toast } from "sonner";
+import { locateFolder, useMissingFolders } from "@/lib/folder-health";
+
+function onLocateFolder(dir: string) {
+  locateFolder(dir).catch((e) => toast.error(String(e)));
+}
 
 // The folder row's "active" look (accent header + revealed action icons) shows
 // on hover, while its dropdown is open, or under *keyboard* focus. We key off
@@ -73,9 +80,16 @@ function WorkspaceMenuItems({
   onRemoveWorkspace,
 }: WorkspaceActions & { dir: string; isDefault: boolean; empty: boolean }) {
   const { t } = useTranslation("sidebar");
+  const missing = useMissingFolders().has(dir);
   return (
     <>
-      {!isDefault && (
+      {!isDefault && missing && (
+        <DropdownMenuItem onSelect={() => onLocateFolder(dir)}>
+          <FolderSearch />
+          <span>{t("action.locate")}</span>
+        </DropdownMenuItem>
+      )}
+      {!isDefault && !missing && (
         <DropdownMenuItem onSelect={() => onRevealWorkspace(dir)}>
           <FolderOpen />
           <span>{t("action.reveal")}</span>
@@ -269,6 +283,7 @@ export function WorkspaceGroupView({
   onRemoveWorkspace,
 }: WorkspaceGroupViewProps) {
   const { t } = useTranslation("sidebar");
+  const missing = useMissingFolders().has(group.dir) && !isDefault;
   return (
     <>
       <div className="group/project-row relative">
@@ -303,15 +318,32 @@ export function WorkspaceGroupView({
             <>
               {isDefault ? (
                 <MessageSquare className="mr-1.5 !size-3 group-hover/project-row:hidden" />
+              ) : missing ? (
+                <FolderX className="mr-1.5 !size-3 text-destructive group-hover/project-row:hidden" />
               ) : (
                 <Folder className="mr-1.5 !size-3 group-hover/project-row:hidden" />
               )}
               <ChevronDown className="mr-1.5 hidden !size-3 group-hover/project-row:block" />
             </>
           )}
-          <span className="truncate">{label}</span>
+          <span
+            className={cn("truncate", missing && "text-muted-foreground")}
+            title={missing ? t("folder.missing.tooltip", { dir: group.dir }) : undefined}
+          >
+            {label}
+          </span>
         </SidebarGroupLabel>
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-2">
+          {missing && (
+            <button
+              type="button"
+              onClick={() => onLocateFolder(group.dir)}
+              className={cn(ROW_ACTION_CLASS, "opacity-100 text-destructive")}
+            >
+              <FolderSearch className="size-3" />
+              <span className="sr-only">{t("action.locate")}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onNew(group.dir)}
@@ -466,8 +498,9 @@ export function WorkspaceFilterButton({
       className={cn(
         // Same 12px glyph as the folder headers in the Chats list.
         "[&>svg]:!size-3",
-        handleProps &&
-          "cursor-grab touch-none select-none active:cursor-grabbing",
+        // Keep the label and badges clear of the ⋯ button.
+        menu && "pr-9",
+        handleProps && "touch-none select-none active:cursor-grabbing",
       )}
     >
       {icon ?? <Folder />}
@@ -511,13 +544,16 @@ export function WorkspaceFilterMenu(
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <SidebarMenuAction
-          showOnHover
-          className="!right-1 !top-1/2 !w-6 !-translate-y-1/2 rounded-sm !text-muted-foreground/80 hover:!bg-transparent hover:!text-muted-foreground data-[state=open]:!text-muted-foreground"
+        {/* A real 24px target with its own hover fill, inset like the Chats
+            list's folder actions, so it reads as a button and not as part of
+            the row. */}
+        <button
+          type="button"
+          className="fade-layer absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-hidden transition-opacity hover:bg-sidebar-foreground/10 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover/menu-item:opacity-100 data-[state=open]:bg-sidebar-foreground/10 data-[state=open]:text-foreground data-[state=open]:opacity-100"
         >
-          <MoreHorizontal />
+          <MoreHorizontal className="size-3.5" />
           <span className="sr-only">{t("action.more")}</span>
-        </SidebarMenuAction>
+        </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="right" align="start" className="w-52">
         <WorkspaceMenuItems {...props} />

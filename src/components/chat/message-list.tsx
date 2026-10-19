@@ -45,6 +45,9 @@ import {
 import { useTranslation } from "@/lib/i18n";
 import { ThinkingPlaceholder, MessageError } from "./chat-status";
 import { QuoteSelectionToolbar } from "./quote-selection";
+import { SessionCard } from "@/components/threads/session-card";
+import { useSessionTimeline } from "@/components/threads/session-timeline";
+import type { Conversation } from "@/lib/types";
 
 // The elevator is intentionally less eager than sticky-bottom follow: a small
 // nudge away from the latest message should not summon a floating control.
@@ -94,7 +97,35 @@ type MessageGroup =
  * row rather than a Footer: scrollToIndex("LAST") cannot account for Footer
  * height, which made conversation-open alignment fight the streaming
  * scroll-to-bottom observer while Thinking was visible. */
-type MessageListItem = MessageGroup | { kind: "thinking" } | { kind: "error" };
+type MessageListItem =
+  | TimelineRow
+  | { kind: "thinking" }
+  | { kind: "error" };
+
+/** A message group, or (in Cetus's Threads timeline) a session of the folder
+ *  shown where it began. */
+type TimelineRow = MessageGroup | { kind: "session"; conv: Conversation };
+
+/** Slot each session in before the first group that started after it, so the
+ *  folder's sessions and Cetus's turns read as one timeline. A group is never
+ *  split: a session that began mid-turn lands after that turn. */
+function weaveSessions(
+  groups: MessageGroup[],
+  sessions: Conversation[] | undefined,
+  createdAt: (key: string) => number | undefined,
+): TimelineRow[] {
+  if (!sessions?.length) return groups;
+  const out: TimelineRow[] = [];
+  let s = 0;
+  for (const g of groups) {
+    const at = createdAt(g.kind === "assistant" ? g.keys[0] : g.key) ?? Infinity;
+    while (s < sessions.length && sessions[s].createdAt <= at)
+      out.push({ kind: "session", conv: sessions[s++] });
+    out.push(g);
+  }
+  while (s < sessions.length) out.push({ kind: "session", conv: sessions[s++] });
+  return out;
+}
 
 /** Collapse consecutive assistant/tool messages (one agent loop) into a single
  *  group; user and custom messages stay standalone. */
@@ -150,15 +181,23 @@ export function MessageList({
   // agent loop reads as a single turn — one ASSISTANT header, one activity
   // timeline — instead of a header + tool cards per round.
   const groups = useMemo(() => buildGroups(keys, roles), [keys, roles]);
+  const timeline = useSessionTimeline();
+  const timelineSessions = timeline?.sessions;
+  // A message's createdAt never changes, so reading it off the store here
+  // (rather than subscribing) is enough.
+  const rows = useMemo(() => {
+    const byKey = convId ? useChatStore.getState().chats[convId]?.byKey : undefined;
+    return weaveSessions(groups, timelineSessions, (k) => byKey?.[k]?.createdAt);
+  }, [groups, timelineSessions, convId]);
   const awaiting = useAwaitingAssistant(convId);
   const hasError = !!useChatError(convId);
   // Thinking and errors are measured rows so every bottom seek uses the same
   // edge as the streaming follow controller.
   const items = useMemo<MessageListItem[]>(() => {
-    if (awaiting) return [...groups, { kind: "thinking" }];
-    if (!isStreaming && hasError) return [...groups, { kind: "error" }];
-    return groups;
-  }, [groups, awaiting, isStreaming, hasError]);
+    if (awaiting) return [...rows, { kind: "thinking" }];
+    if (!isStreaming && hasError) return [...rows, { kind: "error" }];
+    return rows;
+  }, [rows, awaiting, isStreaming, hasError]);
 
   // Virtualization measures rows; the intent controller owns tail-following.
   const listRef = useRef<ChatListHandle>(null);
@@ -230,13 +269,13 @@ export function MessageList({
   // scroll-to-turn (the virtual list scrollToIndex) and active-tick math.
   const userTurns = useMemo(() => {
     const out: { key: string; index: number }[] = [];
-    groups.forEach((g, i) => {
+    rows.forEach((g, i) => {
       if (g.kind !== "single") return;
       if (roles[keys.indexOf(g.key)] === "user")
         out.push({ key: g.key, index: i });
     });
     return out;
-  }, [groups, keys, roles]);
+  }, [rows, keys, roles]);
 
   // The prose behind each list row, for ⌘F. Read straight off the store rather
   // than through a hook: subscribing to message BODIES here would re-render the
@@ -526,10 +565,10 @@ export function MessageList({
         quote,
       );
       const sourceKey = keys[source];
-      const rowIndex = groups.findIndex((group) =>
+      const rowIndex = rows.findIndex((group) =>
         group.kind === "assistant"
           ? group.keys.includes(sourceKey)
-          : group.key === sourceKey,
+          : group.kind === "single" && group.key === sourceKey,
       );
       if (source < 0 || rowIndex < 0) {
         toast(quoteT("quote.sourceNotFound"));
@@ -591,7 +630,7 @@ export function MessageList({
         highlights?.delete("cetus-quote");
       };
     },
-    [convId, scroller, keys, groups, quoteT],
+    [convId, scroller, keys, rows, quoteT],
   );
 
   const itemContent = useCallback(
@@ -622,6 +661,20 @@ export function MessageList({
                 onRetry={onRetry}
                 retrying={retrying}
               />
+            </div>
+          </div>
+        );
+      }
+
+      if (item.kind === "session") {
+        return (
+          <div className={MESSAGE_ROW_GUTTER_CLASS}>
+            <div
+              className={`mx-auto max-w-3xl py-3 panel-motion transition-[translate] ${
+                opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
+              }`}
+            >
+              <SessionCard conversation={item.conv} />
             </div>
           </div>
         );
@@ -705,6 +758,7 @@ export function MessageList({
         itemKey={(_i, item) => {
           if (item.kind === "assistant") return item.keys[0];
           if (item.kind === "single") return item.key;
+          if (item.kind === "session") return `session:${item.conv.id}`;
           return `${convId ?? "new"}:tail:${item.kind}`;
         }}
         itemContent={itemContent}

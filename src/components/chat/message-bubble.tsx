@@ -20,6 +20,8 @@ import {
 import { cn } from "@/lib/utils";
 import { splitLeadingQuote } from "@/lib/user-quote";
 import { useTranslation } from "@/lib/i18n";
+import { SessionCard } from "@/components/threads/session-card";
+import { useSessionTimeline } from "@/components/threads/session-timeline";
 
 interface Props {
   /** Subscription mode: re-renders only when the message at this key changes. */
@@ -69,6 +71,7 @@ function MessageBubbleView({
   onQuoteClick?: (quote: string) => void;
 }) {
   const { t } = useTranslation("chat");
+  const timeline = useSessionTimeline();
   const isUser = message.role === "user";
   // Continuations Cetus dispatched on the user's behalf (auto-retry after a
   // transient provider error, resume after an app restart) are user-role rows
@@ -85,6 +88,16 @@ function MessageBubbleView({
     isUser && message.blocks.length === 1 && message.blocks[0].kind === "text"
       ? reportFromText(message.blocks[0].text)
       : null;
+  // In the Threads timeline a message sent straight to a runtime reads like
+  // every other session there: the prompt, then the session's live card.
+  const startedConv =
+    report?.status === "started" && report.id ? timeline?.conversation(report.id) : undefined;
+  if (startedConv)
+    return (
+      <div className="py-3">
+        <SessionCard conversation={startedConv} />
+      </div>
+    );
   if (report)
     return report.status === "started" ? (
       <div className="flex w-full justify-end py-2">

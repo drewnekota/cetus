@@ -482,9 +482,10 @@ async fn new_conversation(
     Json(body): Json<NewConversation>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     require(&headers, &web)?;
-    let conversation = commands::new_conversation(web.app.state(), body.workspace_dir, None)
-        .await
-        .map_err(json_error)?;
+    let conversation =
+        commands::new_conversation(web.app.clone(), web.app.state(), body.workspace_dir, None)
+            .await
+            .map_err(json_error)?;
     if let Some(backend) = body.backend.filter(|b| b != "pi") {
         commands::set_conversation_backend(web.app.state(), conversation.id.clone(), backend)
             .await

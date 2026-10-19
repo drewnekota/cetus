@@ -57,6 +57,7 @@ import {
   mergeAutomation,
 } from "./home/home-utils";
 import { useAppEvents } from "./home/use-app-events";
+import { useFolderHealth } from "./home/use-folder-health";
 import { useHomeKeyboardShortcuts } from "./home/use-home-keyboard-shortcuts";
 import { useWorkspaceActions } from "./home/use-workspace-actions";
 import { useMessageActions } from "./home/use-message-actions";
@@ -356,6 +357,13 @@ export default function Home() {
   }, []);
   const detailIdRef = useRef<string | null>(detailId);
   detailIdRef.current = detailId;
+  useFolderHealth({
+    conversationsLoaded,
+    conversationsRef,
+    setConversations,
+    setWorkspaceDir,
+    setTemporaryWorkspaces,
+  });
   useAppEvents({
     setPiReady,
     conversationsRef,

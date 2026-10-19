@@ -44,6 +44,7 @@ mod diagnostics;
 mod discovery;
 mod doubao;
 mod focused_text;
+mod folders;
 mod host_tunnel;
 #[cfg(target_os = "macos")]
 mod hotkey;
@@ -1059,6 +1060,7 @@ pub fn run() {
         commands::new_conversation,
         commands::fork_conversation,
         commands::switch_conversation,
+        commands::conversation_summaries,
         commands::set_active_conversation,
         commands::set_conversation_unread,
         commands::set_conversation_pinned,
@@ -1095,6 +1097,8 @@ pub fn run() {
         webview_health::wake_main_webview,
         commands::default_workspace,
         commands::pick_workspace_dir,
+        folders::check_workspace_folders,
+        folders::relocate_workspace,
         commands::save_artifact_copy,
         commands::list_workspace_files,
         commands::list_workspace_directory,
@@ -1256,6 +1260,7 @@ pub fn run() {
         commands::new_conversation,
         commands::fork_conversation,
         commands::switch_conversation,
+        commands::conversation_summaries,
         commands::set_active_conversation,
         commands::set_conversation_unread,
         commands::set_conversation_pinned,
@@ -1292,6 +1297,8 @@ pub fn run() {
         webview_health::wake_main_webview,
         commands::default_workspace,
         commands::pick_workspace_dir,
+        folders::check_workspace_folders,
+        folders::relocate_workspace,
         commands::save_artifact_copy,
         commands::list_workspace_files,
         commands::list_workspace_directory,

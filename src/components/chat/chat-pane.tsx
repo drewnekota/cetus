@@ -30,6 +30,7 @@ import { flavorHeadline } from "@/lib/chat-flavor";
 import type { BackendId, ModelChoice } from "@/lib/types";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import { MessageList } from "./message-list";
+import { useSessionTimeline } from "@/components/threads/session-timeline";
 import { QueuedMessages } from "./chat-status";
 
 interface Props {
@@ -141,6 +142,7 @@ export function ChatPane({
 }: Props) {
   const { locale } = useTranslation("chat");
   const hasMessages = useHasMessages(convId);
+  const timeline = useSessionTimeline();
   const isStreaming = useIsStreaming(convId);
   const compaction = useCompaction(convId);
   const [quoteRequest, setQuoteRequest] = useState<QuoteRequest | null>(null);
@@ -216,7 +218,9 @@ export function ChatPane({
     [onSend, queuedDraftKey],
   );
 
-  if (!hasMessages) {
+  // In the Threads view Cetus's pane is also the folder's timeline, so it
+  // shows the list as soon as the folder has sessions, before Cetus speaks.
+  if (!hasMessages && !timeline?.sessions.length) {
     return (
       <WallpaperFrame className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <GlyphBackdrop />

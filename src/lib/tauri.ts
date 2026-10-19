@@ -208,6 +208,13 @@ export const api = {
     }),
   switchConversation: (id: string) =>
     invoke<{ conversation: Conversation; messages: PiMessage[] }>("switch_conversation", { id }),
+  /** Opening prompt + latest reply per id, read from the transcript without
+   *  switching to or spawning anything. */
+  conversationSummaries: (ids: string[]) =>
+    invoke<Record<string, { firstPrompt: string | null; lastReply: string | null }>>(
+      "conversation_summaries",
+      { ids },
+    ),
   setActiveConversation: (id: string | null) =>
     invoke<void>("set_active_conversation", { id }),
   archiveConversation: (id: string, archive: boolean) =>
@@ -326,6 +333,13 @@ export const api = {
   piPing: () => invoke<boolean>("pi_ping"),
   defaultWorkspace: () => invoke<string>("default_workspace"),
   pickWorkspaceDir: () => invoke<string | null>("pick_workspace_dir"),
+  /** Check folders still exist. Moved ones are migrated (and announced via
+   *  `workspace-moved`); missing ones come back as "missing". */
+  checkWorkspaceFolders: (dirs: string[]) =>
+    invoke<FolderCheck[]>("check_workspace_folders", { dirs }),
+  /** Point a missing folder's chats and automations at its new location. */
+  relocateWorkspace: (from: string, to: string) =>
+    invoke<void>("relocate_workspace", { from, to }),
   listWorkspaceFiles: (workspaceDir?: string | null) =>
     invoke<WorkspaceFileEntry[]>("list_workspace_files", { workspaceDir: workspaceDir ?? null }),
   listWorkspaceDirectory: (workspaceDir: string, directoryPath?: string | null) =>
@@ -776,13 +790,29 @@ export async function onUpdateAvailable(
   return listen<UpdateMeta>("update-available", (e) => handler(e.payload));
 }
 
-/** Fired once an update has finished downloading + installing (silently at
- *  startup, or via a manual install) — drives the sidebar's "Restart to
- *  update" button. The swap is already on disk; only a relaunch remains. */
+/** Fired once an update has finished downloading (silently in the background,
+ *  or via a manual install) — drives the sidebar's "Restart to update" button.
+ *  The package installs when the app quits or restarts. */
 export async function onUpdateReady(
   handler: (u: UpdateMeta) => void,
 ): Promise<UnlistenFn> {
   return listen<UpdateMeta>("update-ready", (e) => handler(e.payload));
+}
+
+export interface FolderCheck {
+  dir: string;
+  status: "ok" | "moved" | "missing";
+  to: string | null;
+}
+
+/** Fired after a workspace folder was found at a new path (renamed or moved
+ *  on disk) and every stored reference was rewritten to it. */
+export async function onWorkspaceMoved(
+  handler: (m: { from: string; to: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ from: string; to: string }>("workspace-moved", (e) =>
+    handler(e.payload),
+  );
 }
 
 /** Fired while a native app update is downloading. */

@@ -100,6 +100,28 @@ pub async fn coordinator_registry(
     Ok(load(&state.store))
 }
 
+/// Re-key coordinators after their folder moved on disk.
+pub fn rebase_workspace(store: &Store, from: &str, to: &str) -> Result<(), String> {
+    let _guard = WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut reg = load(store);
+    let moved: Vec<String> = reg
+        .coordinators
+        .keys()
+        .filter(|dir| *dir == from || dir.strip_prefix(from).is_some_and(|r| r.starts_with('/')))
+        .cloned()
+        .collect();
+    if moved.is_empty() {
+        return Ok(());
+    }
+    for old in moved {
+        if let Some(id) = reg.coordinators.remove(&old) {
+            reg.coordinators
+                .insert(format!("{to}{}", &old[from.len()..]), id);
+        }
+    }
+    save(store, &reg)
+}
+
 /// Make `conversation_id` the coordinator for `workspace_dir`, replacing any
 /// earlier one (its threads stay linked to it).
 #[tauri::command]

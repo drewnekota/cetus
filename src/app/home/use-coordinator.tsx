@@ -4,6 +4,7 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useRef } from "react";
 import { api, onAppEvent } from "@/lib/tauri";
 import { loadCachedMessages, useChatStore } from "@/lib/chat-store";
+import { chatReducer, emptyChatState } from "@/lib/chat-state";
 import {
   backendLabel,
   CLI_REQUEST_PREFIX,
@@ -13,6 +14,7 @@ import {
   COORDINATOR_TITLE,
   firstUserText,
   formatReport,
+  isCoordinatorId,
   latestReply,
   latestRequest,
   pendingQuestion,
@@ -32,6 +34,9 @@ const SETTLE_MS = 1500;
 /** Caps on what a report / thread_read hands the coordinator. */
 const REPORT_CHARS = 6000;
 const READ_CHARS = 16000;
+// Most recently active non-thread sessions thread_list shows besides Cetus's
+// own threads; older ones stay reachable by id.
+const OTHER_SESSIONS_LISTED = 20;
 
 type Reply = Record<string, unknown> & { ok: boolean };
 
@@ -94,7 +99,18 @@ export function useCoordinator({
   async function messagesOf(id: string): Promise<RenderedMessage[]> {
     const live = chatStore.getState().chats[id]?.messages;
     if (live?.length) return live;
-    return (await loadCachedMessages(id)) ?? [];
+    const cached = await loadCachedMessages(id);
+    if (cached?.length) return cached;
+    // Never rendered here (a session opened elsewhere before this client saw
+    // it): CLI transcripts read straight from the store, no process spawned.
+    // A pi session would need its pi spawned, so it stays empty until opened.
+    if ((conv(id)?.backend || "pi") === "pi") return [];
+    try {
+      const { messages } = await api.switchConversation(id);
+      return chatReducer(emptyChatState, { type: "reset", messages }).messages;
+    } catch {
+      return [];
+    }
   }
 
   function statusOf(id: string, messages: RenderedMessage[]): ThreadStatus {
@@ -173,9 +189,25 @@ export function useCoordinator({
     async function handle(coordId: string, p: Record<string, unknown>): Promise<Reply> {
       const { registry } = useCoordinatorStore.getState();
       const own = new Set(threadsOf(registry, coordId));
+      // Cetus also sees the folder's other sessions (opened from Chat, an
+      // automation, …): they share its timeline, so the user can ask it about
+      // them or hand them follow-ups. Only its own threads report back.
+      // `cetus thread` callers that aren't a coordinator keep to their own.
+      const home = isCoordinatorId(registry, coordId) ? conv(coordId)?.workspaceDir : undefined;
+      const inFolder = (c: Conversation) =>
+        c.workspaceDir === home && !c.archivedAt && !isCoordinatorId(registry, c.id);
+      const reachable = new Set(own);
+      if (home) {
+        const others = (conversationsRef.current ?? [])
+          .filter((c) => inFolder(c) && !own.has(c.id))
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .slice(0, OTHER_SESSIONS_LISTED);
+        for (const c of others) reachable.add(c.id);
+      }
       const threadId = typeof p.thread_id === "string" ? p.thread_id.trim() : "";
+      const target = conv(threadId);
       const needThread = (): Reply | null =>
-        own.has(threadId)
+        own.has(threadId) || (home && target && inFolder(target))
           ? null
           : { ok: false, error: `no thread with id "${threadId}"; call thread_list (or 'cetus thread list' from a shell) for ids` };
 
@@ -245,13 +277,17 @@ export function useCoordinator({
           };
         }
         case "list": {
+          const ids = [...reachable].sort(
+            (a, b) => (conv(a)?.createdAt ?? 0) - (conv(b)?.createdAt ?? 0),
+          );
           const threads = await Promise.all(
-            [...own].map(async (id) => {
+            ids.map(async (id) => {
               const c = conv(id);
               if (!c) return null;
               const msgs = await messagesOf(id);
               return {
                 id,
+                yours: own.has(id),
                 title: c.title,
                 runtime: backendLabel(c.backend),
                 status: statusOf(id, msgs),

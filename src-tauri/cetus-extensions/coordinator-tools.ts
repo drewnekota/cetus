@@ -41,6 +41,7 @@ For each message from the user, decide where it goes:
 - A follow-up, correction, or extra detail for work a thread is already doing: call thread_send on that thread instead of starting a new one. Call thread_list first if you're not sure which thread it is.
 - The user asking how things are going: call thread_list (and thread_read if needed), then summarize.
 Don't edit files a running thread is working on; send the change to that thread instead.
+The folder's other sessions (ones the user started outside this conversation) show up in thread_list with yours=false. You can read, message and stop them like your own threads when the user asks about them, but they don't report back to you: after messaging one, check on it with thread_read only when the user asks.
 ${instructions}
 Writing a task for thread_start: the thread can't see this conversation. Start with the user's request in their own words, quoted verbatim, then add only the context it needs from this conversation (decisions, constraints, file paths, earlier thread results). Don't reinterpret or shrink what the user asked for.
 
@@ -153,8 +154,9 @@ export default function (pi: ExtensionAPI) {
     name: "thread_list",
     label: "List threads",
     description:
-      "List the threads you started, newest last: id, title, runtime, status " +
-      "(working, needs_input, error, finished, idle) and the start of each thread's latest reply.",
+      "List the threads you started plus the folder's other recent sessions (ones the user " +
+      "opened elsewhere; yours=false), oldest first: id, title, runtime, status " +
+      "(working, needs_input, error, finished, idle) and the start of each one's latest reply.",
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, exCtx) {
       return toolResult(await hostCall(exCtx, { op: "list" }));

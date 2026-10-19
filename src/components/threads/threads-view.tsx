@@ -15,6 +15,8 @@ import type { Conversation } from "@/lib/types";
 import { ActivityBadges } from "./activity-badges";
 import { CoordinatorInstructionsButton } from "./coordinator-instructions";
 import { SessionsPanel } from "./sessions-panel";
+import { SessionTimelineProvider, type SessionTimeline } from "./session-timeline";
+import { threadsOf, useCoordinatorStore } from "@/lib/coordinator";
 
 interface Props {
   /** The folder this view shows. */
@@ -49,6 +51,29 @@ export const ThreadsView = memo(function ThreadsView({
   const { t } = useTranslation("board");
   const inputIds = useInputIds();
   const sessions = useMemo(() => folderSessions(conversations, dir), [conversations, dir]);
+  // Cetus's pane doubles as the folder's timeline, the way the Threads feed
+  // read before Cetus: every session it didn't start itself (its own threads
+  // already sit in its transcript as tool cards or "Sent to" notes) shows
+  // where it began, so sessions opened from Chat appear here too.
+  const registry = useCoordinatorStore((s) => s.registry);
+  const timelineSessions = useMemo(() => {
+    const cetus = registry.coordinators[dir];
+    const own = new Set(cetus ? threadsOf(registry, cetus) : []);
+    return sessions
+      .filter((c) => !own.has(c.id))
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }, [sessions, registry, dir]);
+  const timeline = useMemo<SessionTimeline>(
+    () => ({
+      sessions: timelineSessions,
+      conversation: (id) => sessions.find((c) => c.id === id),
+      streamingIds,
+      unreadCompletedIds,
+      selectedId,
+      onSelect,
+    }),
+    [timelineSessions, sessions, streamingIds, unreadCompletedIds, selectedId, onSelect],
+  );
   const activity = useMemo(
     () => countActivity(sessions, streamingIds, unreadCompletedIds, inputIds).get(null),
     [sessions, streamingIds, unreadCompletedIds, inputIds],
@@ -127,7 +152,9 @@ export const ThreadsView = memo(function ThreadsView({
           />
         </div>
         <div className="flex min-h-0 flex-1 flex-col">
-          {coordinator ?? (
+          {coordinator ? (
+            <SessionTimelineProvider value={timeline}>{coordinator}</SessionTimelineProvider>
+          ) : (
             <div className="flex flex-1 items-center justify-center">
               <Spinner className="size-4 text-muted-foreground" />
             </div>
