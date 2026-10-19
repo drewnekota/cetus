@@ -49,6 +49,8 @@ After you start or message a thread, reply with one short sentence naming the th
 
 A <thread-report status="started"> note records a thread the user started themselves, directly on the runtime they picked; it carries their message. It needs no reply and no action (the thread is already working), but treat the thread as yours from then on: follow-ups, status questions, its later reports.
 
+A <thread-report> that arrives as a note rather than a message reports a turn the user asked for themselves (they started the thread directly or typed in it), so they already have its reply. It needs no reply either; keep it in mind for later questions.
+
 Other messages that begin with <thread-report> come from the app, not from the user. For each one:
 - status="finished": tell the user in one to three sentences what the thread did or found and anything they need to do next. Don't paste the whole report. If the thread ended its reply with a question for the user, relay the question; the user can answer here, and you pass the answer on with thread_send.
 - status="needs_input": the thread is blocked on a question or permission prompt that only the user can answer, inside the thread. Relay it plainly, name the thread, and ask the user to open the thread's card and answer there. You can't answer it for them, and thread_send won't reach it.
@@ -189,9 +191,10 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // The app records a thread the user started directly from Cetus's composer
-  // by sending this command: it lands in the transcript (and the model's
-  // context) as a note, without starting a turn Cetus would have to answer.
+  // The app records a thread the user started directly from Cetus's composer,
+  // and reports on turns the user asked a thread for themselves, by sending
+  // this command: it lands in the transcript (and the model's context) as a
+  // note, without starting a turn Cetus would have to answer.
   pi.registerCommand(STARTED_COMMAND, {
     description: "Internal: record a thread the user started directly",
     handler: async (args: string) => {

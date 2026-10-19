@@ -144,8 +144,12 @@ function warmPreview(id: string) {
 /** Memoized per row so one streaming session doesn't repaint the timeline. */
 export const SessionCard = memo(function SessionCard({
   conversation: c,
+  prompt: knownPrompt,
 }: {
   conversation: Conversation;
+  /** The opening prompt when the caller already has it (a message sent
+   *  straight to a runtime), so the card doesn't wait on its preview. */
+  prompt?: string;
 }) {
   const { t } = useTranslation("board");
   const summary = useThreadSummary(c.id);
@@ -177,7 +181,7 @@ export const SessionCard = memo(function SessionCard({
   const RuntimeIcon = runtime.icon;
   // The opening prompt reads as the message that started the thread. Until
   // it's known (an old preview record) the card's title stands in alone.
-  const prompt = summary.firstPrompt;
+  const prompt = knownPrompt?.trim() || summary.firstPrompt;
   // Until the generated title lands, the title is just the prompt's first
   // line; showing it beside the runtime icon would read as the agent saying
   // it, so the card is labelled with the runtime instead.
@@ -191,7 +195,7 @@ export const SessionCard = memo(function SessionCard({
 
   return (
     <article
-      className="flex flex-col gap-2"
+      className="flex flex-col gap-3"
     >
       {prompt && (
         <div className="flex justify-end pl-10">
@@ -207,7 +211,7 @@ export const SessionCard = memo(function SessionCard({
         onClick={() => timeline?.onSelect(c.id)}
         aria-pressed={selected}
         className={cn(
-          "group flex w-full min-w-0 flex-col rounded-xl border px-3.5 py-3 text-left outline-none transition-colors",
+          "group flex w-full max-w-[90%] min-w-0 flex-col self-start rounded-xl border px-3.5 py-3 text-left outline-none transition-colors",
           "focus-visible:ring-2 focus-visible:ring-ring/50",
           selected
             ? "border-[var(--brand)]/45 bg-[var(--brand)]/[0.06]"

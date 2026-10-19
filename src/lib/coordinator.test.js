@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatReport, latestReply, parseReport, resolveCliModel, runtimeToBackend, threadsOf } from "./coordinator.ts";
+import { formatReport, latestReply, listedConversations, parseReport, resolveCliModel, runtimeToBackend, threadsOf } from "./coordinator.ts";
 
 describe("thread reports", () => {
   test("format and parse round-trip, quotes and newlines in titles are neutralised", () => {
@@ -69,5 +69,18 @@ describe("resolveCliModel", () => {
     expect(r.error).toContain("unknown model");
     expect(r.error).toContain("opus (Opus 5.5)");
     expect(resolveCliModel("gpt-7", codex).error).toContain("gpt-6-sol (GPT-6-Sol)");
+  });
+});
+
+describe("listedConversations", () => {
+  test("drops the folders' Cetus sessions and keeps the order", () => {
+    const registry = { coordinators: { "/a": "c1", "/b": "c2" }, threads: {} };
+    const all = [{ id: "x" }, { id: "c1" }, { id: "y" }, { id: "c2" }];
+    expect(listedConversations(all, registry).map((c) => c.id)).toEqual(["x", "y"]);
+  });
+
+  test("returns the same array when there is no Cetus session", () => {
+    const all = [{ id: "x" }];
+    expect(listedConversations(all, { coordinators: {}, threads: {} })).toBe(all);
   });
 });

@@ -21,7 +21,8 @@ export const COORDINATOR_MODEL: ModelChoice = { model: "flash", reasoning: "high
 export const COORDINATOR_TITLE = "Cetus";
 
 /** Extension command that records a thread the user started directly from
- *  Cetus's composer as a transcript note, without starting a turn
+ *  Cetus's composer, or a report on a turn the user asked a thread for
+ *  themselves, as a transcript note, without starting a turn
  *  (src-tauri/cetus-extensions/coordinator-tools.ts). */
 export const STARTED_COMMAND = "cetus-thread-started";
 export const STARTED_NOTE_TYPE = "thread_started";
@@ -41,6 +42,18 @@ export const useCoordinatorStore = create<{
 
 export function isCoordinatorId(registry: CoordinatorRegistry, id: string): boolean {
   return Object.values(registry.coordinators).includes(id);
+}
+
+/** The conversations the chat list shows: everything but the folders' Cetus
+ *  sessions, which live in the Threads view as the folder's timeline. The
+ *  sidebar and the keys that walk it (⌘1…⌘9, ⌥⌘↑/↓) must share this, or the
+ *  slots land on hidden rows. */
+export function listedConversations<T extends { id: string }>(
+  conversations: T[],
+  registry: CoordinatorRegistry,
+): T[] {
+  const cetus = new Set(Object.values(registry.coordinators));
+  return cetus.size ? conversations.filter((c) => !cetus.has(c.id)) : conversations;
 }
 
 /** Thread ids a coordinator started, in insertion order. */

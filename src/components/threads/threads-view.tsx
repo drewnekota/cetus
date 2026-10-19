@@ -66,13 +66,14 @@ export const ThreadsView = memo(function ThreadsView({
   const timeline = useMemo<SessionTimeline>(
     () => ({
       sessions: timelineSessions,
-      conversation: (id) => sessions.find((c) => c.id === id),
+      // Archived sessions too, so their messages keep their card.
+      conversation: (id) => conversations.find((c) => c.id === id),
       streamingIds,
       unreadCompletedIds,
       selectedId,
       onSelect,
     }),
-    [timelineSessions, sessions, streamingIds, unreadCompletedIds, selectedId, onSelect],
+    [timelineSessions, conversations, streamingIds, unreadCompletedIds, selectedId, onSelect],
   );
   const activity = useMemo(
     () => countActivity(sessions, streamingIds, unreadCompletedIds, inputIds).get(null),

@@ -82,22 +82,31 @@ function MessageBubbleView({
       ? continuationNoticeKind(message.blocks[0].text)
       : null;
   if (continuation) return <ContinuationNotice kind={continuation} />;
-  // A thread report Cetus posted into a coordinator: from Cetus, not the
-  // user, so a card on the left rather than a user bubble.
+  // A thread report in a coordinator's transcript: a message (a turn Cetus
+  // asked for, which it answers) or a note (a thread the user started
+  // directly from Cetus's composer, or a turn they asked for themselves).
+  const noteBlock =
+    message.role === "custom"
+      ? message.blocks.find((b) => b.kind === "custom" && b.customType === STARTED_NOTE_TYPE)
+      : undefined;
+  const isNote = !!noteBlock;
   const report =
-    isUser && message.blocks.length === 1 && message.blocks[0].kind === "text"
-      ? reportFromText(message.blocks[0].text)
-      : null;
+    noteBlock?.kind === "custom"
+      ? reportFromText(noteBlock.text)
+      : isUser && message.blocks.length === 1 && message.blocks[0].kind === "text"
+        ? reportFromText(message.blocks[0].text)
+        : null;
   // In the Threads timeline a message sent straight to a runtime reads like
-  // every other session there: the prompt, then the session's live card.
-  const startedConv =
-    report?.status === "started" && report.id ? timeline?.conversation(report.id) : undefined;
-  if (startedConv)
-    return (
-      <div className="py-3">
-        <SessionCard conversation={startedConv} />
+  // every other session there: the prompt on the right, the session's live
+  // card on the left. That card shows every later turn, so the notes on them
+  // add nothing.
+  const reportConv = report?.id ? timeline?.conversation(report.id) : undefined;
+  if (report && reportConv && (report.status === "started" || isNote))
+    return report.status === "started" ? (
+      <div className="py-5">
+        <SessionCard conversation={reportConv} prompt={report.body} />
       </div>
-    );
+    ) : null;
   if (report)
     return report.status === "started" ? (
       <div className="flex w-full justify-end py-2">
@@ -124,20 +133,6 @@ function MessageBubbleView({
     const runtimeSwitch = message.blocks.find(
       (b) => b.kind === "custom" && b.customType === "runtime_switch",
     );
-    // A thread the user started directly from Cetus's composer: their words,
-    // on their side, with where they went.
-    const started = message.blocks.find(
-      (b) => b.kind === "custom" && b.customType === STARTED_NOTE_TYPE,
-    );
-    const startedReport =
-      started && started.kind === "custom" ? reportFromText(started.text) : null;
-    if (startedReport) {
-      return (
-        <div className="flex w-full justify-end py-2">
-          <StartedThreadCard report={startedReport} />
-        </div>
-      );
-    }
     if (runtimeSwitch && runtimeSwitch.kind === "custom") {
       return (
         <RuntimeSwitchDivider text={runtimeSwitch.text} details={runtimeSwitch.details} />

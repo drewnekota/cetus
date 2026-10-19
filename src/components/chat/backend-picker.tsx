@@ -38,7 +38,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
-import { loadCliTuningChoice, saveCliTuningChoice } from "@/lib/backend-choice";
+import {
+  loadCetusRuntimeChoice,
+  loadCliTuningChoice,
+  saveCetusRuntimeChoice,
+  saveCliTuningChoice,
+} from "@/lib/backend-choice";
+import { useCoordinatorStore } from "@/lib/coordinator";
 import {
   openRuntimeSettings,
   runtimeSlotDisplay,
@@ -687,6 +693,20 @@ export function BackendPicker({
     onBackendChange?.(b);
   }
 
+  // A folder's Cetus conversation always runs on pi, so its stored backend
+  // can't carry the pick: remember it per folder instead.
+  const cetusDir = useCoordinatorStore((s) =>
+    conversationId
+      ? (Object.entries(s.registry.coordinators).find(
+          ([, id]) => id === conversationId,
+        )?.[0] ?? null)
+      : null,
+  );
+  function rememberForCetus(b: BackendId, model: string, effort: string) {
+    if (cetusDir)
+      saveCetusRuntimeChoice(cetusDir, { backend: b, cliModel: model, cliEffort: effort });
+  }
+
   useEffect(() => {
     if (conversationId || enabledBackendIds.has(pendingValue ?? "pi")) return;
     setBackend("pi");
@@ -710,10 +730,19 @@ export function BackendPicker({
       .getConversation(conversationId)
       .then((c) => {
         if (!cancelled && c) {
-          setBackend(((c.backend as BackendId | undefined) ?? "pi"));
-          setCliModel(c.cliModel ?? "");
-          setCliEffort(c.cliEffort ?? "");
-          onTuningChange?.(c.cliModel ?? "", c.cliEffort ?? "");
+          const kept = cetusDir ? loadCetusRuntimeChoice(cetusDir) : null;
+          const pick =
+            kept && enabledBackendIds.has(kept.backend)
+              ? { backend: kept.backend, model: kept.cliModel, effort: kept.cliEffort }
+              : {
+                  backend: (c.backend as BackendId | undefined) ?? "pi",
+                  model: c.cliModel ?? "",
+                  effort: c.cliEffort ?? "",
+                };
+          setBackend(pick.backend);
+          setCliModel(pick.model);
+          setCliEffort(pick.effort);
+          onTuningChange?.(pick.model, pick.effort);
         }
       })
       .catch(() => {});
@@ -721,7 +750,7 @@ export function BackendPicker({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, pendingValue, onTuningChange]);
+  }, [conversationId, cetusDir, pendingValue, onTuningChange]);
 
   // Apply a keyboard runtime-switch (⌃1…⌃9) exactly once per token. The
   // ref starts at the mount-time token so a request fired before this picker
@@ -787,6 +816,7 @@ export function BackendPicker({
     setCliModel(model);
     setCliEffort(effort);
     onTuningChange?.(model, effort);
+    rememberForCetus(target.backend, model, effort);
     if (!conversationId) onPendingTuningChange?.(model, effort);
   }
 
@@ -814,6 +844,7 @@ export function BackendPicker({
     setCliModel(tuning.model);
     setCliEffort(tuning.effort);
     onTuningChange?.(tuning.model, tuning.effort);
+    rememberForCetus(b.id, tuning.model, tuning.effort);
     if (backendSupportsTuning(b.id)) saveCliTuningChoice(b.id, tuning);
     if (!conversationId) {
       onPendingTuningChange?.(tuning.model, tuning.effort);
@@ -825,6 +856,7 @@ export function BackendPicker({
     setCliEffort(effort);
     saveCliTuningChoice(shown as TunableBackendId, { model, effort });
     onTuningChange?.(model, effort);
+    rememberForCetus(shown, model, effort);
   }
 
   /** The tuning menu's automatic rewrite of an existing conversation's stored

@@ -670,7 +670,7 @@ export function MessageList({
         return (
           <div className={MESSAGE_ROW_GUTTER_CLASS}>
             <div
-              className={`mx-auto max-w-3xl py-3 panel-motion transition-[translate] ${
+              className={`mx-auto max-w-3xl py-5 panel-motion transition-[translate] ${
                 opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
               }`}
             >

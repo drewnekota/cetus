@@ -1,6 +1,6 @@
 "use client";
 
-import { useCoordinatorStore } from "@/lib/coordinator";
+import { listedConversations, useCoordinatorStore } from "@/lib/coordinator";
 import { countActivity, useInputIds } from "@/lib/session-activity";
 import { ActivityBadges } from "@/components/threads/activity-badges";
 import {
@@ -177,10 +177,10 @@ export const AppSidebar = memo(function AppSidebar({
   // timeline; listing it as a chat too would add a "Cetus" row to every
   // folder that was ever opened there.
   const registry = useCoordinatorStore((s) => s.registry);
-  const listed = useMemo(() => {
-    const cetus = new Set(Object.values(registry.coordinators));
-    return cetus.size ? conversations.filter((c) => !cetus.has(c.id)) : conversations;
-  }, [conversations, registry]);
+  const listed = useMemo(
+    () => listedConversations(conversations, registry),
+    [conversations, registry],
+  );
   const groups = useMemo(
     () =>
       groupByWorkspace(

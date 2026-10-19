@@ -47,6 +47,7 @@ import {
   readKeyboardShortcuts,
 } from "@/lib/keyboard-shortcuts";
 import { reconcileTemporaryWorkspaces } from "@/lib/recent-workspaces";
+import { listedConversations, useCoordinatorStore } from "@/lib/coordinator";
 import {
   PersistedAppViewState,
   SIDEBAR_OPEN_KEY,
@@ -416,7 +417,10 @@ export function useHomeState({
       const convs = conversationsRef.current;
       const live = new Set(convs.map((c) => c.id));
       const visited = mruChatsRef.current.filter((id) => live.has(id));
-      const rest = [...convs]
+      const rest = listedConversations(
+        convs,
+        useCoordinatorStore.getState().registry,
+      )
         .filter((c) => !visited.includes(c.id))
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .map((c) => c.id);
@@ -541,10 +545,13 @@ export function useHomeState({
   // Visible chat ids in the sidebar's visual order (workspace groups flattened),
   // mirrored into a ref so archive fallback and the identity-stable switchChat
   // handler both skip rows hidden by a folded workspace.
+  // Same list the sidebar draws, so the Cetus sessions it hides don't take
+  // ⌘1…⌘9 slots here.
+  const coordinatorRegistry = useCoordinatorStore((s) => s.registry);
   const workspaceGroups = useMemo(
     () =>
       groupByWorkspace(
-        conversations,
+        listedConversations(conversations, coordinatorRegistry),
         [...recentWorkspaces, ...temporaryWorkspaces],
         hiddenWorkspaces.filter((dir) => !temporaryWorkspaces.includes(dir)),
         defaultWorkspace,
@@ -552,6 +559,7 @@ export function useHomeState({
       ),
     [
       conversations,
+      coordinatorRegistry,
       recentWorkspaces,
       hiddenWorkspaces,
       temporaryWorkspaces,

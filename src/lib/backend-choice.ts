@@ -153,3 +153,38 @@ export function saveCliTuningChoice(
     }));
   } catch {}
 }
+
+// The runtime picked in a folder's Cetus composer (Threads view). Cetus itself
+// always runs on pi; another runtime there means "start this message as that
+// runtime's thread", and the pick sticks per folder until changed.
+const CETUS_KEY = "cetus:threadsRuntimeChoice";
+
+function readCetusChoices(): Record<string, BackendChoice> {
+  try {
+    const raw = localStorage.getItem(CETUS_KEY);
+    const v = raw ? JSON.parse(raw) : null;
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+export function loadCetusRuntimeChoice(dir: string): BackendChoice | null {
+  const v = readCetusChoices()[dir];
+  if (!v || !BACKEND_IDS.includes(v.backend)) return null;
+  return {
+    backend: v.backend,
+    cliModel: typeof v.cliModel === "string" ? v.cliModel : "",
+    cliEffort: typeof v.cliEffort === "string" ? v.cliEffort : "",
+  };
+}
+
+export function saveCetusRuntimeChoice(dir: string, choice: BackendChoice) {
+  try {
+    const all = readCetusChoices();
+    // Back on Cetus is the default — drop the entry rather than store it.
+    if (choice.backend === "pi") delete all[dir];
+    else all[dir] = choice;
+    localStorage.setItem(CETUS_KEY, JSON.stringify(all));
+  } catch {}
+}

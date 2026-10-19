@@ -457,7 +457,18 @@ export const ConversationRow = memo(function ConversationRow({
           sideOffset={6}
           className="flex w-60 flex-col items-stretch gap-2 px-3 py-2.5"
         >
-          <div className="flex min-w-0 items-center gap-2">
+          {/* The row truncates long titles, so the card carries the full one. */}
+          {conversation.title && (
+            <div className="line-clamp-4 font-medium leading-snug break-words">
+              {conversation.title}
+            </div>
+          )}
+          <div
+            className={cn(
+              "flex min-w-0 items-center gap-2",
+              conversation.title && "text-xs text-background/70",
+            )}
+          >
             {/* dsh's identity color is the foreground, which is exactly this
                 inverted tooltip's background, so swap it for the one color
                 that is guaranteed to contrast here. */}
@@ -470,7 +481,9 @@ export const ConversationRow = memo(function ConversationRow({
               }}
               className="size-1.5 shrink-0 rounded-full"
             />
-            <span className="truncate font-medium">
+            <span
+              className={cn("truncate", !conversation.title && "font-medium")}
+            >
               {runtimeLabel(backend)}
             </span>
             {streaming && (

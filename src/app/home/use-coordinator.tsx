@@ -72,6 +72,11 @@ export function useCoordinator({
   defaultBackendRef: RefObject<BackendId>;
 }) {
   const setRegistry = useCoordinatorStore((s) => s.setRegistry);
+  // Turns Cetus asked a thread for (thread_start / thread_send), per thread.
+  // Only those turns' reports start a Cetus turn; a turn the user asked for
+  // directly (from Cetus's composer or inside the thread) is recorded as a
+  // note, since the user already has the reply in front of them.
+  const asked = useRef(new Map<string, number>());
   // Latest callbacks for the long-lived listeners below.
   const createThreadRef = useRef(createThread);
   createThreadRef.current = createThread;
@@ -92,6 +97,17 @@ export function useCoordinator({
       catalogs.current.set(backend, p);
     }
     return p;
+  }
+
+  /** Put a report in Cetus's transcript (and context) without starting a
+   *  turn. pi runs the command even mid-turn and appends the note once that
+   *  turn ends. */
+  function recordNote(coordId: string, note: string) {
+    return api.sendPrompt(coordId, `/${STARTED_COMMAND} ${note}`);
+  }
+
+  function markAsked(threadId: string) {
+    asked.current.set(threadId, (asked.current.get(threadId) ?? 0) + 1);
   }
 
   const conv = (id: string) => conversationsRef.current?.find((c) => c.id === id);
@@ -149,8 +165,10 @@ export function useCoordinator({
   );
 
   /** The user sent from Cetus's composer with another runtime picked: start
-   *  that runtime's session on their message as-is (no hop through Cetus),
-   *  linked to Cetus, and tell Cetus so it can track it. */
+   *  that runtime's session on their message as-is. Cetus stays out of it (no
+   *  link, no note, no reports): it's an ordinary session of the folder, which
+   *  the timeline shows as its card, and Cetus can still find it in
+   *  thread_list if the user asks about it. */
   const startDirect = useCallback(
     async (
       coordId: string,
@@ -160,28 +178,15 @@ export function useCoordinator({
     ): Promise<void> => {
       const coordinator = conv(coordId);
       if (!coordinator) throw new Error("Cetus conversation not found");
-      const id = await createThreadRef.current(text, attachments, coordinator.workspaceDir, {
+      await createThreadRef.current(text, attachments, coordinator.workspaceDir, {
         backend: runtime.backend,
         cliModel: runtime.cliModel || undefined,
         cliEffort: runtime.cliEffort || undefined,
-        beforeSend: async (tid) => {
-          setRegistry(await api.coordinatorLinkThread(tid, coordId));
-        },
+        beforeSend: async () => {},
       });
-      const names = attachments.map((a) => a.name).filter(Boolean);
-      const note = formatReport({
-        id,
-        title: "",
-        runtime: backendLabel(runtime.backend),
-        status: "started",
-        body: names.length ? `${text}\n\n(attached: ${names.join(", ")})` : text,
-      });
-      // A note, not a message: Cetus has nothing to answer. pi runs the
-      // command even mid-turn and appends the note once that turn ends.
-      await api.sendPrompt(coordId, `/${STARTED_COMMAND} ${note}`);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setRegistry],
+    [],
   );
 
   // --- thread tools -------------------------------------------------------
@@ -242,6 +247,7 @@ export function useCoordinator({
             // Linked before the prompt goes out, so even an instant failure
             // reports back.
             beforeSend: async (tid) => {
+              markAsked(tid);
               setRegistry(await api.coordinatorLinkThread(tid, coordId));
             },
           });
@@ -268,6 +274,7 @@ export function useCoordinator({
             };
           }
           const busy = chatStore.getState().streamingIds.has(threadId);
+          if (own.has(threadId)) markAsked(threadId);
           enqueueRef.current(threadId, message);
           return {
             ok: true,
@@ -380,17 +387,25 @@ export function useCoordinator({
       // it in the thread itself.
       const request = latestRequest(msgs);
       const followUp = request && request !== firstUserText(msgs);
-      enqueueRef.current(
-        coordId,
-        formatReport({
-          id: threadId,
-          title: c?.title ?? "",
-          runtime: backendLabel(c?.backend ?? "pi"),
-          status,
-          body,
-          request: followUp ? clip(request, 1500) : undefined,
-        }),
-      );
+      const text = formatReport({
+        id: threadId,
+        title: c?.title ?? "",
+        runtime: backendLabel(c?.backend ?? "pi"),
+        status,
+        body,
+        request: followUp ? clip(request, 1500) : undefined,
+      });
+      const pending = asked.current.get(threadId) ?? 0;
+      if (!pending) {
+        recordNote(coordId, text).catch((err) => console.error("[coordinator] note failed", err));
+        return;
+      }
+      // A question keeps the request open; the turn's end settles it.
+      if (status !== "needs_input") {
+        if (pending > 1) asked.current.set(threadId, pending - 1);
+        else asked.current.delete(threadId);
+      }
+      enqueueRef.current(coordId, text);
     }
 
     return chatStore.subscribe((s, prev) => {
@@ -421,7 +436,10 @@ export function useCoordinator({
             const now = chatStore.getState();
             if (now.streamingIds.has(id) || now.controlRequests[id]?.length) return;
             const chat = now.chats[id];
-            if (chat?.aborted) return;
+            if (chat?.aborted) {
+              asked.current.delete(id);
+              return;
+            }
             report(id, chat?.error ? "error" : "finished");
           }, SETTLE_MS),
         );
