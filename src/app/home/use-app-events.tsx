@@ -8,6 +8,7 @@ import { REVIEW_TOOL_NAME } from "@/lib/review";
 import { api, onAppEvent } from "@/lib/tauri";
 import { useChatStore } from "@/lib/chat-store";
 import { dispatchNotification } from "@/lib/notifications";
+import { createTurnNotifier } from "@/lib/turn-notify";
 import { tt } from "@/lib/i18n";
 import {
   type AppEvent,
@@ -59,6 +60,7 @@ export function useAppEvents({
 }) {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposeNotifier: (() => void) | undefined;
     let cancelled = false;
     (async () => {
       api
@@ -75,6 +77,24 @@ export function useAppEvents({
         (cid === activeIdRef.current && viewRef.current === "chat") ||
         (cid === detailIdRef.current && viewRef.current === "threads");
 
+      // One notification for any finished run (interactive reply, board task,
+      // or automation — they're all just chats); the body carries success vs
+      // error. Held while an async Agent/Workflow keeps the conversation
+      // working past its foreground turn — see createTurnNotifier.
+      const turnNotifier = createTurnNotifier((cid, outcome) => {
+        dispatchNotification("task_finished", {
+          title: convTitle(cid),
+          body:
+            outcome === "errored"
+              ? "Finished with an error."
+              : "Your task is ready.",
+          suppressWhenFocused: watchingNow(cid),
+          conversationId: cid,
+        });
+        markUnread(cid, !watchingNow(cid));
+      });
+      disposeNotifier = turnNotifier.dispose;
+
       const notifyForPiEvent = (
         cid: string,
         pe: PiEvent | ExtensionUIRequest,
@@ -82,6 +102,7 @@ export function useAppEvents({
         switch (pe.type) {
           case "agent_start":
             runStatusRef.current[cid] = { running: true, outcome: "ok" };
+            turnNotifier.turnStarted(cid);
             markUnread(cid, false);
             break;
           case "message_update": {
@@ -110,19 +131,11 @@ export function useAppEvents({
             // consumes the queue after this handler), so the conversation isn't
             // really done — stay quiet and let the final run notify.
             if ((queuedRef.current[cid]?.length ?? 0) > 0) break;
-            // One notification for any finished run (interactive reply, board
-            // task, or automation — they're all just chats); the body carries
-            // success vs error.
-            dispatchNotification("task_finished", {
-              title: convTitle(cid),
-              body:
-                r.outcome === "errored"
-                  ? "Finished with an error."
-                  : "Your task is ready.",
-              suppressWhenFocused: watchingNow(cid),
-              conversationId: cid,
-            });
-            markUnread(cid, !watchingNow(cid));
+            turnNotifier.turnEnded(
+              cid,
+              r.outcome,
+              chatStore.getState().backgroundTasks[cid],
+            );
             break;
           }
         }
@@ -167,6 +180,7 @@ export function useAppEvents({
               store.setBackgroundTasks(evt.conversationId, []);
               // Close out any live run so a trailing agent_end can't double-fire.
               if (r) r.running = false;
+              turnNotifier.drop(evt.conversationId);
               dispatchNotification("task_finished", {
                 title: convTitle(evt.conversationId),
                 body: `Agent process exited (code ${evt.code ?? "n/a"}).`,
@@ -241,11 +255,11 @@ export function useAppEvents({
             // outlive model turns, so the bridge streams the full set on every
             // change (empty when the session process exits).
             if (cid && eventType === "cli_background_tasks") {
-              store.setBackgroundTasks(
-                cid,
+              const tasks =
                 (evt.event as unknown as { tasks?: CliBackgroundTask[] })
-                  .tasks ?? [],
-              );
+                  .tasks ?? [];
+              store.setBackgroundTasks(cid, tasks);
+              turnNotifier.tasksChanged(cid, tasks);
             }
             // A claude-code control request (permission prompt / AskUserQuestion)
             // is parked in the store — captured here in the app's single
@@ -373,6 +387,7 @@ export function useAppEvents({
     return () => {
       cancelled = true;
       unlisten?.();
+      disposeNotifier?.();
     };
   }, [chatStore, markUnread]);
 }

@@ -80,12 +80,12 @@ prints one meeting's summary plus its full timestamped transcript — grep it
 for specifics. Text only; audio, when kept, never leaves the machine.
 
 THREAD — a thread is an ordinary Cetus session (shown in the user's Threads
-view) that works on one task and posts a <thread-report> message back into
-YOUR conversation when it finishes, fails, or needs the user. It can't see
-your conversation, so `start` must carry everything: the user's request
-verbatim, then the context it needs. Runtime: cetus | claude-code | codex
-(default: the user's). --model only for claude-code/codex, and only one the
-user named. Don't poll; wait for the report.
+view) that works on one task. Nothing is reported back to your conversation:
+the user reads each thread's status and reply on its card. It can't see your
+conversation, so `start` must carry everything: the user's request verbatim,
+then the context it needs. Runtime: cetus | claude-code | codex (default: the
+user's). --model only for claude-code/codex, and only one the user named.
+Don't poll it or narrate its result.
 
 INPUT JSON — create requires name/prompt/schedule; edit takes any subset:
   {"name":"…","prompt":"…","schedule":<schedule>,

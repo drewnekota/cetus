@@ -107,9 +107,10 @@ pub struct QuickSettings {
     /// time settings are saved, so the OS login item tracks this flag.
     #[serde(default)]
     pub launch_on_startup: bool,
-    /// Silently check for, download, and install app updates in the background
-    /// at launch (applied on the next launch). On by default — read once at
-    /// startup; toggling it takes effect next launch. Release builds only.
+    /// Silently check for and download app updates in the background, then
+    /// apply them on quit or with an idle relaunch (see `updater`). On by
+    /// default. The periodic checks and the idle restart re-read it, so a
+    /// toggle takes effect without a relaunch. Release builds only.
     #[serde(default = "default_true")]
     pub auto_update: bool,
     /// Ask before quitting (Cmd+Q / menu Quit / tray Quit). On by default so a

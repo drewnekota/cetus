@@ -179,6 +179,9 @@ export interface UpdateMeta {
   currentVersion: string;
   /** Release notes, if any. */
   notes?: string | null;
+  /** On `update-ready`: show the sidebar "Restart to update" button. False
+   *  for a silent auto-update, which applies itself when the user is away. */
+  promptRestart?: boolean;
 }
 
 /** Progress emitted while the native updater downloads an app update. */

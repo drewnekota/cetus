@@ -46,7 +46,7 @@ export const pt = {
     "Reordena os chats ao receber novas mensagens. Desative para manter a ordem de criação, com os novos chats no topo.",
   "general.autoUpdate.label": "Atualizações automáticas",
   "general.autoUpdate.description":
-    "Verifica e instala atualizações em segundo plano. Aplicadas na próxima vez que você abrir o Cetus.",
+    "Baixa atualizações em segundo plano e as aplica ao sair, ou com um reinício discreto enquanto você está ausente e nada está em execução.",
   "general.confirmQuit.label": "Confirmar antes de sair",
   "general.confirmQuit.description":
     "Pergunta antes de o Cmd+Q fechar o Cetus, para que um deslize não interrompa agentes em execução.",

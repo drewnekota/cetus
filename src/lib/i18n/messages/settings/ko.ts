@@ -45,7 +45,7 @@ export const ko = {
     "새 메시지가 오면 채팅 순서를 변경합니다. 끄면 생성 순서를 유지하고 새 채팅이 맨 위에 표시됩니다.",
   "general.autoUpdate.label": "자동 업데이트",
   "general.autoUpdate.description":
-    "백그라운드에서 업데이트를 확인하고 설치합니다. 다음에 Cetus를 열 때 적용됩니다.",
+    "업데이트를 백그라운드에서 내려받아 종료할 때 적용합니다. 자리를 비웠고 실행 중인 작업이 없으면 조용히 재시작해 적용합니다.",
   "general.confirmQuit.label": "종료 전 확인",
   "general.confirmQuit.description":
     "Cmd+Q로 Cetus를 종료하기 전에 확인하여 실수로 실행 중인 에이전트를 중단하지 않도록 합니다.",

@@ -33,7 +33,7 @@ const MODELS: { id: DsModel; labelKey: string; hintKey: string; icon: LucideIcon
   },
 ];
 
-/** pi's full reasoning axis. The DeepSeek built-ins expose off/high/max
+/** pi's full reasoning axis. The DeepSeek built-ins expose off/low/high/max
  *  (BUILTIN_LEVELS); custom models expose whichever levels their settings
  *  enable (Settings → Models). */
 const EFFORTS: { id: ReasoningLevel; labelKey: string; hintKey: string }[] = [
@@ -46,7 +46,7 @@ const EFFORTS: { id: ReasoningLevel; labelKey: string; hintKey: string }[] = [
   { id: "max", labelKey: "model.max", hintKey: "model.maxHint" },
 ];
 
-const BUILTIN_LEVELS: ReasoningLevel[] = ["off", "high", "max"];
+const BUILTIN_LEVELS: ReasoningLevel[] = ["off", "low", "high", "max"];
 
 /** One selectable custom model, flattened from the provider list. `value` is
  *  the persisted `"<provider-id>/<model-id>"` form. */
@@ -122,7 +122,7 @@ export function ModelPicker({ value, onChange, disabled }: Props) {
     ? t(builtin.labelKey)
     : customCur?.label ?? value.model.split("/").slice(1).join("/") ?? value.model;
   const isBuiltin = Boolean(builtin);
-  // Which reasoning rows apply to the current model: off/high/max for the
+  // Which reasoning rows apply to the current model: off/low/high/max for the
   // built-ins, the model's enabled set for custom, none otherwise.
   const efforts = isBuiltin
     ? EFFORTS.filter((e) => BUILTIN_LEVELS.includes(e.id))

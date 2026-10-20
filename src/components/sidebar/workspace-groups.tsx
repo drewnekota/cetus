@@ -500,9 +500,11 @@ export function WorkspaceFilterButton({
         "[&>svg]:!size-3",
         // The badges and ⌘ hint sit at the far right like the chat rows'
         // indicators and step aside while the ⋯ shows over that spot; only
-        // then does the label need to clear the ⋯ slot.
+        // then does the label need to clear the ⋯ slot. That padding has to
+        // snap, not ease: the badges are in flow, so an animated pr-9 slides
+        // them sideways (visibly so on mouse-out, when they reappear first).
         menu &&
-          "group-hover/menu-item:pr-9 group-has-[[data-state=open]]/menu-item:pr-9 group-has-[:focus-visible]/menu-item:pr-9",
+          "transition-[width,height] group-hover/menu-item:pr-9 group-has-[[data-state=open]]/menu-item:pr-9 group-has-[:focus-visible]/menu-item:pr-9",
         handleProps && "touch-none select-none active:cursor-grabbing",
       )}
     >

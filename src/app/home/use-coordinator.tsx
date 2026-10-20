@@ -5,18 +5,16 @@ import { useCallback, useEffect, useRef } from "react";
 import { api, onAppEvent } from "@/lib/tauri";
 import { loadCachedMessages, useChatStore } from "@/lib/chat-store";
 import { chatReducer, emptyChatState } from "@/lib/chat-state";
+import { holdsActivity } from "@/lib/turn-notify";
 import {
   backendLabel,
   CLI_REQUEST_PREFIX,
   clip,
-  STARTED_COMMAND,
   COORDINATOR_MODEL,
   COORDINATOR_TITLE,
   firstUserText,
-  formatReport,
   isCoordinatorId,
   latestReply,
-  latestRequest,
   pendingQuestion,
   resolveCliModel,
   runtimeToBackend,
@@ -28,13 +26,9 @@ import type { ComposerAttachment, ComposerRuntimeSelection } from "@/components/
 import type { BackendId, Conversation, RenderedMessage } from "@/lib/types";
 import { mergeConversation } from "./home-utils";
 
-/** A turn end is reported only once the thread has stayed idle this long, so
- *  a CLI's quick follow-up turn doesn't produce two reports. */
-const SETTLE_MS = 1500;
-/** Caps on what a report / thread_read hands the coordinator. */
-const REPORT_CHARS = 6000;
+/** Cap on what `cetus thread read` hands the caller. */
 const READ_CHARS = 16000;
-// Most recently active non-thread sessions thread_list shows besides Cetus's
+// Most recently active non-thread sessions `cetus thread list` shows besides Cetus's
 // own threads; older ones stay reachable by id.
 const OTHER_SESSIONS_LISTED = 20;
 
@@ -72,11 +66,6 @@ export function useCoordinator({
   defaultBackendRef: RefObject<BackendId>;
 }) {
   const setRegistry = useCoordinatorStore((s) => s.setRegistry);
-  // Turns Cetus asked a thread for (thread_start / thread_send), per thread.
-  // Only those turns' reports start a Cetus turn; a turn the user asked for
-  // directly (from Cetus's composer or inside the thread) is recorded as a
-  // note, since the user already has the reply in front of them.
-  const asked = useRef(new Map<string, number>());
   // Latest callbacks for the long-lived listeners below.
   const createThreadRef = useRef(createThread);
   createThreadRef.current = createThread;
@@ -97,17 +86,6 @@ export function useCoordinator({
       catalogs.current.set(backend, p);
     }
     return p;
-  }
-
-  /** Put a report in Cetus's transcript (and context) without starting a
-   *  turn. pi runs the command even mid-turn and appends the note once that
-   *  turn ends. */
-  function recordNote(coordId: string, note: string) {
-    return api.sendPrompt(coordId, `/${STARTED_COMMAND} ${note}`);
-  }
-
-  function markAsked(threadId: string) {
-    asked.current.set(threadId, (asked.current.get(threadId) ?? 0) + 1);
   }
 
   const conv = (id: string) => conversationsRef.current?.find((c) => c.id === id);
@@ -132,7 +110,7 @@ export function useCoordinator({
   function statusOf(id: string, messages: RenderedMessage[]): ThreadStatus {
     const s = chatStore.getState();
     if (s.controlRequests[id]?.length) return "needs_input";
-    if (s.streamingIds.has(id)) return "working";
+    if (s.streamingIds.has(id) || holdsActivity(s.backgroundTasks[id])) return "working";
     if (s.chats[id]?.error) return "error";
     return latestReply(messages) ? "finished" : "idle";
   }
@@ -166,9 +144,8 @@ export function useCoordinator({
 
   /** The user sent from Cetus's composer with another runtime picked: start
    *  that runtime's session on their message as-is. Cetus stays out of it (no
-   *  link, no note, no reports): it's an ordinary session of the folder, which
-   *  the timeline shows as its card, and Cetus can still find it in
-   *  thread_list if the user asks about it. */
+   *  link, no note): it's an ordinary session of the folder, which the
+   *  timeline shows as its card. */
   const startDirect = useCallback(
     async (
       coordId: string,
@@ -190,13 +167,17 @@ export function useCoordinator({
   );
 
   // --- thread tools -------------------------------------------------------
+  // Cetus itself only starts threads and sends them follow-ups; nothing flows
+  // back into its conversation — each session's card in the Threads view is
+  // where the user reads status and replies. list/read/stop remain for
+  // `cetus thread …` callers.
   useEffect(() => {
     async function handle(coordId: string, p: Record<string, unknown>): Promise<Reply> {
       const { registry } = useCoordinatorStore.getState();
       const own = new Set(threadsOf(registry, coordId));
       // Cetus also sees the folder's other sessions (opened from Chat, an
       // automation, …): they share its timeline, so the user can ask it about
-      // them or hand them follow-ups. Only its own threads report back.
+      // them or hand them follow-ups.
       // `cetus thread` callers that aren't a coordinator keep to their own.
       const home = isCoordinatorId(registry, coordId) ? conv(coordId)?.workspaceDir : undefined;
       const inFolder = (c: Conversation) =>
@@ -214,7 +195,7 @@ export function useCoordinator({
       const needThread = (): Reply | null =>
         own.has(threadId) || (home && target && inFolder(target))
           ? null
-          : { ok: false, error: `no thread with id "${threadId}"; call thread_list (or 'cetus thread list' from a shell) for ids` };
+          : { ok: false, error: `no thread with id "${threadId}"; use the id thread_start returned (or 'cetus thread list' from a shell)` };
 
       switch (p.op) {
         case "start": {
@@ -244,10 +225,9 @@ export function useCoordinator({
             backend,
             cliModel,
             title: title || undefined,
-            // Linked before the prompt goes out, so even an instant failure
-            // reports back.
+            // Linked before the prompt goes out, so the thread is Cetus's own
+            // (thread_send reaches it) from its first event.
             beforeSend: async (tid) => {
-              markAsked(tid);
               setRegistry(await api.coordinatorLinkThread(tid, coordId));
             },
           });
@@ -274,7 +254,6 @@ export function useCoordinator({
             };
           }
           const busy = chatStore.getState().streamingIds.has(threadId);
-          if (own.has(threadId)) markAsked(threadId);
           enqueueRef.current(threadId, message);
           return {
             ok: true,
@@ -365,88 +344,6 @@ export function useCoordinator({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatStore, setRegistry]);
-
-  // --- reports back to the coordinator -------------------------------------
-  useEffect(() => {
-    const timers = new Map<string, ReturnType<typeof setTimeout>>();
-
-    function report(threadId: string, status: "finished" | "error" | "needs_input") {
-      const { registry } = useCoordinatorStore.getState();
-      const coordId = registry.threads[threadId];
-      if (!coordId || !conv(coordId)) return;
-      const s = chatStore.getState();
-      const c = conv(threadId);
-      const msgs = s.chats[threadId]?.messages ?? [];
-      const body =
-        status === "needs_input"
-          ? `The thread is waiting on the user:\n${pendingQuestion(s.controlRequests[threadId])}`
-          : status === "error"
-            ? `${s.chats[threadId]?.error ?? "The turn failed."}\n\n${clip(latestReply(msgs), REPORT_CHARS)}`
-            : clip(latestReply(msgs), REPORT_CHARS);
-      // A follow-up turn: say what it was asked, since the user may have typed
-      // it in the thread itself.
-      const request = latestRequest(msgs);
-      const followUp = request && request !== firstUserText(msgs);
-      const text = formatReport({
-        id: threadId,
-        title: c?.title ?? "",
-        runtime: backendLabel(c?.backend ?? "pi"),
-        status,
-        body,
-        request: followUp ? clip(request, 1500) : undefined,
-      });
-      const pending = asked.current.get(threadId) ?? 0;
-      if (!pending) {
-        recordNote(coordId, text).catch((err) => console.error("[coordinator] note failed", err));
-        return;
-      }
-      // A question keeps the request open; the turn's end settles it.
-      if (status !== "needs_input") {
-        if (pending > 1) asked.current.set(threadId, pending - 1);
-        else asked.current.delete(threadId);
-      }
-      enqueueRef.current(coordId, text);
-    }
-
-    return chatStore.subscribe((s, prev) => {
-      if (s.streamingIds === prev.streamingIds && s.controlRequests === prev.controlRequests) {
-        return;
-      }
-      const { registry } = useCoordinatorStore.getState();
-      for (const id of Object.keys(registry.threads)) {
-        const asking = !!s.controlRequests[id]?.length;
-        const wasAsking = !!prev.controlRequests[id]?.length;
-        if (asking && !wasAsking) {
-          report(id, "needs_input");
-          continue;
-        }
-        const streaming = s.streamingIds.has(id);
-        if (streaming) {
-          clearTimeout(timers.get(id));
-          timers.delete(id);
-          continue;
-        }
-        if (!prev.streamingIds.has(id)) continue;
-        // Turn ended: report once it has settled (and wasn't a deliberate stop).
-        clearTimeout(timers.get(id));
-        timers.set(
-          id,
-          setTimeout(() => {
-            timers.delete(id);
-            const now = chatStore.getState();
-            if (now.streamingIds.has(id) || now.controlRequests[id]?.length) return;
-            const chat = now.chats[id];
-            if (chat?.aborted) {
-              asked.current.delete(id);
-              return;
-            }
-            report(id, chat?.error ? "error" : "finished");
-          }, SETTLE_MS),
-        );
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatStore]);
 
   return { ensureCoordinator, startDirect };
 }

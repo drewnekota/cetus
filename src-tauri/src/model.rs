@@ -5,7 +5,7 @@
 //! single string: `"flash"` (legacy `"pro"` maps to Flash), or
 //! `"<provider>/<model-id>"` for a custom model (custom provider ids always
 //! carry the `custom-` prefix, so the two forms can't collide). The
-//! per-conversation reasoning axis (off / high / max) applies to the DeepSeek
+//! per-conversation reasoning axis (off / low / high / max) applies to the DeepSeek
 //! built-ins natively, and to custom models that declare a reasoning knob
 //! (their High/Max tokens map through pi's thinkingLevelMap; see
 //! `custom_models.rs` and `model_bridge.rs`).
@@ -159,15 +159,13 @@ impl ReasoningLevel {
     }
 
     /// The level actually sent for the DeepSeek built-ins, whose bundled
-    /// thinkingLevelMap supports exactly off / high / max: mid-tier levels
-    /// clamp to the only "on" tier below Max, xhigh clamps to max.
+    /// thinkingLevelMap supports exactly off / low / high / max: minimal
+    /// clamps up to low, medium up to high, xhigh to max.
     pub fn builtin_pi_level(self) -> &'static str {
         match self {
             ReasoningLevel::Off => "off",
-            ReasoningLevel::Minimal
-            | ReasoningLevel::Low
-            | ReasoningLevel::Medium
-            | ReasoningLevel::High => "high",
+            ReasoningLevel::Minimal | ReasoningLevel::Low => "low",
+            ReasoningLevel::Medium | ReasoningLevel::High => "high",
             ReasoningLevel::XHigh | ReasoningLevel::Max => "max",
         }
     }

@@ -52,6 +52,13 @@ pub struct DictationState {
     warm: Arc<Mutex<Option<Warm>>>,
 }
 
+impl DictationState {
+    /// Whether a dictation (push-to-talk or hands-free) holds the mic.
+    pub async fn is_active(&self) -> bool {
+        self.inner.lock().await.is_some()
+    }
+}
+
 #[cfg(target_os = "macos")]
 struct Active {
     session: session::Session,

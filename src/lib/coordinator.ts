@@ -1,9 +1,9 @@
 // A folder's coordinator: one ordinary pi conversation (DeepSeek Flash) that
 // takes the user's stream of work, answers quick questions itself, and runs
 // the rest as threads — ordinary sessions in the same folder on any runtime.
-// Its thread_* tools (src-tauri/cetus-extensions/coordinator-tools.ts) tunnel
-// here; when a thread finishes a turn, fails, or needs the user, a
-// <thread-report> message is posted back into the coordinator.
+// Its thread tools (src-tauri/cetus-extensions/coordinator-tools.ts) and
+// `cetus thread …` tunnel here. Nothing is posted back into the coordinator:
+// the user reads each thread on its card in the Threads view.
 
 import { create } from "zustand";
 import type {
@@ -20,11 +20,8 @@ export const COORDINATOR_MODEL: ModelChoice = { model: "flash", reasoning: "high
 
 export const COORDINATOR_TITLE = "Cetus";
 
-/** Extension command that records a thread the user started directly from
- *  Cetus's composer, or a report on a turn the user asked a thread for
- *  themselves, as a transcript note, without starting a turn
- *  (src-tauri/cetus-extensions/coordinator-tools.ts). */
-export const STARTED_COMMAND = "cetus-thread-started";
+/** Custom block type of the "thread started" notes older Cetus transcripts
+ *  carry; still rendered, no longer written. */
 export const STARTED_NOTE_TYPE = "thread_started";
 
 /** Request ids of `cetus thread …` CLI calls (src-tauri/src/coordinator.rs). */
@@ -148,19 +145,6 @@ export function firstUserText(messages: RenderedMessage[]): string {
   return "";
 }
 
-/** The most recent user message (what the thread was last asked to do). The
- *  user may have typed it in the thread directly, which the coordinator
- *  didn't see. */
-export function latestRequest(messages: RenderedMessage[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== "user") continue;
-    const t = textOf(m);
-    if (t) return t;
-  }
-  return "";
-}
-
 /** The thread's latest reply: the text of the last assistant message that has
  *  any, after the most recent user message when there is one. */
 export function latestReply(messages: RenderedMessage[]): string {
@@ -194,34 +178,6 @@ export function clip(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max)}\n…[${s.length - max} more characters]`;
 }
 
-function attr(s: string): string {
-  return s.replace(/[\n\r]+/g, " ").replace(/"/g, "'");
-}
-
-export const REPORT_TAG = "thread-report";
-
-/** The message Cetus posts into the coordinator for a thread event. */
-export function formatReport(r: {
-  id: string;
-  title: string;
-  runtime: string;
-  /** "started": the user started the thread directly on a runtime they
-   *  picked; the body is their message. */
-  status: Exclude<ThreadStatus, "working" | "idle"> | "started";
-  body: string;
-  /** The message that started this turn, when it isn't the original task. */
-  request?: string;
-}): string {
-  const request = r.request?.trim()
-    ? `Latest request to the thread (from you or typed by the user in the thread):\n${r.request.trim()}\n\nReply:\n`
-    : "";
-  return (
-    `<${REPORT_TAG} id="${attr(r.id)}" title="${attr(r.title)}" runtime="${attr(r.runtime)}" status="${r.status}">\n` +
-    `${request}${r.body.trim() || "(no text reply)"}\n` +
-    `</${REPORT_TAG}>`
-  );
-}
-
 export interface ParsedReport {
   id: string;
   title: string;
@@ -230,7 +186,8 @@ export interface ParsedReport {
   body: string;
 }
 
-/** Inverse of formatReport, for rendering a report bubble as a card. */
+/** A <thread-report> bubble from an older Cetus transcript (reports are no
+ *  longer posted), for rendering it as a card. */
 export function parseReport(text: string): ParsedReport | null {
   const m = text
     .trim()

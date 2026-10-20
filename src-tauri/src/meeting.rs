@@ -439,6 +439,14 @@ pub struct MeetingRuntime {
     auto_suppressed: std::sync::atomic::AtomicBool,
 }
 
+impl MeetingRuntime {
+    /// Whether a meeting is being captured right now.
+    #[cfg_attr(debug_assertions, allow(dead_code))]
+    pub async fn is_capturing(&self) -> bool {
+        self.active.lock().await.is_some()
+    }
+}
+
 struct ActiveSession {
     id: String,
     started_ts: i64,

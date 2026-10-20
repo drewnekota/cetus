@@ -45,7 +45,7 @@ export const fr = {
     "Réorganise les discussions à l'arrivée de nouveaux messages. Désactivez cette option pour conserver l'ordre de création, avec les nouvelles discussions en haut.",
   "general.autoUpdate.label": "Mises à jour automatiques",
   "general.autoUpdate.description":
-    "Recherche et installe les mises à jour en arrière-plan. Appliquées au prochain lancement de Cetus.",
+    "Télécharge les mises à jour en arrière-plan et les applique à la fermeture, ou via un redémarrage discret pendant votre absence quand rien ne tourne.",
   "general.confirmQuit.label": "Confirmer avant de quitter",
   "general.confirmQuit.description":
     "Demande confirmation avant que Cmd+Q ne ferme Cetus, pour qu'une fausse manipulation n'interrompe pas les agents en cours.",

@@ -26,6 +26,7 @@ import {
   type ChatState,
 } from "./chat-state";
 import { artifactsFromDetails } from "./artifact";
+import { holdsActivity } from "./turn-notify";
 import {
   forgetContextUsage,
   loadContextUsage,
@@ -740,7 +741,7 @@ export function useActivityIds(): Set<string> {
   return useMemo(() => {
     let activityIds = streamingIds;
     for (const [id, tasks] of Object.entries(backgroundTasks)) {
-      if (!tasks.some((task) => task.kind !== "Bash") || activityIds.has(id)) {
+      if (!holdsActivity(tasks) || activityIds.has(id)) {
         continue;
       }
       if (activityIds === streamingIds) activityIds = new Set(streamingIds);

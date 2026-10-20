@@ -188,7 +188,7 @@ export const en = {
     "Reorder chats when they receive new messages. Turn this off to keep chats in creation order, with newly created chats at the top.",
   "general.autoUpdate.label": "Automatic updates",
   "general.autoUpdate.description":
-    "Check for and install updates in the background. Applied the next time you open Cetus.",
+    "Download updates in the background and apply them when you quit, or with a quiet restart while you're away and nothing is running.",
   "general.confirmQuit.label": "Confirm before quitting",
   "general.confirmQuit.description":
     "Ask before Cmd+Q closes Cetus, so a slip of the hand doesn't interrupt running agents.",

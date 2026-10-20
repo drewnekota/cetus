@@ -2,6 +2,11 @@
 //! Settings "Check for updates" button and the passive "update available"
 //! toast.
 //!
+//! With auto-update on, a downloaded update is applied without asking: on the
+//! next quit, or by a quiet relaunch once the user has stepped away and nothing
+//! is running (see [`spawn_idle_restart`]). The sidebar "Restart to update"
+//! button only appears when that can't happen on its own.
+//!
 //! Real behavior is **release-only**: the updater plugin is registered only in
 //! release builds (see `lib.rs`), and `app.updater()` needs that registration.
 //! In debug everything no-ops / errors politely so `tauri dev` is never touched.
@@ -40,6 +45,22 @@ const PERIODIC_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// behind the socket — which reads as "stuck".
 #[cfg(not(debug_assertions))]
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(200);
+/// How often the idle restart looks for a quiet moment.
+#[cfg(all(not(debug_assertions), target_os = "macos"))]
+const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(60);
+/// No keyboard or mouse input for this long counts as "stepped away".
+#[cfg(all(not(debug_assertions), target_os = "macos"))]
+const IDLE_RESTART_AFTER: Duration = Duration::from_secs(10 * 60);
+/// Don't restart this close to a scheduled automation; let it run first.
+#[cfg(all(not(debug_assertions), target_os = "macos"))]
+const AUTOMATION_GUARD: Duration = Duration::from_secs(5 * 60);
+/// An auto-update still waiting after this long (the user never stepped away
+/// while things were quiet) falls back to the sidebar "Restart to update".
+#[cfg(not(debug_assertions))]
+const PROMPT_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
+/// Passed to the relaunched instance so it starts with the main window hidden
+/// when it was hidden before.
+pub const BACKGROUND_RELAUNCH_ARG: &str = "--background-relaunch";
 
 /// One download at a time, process-wide.
 ///
@@ -65,6 +86,12 @@ static PROGRESS: Mutex<Option<UpdateDownloadProgress>> = Mutex::new(None);
 /// the next launch simply finds the update again.
 #[cfg(not(debug_assertions))]
 static PENDING: Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>> = Mutex::new(None);
+/// When the pending update finished downloading.
+#[cfg(not(debug_assertions))]
+static STAGED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+/// The pending update has been surfaced as a sidebar "Restart to update".
+#[cfg(not(debug_assertions))]
+static RESTART_PROMPTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +102,9 @@ pub struct UpdateMeta {
     pub current_version: String,
     /// Release notes from the manifest, if any.
     pub notes: Option<String>,
+    /// On `update-ready`: show the sidebar "Restart to update" button. False
+    /// for a silent auto-update, which applies itself.
+    pub prompt_restart: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -193,6 +223,7 @@ pub fn clear_legacy_ready_marker(app: &AppHandle) {
 async fn download_update(
     app: &AppHandle,
     update: &tauri_plugin_updater::Update,
+    prompt_restart: bool,
 ) -> Result<bool, String> {
     use tauri::Emitter;
 
@@ -264,6 +295,10 @@ async fn download_update(
     if let Ok(mut slot) = PENDING.lock() {
         *slot = Some((update.clone(), bytes));
     }
+    if let Ok(mut at) = STAGED_AT.lock() {
+        *at = Some(Instant::now());
+    }
+    RESTART_PROMPTED.store(prompt_restart, Ordering::SeqCst);
     let _ = app.emit_to(
         "main",
         "update-download-progress",
@@ -275,8 +310,8 @@ async fn download_update(
             version: Some(version.clone()),
         },
     );
-    // Surface a persistent "Restart to update" affordance in the sidebar so the
-    // user can apply it now instead of waiting for a stray relaunch.
+    // Settings flips to "ready" either way; the sidebar button only shows when
+    // the user asked for this download (a silent one restarts by itself).
     let _ = app.emit_to(
         "main",
         "update-ready",
@@ -284,14 +319,37 @@ async fn download_update(
             version: update.version.clone(),
             current_version: update.current_version.clone(),
             notes: update.body.clone(),
+            prompt_restart,
         },
     );
     Ok(true)
 }
 
+/// Surface the pending update as a sidebar "Restart to update", once.
+#[cfg(not(debug_assertions))]
+fn prompt_restart(app: &AppHandle) {
+    use tauri::Emitter;
+
+    if RESTART_PROMPTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let Some(meta) = PENDING.lock().ok().and_then(|slot| {
+        slot.as_ref().map(|(u, _)| UpdateMeta {
+            version: u.version.clone(),
+            current_version: u.current_version.clone(),
+            notes: u.body.clone(),
+            prompt_restart: true,
+        })
+    }) else {
+        return;
+    };
+    let _ = app.emit_to("main", "update-ready", meta);
+}
+
 /// Background check at launch.
 ///
-/// - auto on  → download silently; installs on the next quit or restart, no nag.
+/// - auto on  → download silently; installs on the next quit or an idle
+///   relaunch, no nag.
 /// - auto off → only emit a non-intrusive `update-available` event to the main
 ///   window, and only for a version the user hasn't already dismissed.
 ///
@@ -336,9 +394,9 @@ async fn check_once(app: AppHandle, auto: bool) {
     if auto {
         let v = update.version.clone();
         tracing::info!("cetus: update {v} available — installing in background");
-        match download_update(&app, &update).await {
+        match download_update(&app, &update, false).await {
             Ok(true) => {
-                tracing::info!("cetus: update {v} downloaded; installs on quit or restart");
+                tracing::info!("cetus: update {v} downloaded; installs on quit or when idle");
             }
             Ok(false) => {
                 tracing::debug!("cetus: update {v} already downloading");
@@ -354,6 +412,7 @@ async fn check_once(app: AppHandle, auto: bool) {
                         version: update.version.clone(),
                         current_version: update.current_version.clone(),
                         notes: update.body.clone(),
+                        prompt_restart: false,
                     },
                 );
             }
@@ -378,6 +437,7 @@ async fn check_once(app: AppHandle, auto: bool) {
             version: update.version.clone(),
             current_version: update.current_version.clone(),
             notes: update.body.clone(),
+            prompt_restart: false,
         },
     );
 }
@@ -434,6 +494,7 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateMeta>, Stri
                 version: u.version.clone(),
                 current_version: u.current_version.clone(),
                 notes: u.body.clone(),
+                prompt_restart: false,
             })),
             None => Ok(None),
         }
@@ -469,7 +530,7 @@ pub async fn install_update(app: AppHandle) -> Result<bool, String> {
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "no update available".to_string())?;
-        download_update(&app, &update).await
+        download_update(&app, &update, true).await
     }
 }
 
@@ -507,6 +568,107 @@ pub async fn pending_update_version(app: AppHandle) -> Result<Option<String>, St
     }
 }
 
+/// Version of a downloaded update the sidebar should offer to restart for, if
+/// any. Unlike [`pending_update_version`] this stays `None` while a silent
+/// auto-update is still waiting for an idle moment.
+#[tauri::command]
+pub async fn pending_restart_prompt(app: AppHandle) -> Result<Option<String>, String> {
+    #[cfg(debug_assertions)]
+    {
+        let _ = app;
+        Ok(None)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = app;
+        Ok(pending_version().filter(|_| RESTART_PROMPTED.load(Ordering::SeqCst)))
+    }
+}
+
+/// Watch for a quiet moment to apply a silently downloaded update: the user
+/// has been away from the keyboard for [`IDLE_RESTART_AFTER`] and Cetus has
+/// nothing in flight that a restart would cut down. Then install and relaunch
+/// in the background, keeping the main window hidden if it was.
+///
+/// macOS only: on Windows applying the update runs an installer the user sees.
+#[cfg(all(not(debug_assertions), target_os = "macos"))]
+pub fn spawn_idle_restart(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(IDLE_POLL_INTERVAL).await;
+            let Some(version) = pending_version() else {
+                continue;
+            };
+            let auto = quick::load_settings(&app.state::<AppState>().store).auto_update;
+            let stale = STAGED_AT
+                .lock()
+                .ok()
+                .and_then(|at| *at)
+                .is_some_and(|at| at.elapsed() >= PROMPT_AFTER);
+            if !auto || stale {
+                prompt_restart(&app);
+            }
+            if !auto {
+                continue;
+            }
+            if crate::ax::seconds_since_last_input() < IDLE_RESTART_AFTER.as_secs_f64() {
+                continue;
+            }
+            if let Some(reason) = busy_reason(&app).await {
+                tracing::debug!("cetus: update {version} waiting — {reason}");
+                continue;
+            }
+            tracing::info!("cetus: user idle and nothing running — applying update {version}");
+            relaunch(&app, true);
+            return;
+        }
+    });
+}
+
+#[cfg(not(all(not(debug_assertions), target_os = "macos")))]
+#[allow(dead_code)]
+pub fn spawn_idle_restart(_app: AppHandle) {}
+
+/// What a restart right now would interrupt, if anything.
+#[cfg(all(not(debug_assertions), target_os = "macos"))]
+async fn busy_reason(app: &AppHandle) -> Option<&'static str> {
+    let state = app.state::<AppState>();
+    if state.any_turn_active().await {
+        return Some("an agent turn is running");
+    }
+    if app
+        .state::<crate::meeting::MeetingRuntime>()
+        .is_capturing()
+        .await
+    {
+        return Some("a meeting is being recorded");
+    }
+    if state.dictation.is_active().await {
+        return Some("dictation is active");
+    }
+    if app
+        .state::<crate::terminal::TerminalRuntime>()
+        .has_foreground_job()
+    {
+        return Some("a terminal command is running");
+    }
+    let horizon = crate::store::now_ms() + AUTOMATION_GUARD.as_millis() as i64;
+    let automation_due = state
+        .store
+        .list_automations()
+        .map(|autos| {
+            autos
+                .iter()
+                .any(|a| a.enabled && a.next_run_at.is_some_and(|t| t <= horizon))
+        })
+        // Can't tell: wait rather than risk skipping a run.
+        .unwrap_or(true);
+    if automation_due {
+        return Some("an automation is about to run");
+    }
+    None
+}
+
 /// Relaunch the app to apply a downloaded update: install it, then restart so
 /// the new bundle boots. Drives the sidebar's "Restart to update" button.
 ///
@@ -521,16 +683,33 @@ pub async fn pending_update_version(app: AppHandle) -> Result<Option<String>, St
 /// the new one does not race us for the control socket and remote port.
 #[tauri::command]
 pub fn relaunch_app(app: AppHandle) {
+    relaunch(&app, false);
+}
+
+/// `background`: an unattended relaunch (the idle update restart). The new
+/// instance opens without taking focus, and with its main window hidden if it
+/// was hidden here.
+fn relaunch(app: &AppHandle, background: bool) {
     apply_pending_update();
     #[cfg(target_os = "macos")]
     {
         if let Some(bundle) = macos_bundle_path() {
             let pid = std::process::id();
+            // `-g`: don't pull focus from whatever the user comes back to.
+            // `--args` reaches the new process only because we wait for this
+            // one to exit first, so `open` launches rather than activates.
+            let open_cmd = match (background, background && main_window_hidden(app)) {
+                (false, _) => "exec /usr/bin/open \"$0\"".to_string(),
+                (true, false) => "exec /usr/bin/open -g \"$0\"".to_string(),
+                (true, true) => {
+                    format!("exec /usr/bin/open -g \"$0\" --args {BACKGROUND_RELAUNCH_ARG}")
+                }
+            };
             // Poll for up to ~30 s, then open regardless (if we are somehow
             // still alive, `open` without `-n` just activates us — no second
             // instance).
             let script = format!(
-                "i=0; while kill -0 {pid} 2>/dev/null && [ \"$i\" -lt 150 ]; do sleep 0.2; i=$((i+1)); done; exec /usr/bin/open \"$0\""
+                "i=0; while kill -0 {pid} 2>/dev/null && [ \"$i\" -lt 150 ]; do sleep 0.2; i=$((i+1)); done; {open_cmd}"
             );
             let spawned = std::process::Command::new("/bin/sh")
                 .arg("-c")
@@ -556,6 +735,17 @@ pub fn relaunch_app(app: AppHandle) {
         }
     }
     app.restart();
+}
+
+/// The main window is parked or hidden, i.e. the user isn't looking at Cetus.
+#[cfg(target_os = "macos")]
+fn main_window_hidden(app: &AppHandle) -> bool {
+    use tauri::Manager;
+    crate::main_is_parked()
+        || !app
+            .get_webview_window("main")
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false)
 }
 
 /// `/path/to/Cetus.app` for a bundled build; `None` under `tauri dev` (the

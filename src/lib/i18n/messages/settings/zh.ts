@@ -99,7 +99,7 @@ export const zh = {
     "对话收到新消息时自动重新排序。关闭后按创建顺序固定排列，新建的对话位于顶部。",
   "general.autoUpdate.label": "自动更新",
   "general.autoUpdate.description":
-    "在后台检查并安装更新，下次打开 Cetus 时生效。",
+    "在后台下载更新，退出时安装；你离开电脑且没有任务在跑时，也会悄悄重启完成更新。",
   "general.confirmQuit.label": "退出前确认",
   "general.confirmQuit.description":
     "按 Cmd+Q 退出 Cetus 前先询问，避免误触打断正在运行的智能体。",

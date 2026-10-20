@@ -186,6 +186,19 @@ impl AppState {
         self.cli_turns.lock().unwrap().contains_key(conv_id)
     }
 
+    /// Whether any agent turn is in flight, on any runtime. A relaunch would
+    /// cut it down mid-run, so the idle update restart waits for this to clear.
+    pub async fn any_turn_active(&self) -> bool {
+        if !self.cli_turns.lock().unwrap().is_empty() {
+            return true;
+        }
+        self.pis
+            .lock()
+            .await
+            .values()
+            .any(|pi| pi.is_alive() && pi.is_busy())
+    }
+
     /// Count a turn dispatch for this conversation and return the new
     /// generation. A scheduled auto-retry snapshots this and gives way when
     /// the generation moved on before it fired (something else dispatched).

@@ -46,7 +46,7 @@ export const it = {
     "Riordina le chat quando arrivano nuovi messaggi. Disattiva per mantenere l'ordine di creazione, con le nuove chat in alto.",
   "general.autoUpdate.label": "Aggiornamenti automatici",
   "general.autoUpdate.description":
-    "Cerca e installa gli aggiornamenti in background. Applicati al prossimo avvio di Cetus.",
+    "Scarica gli aggiornamenti in background e li applica alla chiusura, o con un riavvio silenzioso mentre sei via e non c'è nulla in esecuzione.",
   "general.confirmQuit.label": "Conferma prima di uscire",
   "general.confirmQuit.description":
     "Chiede conferma prima che Cmd+Q chiuda Cetus, così un tocco involontario non interrompe gli agenti in esecuzione.",

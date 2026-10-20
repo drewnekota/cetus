@@ -49,7 +49,7 @@ pub async fn apply_choice(pi: &PiRpc, store: &Store, choice: &ModelChoice) -> Re
                 return Err(e);
             }
             // The DeepSeek built-ins' thinkingLevelMap accepts exactly
-            // off/high/max — clamp the seven-level axis onto those.
+            // off/low/high/max — clamp the seven-level axis onto those.
             pi.set_thinking_level(choice.reasoning.builtin_pi_level())
                 .await?;
             Ok(())

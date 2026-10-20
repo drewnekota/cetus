@@ -21,6 +21,10 @@ struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// The tab's shell. When the PTY's foreground process group is anything
+    /// else, the user has a command running in it.
+    #[cfg_attr(debug_assertions, allow(dead_code))]
+    shell_pid: Option<u32>,
 }
 
 type Sessions = Arc<Mutex<HashMap<String, TerminalSession>>>;
@@ -143,6 +147,7 @@ pub fn terminal_start(
         .take_writer()
         .map_err(|error| format!("failed to open terminal input: {error}"))?;
     let killer = child.clone_killer();
+    let shell_pid = child.process_id();
 
     session_registry.insert(
         session_id.clone(),
@@ -150,6 +155,7 @@ pub fn terminal_start(
             master: pair.master,
             writer,
             killer,
+            shell_pid,
         },
     );
     drop(session_registry);
@@ -237,6 +243,28 @@ pub fn terminal_stop(
 }
 
 impl TerminalRuntime {
+    /// Whether any tab is running a command (a dev server, a build, an ssh
+    /// session…) rather than sitting at its shell prompt. Restarting the app
+    /// would kill it.
+    #[cfg_attr(debug_assertions, allow(dead_code))]
+    pub fn has_foreground_job(&self) -> bool {
+        self.sessions.lock().unwrap().values().any(|session| {
+            #[cfg(unix)]
+            {
+                match (session.master.process_group_leader(), session.shell_pid) {
+                    (Some(leader), Some(shell)) => leader as u32 != shell,
+                    // Can't tell: assume busy rather than kill something.
+                    _ => true,
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = session;
+                false
+            }
+        })
+    }
+
     pub fn shutdown_all(&self) {
         for (_, mut session) in self.sessions.lock().unwrap().drain() {
             let _ = session.killer.kill();

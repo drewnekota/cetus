@@ -407,7 +407,9 @@ pub fn run() {
             // Started as a login item (the autostart plugin appends `--autostart`):
             // keep cetus resident in the tray instead of popping the main window in
             // the user's face right after they log in.
-            if std::env::args().any(|a| a == "--autostart") {
+            // Same after the idle update restart relaunched a hidden window.
+            if std::env::args().any(|a| a == "--autostart" || a == updater::BACKGROUND_RELAUNCH_ARG)
+            {
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.hide();
                 }
@@ -961,6 +963,7 @@ pub fn run() {
                     quick_settings.auto_update,
                 ));
                 updater::spawn_periodic_checks(app.handle().clone());
+                updater::spawn_idle_restart(app.handle().clone());
             }
 
             // Renderer-footprint time series for the log files: the main
@@ -1216,6 +1219,7 @@ pub fn run() {
         updater::update_download_progress,
         updater::ignore_update_version,
         updater::pending_update_version,
+        updater::pending_restart_prompt,
         updater::relaunch_app,
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,
@@ -1416,6 +1420,7 @@ pub fn run() {
         updater::update_download_progress,
         updater::ignore_update_version,
         updater::pending_update_version,
+        updater::pending_restart_prompt,
         updater::relaunch_app,
         quick::quick_recapture_screenshot,
         quick::quick_dismiss,

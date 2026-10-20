@@ -46,7 +46,7 @@ export const ja = {
     "新しいメッセージが届くとチャットを並べ替えます。オフにすると作成順を維持し、新しいチャットが上に表示されます。",
   "general.autoUpdate.label": "自動アップデート",
   "general.autoUpdate.description":
-    "バックグラウンドで更新を確認・インストールします。次回 Cetus 起動時に適用されます。",
+    "更新をバックグラウンドでダウンロードし、終了時に適用します。離席中で実行中の処理がなければ、静かに再起動して適用します。",
   "general.confirmQuit.label": "終了前に確認",
   "general.confirmQuit.description":
     "Cmd+Q で Cetus を終了する前に確認し、誤操作で実行中のエージェントを中断しないようにします。",

@@ -1069,9 +1069,9 @@ export default function Home() {
     };
   }, []);
 
-  // A downloaded-but-not-yet-applied update. Set when the backend reports the
-  // swap is on disk (silent auto-install, or a manual install); drives the
-  // sidebar's persistent "Restart to update" button.
+  // A downloaded-but-not-yet-applied update the user should restart for:
+  // a manual install, or a silent auto-update that never found an idle moment
+  // to apply itself. Drives the sidebar's persistent "Restart to update" button.
   const [updateReadyVersion, setUpdateReadyVersion] = useState<string | null>(
     null,
   );
@@ -1079,7 +1079,7 @@ export default function Home() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     api
-      .pendingUpdateVersion()
+      .pendingRestartPrompt()
       .then((version) => {
         if (!cancelled && version) {
           setUpdateReadyVersion(version);
@@ -1087,7 +1087,7 @@ export default function Home() {
       })
       .catch(() => {});
     onUpdateReady((u) => {
-      setUpdateReadyVersion(u.version);
+      if (u.promptRestart) setUpdateReadyVersion(u.version);
     }).then((u) => {
       if (cancelled) u();
       else unlisten = u;

@@ -45,7 +45,7 @@ export const de = {
     "Sortiert Chats bei neuen Nachrichten neu. Deaktivieren, um die Erstellungsreihenfolge mit neuen Chats oben beizubehalten.",
   "general.autoUpdate.label": "Automatische Updates",
   "general.autoUpdate.description":
-    "Sucht und installiert Updates im Hintergrund. Wird beim nächsten Start von Cetus angewendet.",
+    "Lädt Updates im Hintergrund und wendet sie beim Beenden an – oder per stillem Neustart, während du weg bist und nichts läuft.",
   "general.confirmQuit.label": "Vor dem Beenden nachfragen",
   "general.confirmQuit.description":
     "Fragt nach, bevor Cmd+Q Cetus beendet, damit ein Fehlgriff keine laufenden Agenten unterbricht.",

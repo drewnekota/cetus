@@ -1,11 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { formatReport, latestReply, listedConversations, parseReport, resolveCliModel, runtimeToBackend, threadsOf } from "./coordinator.ts";
+import { latestReply, listedConversations, parseReport, resolveCliModel, runtimeToBackend, threadsOf } from "./coordinator.ts";
 
-describe("thread reports", () => {
-  test("format and parse round-trip, quotes and newlines in titles are neutralised", () => {
-    const text = formatReport({ id: "t1", title: 'Fix "login"\nbug', runtime: "codex", status: "finished", body: "Done.\n\nTwo files changed." });
-    const r = parseReport(text);
-    expect(r).toEqual({ id: "t1", title: "Fix 'login' bug", runtime: "codex", status: "finished", body: "Done.\n\nTwo files changed." });
+describe("legacy thread reports", () => {
+  test("reports in older transcripts still parse for their cards", () => {
+    const text = '<thread-report id="t1" title="Fix \'login\' bug" runtime="codex" status="finished">\nDone.\n\nTwo files changed.\n</thread-report>';
+    expect(parseReport(text)).toEqual({ id: "t1", title: "Fix 'login' bug", runtime: "codex", status: "finished", body: "Done.\n\nTwo files changed." });
   });
 
   test("ordinary user text is not a report", () => {

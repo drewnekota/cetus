@@ -615,6 +615,9 @@ export const api = {
     invoke<void>("ignore_update_version", { version }),
   /** Version of an already-downloaded update waiting for relaunch, if any. */
   pendingUpdateVersion: () => invoke<string | null>("pending_update_version"),
+  /** Version the sidebar should offer "Restart to update" for, if any. Null
+   *  while a silent auto-update is still waiting for an idle moment. */
+  pendingRestartPrompt: () => invoke<string | null>("pending_restart_prompt"),
   /** Relaunch the app to apply an already-downloaded update. */
   relaunchApp: () => invoke<void>("relaunch_app"),
   /** Hide panel, capture screen, restore panel. For the in-panel toggle. */
@@ -791,8 +794,9 @@ export async function onUpdateAvailable(
 }
 
 /** Fired once an update has finished downloading (silently in the background,
- *  or via a manual install) — drives the sidebar's "Restart to update" button.
- *  The package installs when the app quits or restarts. */
+ *  or via a manual install), and again with `promptRestart` when a silent one
+ *  falls back to the sidebar's "Restart to update" button. The package installs
+ *  when the app quits or restarts. */
 export async function onUpdateReady(
   handler: (u: UpdateMeta) => void,
 ): Promise<UnlistenFn> {
