@@ -7,7 +7,12 @@ import {
 } from "@/components/chat/composer";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
-import { folderSessions, groupSessions } from "@/lib/folder-sessions";
+import {
+  folderSessions,
+  groupSessions,
+  stepThreadId,
+  threadWalkOrder,
+} from "@/lib/folder-sessions";
 import { useInputIds } from "@/lib/session-activity";
 import { api, onUpdateReady } from "@/lib/tauri";
 import {
@@ -734,13 +739,11 @@ export default function Home() {
     );
   }, []);
   const stepThread = useCallback((direction: 1 | -1) => {
-    const order = sessionOrder(threadNavRef.current.filter);
-    if (order.length === 0) return;
-    const i = order.findIndex((c) => c.id === threadNavRef.current.detailId);
-    // Nothing open yet: start from the top of the list.
-    const next = i < 0 ? 0 : Math.min(order.length - 1, Math.max(0, i + direction));
-    setDetailId(order[next].id);
-  }, [sessionOrder]);
+    const { filter, detailId: id } = threadNavRef.current;
+    if (!filter) return;
+    const next = stepThreadId(threadWalkOrder(conversationsRef.current, filter), id, direction);
+    if (next) setDetailId(next);
+  }, []);
   const archiveThread = useCallback((): boolean => {
     const { filter, detailId: id } = threadNavRef.current;
     const c = id ? conversationsRef.current.find((x) => x.id === id) : null;
@@ -1689,7 +1692,6 @@ export default function Home() {
     historyQuery,
     historyFrame,
     activityIds,
-    inputIds,
     unreadCompletedIds,
     recentWorkspaces,
     temporaryWorkspaces,

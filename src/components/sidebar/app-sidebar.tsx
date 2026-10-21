@@ -442,7 +442,6 @@ export const AppSidebar = memo(function AppSidebar({
                   >
                     <span className="truncate">{t("workspace.all")}</span>
                     <ActivityBadges
-                      hideWorking
                       counts={workspaceActivity.get(null)}
                       className="ml-auto text-muted-foreground"
                     />

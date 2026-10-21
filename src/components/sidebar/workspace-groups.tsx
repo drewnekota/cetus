@@ -522,7 +522,6 @@ export function WorkspaceFilterButton({
         </Kbd>
       ) : (
         <ActivityBadges
-          hideWorking
           counts={activity}
           className={cn(
             "ml-auto",

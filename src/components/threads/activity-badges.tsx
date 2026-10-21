@@ -16,26 +16,20 @@ const ITEMS = [
 /** Dot + count per state that needs attention; renders nothing when the
  *  folder is quiet. `labels` spells the state out (feed header); without it
  *  the label moves to the tooltip (sidebar rows). `onPick` makes each state
- *  a button that jumps to the next session in it. `hideWorking` keeps only
- *  the states that want the user (unread, input) — the sidebar's view;
- *  running work shows once inside the folder. */
+ *  a button that jumps to the next session in it. */
 export function ActivityBadges({
   counts,
   labels,
-  hideWorking,
   onPick,
   className,
 }: {
   counts: ActivityCounts | undefined;
   labels?: boolean;
-  hideWorking?: boolean;
   onPick?: (k: keyof ActivityCounts) => void;
   className?: string;
 }) {
   const { t } = useTranslation("board");
-  const shown = ITEMS.filter(
-    (i) => (counts?.[i.k] ?? 0) > 0 && !(hideWorking && i.k === "working"),
-  );
+  const shown = ITEMS.filter((i) => (counts?.[i.k] ?? 0) > 0);
   if (!counts || shown.length === 0) return null;
   return (
     <span

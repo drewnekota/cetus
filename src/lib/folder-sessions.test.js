@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { useCoordinatorStore } from "./coordinator.ts";
-import { folderSessions, groupSessions } from "./folder-sessions.ts";
+import { folderSessions, groupSessions, stepThreadId, threadWalkOrder } from "./folder-sessions.ts";
 
 const conv = (id, dir, updatedAt, extra = {}) => ({ id, workspaceDir: dir, updatedAt, archivedAt: null, ...extra });
 
@@ -34,5 +34,22 @@ describe("folder sessions", () => {
       "recent:r1",
       "recent:r2",
     ]);
+  });
+
+  test("the docked thread walks the cards oldest-first and wraps", () => {
+    useCoordinatorStore.getState().setRegistry({ coordinators: {}, threads: {} });
+    const all = [
+      conv("mid", "/w", 9, { createdAt: 2 }),
+      conv("new", "/w", 1, { createdAt: 3 }),
+      conv("old", "/w", 5, { createdAt: 1 }),
+    ];
+    const order = threadWalkOrder(all, "/w");
+    expect(order.map((c) => c.id)).toEqual(["old", "mid", "new"]);
+    expect(stepThreadId(order, "mid", -1)).toBe("old");
+    expect(stepThreadId(order, "mid", 1)).toBe("new");
+    expect(stepThreadId(order, "new", 1)).toBe("old");
+    expect(stepThreadId(order, "old", -1)).toBe("new");
+    expect(stepThreadId(order, null, -1)).toBe("new");
+    expect(stepThreadId(order, null, 1)).toBe("old");
   });
 });

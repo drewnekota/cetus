@@ -36,7 +36,7 @@ import {
   SessionDetailPanel,
 } from "@/components/board/session-detail-dialog";
 import { ThreadsView } from "@/components/threads/threads-view";
-import { folderSessions, groupSessions } from "@/lib/folder-sessions";
+import { stepThreadId, threadWalkOrder } from "@/lib/folder-sessions";
 import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
 import { DialogHost } from "@/components/extension-ui/dialog-host";
 import { ZoomHud } from "@/components/zoom-hud";
@@ -159,7 +159,6 @@ export function renderHome({
   historyQuery,
   historyFrame,
   activityIds,
-  inputIds,
   unreadCompletedIds,
   recentWorkspaces,
   temporaryWorkspaces,
@@ -311,8 +310,6 @@ export function renderHome({
   historyQuery: string;
   historyFrame: Screenshot | null;
   activityIds: Set<string>;
-  /** Sessions waiting on the user (a question or permission prompt). */
-  inputIds: ReadonlySet<string>;
   unreadCompletedIds: Set<string>;
   recentWorkspaces: string[];
   temporaryWorkspaces: string[];
@@ -419,22 +416,17 @@ export function renderHome({
   // The folder the Threads view shows.
   const threadsWorkspace =
     boardWorkspaceFilter ?? workspaceDir ?? defaultWorkspace;
-  // The docked session's ↑/↓ buttons: its neighbours in the session list
-  // beside Cetus (same order as the ⌥⌘↑/↓ stepping in page.tsx).
+  // The docked session's ↑/↓ buttons: its neighbours among the cards in
+  // Cetus's pane, wrapping (same walk as the ⌥⌘↑/↓ stepping in page.tsx).
   const threadNav: { prev: string | null; next: string | null } = {
     prev: null,
     next: null,
   };
   if (view === "threads" && detailId) {
-    const order = groupSessions(
-      folderSessions(conversations, threadsWorkspace),
-      inputIds,
-      activityIds,
-    );
-    const i = order.findIndex((s) => s.conv.id === detailId);
-    if (i >= 0) {
-      threadNav.prev = order[i - 1]?.conv.id ?? null;
-      threadNav.next = order[i + 1]?.conv.id ?? null;
+    const order = threadWalkOrder(conversations, threadsWorkspace);
+    if (order.length > 1 && order.some((c) => c.id === detailId)) {
+      threadNav.prev = stepThreadId(order, detailId, -1);
+      threadNav.next = stepThreadId(order, detailId, 1);
     }
   }
   // The active chat's pane: the Chat view's transcript, and the coordinator's

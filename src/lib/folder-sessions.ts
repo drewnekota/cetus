@@ -52,3 +52,22 @@ export function groupSessions(
   }
   return [...input, ...working, ...recent];
 }
+
+/** The order the docked thread's ↑/↓ (and the keyboard stepping) walk: the
+ *  cards as they sit in Cetus's pane beside it, oldest on top. */
+export function threadWalkOrder(conversations: Conversation[], dir: string): Conversation[] {
+  return [...folderSessions(conversations, dir)].sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** The neighbour `direction` steps from `id`, wrapping at both ends. With
+ *  nothing open, ↑ lands on the newest card and ↓ on the oldest. */
+export function stepThreadId(
+  order: Conversation[],
+  id: string | null,
+  direction: 1 | -1,
+): string | null {
+  if (order.length === 0) return null;
+  const i = id ? order.findIndex((c) => c.id === id) : -1;
+  if (i < 0) return (direction < 0 ? order[order.length - 1] : order[0]).id;
+  return order[(i + direction + order.length) % order.length].id;
+}
