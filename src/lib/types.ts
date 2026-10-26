@@ -256,14 +256,6 @@ export type BackendId =
   | "kimi"
   | "dsh";
 
-/** Whether a backend supports sending a message while a turn is running.
- *  `pi` steers over its RPC, claude-code over the turn's stdin, and codex
- *  mirrors the Codex app behavior by interrupting the current `codex exec`
- *  turn and immediately resuming the thread with the new message. */
-export function backendSupportsSteer(backend: BackendId): boolean {
-  return backend === "pi" || backend === "claude-code" || backend === "codex";
-}
-
 /** Where a CLI-backend conversation's isolated changes live (git repo
  *  workspaces only). `exists` is false until the first turn creates it. */
 export interface WorktreeInfo {

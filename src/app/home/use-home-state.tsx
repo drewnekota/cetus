@@ -117,7 +117,7 @@ export function useHomeState({
   const activeHasArtifacts = useHasArtifacts(activeId);
   const [chatArtifactsOpen, setChatArtifactsOpen] = useState(false);
   // Backend serving the active conversation (null for a not-yet-persisted new
-  // chat). Drives steer-capability gating for the follow-up queue.
+  // chat).
   const activeConvBackend = useMemo<BackendId | null>(
     () =>
       (conversations.find((c) => c.id === activeId)?.backend as

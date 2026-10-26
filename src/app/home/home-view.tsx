@@ -59,7 +59,6 @@ import {
   type Conversation,
   type ModelChoice,
   type BackendId,
-  backendSupportsSteer,
 } from "@/lib/types";
 import { type RuntimeSwitchTarget } from "@/components/chat/backend-picker";
 import { shortcutDisplay, shortcutPlatform } from "@/lib/keyboard-shortcuts";
@@ -126,7 +125,6 @@ export function renderHome({
   retrying,
   queued,
   enqueueMessage,
-  detailConvBackend,
   steerQueuedDetail,
   removeQueued,
   view,
@@ -267,7 +265,6 @@ export function renderHome({
     runtime: ComposerRuntimeSelection | undefined,
     beforeIds?: string[],
   ) => void;
-  detailConvBackend: BackendId | null;
   steerQueuedDetail: (id: string) => void;
   removeQueued: (convId: string, id: string) => void;
   view: SidebarView;
@@ -405,10 +402,7 @@ export function renderHome({
     onQueue: (text, atts, runtime, beforeIds) => {
       if (detailId) enqueueMessage(detailId, text, atts, runtime, beforeIds);
     },
-    onSteerQueued:
-      detailConvBackend && !backendSupportsSteer(detailConvBackend)
-        ? undefined
-        : (id) => steerQueuedDetail(id),
+    onSteerQueued: (id) => steerQueuedDetail(id),
     onRemoveQueued: (id) => {
       if (detailId) removeQueued(detailId, id);
     },
@@ -461,16 +455,9 @@ export function renderHome({
         if (activeId)
           enqueueMessage(activeId, text, atts, runtime, beforeIds);
       }}
-      onSteerQueued={
-        // pi steers via RPC, claude-code over stdin, and codex uses
-        // Codex-app-style interrupt + resume. Hide this only for any
-        // future backend that lacks a running-turn steer path.
-        activeConvBackend && !backendSupportsSteer(activeConvBackend)
-          ? undefined
-          : (id) => {
-              if (activeId) steerQueued(activeId, id);
-            }
-      }
+      onSteerQueued={(id) => {
+        if (activeId) steerQueued(activeId, id);
+      }}
       onRemoveQueued={(id) => {
         if (activeId) removeQueued(activeId, id);
       }}

@@ -184,6 +184,21 @@ pub fn dispatch_turn(
         // Idle: fall through to a normal turn.
     }
 
+    // ACP has no same-turn steering primitive: `session/prompt` is one call
+    // per turn. Steer the way the Codex app used to — cancel the running turn
+    // (its partial output persists with the outcome), then resume the session
+    // with the new message once it settles.
+    if backend.is_acp() {
+        if let Some(done) = state.cli_turn_done_if_closing(&conv.id) {
+            redispatch_after_settle(handle, conv.id.clone(), message.to_string(), images, done);
+            return Ok(());
+        }
+        if let Some(done) = state.cli_interrupt_turn(&conv.id) {
+            redispatch_after_settle(handle, conv.id.clone(), message.to_string(), images, done);
+            return Ok(());
+        }
+    }
+
     let ws = crate::folders::ensure_workspace(handle, &conv.workspace_dir)?;
     let settings = load_settings(&state.store);
     // Run in the workspace itself by default; opt-in setting isolates each

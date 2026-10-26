@@ -211,14 +211,6 @@ export default function Home() {
     deliverQueued,
   });
 
-  // Backend serving the detail-dialog conversation, for steer-capability gating.
-  const detailConvBackend = useMemo<BackendId | null>(
-    () =>
-      (conversations.find((c) => c.id === detailId)?.backend as
-        BackendId | undefined) ?? null,
-    [conversations, detailId],
-  );
-
   // Set once useCoordinator below has run; read only from event handlers.
   const startDirectRef = useRef<
     ReturnType<typeof useCoordinator>["startDirect"]
@@ -1661,7 +1653,6 @@ export default function Home() {
     retrying,
     queued,
     enqueueMessage,
-    detailConvBackend,
     steerQueuedDetail,
     removeQueued,
     view,
