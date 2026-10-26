@@ -23,6 +23,19 @@
 
 ![Cetus 操作演示 —— 唤起 agent、创建自动化任务并切换 runtime](docs/cetus-demo.gif)
 
+## 社区
+
+⭐️ 给仓库点个 Star，第一时间收到新版本通知。想交流使用体验和建议，欢迎微信扫码加入群聊。
+
+<p align="center"><img src="docs/cetus-community-wechat.jpg" width="280" alt="Cetus 社区微信群二维码" /></p>
+
+<details>
+<summary>友情链接</summary>
+
+- [LINUX DO](https://linux.do) —— 有理想的新社区。
+
+</details>
+
 ## 为什么做 Cetus
 
 agent 已经不是慢的那一环了。Claude Code、Codex、DeepSeek Harness 都能自己连续干一个小时。真正拖慢它们的，是它们在等的那个人：一个权限请求、一个澄清问题、一个做完了却还没人审阅的任务。
@@ -98,19 +111,6 @@ Cetus 支持 **Apple Silicon** Mac，同一个 app 有两个版本：
 3. 选一个工作区，给 agent 布置第一个任务。
 
 > **早期版本：** Cetus 仍在快速迭代中。遇到问题或缺少某个工作流，欢迎[提 issue](https://github.com/drewnekota/cetus/issues)。
-
-## 社区
-
-⭐️ 给仓库点个 Star，第一时间收到新版本通知。想交流使用体验和建议，欢迎微信扫码加入群聊。
-
-<p align="center"><img src="docs/cetus-community-wechat.jpg" width="280" alt="Cetus 社区微信群二维码" /></p>
-
-<details>
-<summary>友情链接</summary>
-
-- [LINUX DO](https://linux.do) —— 有理想的新社区。
-
-</details>
 
 ## 许可证
 

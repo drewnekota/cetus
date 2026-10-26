@@ -23,6 +23,19 @@
 
 ![Cetus demo — launch an agent, schedule an automation, and switch runtimes](docs/cetus-demo.gif)
 
+## Community
+
+⭐️ Star the repo to get notified about new releases. To share feedback, scan the QR code with WeChat to join the group chat.
+
+<p align="center"><img src="docs/cetus-community-wechat.jpg" width="280" alt="WeChat QR code for the Cetus community group" /></p>
+
+<details>
+<summary>Friendly links</summary>
+
+- [LINUX DO](https://linux.do) — A community of idealists.
+
+</details>
+
 ## Why Cetus
 
 Agents are no longer the slow part. Claude Code, Codex, and DeepSeek Harness can work for an hour on their own. What slows them down is the person they are waiting on: a permission prompt, a clarifying question, a finished task that nobody has reviewed yet.
@@ -98,19 +111,6 @@ Both update themselves. Then:
 3. Choose a workspace and give the agent its first task.
 
 > **Early release:** Cetus is under active development. Please [open an issue](https://github.com/drewnekota/cetus/issues) if something breaks or a workflow is missing.
-
-## Community
-
-⭐️ Star the repo to get notified about new releases. To share feedback, scan the QR code with WeChat to join the group chat.
-
-<p align="center"><img src="docs/cetus-community-wechat.jpg" width="280" alt="WeChat QR code for the Cetus community group" /></p>
-
-<details>
-<summary>Friendly links</summary>
-
-- [LINUX DO](https://linux.do) — A community of idealists.
-
-</details>
 
 ## License
 
