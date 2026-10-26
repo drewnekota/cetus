@@ -152,6 +152,8 @@ type Props = {
    *  Restores include the fresh row so a hidden automation workspace can be
    *  surfaced again immediately. */
   onConversationsChanged?: (restored?: Conversation) => void;
+  /** A newer version is downloaded or available: dot on the General entry. */
+  updateBadge?: boolean;
 };
 
 // Memoized because the panel latches mounted after first open (hidden via CSS)
@@ -164,6 +166,7 @@ export const SettingsPage = memo(function SettingsPage({
   onSaved,
   onOpenHistory,
   onConversationsChanged,
+  updateBadge,
 }: Props) {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
@@ -315,6 +318,12 @@ export const SettingsPage = memo(function SettingsPage({
                       )}
                     >
                       {t(s.labelKey)}
+                      {updateBadge && s.id === "general" && (
+                        <span
+                          aria-hidden="true"
+                          className="ml-auto size-1.5 rounded-full bg-primary"
+                        />
+                      )}
                     </button>
                   );
                 })}

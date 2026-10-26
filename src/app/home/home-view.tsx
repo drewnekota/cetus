@@ -181,6 +181,7 @@ export function renderHome({
   onRename,
   openSettings,
   updateReadyVersion,
+  updateBadgeVersion,
   onRestartToUpdate,
   keyboardShortcuts,
   piReady,
@@ -332,6 +333,7 @@ export function renderHome({
   onRename: (c: Conversation, title: string) => Promise<void>;
   openSettings: () => void;
   updateReadyVersion: string | null;
+  updateBadgeVersion: string | null;
   onRestartToUpdate: () => void;
   keyboardShortcuts: ShortcutMap;
   piReady: boolean;
@@ -610,6 +612,7 @@ export function renderHome({
           onSaved={onSettingsSaved}
           onConversationsChanged={onSettingsConversationsChanged}
           onOpenHistory={openHistoryFromSettings}
+          updateBadge={updateBadgeVersion != null}
         />
       )}
       <ScreenHistoryPage

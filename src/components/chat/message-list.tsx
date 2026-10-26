@@ -805,14 +805,35 @@ export function MessageList({
   );
 }
 
+// Turn navigator geometry. Each tick owns one row of `pitch` px: the natural
+// pitch while the whole list fits, compressed toward MIN when it doesn't, and
+// past that the rail becomes a window of ticks that follows the active turn.
+const NAV_PITCH_PX = 6;
+const NAV_MIN_PITCH_PX = 4;
+// Breathing room kept clear above and below the ticks.
+const NAV_EDGE_PAD_PX = 32;
+// Ticks that fade out at a window edge with more turns hidden beyond it.
+const NAV_EDGE_FADE = 4;
+// Hover magnification: the hovered tick doubles and neighbors within this many
+// rows grow along a cosine falloff, so the swell reads as one smooth bump.
+const NAV_LENS_RADIUS = 4;
+
+function lensScale(distance: number): number {
+  if (distance >= NAV_LENS_RADIUS) return 1;
+  return 1 + (1 + Math.cos((Math.PI * distance) / NAV_LENS_RADIUS)) / 2;
+}
+
 /** Codex-style turn navigator: a thin gutter of ticks down the left edge, one
- *  per user turn. Ticks are evenly spaced and clustered together, vertically
- *  centered in the viewport (not spread across the full scroll height). The
- *  active tick (turn nearest the top of the viewport) brightens as you
- *  scroll; hovering a tick reveals a preview popover; click scrolls that turn
- *  to the top. Lives in the otherwise-empty left margin (content is centered
- *  max-w-3xl), and is pointer-transparent except on the ticks themselves so
- *  it never fights text selection. */
+ *  per user turn, vertically centered in the viewport (not spread across the
+ *  full scroll height). The active tick (turn nearest the top of the
+ *  viewport) brightens as you scroll; hovering swells the tick and its
+ *  neighbors and reveals a preview popover; click scrolls that turn to the
+ *  top. Long conversations first compress the tick pitch, then show a window
+ *  of ticks around the active turn (wheel over the rail pans it) with faded
+ *  edges, so the rail never outgrows the viewport. Lives in the
+ *  otherwise-empty left margin (content is centered max-w-3xl), and is
+ *  pointer-transparent except on the ticks themselves so it never fights
+ *  text selection. */
 function TurnNavigator({
   convId,
   userTurns,
@@ -832,6 +853,24 @@ function TurnNavigator({
   onNavigate: () => void;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const [railHeight, setRailHeight] = useState(0);
+  // Wheel panning over the rail, valid until the active turn moves again.
+  const [panned, setPanned] = useState<{ start: number; active: number } | null>(
+    null,
+  );
+  const wheelRemainder = useRef(0);
+  const shownStart = useRef(0);
+
+  useEffect(() => {
+    const el = railRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setRailHeight(entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // At the bottom, the newest turn wins explicitly. During a conversation
   // switch the virtual list can briefly publish an intermediate range while its
@@ -849,43 +888,110 @@ function TurnNavigator({
     return next;
   }, [atBottom, userTurns, topIndex]);
 
-  if (userTurns.length < 2) return null;
+  const count = userTurns.length;
+  const measured = railHeight > 0;
+  const room = measured
+    ? Math.max(NAV_MIN_PITCH_PX, railHeight - NAV_EDGE_PAD_PX * 2)
+    : count * NAV_PITCH_PX;
+  const pitch = Math.max(
+    NAV_MIN_PITCH_PX,
+    Math.min(NAV_PITCH_PX, room / Math.max(1, count)),
+  );
+  const capacity = Math.min(count, Math.max(1, Math.floor(room / pitch)));
+  const maxStart = count - capacity;
+  const clampStart = (s: number) => Math.min(maxStart, Math.max(0, s));
+
+  // The window centers on the active turn, but holds still while the pointer
+  // is on the rail so a clicked tick doesn't slide out from under it.
+  let start: number;
+  if (panned && panned.active === active) start = clampStart(panned.start);
+  else if (hover !== null) start = clampStart(shownStart.current);
+  else start = clampStart(active - Math.floor(capacity / 2));
+  shownStart.current = start;
+
+  if (count < 2) return null;
+
+  const windowed = capacity < count;
+  const top = measured ? (railHeight - capacity * pitch) / 2 : 0;
+
+  const tickOpacity = (i: number) => {
+    if (i < start || i >= start + capacity) return 0;
+    let opacity = 1;
+    if (start > 0) {
+      opacity = Math.min(opacity, (i - start + 1) / (NAV_EDGE_FADE + 1));
+    }
+    if (start + capacity < count) {
+      opacity = Math.min(
+        opacity,
+        (start + capacity - i) / (NAV_EDGE_FADE + 1),
+      );
+    }
+    return opacity;
+  };
 
   return (
-    <div className="pointer-events-none absolute inset-y-0 left-0 z-20 hidden w-12 sm:flex sm:flex-col sm:items-start sm:justify-center">
-      <div className="flex flex-col items-start gap-0">
+    <div
+      ref={railRef}
+      className="pointer-events-none absolute inset-y-0 left-0 z-20 hidden w-12 sm:block"
+    >
+      <div
+        className={`absolute left-0 top-0 flex flex-col items-start ${
+          measured ? "transition-transform duration-200 ease-out" : ""
+        }`}
+        style={{ transform: `translateY(${top - start * pitch}px)` }}
+        onMouseLeave={() => setHover(null)}
+        onWheel={
+          windowed
+            ? (e) => {
+                wheelRemainder.current += e.deltaY / pitch;
+                const steps = Math.trunc(wheelRemainder.current);
+                if (steps === 0) return;
+                wheelRemainder.current -= steps;
+                setPanned({ start: clampStart(start + steps), active });
+              }
+            : undefined
+        }
+      >
         {userTurns.map((turn, i) => {
           const isActive = i === active;
+          const isHovered = i === hover;
+          const opacity = tickOpacity(i);
+          const scale = hover === null ? 1 : lensScale(Math.abs(i - hover));
           return (
             <div
               key={turn.key}
-              className="pointer-events-auto relative flex items-center"
+              className={`relative flex items-center transition-opacity duration-200 ${
+                opacity > 0 ? "pointer-events-auto" : ""
+              }`}
+              style={{ height: pitch, opacity }}
               onMouseEnter={() => setHover(i)}
-              onMouseLeave={() => setHover((h) => (h === i ? null : h))}
             >
               <button
                 type="button"
+                tabIndex={opacity > 0 ? 0 : -1}
                 aria-label={`Jump to message ${i + 1}`}
                 onClick={() => {
                   onNavigate();
+                  setPanned(null);
                   listRef.current?.scrollToIndex({
                     index: turn.index,
                     align: "start",
                   });
                 }}
-                className="group flex h-1.5 items-center pl-3 pr-2"
+                className="flex h-full items-center pl-3 pr-2"
               >
                 <span
-                  className={`block h-0.5 w-2.5 origin-left rounded-full transition-[background-color,transform] duration-100 group-hover:scale-x-[2] ${
-                    isActive
-                      ? "bg-foreground/60 group-hover:bg-foreground"
-                      : "bg-muted-foreground/40 group-hover:bg-foreground"
+                  className={`block h-0.5 w-2.5 origin-left rounded-full transition-[background-color,transform] duration-150 ease-out ${
+                    isHovered
+                      ? "bg-foreground"
+                      : isActive
+                        ? "bg-foreground/60"
+                        : "bg-muted-foreground/40"
                   }`}
+                  style={{ transform: `scaleX(${scale})` }}
                 />
               </button>
-              {hover === i && (
-                <TurnPreview convId={convId} turnKey={turn.key} />
-              )}
+              {isHovered && <TurnPreview convId={convId} turnKey={turn.key} />}
             </div>
           );
         })}

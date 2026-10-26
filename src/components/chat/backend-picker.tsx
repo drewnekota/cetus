@@ -37,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { Kbd } from "@/components/ui/kbd";
 import { useTranslation } from "@/lib/i18n";
 import {
   loadCetusRuntimeChoice,
@@ -208,18 +209,20 @@ export function useRuntimeShortcuts(
   }, [enabled, shortcuts, onSwitch, slots]);
 }
 
-/** Right-aligned shortcut hint inside a runtime/preset SelectItem (e.g. "⌃2").
- *  Follows the row's position in the enabled order, so reordering in Settings
- *  relabels the menu. Renders nothing when unassigned or out of slots. */
+/** Shortcut hint inside a runtime/preset SelectItem (e.g. "⌃2"). Sits in the
+ *  checkmark's slot and hides on the checked row, since switching to the
+ *  current runtime is a no-op. Follows the row's position in the enabled
+ *  order, so reordering in Settings relabels the menu. Renders nothing when
+ *  unassigned or out of slots. */
 export function RuntimeShortcutHint({ entryId }: { entryId: string }) {
   const shortcuts = useKeyboardShortcuts();
   const { settings } = useRuntimePreferences();
   const display = runtimeSlotDisplay(entryId, settings, shortcuts);
   if (!display) return null;
   return (
-    <span className="ml-auto pl-3 text-2xs tracking-wide text-muted-foreground/70">
+    <Kbd className="absolute top-1/2 right-2 -translate-y-1/2 in-data-[state=checked]:hidden">
       {display}
-    </span>
+    </Kbd>
   );
 }
 
@@ -891,7 +894,7 @@ export function BackendPicker({
           <TriggerIcon className="size-3" />
           <span className="truncate">{current.label}</span>
         </SelectTrigger>
-        <SelectContent align="start">
+        <SelectContent align="start" className="min-w-60">
           {availableEntries.map((entry) => {
             if (entry.kind === "preset") {
               const { preset } = entry;
@@ -902,7 +905,7 @@ export function BackendPicker({
                 <SelectItem
                   key={entry.id}
                   value={entry.id}
-                  className="text-xs *:[span]:last:w-full"
+                  className="pr-11 text-xs"
                   data-testid={`runtime-option-${entry.id}`}
                 >
                   <PresetIcon className="size-4" />
@@ -919,9 +922,7 @@ export function BackendPicker({
               <SelectItem
                 key={b.id}
                 value={b.id}
-                // The shortcut hint is `ml-auto`; Radix wraps the children in a
-                // shrink-to-fit span, so it needs to span the row to right-align.
-                className="text-xs *:[span]:last:w-full"
+                className="pr-11 text-xs"
                 data-testid={`runtime-option-${b.id}`}
               >
                 <Icon className="size-4" />

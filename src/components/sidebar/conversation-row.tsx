@@ -53,7 +53,6 @@ import type {
   CliRateLimitInfo,
   Conversation,
 } from "@/lib/types";
-import { RUNTIME_THEME } from "@/lib/runtime-theme";
 import {
   CliBackendId,
   fetchSidebarCliDefaults,
@@ -122,6 +121,11 @@ function normalizedBackend(conversation: Conversation): BackendId {
   return BACKENDS.some((backend) => backend.id === conversation.backend)
     ? (conversation.backend as BackendId)
     : "pi";
+}
+
+function runtimeIcon(backend: BackendId) {
+  return (BACKENDS.find((runtime) => runtime.id === backend) ?? BACKENDS[0])
+    .icon;
 }
 
 function runtimeLabel(backend: BackendId): string {
@@ -275,6 +279,7 @@ export const ConversationRow = memo(function ConversationRow({
   const title = conversation.title || t("conversation.untitled");
   const relativeTime = formatRelativeTime(conversation.updatedAt, nowMs);
   const backend = normalizedBackend(conversation);
+  const RuntimeIcon = runtimeIcon(backend);
   const [resolvedDefaults, setResolvedDefaults] = useState<{
     backend: CliBackendId;
     value: CliDefaults;
@@ -463,37 +468,38 @@ export const ConversationRow = memo(function ConversationRow({
               {conversation.title}
             </div>
           )}
-          <div
-            className={cn(
-              "flex min-w-0 items-center gap-2",
-              conversation.title && "text-xs text-background/70",
-            )}
-          >
-            {/* dsh's identity color is the foreground, which is exactly this
-                inverted tooltip's background, so swap it for the one color
-                that is guaranteed to contrast here. */}
-            <span
-              style={{
-                backgroundColor:
-                  backend === "dsh"
-                    ? "var(--background)"
-                    : RUNTIME_THEME[backend].color,
-              }}
-              className="size-1.5 shrink-0 rounded-full"
-            />
-            <span
-              className={cn("truncate", !conversation.title && "font-medium")}
-            >
-              {runtimeLabel(backend)}
-            </span>
-            {streaming && (
-              <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-background/70">
-                <span className="size-1.5 animate-pulse rounded-full bg-current" />
-                {t("conversation.inProgress")}
-              </span>
-            )}
-          </div>
           <div className="flex flex-col gap-1 text-xs text-background/70">
+            <div
+              className={cn(
+                "flex min-w-0 items-center gap-1.5",
+                !conversation.title && "text-background",
+              )}
+            >
+              {/* The logo overhangs the 12px icon column by a pixel each side
+                  so it reads at the same weight as the glyphs below without
+                  shifting the text. dsh's mark is monochrome and normally
+                  inverts in dark mode; this tooltip is inverted, so flip it
+                  the other way. */}
+              <span className="flex size-3 shrink-0 items-center justify-center">
+                <RuntimeIcon
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    backend === "dsh" && "invert dark:invert-0",
+                  )}
+                />
+              </span>
+              <span
+                className={cn("truncate", !conversation.title && "font-medium")}
+              >
+                {runtimeLabel(backend)}
+              </span>
+              {streaming && (
+                <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-background/70">
+                  <span className="size-1.5 animate-pulse rounded-full bg-current" />
+                  {t("conversation.inProgress")}
+                </span>
+              )}
+            </div>
             <div className="flex min-w-0 items-center gap-1.5">
               <Cpu className="size-3 shrink-0 opacity-60" />
               <span className="truncate">

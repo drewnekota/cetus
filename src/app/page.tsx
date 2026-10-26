@@ -14,7 +14,7 @@ import {
   threadWalkOrder,
 } from "@/lib/folder-sessions";
 import { useInputIds } from "@/lib/session-activity";
-import { api, onUpdateReady } from "@/lib/tauri";
+import { api, onUpdateAvailable, onUpdateReady } from "@/lib/tauri";
 import {
   installChatPersistence,
   loadCachedMessages,
@@ -1092,6 +1092,32 @@ export default function Home() {
       unlisten?.();
     };
   }, []);
+  // Any newer version Cetus knows about — downloaded (silently or not) or just
+  // available with auto-update off. Dots the General entry inside Settings —
+  // discoverable there without nagging from the sidebar.
+  const [updateBadgeVersion, setUpdateBadgeVersion] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    const unlisteners: (() => void)[] = [];
+    let cancelled = false;
+    api
+      .pendingUpdateVersion()
+      .then((version) => {
+        if (!cancelled && version) setUpdateBadgeVersion(version);
+      })
+      .catch(() => {});
+    for (const subscribe of [onUpdateReady, onUpdateAvailable]) {
+      subscribe((u) => setUpdateBadgeVersion(u.version)).then((u) => {
+        if (cancelled) u();
+        else unlisteners.push(u);
+      });
+    }
+    return () => {
+      cancelled = true;
+      for (const u of unlisteners) u();
+    };
+  }, []);
   const onRestartToUpdate = useCallback(() => {
     api.relaunchApp().catch(console.error);
   }, []);
@@ -1709,6 +1735,7 @@ export default function Home() {
     onRename,
     openSettings,
     updateReadyVersion,
+    updateBadgeVersion,
     onRestartToUpdate,
     keyboardShortcuts,
     piReady,

@@ -1030,7 +1030,7 @@ function BackendSelect({
               <SelectItem
                 key={entry.id}
                 value={entry.id}
-                className="text-md *:[span]:last:w-full"
+                className="pr-11 text-md"
               >
                 <PresetIcon className="size-4" />
                 <span className="truncate">{runtimePresetLabel(preset)}</span>
@@ -1045,7 +1045,7 @@ function BackendSelect({
             <SelectItem
               key={b.id}
               value={b.id}
-              className="text-md *:[span]:last:w-full"
+              className="pr-11 text-md"
             >
               <Icon className="size-4" />
               <span className="truncate">{b.label}</span>

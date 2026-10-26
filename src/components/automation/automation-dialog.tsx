@@ -488,7 +488,7 @@ export function AutomationDialog({
                     <SelectItem
                       key={b.id}
                       value={b.id}
-                      className="text-xs *:[span]:last:w-full"
+                      className="pr-11 text-xs"
                     >
                       <Icon className="size-4" />
                       <span className="truncate">{b.label}</span>
