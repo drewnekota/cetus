@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg"><img alt="Download Cetus for macOS" src="https://img.shields.io/badge/Download-Cetus-111111?style=for-the-badge&logo=apple" /></a>
-  <a href="https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="Download Cetus Swift (Beta) for macOS" src="https://img.shields.io/badge/Download-Cetus_Swift_(Beta)-7C3AED?style=for-the-badge&logo=swift&logoColor=white" /></a>
+  <a href="https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="Download Cetus Swift (Beta) for macOS" src="https://img.shields.io/badge/Download-Cetus_Swift_(Beta)-555555?style=flat&logo=swift&logoColor=white" /></a>
 </p>
 
 <p align="center">
