@@ -272,6 +272,13 @@
   html {
     @apply font-sans;
     color-scheme: light;
+    /* The document never scrolls (every pane scrolls itself), but WKWebView
+       still rubber-bands the root on a trackpad swipe over a non-scrolling
+       area, dragging the whole UI off the window's background. */
+    overscroll-behavior: none;
+  }
+  body {
+    overscroll-behavior: none;
   }
   html.dark {
     color-scheme: dark;

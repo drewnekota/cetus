@@ -73,7 +73,12 @@ import { renderHome } from "./home/home-view";
 import { useHomeState } from "./home/use-home-state";
 import { useConversationSelection } from "./home/use-conversation-selection";
 import { useCoordinator } from "./home/use-coordinator";
-import { isCoordinatorId, OPEN_THREAD_EVENT, useCoordinatorStore } from "@/lib/coordinator";
+import {
+  isCoordinatorId,
+  listedConversations,
+  OPEN_THREAD_EVENT,
+  useCoordinatorStore,
+} from "@/lib/coordinator";
 
 export default function Home() {
   useZoom();
@@ -400,7 +405,12 @@ export default function Home() {
     // Rebuild ephemeral automation workspace visibility from persisted rows.
     // This also recovers chats restored before the restore callback learned to
     // surface their workspace explicitly.
-    setTemporaryWorkspaces((dirs) => reconcileTemporaryWorkspaces(dirs, list));
+    setTemporaryWorkspaces((dirs) =>
+      reconcileTemporaryWorkspaces(
+        dirs,
+        listedConversations(list, useCoordinatorStore.getState().registry),
+      ),
+    );
     // Seed the unread dots from the persisted rows, once. Later refreshes are
     // not a source of truth: they race in-flight markUnread writes and would
     // resurrect a dot the user just cleared by opening the chat.
@@ -1520,6 +1530,7 @@ export default function Home() {
     refreshList,
     setRecentWorkspaces,
     setHiddenWorkspaces,
+    setTemporaryWorkspaces,
     setWorkspaceDir,
     defaultWorkspace,
     setView,

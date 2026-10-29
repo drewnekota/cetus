@@ -32,6 +32,7 @@ export function useConversationActions({
   refreshList,
   setRecentWorkspaces,
   setHiddenWorkspaces,
+  setTemporaryWorkspaces,
   setWorkspaceDir,
   defaultWorkspace,
   setView,
@@ -53,6 +54,7 @@ export function useConversationActions({
   refreshList: () => Promise<Conversation[]>;
   setRecentWorkspaces: Dispatch<SetStateAction<string[]>>;
   setHiddenWorkspaces: Dispatch<SetStateAction<string[]>>;
+  setTemporaryWorkspaces: Dispatch<SetStateAction<string[]>>;
   setWorkspaceDir: Dispatch<SetStateAction<string | null>>;
   defaultWorkspace: string;
   setView: Dispatch<SetStateAction<SidebarView>>;
@@ -180,6 +182,9 @@ export function useConversationActions({
       const next = hideWorkspace(dir);
       setRecentWorkspaces(next.recent);
       setHiddenWorkspaces(next.hidden);
+      // Temporary (automation) folders bypass the hidden list, so drop it
+      // there too or Remove does nothing.
+      setTemporaryWorkspaces((dirs) => dirs.filter((d) => d !== dir));
       setBoardWorkspaceFilter((filter) => (filter === dir ? null : filter));
       setWorkspaceDir((current) =>
         current === dir ? defaultWorkspace || null : current,
@@ -192,7 +197,7 @@ export function useConversationActions({
         setActiveId(null);
       }
     },
-    [defaultWorkspace],
+    [defaultWorkspace, setTemporaryWorkspaces],
   );
 
   const onReorderWorkspaces = useCallback((dirs: string[]) => {

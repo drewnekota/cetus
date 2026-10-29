@@ -181,12 +181,18 @@ export function useHomeState({
   // their cached last-reply previews (board card cache — best-effort). Reloaded
   // only when the top-of-list ids actually change, not on every updated_at bump.
   // Once the last active chat in a temporary workspace is archived, remove the
-  // empty folder from the sidebar naturally.
+  // empty folder from the sidebar naturally. Count only the chats the sidebar
+  // lists: a hidden Cetus session would otherwise pin an empty, unremovable
+  // folder (temporary dirs bypass the hidden list).
+  const coordinatorRegistry = useCoordinatorStore((s) => s.registry);
   useEffect(() => {
     setTemporaryWorkspaces((dirs) =>
-      reconcileTemporaryWorkspaces(dirs, conversations),
+      reconcileTemporaryWorkspaces(
+        dirs,
+        listedConversations(conversations, coordinatorRegistry),
+      ),
     );
-  }, [conversations]);
+  }, [conversations, coordinatorRegistry]);
   const [settingsOpen, setSettingsOpen] = useState(
     initialViewState.settingsOpen === true,
   );
@@ -547,7 +553,6 @@ export function useHomeState({
   // handler both skip rows hidden by a folded workspace.
   // Same list the sidebar draws, so the Cetus sessions it hides don't take
   // ⌘1…⌘9 slots here.
-  const coordinatorRegistry = useCoordinatorStore((s) => s.registry);
   const workspaceGroups = useMemo(
     () =>
       groupByWorkspace(

@@ -453,7 +453,7 @@ export function renderComposer({
           // Mirror the textarea's type exactly — the pills only line up if
           // both layers wrap alike.
           className={cn(
-            "min-h-14 text-chat",
+            "min-h-14 text-chat leading-normal",
             variant === "hero" ? "px-3 py-3" : "px-2.5 py-2",
           )}
         />
@@ -691,6 +691,11 @@ export function renderComposer({
             // md:text-chat overrides the shared Textarea's md:text-sm, so the
             // draft is set at the "Message font size" like the messages.
             "text-chat md:text-chat",
+            // Pinned to the default leading regardless of the "Line height"
+            // setting: WebKit draws a textarea caret from the previous line's
+            // bottom, so extra leading makes it overshoot the text on every
+            // line after the first.
+            "leading-normal",
             variant === "hero" ? "px-3 py-3" : "px-2.5 py-2",
           )}
         />

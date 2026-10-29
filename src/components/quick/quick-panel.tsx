@@ -797,7 +797,7 @@ export function QuickPanel() {
           placeholder={t("launcher.placeholder")}
           rows={1}
           style={{ paddingRight: prefsGutter }}
-          className="w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent text-base font-normal text-foreground outline-none placeholder:text-muted-foreground/60"
+          className="w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent text-base leading-normal font-normal text-foreground outline-none placeholder:text-muted-foreground/60"
         />
 
         {/* Attachments band — screenshot thumbnail (or its denied hint) and the
