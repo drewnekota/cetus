@@ -201,6 +201,9 @@ export const en = {
   "general.cliWorktree.label": "CLI agents: isolate in git worktrees",
   "general.cliWorktree.description":
     "Run each conversation on its own branch in a separate git worktree, so agents never touch your checked-out files. Off = agents edit the workspace directly, like running the CLI in a terminal. Conversations that already have a worktree keep it.",
+  "general.promptSuggestions.label": "Suggest next prompt",
+  "general.promptSuggestions.description":
+    "After each Claude Code turn, show its guess at what you'll type next as grey text in the empty composer. Press Tab to accept. Applies to new Claude Code sessions.",
   "update.check.label": "Updates",
   "update.check.current": "You're on v{version}.",
   "update.check.button": "Check for updates",

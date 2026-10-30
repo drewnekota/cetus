@@ -101,6 +101,7 @@ pub fn spawn_claude_session(
     orphan_messages: Option<tokio::sync::mpsc::UnboundedSender<Vec<Value>>>,
 ) -> Result<ClaudeSessionHandle> {
     let translator_cwd = cwd.to_path_buf();
+    let prompt_suggestions = opts.prompt_suggestions;
     let args = CliBackend::ClaudeCode.turn_args("", &opts);
     let mut cmd = TokioCommand::new(bin);
     cmd.args(&args)
@@ -110,6 +111,9 @@ pub fn spawn_claude_session(
         .stderr(Stdio::piped());
     for (k, v) in extra_env {
         cmd.env(k, v);
+    }
+    if prompt_suggestions {
+        cmd.env(super::PROMPT_SUGGESTION_ENV, "1");
     }
     let mut child = cmd
         .spawn()
@@ -251,6 +255,15 @@ pub fn spawn_claude_session(
                 },
                 line = reader.next_line() => {
                     let line = match line { Ok(Some(line)) => line, _ => break };
+                    // The predicted next prompt lands a few seconds after the
+                    // turn's result, between turns — never transcript content.
+                    if let Some(suggestion) = prompt_suggestion(&line) {
+                        emit(&base_sink, vec![json!({
+                            "type": "cli_prompt_suggestion",
+                            "suggestion": suggestion,
+                        })]);
+                        continue;
+                    }
                     // A completed background task re-invokes the model: the CLI
                     // starts a continuation turn no StartTurn ever announced.
                     // Without re-arming here, the previous turn's `opened` flag
@@ -384,4 +397,17 @@ pub fn spawn_claude_session(
     });
 
     Ok(handle)
+}
+
+/// The suggestion text of a `prompt_suggestion` line, if `line` is one.
+fn prompt_suggestion(line: &str) -> Option<String> {
+    if !line.contains("\"prompt_suggestion\"") {
+        return None;
+    }
+    let value: Value = serde_json::from_str(line).ok()?;
+    if value.get("type")?.as_str()? != "prompt_suggestion" {
+        return None;
+    }
+    let text = value.get("suggestion")?.as_str()?.trim();
+    (!text.is_empty()).then(|| text.to_string())
 }

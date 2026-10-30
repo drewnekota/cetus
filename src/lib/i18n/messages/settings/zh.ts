@@ -112,6 +112,9 @@ export const zh = {
   "general.cliWorktree.label": "CLI 智能体：隔离在 git worktree 中",
   "general.cliWorktree.description":
     "每个会话在独立的 git worktree 和分支上运行，智能体不会触碰你当前检出的文件。关闭时智能体直接修改工作区，就像在终端里运行 CLI 一样。已有 worktree 的会话会继续使用原有 worktree。",
+  "general.promptSuggestions.label": "建议下一句",
+  "general.promptSuggestions.description":
+    "Claude Code 每轮结束后，在空输入框里用灰字显示它猜你接下来要输入的内容，按 Tab 采用。对新启动的 Claude Code 会话生效。",
   "update.check.label": "更新",
   "update.check.current": "当前版本 v{version}。",
   "update.check.button": "检查更新",

@@ -279,7 +279,7 @@ export function ChatPane({
       </ArtifactNavProvider>
       <div className="chat-composer-dock relative z-10 bg-background px-4 pb-3 pt-2">
         <div
-          className={`mx-auto max-w-3xl space-y-2 panel-motion transition-[translate] ${
+          className={`mx-auto max-w-4xl space-y-2 panel-motion transition-[translate] ${
             opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
           }`}
         >

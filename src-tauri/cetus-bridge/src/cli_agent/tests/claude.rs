@@ -783,3 +783,17 @@ fn claude_argv_shape() {
     // the prompt rides stdin, not argv
     assert!(!args.contains(&"hello".to_string()));
 }
+
+#[test]
+fn claude_prompt_suggestions_flag_is_opt_in() {
+    let off = CliBackend::ClaudeCode.turn_args("", &CliRunOpts::default());
+    assert!(!off.iter().any(|a| a == "--prompt-suggestions"));
+    let on = CliBackend::ClaudeCode.turn_args(
+        "",
+        &CliRunOpts {
+            prompt_suggestions: true,
+            ..Default::default()
+        },
+    );
+    assert!(on.iter().any(|a| a == "--prompt-suggestions"));
+}

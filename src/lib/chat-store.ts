@@ -105,6 +105,11 @@ interface ChatsStore {
    *  localStorage and written through, so the last completed turn's reading
    *  survives restarts and sidebar eviction (see context-usage-store). */
   cliContextUsage: Record<string, CliContextUsage>;
+  /** The runtime's predicted next prompt per conversation (claude-code's
+   *  `prompt_suggestion`), shown as grey text in an empty composer. Cleared
+   *  as soon as anything new is sent or a turn starts. */
+  promptSuggestions: Record<string, string>;
+  setPromptSuggestion: (id: string, suggestion: string | null) => void;
   setCliContextUsage: (id: string, usage: CliContextUsage) => void;
   clearCliContextUsage: (id: string) => void;
   /** Append a "running" breadcrumb for a local `!` bash command. */
@@ -290,7 +295,7 @@ function evictionTargets(
   return drops;
 }
 
-export const useChatStore = create<ChatsStore>()((set) => ({
+export const useChatStore = create<ChatsStore>()((set, get) => ({
   chats: {},
   streamingIds: new Set<string>(),
   hydrated: {},
@@ -312,6 +317,7 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   cliCommands: {},
   cliRateLimits: {},
   cliContextUsage: loadContextUsage(),
+  promptSuggestions: {},
   ensure: (id) => {
     flushPiEvents();
     set((s) => {
@@ -358,6 +364,11 @@ export const useChatStore = create<ChatsStore>()((set) => ({
         cliCommands = { ...cliCommands };
         delete cliCommands[id];
       }
+      let promptSuggestions = s.promptSuggestions;
+      if (id in promptSuggestions) {
+        promptSuggestions = { ...promptSuggestions };
+        delete promptSuggestions[id];
+      }
       // cliContextUsage deliberately survives: drop runs on archive and
       // eviction, and the reading is still valid when the thread comes back.
       return {
@@ -366,6 +377,7 @@ export const useChatStore = create<ChatsStore>()((set) => ({
         controlRequests,
         backgroundTasks,
         cliCommands,
+        promptSuggestions,
       };
     });
   },
@@ -377,6 +389,7 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   userSent: (id, text, images, files) => {
     flushPiEvents();
     set((s) => step(s, id, { type: "user_sent", text, images, files }));
+    get().setPromptSuggestion(id, null);
   },
   // Streaming hot path: buffered, applied once per frame (see flushPiEvents).
   piEvent: (id, event) => {
@@ -415,6 +428,20 @@ export const useChatStore = create<ChatsStore>()((set) => ({
   },
   setCliCommands: (id, commands) => {
     set((s) => ({ cliCommands: { ...s.cliCommands, [id]: commands } }));
+  },
+  setPromptSuggestion: (id, suggestion) => {
+    set((s) => {
+      if (!suggestion) {
+        if (!(id in s.promptSuggestions)) return s;
+        const promptSuggestions = { ...s.promptSuggestions };
+        delete promptSuggestions[id];
+        return { promptSuggestions };
+      }
+      if (s.promptSuggestions[id] === suggestion) return s;
+      return {
+        promptSuggestions: { ...s.promptSuggestions, [id]: suggestion },
+      };
+    });
   },
   setCliRateLimit: (backend, info) => {
     set((s) => ({ cliRateLimits: { ...s.cliRateLimits, [backend]: info } }));

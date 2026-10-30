@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -56,10 +57,12 @@ const SCROLL_TO_BOTTOM_BUTTON_MIN_PX = 360;
 const SCROLL_TO_BOTTOM_BUTTON_VIEWPORT_RATIO = 0.5;
 
 // The turn navigator occupies the left 48px from `sm` upward. Before the
-// max-w-3xl reading column has enough viewport space to center itself clear of
-// that rail (896px), reserve the rail explicitly so its ticks never overlap
+// max-w-4xl reading column has enough viewport space to center itself clear of
+// that rail (1024px), reserve the rail explicitly so its ticks never overlap
 // message text. At wider sizes the column's normal centering provides the gap.
-const MESSAGE_ROW_GUTTER_CLASS = "px-4 sm:pl-14 min-[896px]:px-4";
+// `selection-shell` keeps these layout wrappers from painting selection gaps
+// (see globals.css).
+const MESSAGE_ROW_GUTTER_CLASS = "selection-shell px-4 sm:pl-14 min-[1024px]:px-4";
 
 /** Reading position per conversation, so a half-read history resumes where it
  *  was left instead of snapping to the newest turn. Only conversations the
@@ -639,7 +642,7 @@ export function MessageList({
         return (
           <div className={MESSAGE_ROW_GUTTER_CLASS}>
             <div
-              className={`mx-auto max-w-3xl panel-motion transition-[translate] ${
+              className={`selection-shell mx-auto max-w-4xl panel-motion transition-[translate] ${
                 opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
               }`}
             >
@@ -652,7 +655,7 @@ export function MessageList({
         return (
           <div className={MESSAGE_ROW_GUTTER_CLASS}>
             <div
-              className={`mx-auto max-w-3xl panel-motion transition-[translate] ${
+              className={`selection-shell mx-auto max-w-4xl panel-motion transition-[translate] ${
                 opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
               }`}
             >
@@ -670,7 +673,7 @@ export function MessageList({
         return (
           <div className={MESSAGE_ROW_GUTTER_CLASS}>
             <div
-              className={`mx-auto max-w-3xl py-5 panel-motion transition-[translate] ${
+              className={`selection-shell mx-auto max-w-4xl py-5 panel-motion transition-[translate] ${
                 opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
               }`}
             >
@@ -714,14 +717,14 @@ export function MessageList({
           />
         );
       // Center each turn on the reading column. The virtual list measures the outer
-      // wrapper. Once the viewport can center max-w-3xl clear of the navigator,
+      // wrapper. Once the viewport can center max-w-4xl clear of the navigator,
       // this returns to the composer's px-4 geometry so both columns line up.
       return (
         // data-find-row is how the ⌘F painter locates a mounted row's text
         // nodes without knowing anything about the bubbles inside it.
         <div className={MESSAGE_ROW_GUTTER_CLASS} data-find-row={index}>
           <div
-            className={`mx-auto max-w-3xl panel-motion transition-[translate] ${
+            className={`selection-shell mx-auto max-w-4xl panel-motion transition-[translate] ${
               opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
             }`}
           >
@@ -783,6 +786,9 @@ export function MessageList({
         />
       )}
       <TurnNavigator
+        // A fresh navigator per conversation: no hover/pan state carried over,
+        // and no slide from the previous conversation's window position.
+        key={convId ?? "new"}
         convId={convId}
         userTurns={userTurns}
         topIndex={topIndex}
@@ -831,7 +837,7 @@ function lensScale(distance: number): number {
  *  top. Long conversations first compress the tick pitch, then show a window
  *  of ticks around the active turn (wheel over the rail pans it) with faded
  *  edges, so the rail never outgrows the viewport. Lives in the
- *  otherwise-empty left margin (content is centered max-w-3xl), and is
+ *  otherwise-empty left margin (content is centered max-w-4xl), and is
  *  pointer-transparent except on the ticks themselves so it never fights
  *  text selection. */
 function TurnNavigator({
@@ -862,15 +868,31 @@ function TurnNavigator({
   const wheelRemainder = useRef(0);
   const shownStart = useRef(0);
 
-  useEffect(() => {
+  // Measure before the first paint so the ticks never flash at the top edge
+  // waiting for the observer's first callback. The rail element always
+  // renders (even with fewer than two turns) so this attaches on mount; it
+  // used to bail on a null ref when a conversation hydrated after mount and
+  // never measure, leaving the ticks pinned to the top.
+  useLayoutEffect(() => {
     const el = railRef.current;
     if (!el) return;
+    setRailHeight(el.getBoundingClientRect().height);
     const observer = new ResizeObserver(([entry]) => {
       setRailHeight(entry.contentRect.height);
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  // Window moves only animate once the open has settled; the virtual list's
+  // initial seek publishes intermediate ranges that would otherwise read as
+  // the rail sliding in.
+  const [animate, setAnimate] = useState(false);
+  useEffect(() => {
+    if (animate) return;
+    const timer = setTimeout(() => setAnimate(true), 400);
+    return () => clearTimeout(timer);
+  }, [animate]);
 
   // At the bottom, the newest turn wins explicitly. During a conversation
   // switch the virtual list can briefly publish an intermediate range while its
@@ -909,8 +931,6 @@ function TurnNavigator({
   else start = clampStart(active - Math.floor(capacity / 2));
   shownStart.current = start;
 
-  if (count < 2) return null;
-
   const windowed = capacity < count;
   const top = measured ? (railHeight - capacity * pitch) / 2 : 0;
 
@@ -934,68 +954,70 @@ function TurnNavigator({
       ref={railRef}
       className="pointer-events-none absolute inset-y-0 left-0 z-20 hidden w-12 sm:block"
     >
-      <div
-        className={`absolute left-0 top-0 flex flex-col items-start ${
-          measured ? "transition-transform duration-200 ease-out" : ""
-        }`}
-        style={{ transform: `translateY(${top - start * pitch}px)` }}
-        onMouseLeave={() => setHover(null)}
-        onWheel={
-          windowed
-            ? (e) => {
-                wheelRemainder.current += e.deltaY / pitch;
-                const steps = Math.trunc(wheelRemainder.current);
-                if (steps === 0) return;
-                wheelRemainder.current -= steps;
-                setPanned({ start: clampStart(start + steps), active });
-              }
-            : undefined
-        }
-      >
-        {userTurns.map((turn, i) => {
-          const isActive = i === active;
-          const isHovered = i === hover;
-          const opacity = tickOpacity(i);
-          const scale = hover === null ? 1 : lensScale(Math.abs(i - hover));
-          return (
-            <div
-              key={turn.key}
-              className={`relative flex items-center transition-opacity duration-200 ${
-                opacity > 0 ? "pointer-events-auto" : ""
-              }`}
-              style={{ height: pitch, opacity }}
-              onMouseEnter={() => setHover(i)}
-            >
-              <button
-                type="button"
-                tabIndex={opacity > 0 ? 0 : -1}
-                aria-label={`Jump to message ${i + 1}`}
-                onClick={() => {
-                  onNavigate();
-                  setPanned(null);
-                  listRef.current?.scrollToIndex({
-                    index: turn.index,
-                    align: "start",
-                  });
-                }}
-                className="flex h-full items-center pl-3 pr-2"
+      {count >= 2 && measured && (
+        <div
+          className={`absolute left-0 top-0 flex flex-col items-start ${
+            animate ? "transition-transform duration-200 ease-out" : ""
+          }`}
+          style={{ transform: `translateY(${top - start * pitch}px)` }}
+          onMouseLeave={() => setHover(null)}
+          onWheel={
+            windowed
+              ? (e) => {
+                  wheelRemainder.current += e.deltaY / pitch;
+                  const steps = Math.trunc(wheelRemainder.current);
+                  if (steps === 0) return;
+                  wheelRemainder.current -= steps;
+                  setPanned({ start: clampStart(start + steps), active });
+                }
+              : undefined
+          }
+        >
+          {userTurns.map((turn, i) => {
+            const isActive = i === active;
+            const isHovered = i === hover;
+            const opacity = tickOpacity(i);
+            const scale = hover === null ? 1 : lensScale(Math.abs(i - hover));
+            return (
+              <div
+                key={turn.key}
+                className={`relative flex items-center transition-opacity duration-200 ${
+                  opacity > 0 ? "pointer-events-auto" : ""
+                }`}
+                style={{ height: pitch, opacity }}
+                onMouseEnter={() => setHover(i)}
               >
-                <span
-                  className={`block h-0.5 w-2.5 origin-left rounded-full transition-[background-color,transform] duration-150 ease-out ${
-                    isHovered
-                      ? "bg-foreground"
-                      : isActive
-                        ? "bg-foreground/60"
-                        : "bg-muted-foreground/40"
-                  }`}
-                  style={{ transform: `scaleX(${scale})` }}
-                />
-              </button>
-              {isHovered && <TurnPreview convId={convId} turnKey={turn.key} />}
-            </div>
-          );
-        })}
-      </div>
+                <button
+                  type="button"
+                  tabIndex={opacity > 0 ? 0 : -1}
+                  aria-label={`Jump to message ${i + 1}`}
+                  onClick={() => {
+                    onNavigate();
+                    setPanned(null);
+                    listRef.current?.scrollToIndex({
+                      index: turn.index,
+                      align: "start",
+                    });
+                  }}
+                  className="flex h-full items-center pl-3 pr-2"
+                >
+                  <span
+                    className={`block h-0.5 w-2.5 origin-left rounded-full transition-[background-color,transform] duration-150 ease-out ${
+                      isHovered
+                        ? "bg-foreground"
+                        : isActive
+                          ? "bg-foreground/60"
+                          : "bg-muted-foreground/40"
+                    }`}
+                    style={{ transform: `scaleX(${scale})` }}
+                  />
+                </button>
+                {isHovered && <TurnPreview convId={convId} turnKey={turn.key} />}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

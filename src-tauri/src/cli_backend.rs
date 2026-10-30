@@ -41,6 +41,10 @@ pub struct CliAgentSettings {
     /// already has a worktree keeps it regardless — switching cwd mid-
     /// conversation would break the CLIs' session resume.
     pub isolate_in_worktree: bool,
+    /// Ask Claude Code for its predicted next prompt after each turn, shown
+    /// as grey text in an empty composer (Tab accepts). Defaults ON; read when
+    /// a conversation's claude process spawns.
+    pub prompt_suggestions: bool,
     /// Expose the built-in ACP runtime descriptors in runtime pickers.
     pub claude_code_enabled: bool,
     pub codex_enabled: bool,
@@ -73,6 +77,7 @@ impl Default for CliAgentSettings {
         Self {
             bypass_approvals: true,
             isolate_in_worktree: false,
+            prompt_suggestions: true,
             claude_code_enabled: true,
             codex_enabled: true,
             opencode_enabled: true,

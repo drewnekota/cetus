@@ -304,6 +304,16 @@
   [data-chat-markdown] p > [data-chat-selection-text]::selection {
     background-color: color-mix(in oklab, var(--brand) 32%, transparent);
   }
+  /* WebKit also fills the "selection gaps" of every fully selected block:
+     the strip between its children and its own edges. A message row spans
+     the whole pane and centers a max-w-4xl column inside it, so a selection
+     across rows floods the empty gutters on both sides (offset by the
+     column's optical-center translate, which gap painting ignores). Gap fill
+     uses the block's own ::selection, which descendants don't inherit, so
+     clearing it on the two wrapper layers leaves the text highlight alone. */
+  .selection-shell::selection {
+    background-color: transparent;
+  }
   /* ⌘F matches (find-highlight.ts). Painted through the CSS Custom Highlight
      API, so these ranges sit over the existing DOM without any find-aware
      markup in the message tree. The inactive hits stay quiet enough to read

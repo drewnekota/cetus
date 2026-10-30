@@ -344,6 +344,7 @@ pub fn dispatch_turn(
             .then(|| crate::control::AGENT_HINT.to_string()),
         cold_start_preamble: acp_cold_start_preamble,
         client_version: Some(handle.package_info().version.to_string()),
+        prompt_suggestions: settings.prompt_suggestions,
     };
     let bin = backend.default_bin().to_string();
     let store = state.store.clone();
@@ -615,6 +616,7 @@ pub async fn compact_codex_conversation(
                 append_system_prompt: None,
                 cold_start_preamble: None,
                 client_version: None,
+                prompt_suggestions: false,
             };
             let base_sink: std::sync::Arc<dyn cetus_bridge::pi_rpc::EventSink> =
                 std::sync::Arc::new(crate::tauri_bridge::TauriEventSink::new(handle.clone()));

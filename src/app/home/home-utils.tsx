@@ -51,7 +51,7 @@ export function ChatLoadingPane({ opticalCenter }: { opticalCenter: boolean }) {
     >
       <div className="min-h-0 flex-1 overflow-hidden px-4 pt-4">
         <div
-          className={`mx-auto flex w-full max-w-3xl flex-col gap-6 panel-motion transition-[translate] ${columnShift}`}
+          className={`mx-auto flex w-full max-w-4xl flex-col gap-6 panel-motion transition-[translate] ${columnShift}`}
         >
           <div className="flex justify-end">
             <Skeleton className="h-10 w-2/5 rounded-2xl" />
@@ -74,7 +74,7 @@ export function ChatLoadingPane({ opticalCenter }: { opticalCenter: boolean }) {
       </div>
       <div className="shrink-0 bg-background px-4 pb-3 pt-2">
         <div
-          className={`mx-auto w-full max-w-3xl panel-motion transition-[translate] ${columnShift}`}
+          className={`mx-auto w-full max-w-4xl panel-motion transition-[translate] ${columnShift}`}
         >
           <Skeleton className="h-[92px] w-full rounded-2xl" />
         </div>

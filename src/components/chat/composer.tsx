@@ -429,6 +429,11 @@ export function Composer({
     conversationId ? s.cliContextUsage[conversationId] : undefined,
   );
   const codexRateLimit = useChatStore((s) => s.cliRateLimits.codex);
+  // The runtime's predicted next prompt (claude-code), offered as grey text
+  // only while the composer is empty and idle; Tab takes it.
+  const promptSuggestion = useChatStore((s) =>
+    conversationId ? s.promptSuggestions[conversationId] : undefined,
+  );
   // Set when the user dismisses with Esc; cleared on the next edit so the menu
   // stays closed for the current token but a later `/` reopens it.
   const slashSuppress = useRef(false);
@@ -1484,8 +1489,13 @@ export function Composer({
     updateMentionRefs([]);
     setAttachError(null);
   }
+  const suggestion =
+    promptSuggestion && !streaming && !disabled && text === ""
+      ? promptSuggestion
+      : undefined;
   return renderComposer({
     rootRef,
+    suggestion,
     streaming,
     bashMode,
     backend,

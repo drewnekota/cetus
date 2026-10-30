@@ -413,6 +413,13 @@ export function RuntimesSection() {
             checked={settings.isolateInWorktree}
             onCheckedChange={(value) => update({ isolateInWorktree: value })}
           />
+          <ToggleRow
+            id="cli-agents-prompt-suggestions"
+            label={t("general.promptSuggestions.label")}
+            description={t("general.promptSuggestions.description")}
+            checked={settings.promptSuggestions}
+            onCheckedChange={(value) => update({ promptSuggestions: value })}
+          />
         </div>
       </div>
     </section>

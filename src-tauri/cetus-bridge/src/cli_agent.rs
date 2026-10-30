@@ -133,7 +133,16 @@ pub struct CliRunOpts {
     /// Host version reported in the ACP `initialize` handshake. None → the
     /// bridge crate's own version.
     pub client_version: Option<String>,
+    /// claude only: emit a `prompt_suggestion` line (the TUI's grey "next
+    /// prompt" hint) after each turn. Needs the env opt-in too — see
+    /// [`PROMPT_SUGGESTION_ENV`].
+    pub prompt_suggestions: bool,
 }
+
+/// `--prompt-suggestions` alone is a no-op in `-p` mode: the CLI disables
+/// suggestions for non-interactive sessions unless this env var is set
+/// (verified against 2.1.314).
+pub const PROMPT_SUGGESTION_ENV: &str = "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION";
 
 impl CliBackend {
     /// Build the argv for a single headless turn executed with cwd = worktree.
@@ -189,6 +198,9 @@ impl CliBackend {
                 // per tool — rendered as approval cards in the chat.
                 if opts.bypass_approvals {
                     a.push("--dangerously-skip-permissions".into());
+                }
+                if opts.prompt_suggestions {
+                    a.push("--prompt-suggestions".into());
                 }
                 let _ = prompt; // claude receives the prompt via stdin
             }

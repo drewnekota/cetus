@@ -12,6 +12,7 @@ import type { BackendId, CliAgentSettings, RuntimePreset } from "./types";
 export const DEFAULT_CLI_AGENT_SETTINGS: CliAgentSettings = {
   bypassApprovals: true,
   isolateInWorktree: false,
+  promptSuggestions: true,
   claudeCodeEnabled: true,
   codexEnabled: true,
   opencodeEnabled: true,

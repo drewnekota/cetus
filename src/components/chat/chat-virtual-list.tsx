@@ -32,6 +32,8 @@ export function ChatVirtualList<T>({
 }) {
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const seekAllowed = useRef(true);
+  const lastTotal = useRef(-1);
+  const bottomUpdate = useRef<(() => void) | null>(null);
   const setRef = useCallback((element: HTMLDivElement | null) => {
     setScroller(element);
     scrollerRef(element);
@@ -49,6 +51,20 @@ export function ChatVirtualList<T>({
     // Let React batch resize notifications instead of recursively flushing
     // whole assistant turns while their markdown/activities are settling.
     useFlushSync: false,
+    // Row tops and the content height are written straight to the DOM inside
+    // the measurement callback. A row mounting above the viewport (scrolling
+    // up) corrects scrollTop synchronously; if positions waited for the
+    // batched re-render, a frame painted with the new scrollTop but old tops
+    // and the whole column flashed by the estimate error.
+    directDomUpdates: true,
+    directDomUpdatesMode: "position",
+    onChange: (instance) => {
+      const total = instance.getTotalSize();
+      if (total === lastTotal.current) return;
+      lastTotal.current = total;
+      onHeightChange();
+      bottomUpdate.current?.();
+    },
     scrollToFn: (offset, options, instance) => {
       // scrollToIndex can reconcile after a measurement. An upward gesture
       // invalidates that seek too, not just the next automatic follow frame.
@@ -81,28 +97,32 @@ export function ChatVirtualList<T>({
   }, [data.length, initialState, scroller, virtualizer]);
 
   const rows = virtualizer.getVirtualItems();
-  const totalHeight = virtualizer.getTotalSize();
   const startIndex = virtualizer.range?.startIndex ?? 0;
   useEffect(() => { onRangeChange(startIndex); }, [onRangeChange, startIndex]);
-  useEffect(() => { onHeightChange(); }, [onHeightChange, totalHeight]);
   useEffect(() => {
     if (!scroller) return;
     const update = () => onBottomChange(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 32);
+    bottomUpdate.current = update;
     update();
     scroller.addEventListener("scroll", update, { passive: true });
     const observer = new ResizeObserver(update);
     observer.observe(scroller);
-    return () => { observer.disconnect(); scroller.removeEventListener("scroll", update); };
-  }, [onBottomChange, scroller, totalHeight]);
+    return () => {
+      bottomUpdate.current = null;
+      observer.disconnect();
+      scroller.removeEventListener("scroll", update);
+    };
+  }, [onBottomChange, scroller]);
 
   return (
     <div ref={setRef} data-testid="message-list" tabIndex={0} className={className}
       // `contain` still allows trackpad rubber-banding at the scroll boundary.
       style={{ overflowY: "auto", overscrollBehaviorY: "none", overflowAnchor: "none", position: "relative", outline: "none" }}>
-      <div data-chat-list-content style={{ height: totalHeight, position: "relative", width: "100%" }}>
+      {/* Height and row tops are owned by directDomUpdates; React must not set them. */}
+      <div ref={virtualizer.containerRef} data-chat-list-content style={{ position: "relative", width: "100%" }}>
         {rows.map(row => (
           <div key={row.key} ref={virtualizer.measureElement} data-index={row.index}
-            style={{ position: "absolute", top: row.start, left: 0, width: "100%" }}>
+            style={{ position: "absolute", left: 0, width: "100%" }}>
             {itemContent(row.index, data[row.index])}
           </div>
         ))}

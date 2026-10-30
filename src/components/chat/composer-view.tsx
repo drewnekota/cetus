@@ -1,5 +1,6 @@
 "use client";
 
+import { Kbd } from "@/components/ui/kbd";
 import type { RuntimeEntry } from "@/lib/runtime-settings";
 import type { Dispatch, SetStateAction, RefObject } from "react";
 import {
@@ -53,6 +54,7 @@ import {
 
 export function renderComposer({
   rootRef,
+  suggestion,
   streaming,
   bashMode,
   backend,
@@ -138,6 +140,7 @@ export function renderComposer({
   onAbort,
 }: {
   rootRef: RefObject<HTMLDivElement | null>;
+  suggestion: string | undefined;
   streaming: boolean | undefined;
   bashMode: boolean;
   backend: BackendId;
@@ -628,6 +631,25 @@ export function renderComposer({
                 return;
               }
             }
+            // Tab takes the grey suggested prompt, like Claude Code's TUI.
+            // It wins over the runtime cycle below only while one is shown.
+            if (
+              suggestion &&
+              e.key === "Tab" &&
+              !e.shiftKey &&
+              !e.ctrlKey &&
+              !e.metaKey &&
+              !e.altKey &&
+              !composing
+            ) {
+              e.preventDefault();
+              updateText(suggestion);
+              requestAnimationFrame(() => {
+                const node = taRef.current;
+                node?.setSelectionRange(suggestion.length, suggestion.length);
+              });
+              return;
+            }
             // Tab cycles the runtime rows — runtimes and presets in the picker
             // order — matching the quick launcher and the task dialog. The slash
             // menu above already consumed Tab when open, so here it's free to
@@ -665,7 +687,9 @@ export function renderComposer({
             }
           }}
           placeholder={
-            bashMode
+            suggestion
+              ? suggestion
+              : bashMode
               ? t("composer.bashPlaceholder")
               : withFocusHint(
                   placeholder ??
@@ -697,8 +721,20 @@ export function renderComposer({
             // line after the first.
             "leading-normal",
             variant === "hero" ? "px-3 py-3" : "px-2.5 py-2",
+            suggestion && "pr-14",
           )}
         />
+        {suggestion && (
+          <Kbd
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute right-2.5",
+              variant === "hero" ? "top-3.5" : "top-2.5",
+            )}
+          >
+            Tab
+          </Kbd>
+        )}
       </div>
       {attachError && (
         <div className="px-2 pb-1 text-xs text-destructive">{attachError}</div>

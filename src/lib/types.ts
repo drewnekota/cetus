@@ -361,6 +361,8 @@ export interface CliAgentSettings {
   /** Run each conversation in its own git worktree/branch instead of the
    *  workspace's working tree. Off by default. */
   isolateInWorktree: boolean;
+  /** Show Claude Code's predicted next prompt in an empty composer. */
+  promptSuggestions: boolean;
   /** Runtime visibility. Cetus itself stays enabled as the safe fallback. */
   claudeCodeEnabled: boolean;
   codexEnabled: boolean;

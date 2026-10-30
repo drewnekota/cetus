@@ -103,6 +103,7 @@ export function useAppEvents({
           case "agent_start":
             runStatusRef.current[cid] = { running: true, outcome: "ok" };
             turnNotifier.turnStarted(cid);
+            chatStore.getState().setPromptSuggestion(cid, null);
             markUnread(cid, false);
             break;
           case "message_update": {
@@ -203,6 +204,7 @@ export function useAppEvents({
               eventType !== "cli_commands" &&
               eventType !== "cli_rate_limit" &&
               eventType !== "cli_context_usage" &&
+              eventType !== "cli_prompt_suggestion" &&
               cid
             ) {
               store.piEvent(cid, evt.event);
@@ -239,6 +241,16 @@ export function useAppEvents({
                     ? Math.max(0, usage.transcriptBytes!)
                     : undefined,
                 });
+              }
+            }
+            // claude-code's predicted next prompt, a few seconds after the
+            // turn's result. A turn that started since then makes it stale.
+            if (cid && eventType === "cli_prompt_suggestion") {
+              const suggestion = (
+                evt.event as unknown as { suggestion?: string }
+              ).suggestion;
+              if (suggestion && !runStatusRef.current[cid]?.running) {
+                store.setPromptSuggestion(cid, suggestion);
               }
             }
             // The CLI session's slash-command catalog (initialize ack) — the
