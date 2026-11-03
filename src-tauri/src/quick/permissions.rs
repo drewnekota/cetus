@@ -72,16 +72,17 @@ pub async fn open_screen_recording_settings() -> Result<(), String> {
 }
 
 /// Full Disk Access has no preflight API. Probe by opening a file macOS only
-/// lets FDA-holders read: the per-user TCC database. Without FDA the open
-/// fails with EPERM (and does *not* trigger any prompt).
+/// lets FDA-holders read: a TCC database. Without FDA the open fails with
+/// EPERM (and does *not* trigger any prompt). The per-user TCC.db is gone on
+/// macOS 27 (ENOENT regardless of the grant), so the system one is tried first.
 #[cfg(target_os = "macos")]
 fn full_disk_access_granted() -> bool {
-    let Some(home) = std::env::var_os("HOME") else {
-        return false;
-    };
-    let db =
-        std::path::PathBuf::from(home).join("Library/Application Support/com.apple.TCC/TCC.db");
-    std::fs::File::open(db).is_ok()
+    const TCC_DB: &str = "Library/Application Support/com.apple.TCC/TCC.db";
+    let user_db = std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(TCC_DB));
+    [Some(std::path::Path::new("/").join(TCC_DB)), user_db]
+        .into_iter()
+        .flatten()
+        .any(|db| std::fs::File::open(db).is_ok())
 }
 
 /// Whether cetus (and every agent CLI it spawns — macOS attributes child
