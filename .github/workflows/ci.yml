@@ -39,7 +39,7 @@ jobs:
 
   rust:
     name: Rust · fmt + clippy + check + test
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -87,7 +87,7 @@ jobs:
     # default branch, though, are readable from every ref — so main writes the
     # cache here and release.yml only reads it (`save-if: false`).
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
