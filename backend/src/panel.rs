@@ -128,8 +128,9 @@ fn voice_hud_class() -> *const AnyClass {
     }) as *const AnyClass
 }
 
-/// Whether `obj` is an `NSPanel` (Electron's `type: 'panel'` windows are; the
-/// panel-only setters below must not be sent to anything else).
+/// Whether `obj` is an `NSPanel`. Electron's `type: 'panel'` windows are
+/// `ElectronNSPanel`, which is not, and already get the non-activating style
+/// from Electron; the panel-only setters below must not be sent to them.
 unsafe fn is_panel(obj: &AnyObject) -> bool {
     match AnyClass::get(c"NSPanel") {
         Some(cls) => {
@@ -179,7 +180,6 @@ pub fn configure_hud(ns_window: *mut c_void) {
         }
         let _: () = msg_send![window, invalidateShadow];
     }
-    disable_occlusion_throttling(ns_window);
 }
 
 /// Reclass the window into the non-activating launcher panel and apply its
@@ -205,64 +205,7 @@ pub fn configure(ns_window: *mut c_void) {
             let mask = mask | STYLE_NONACTIVATING_PANEL;
             let _: () = msg_send![window, setStyleMask: mask];
             let _: () = msg_send![window, setFloatingPanel: Bool::YES];
-        } else {
-            let cls: *const AnyClass = msg_send![window, class];
-            tracing::warn!(
-                "panel::configure: window class {:?} is not an NSPanel",
-                (*cls).name()
-            );
         }
-    }
-    disable_occlusion_throttling(ns_window);
-}
-
-/// Disable WebKit's per-window occlusion throttling on `ns_window`.
-///
-/// macOS judges a parked / off-screen / occluded window to be "not visible" and
-/// throttles its WKWebView: `requestAnimationFrame` drops to ~1 Hz, CSS
-/// animations and timers stall, and after an idle stretch the rendered backing
-/// store is discarded. The next `present` then has to wait for WebKit to
-/// repaint, so the bare vibrancy (frosted gray) flashes in before the DOM does —
-/// the idle flicker. This is SEPARATE from App Nap ([`prevent_app_nap`], a
-/// process-level throttle): preventing App Nap does NOT stop per-window
-/// occlusion suspension, which is why the parked-sliver keep-warm on its own
-/// still flashes after a long idle.
-///
-/// `NSWindow` carries a private `windowOcclusionDetectionEnabled` flag — the same
-/// one WebKitTestRunner clears to keep its web view rendering while occluded, and
-/// that Raycast clears for its launcher. We clear it via KVC. The key is
-/// uncontracted, so the set runs inside an Obj-C `@try` guard: on a macOS build
-/// that ever drops it, the resulting `NSUnknownKeyException` is caught and logged
-/// rather than aborting. Call once per window after it exists.
-pub fn disable_occlusion_throttling(ns_window: *mut c_void) {
-    if ns_window.is_null() {
-        return;
-    }
-    let obj = ns_window as *mut AnyObject;
-    // `*mut AnyObject` isn't `UnwindSafe` (AnyObject holds interior mutability),
-    // so assert it across the catch boundary — we only read the pointer.
-    let caught = objc2::exception::catch(core::panic::AssertUnwindSafe(|| unsafe {
-        let window: &AnyObject = &*obj;
-        let (Some(num_cls), Some(str_cls)) =
-            (AnyClass::get(c"NSNumber"), AnyClass::get(c"NSString"))
-        else {
-            return;
-        };
-        let no: *mut AnyObject = msg_send![num_cls, numberWithBool: Bool::NO];
-        let key: *mut AnyObject = msg_send![
-            str_cls,
-            stringWithUTF8String: c"windowOcclusionDetectionEnabled".as_ptr()
-        ];
-        let _: () = msg_send![window, setValue: no, forKey: key];
-    }));
-    if caught.is_err() {
-        tracing::warn!(
-            "disable_occlusion_throttling: NSWindow rejected the private \
-             `windowOcclusionDetectionEnabled` KVC key (unsupported on this macOS?); \
-             idle re-show may flash the vibrancy surface"
-        );
-    } else {
-        tracing::debug!("disable_occlusion_throttling: cleared windowOcclusionDetectionEnabled");
     }
 }
 
@@ -640,7 +583,7 @@ pub fn remove_outside_click_monitor() {
 /// active app. A hidden auxiliary window must never participate in app ordering,
 /// so dismissal now ends at `orderOut:`.
 ///
-/// [`disable_occlusion_throttling`] still reduces idle WebKit suspension, and
+/// The panel windows run with `backgroundThrottling: false`, and
 /// [`present`] re-centers/orders the launcher when it is next requested. A cold
 /// launcher repaint is preferable to corrupting the main window's z-order.
 pub fn park(ns_window: *mut c_void) {

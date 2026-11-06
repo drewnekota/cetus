@@ -36,10 +36,6 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(4 * 60);
 /// Per-request network budget for discovery + the token exchange.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Some MCP edges (Notion's, behind Cloudflare) 403 a request with no
-/// User-Agent. reqwest sets none by default, so we must.
-const USER_AGENT: &str = concat!("cetus/", env!("CARGO_PKG_VERSION"));
-
 /// Serializes all refresh work in-process. Notion (and any RFC 9700 server) issues
 /// ROTATING refresh tokens — each refresh invalidates the previous one — so two
 /// overlapping refreshes (the periodic sweep racing a pre-spawn refresh) would have
@@ -53,7 +49,9 @@ fn refresh_lock() -> &'static tokio::sync::Mutex<()> {
 fn http_client() -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(HTTP_TIMEOUT)
-        .user_agent(USER_AGENT)
+        // Some MCP edges (Notion's, behind Cloudflare) 403 a request with no
+        // User-Agent. reqwest sets none by default, so we must.
+        .user_agent(format!("cetus/{}", crate::app_version()))
         .build()
 }
 

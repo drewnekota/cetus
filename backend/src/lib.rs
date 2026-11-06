@@ -258,6 +258,10 @@ fn init_logging() {
 /// Boot the backend inside the Electron host. Called once by the Node-API
 /// addon (`electron.rs`) after the host runtime and the app windows exist.
 pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    set_app_meta(
+        app.config().identifier.clone(),
+        app.package_info().version.to_string(),
+    );
     adopt_login_shell_env();
     init_logging();
 

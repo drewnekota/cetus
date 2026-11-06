@@ -22,7 +22,7 @@ pub async fn export_diagnostics() -> Result<String, String> {
     };
 
     push("== Cetus diagnostics ==");
-    push(&format!("cetus {}", env!("CARGO_PKG_VERSION")));
+    push(&format!("cetus {}", crate::app_version()));
     push(&format!(
         "{} {}",
         std::env::consts::OS,

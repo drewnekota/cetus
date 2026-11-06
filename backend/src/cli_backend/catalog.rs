@@ -81,7 +81,7 @@ async fn probe_grok_defaults() -> Option<CliDefaults> {
                 "fs": { "readTextFile": false, "writeTextFile": false },
                 "terminal": false
             },
-            "clientInfo": { "name": "cetus", "version": env!("CARGO_PKG_VERSION") }
+            "clientInfo": { "name": "cetus", "version": crate::app_version() }
         }
     })
     .to_string();

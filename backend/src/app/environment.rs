@@ -1,16 +1,38 @@
 use super::{dirs_home, Path, PathBuf};
 
+/// The running app's bundle identifier and version, as the Electron host
+/// reported them (`identifier` = `IDENTIFIER` in electron/main.ts, `version` =
+/// package.json). Set once at the top of `start`, before logging comes up.
+static APP_META: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
+
+pub(super) fn set_app_meta(identifier: String, version: String) {
+    let _ = APP_META.set((identifier, version));
+}
+
+/// The app version (package.json), for diagnostics and user agents.
+pub(crate) fn app_version() -> &'static str {
+    APP_META.get().map_or("unknown", |(_, v)| v.as_str())
+}
+
 /// Where persisted logs live: `<app data>/logs/cetus.log.YYYY-MM-DD`, daily
 /// rolling. Resolved without the host path API because tracing must come up
-/// before the host runtime (the identifier matches `IDENTIFIER` in
-/// electron/main.ts).
+/// before the host runtime is fully set up. Keyed by identifier so a dev
+/// build never writes into the release app's logs.
 pub(super) fn log_dir() -> Option<PathBuf> {
+    let identifier = APP_META
+        .get()
+        .map_or("dev.cetus.app", |(id, _)| id.as_str());
     #[cfg(target_os = "macos")]
     {
-        dirs_home().map(|h| h.join("Library/Application Support/dev.cetus.app/logs"))
+        dirs_home().map(|h| {
+            h.join("Library/Application Support")
+                .join(identifier)
+                .join("logs")
+        })
     }
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = identifier;
         dirs_home().map(|h| h.join(".cetus/logs"))
     }
 }

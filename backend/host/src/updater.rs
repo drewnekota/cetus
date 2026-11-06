@@ -59,9 +59,9 @@ fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
     Some((it.next()??, it.next()??, it.next().flatten().unwrap_or(0)))
 }
 
-fn http() -> Result<reqwest::Client> {
+fn http(current_version: &str) -> Result<reqwest::Client> {
     reqwest::Client::builder()
-        .user_agent(concat!("cetus-updater/", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("cetus-updater/{current_version}"))
         .connect_timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(err)
@@ -93,7 +93,7 @@ impl Update {
         mut on_chunk: C,
         on_finish: F,
     ) -> Result<Vec<u8>> {
-        let resp = http()?
+        let resp = http(&self.current_version)?
             .get(&self.url)
             .send()
             .await
@@ -159,7 +159,7 @@ pub struct Updater {
 
 impl Updater {
     pub async fn check(&self) -> Result<Option<Update>> {
-        let manifest: Manifest = http()?
+        let manifest: Manifest = http(&self.current_version)?
             .get(ENDPOINT)
             .send()
             .await
