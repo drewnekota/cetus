@@ -4,7 +4,7 @@ import UserNotifications
 
 // Port of Cetus's notification stack:
 //  - src/lib/notifications.ts  (prefs gate, mute-when-focused, one-shot permission request)
-//  - src-tauri/src/notify.rs   (NSUserNotificationCenter with a persistent delegate so a
+//  - backend/src/notify.rs   (NSUserNotificationCenter with a persistent delegate so a
 //                               click routes back as "open this conversation", the cetus
 //                               logo pinned via `_identityImage`, banners forced even
 //                               while frontmost)

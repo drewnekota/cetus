@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@/lib/host/core";
+import { getCurrentWindow } from "@/lib/host/window";
+import { listen } from "@/lib/host/event";
 import { BookPlus, Copy, X } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import type {
@@ -26,7 +26,7 @@ const ENVELOPE = Array.from({ length: BARS }, (_, i) => {
 const PHASE = Array.from({ length: BARS }, (_, i) => (i * 1.7) % (Math.PI * 2));
 
 /** The floating global-dictation capsule. The component IS the pill — it floats,
- *  centered, in its transparent `voice` window (sized in tauri.conf.json), with
+ *  centered, in its transparent `voice` window (sized in electron/windows.ts), with
  *  no native chrome behind it. While recording it shows only a centered
  *  equalizer that opens vertically with your voice — no live transcript, like
  *  Wispr Flow: raw ASR partials differ from the cleaned final text, and showing

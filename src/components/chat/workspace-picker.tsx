@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Folder, FolderPlus, MessageSquare, Server } from "lucide-react";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import {
   Select,
   SelectContent,

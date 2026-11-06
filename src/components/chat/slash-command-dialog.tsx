@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import type { SlashCommand } from "@/lib/types";
 import { useTranslation } from "@/lib/i18n";
 

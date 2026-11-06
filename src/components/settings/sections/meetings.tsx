@@ -47,7 +47,7 @@ import {
   type MeetingSettings,
   type MeetingStatus,
   type MeetingSegment,
-} from "@/lib/tauri";
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { HotkeyRecorder } from "../hotkey-recorder";
 import {

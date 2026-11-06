@@ -1,0 +1,12 @@
+[package]
+name = "cetus-cli"
+version = "0.1.0"
+edition = "2021"
+description = "The `cetus` control-socket CLI (talks to the running app over cetus.sock)."
+
+[[bin]]
+name = "cetus"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"

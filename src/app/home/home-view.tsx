@@ -51,7 +51,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { api, type Screenshot } from "@/lib/tauri";
+import { api, type Screenshot } from "@/lib/api";
 import { tt } from "@/lib/i18n";
 import {
   type Automation,
@@ -72,7 +72,7 @@ import type { ChatSwitcherState } from "./use-home-state";
 // The settings UI is a ~3900-line client component (plus react-markdown for the
 // skill previews). Code-split it so its chunk only loads the first time the user
 // opens Settings, keeping it out of the cold-start bundle. ssr:false is safe —
-// this is a static-export Tauri SPA with no server render. Gated on
+// this is a static-export SPA with no server render. Gated on
 // `settingsEverOpened` below so the mount (and thus the chunk fetch) is deferred
 // until first open; it then stays mounted so reopen is instant.
 const SettingsPage = dynamic(
@@ -685,7 +685,7 @@ export function renderHome({
                 <>
                   {shortcutPlatform() === "mac" && (
                     <div
-                      data-tauri-drag-region
+                      data-drag-region
                       className="h-full w-14 shrink-0"
                     />
                   )}
@@ -711,7 +711,7 @@ export function renderHome({
                   </Tooltip>
                 </>
               )}
-              <div data-tauri-drag-region className="h-full flex-1" />
+              <div data-drag-region className="h-full flex-1" />
               {!piReady && (
                 <span className="text-muted-foreground/70">○ connecting…</span>
               )}
@@ -851,7 +851,7 @@ export function renderHome({
               <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
                 <GlyphBackdrop />
                 <div
-                  className={`relative z-10 w-full max-w-2xl space-y-6 panel-motion transition-[translate] ${
+                  className={`relative z-10 w-full max-w-3xl space-y-6 panel-motion transition-[translate] ${
                     !sidebarOpen || sideWorkspace.open
                       ? ""
                       : "xl:-translate-x-10 2xl:-translate-x-12"

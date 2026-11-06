@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext } from "react";
 import { defaultUrlTransform, type Components } from "react-markdown";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@/lib/host/core";
 
 /**
  * Shared rehype-katex options. Assistant output routinely drops CJK text or
@@ -122,7 +122,7 @@ export function stripDanglingCodexCitation(text: string): string {
 }
 
 /**
- * Open a link in the default browser instead of letting the WKWebView navigate.
+ * Open a link in the default browser instead of letting the webview navigate.
  *
  * A bare in-webview `<a>` click both replaces the cetus UI and triggers macOS
  * Universal Links — so Lark/Feishu doc links (`*.larksuite.com`, `*.feishu.cn`)
@@ -209,9 +209,9 @@ export const markdownComponents: Components = {
     );
   },
   img({ src, alt, ...props }) {
-    // WKWebView cannot load file:// URLs (or absolute filesystem paths treated
-    // as web-root URLs) directly. Route local images through Tauri's asset
-    // protocol, just like artifact previews do.
+    // The webview cannot load file:// URLs (or absolute filesystem paths
+    // treated as web-root URLs) directly. Route local images through the
+    // asset:// protocol, just like artifact previews do.
     const localPath =
       typeof src === "string" ? localPathFromHref(src) : null;
     return (

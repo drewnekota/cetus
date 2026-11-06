@@ -48,34 +48,35 @@ jobs:
           components: rustfmt, clippy
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            backend
+            backend/host
+            backend/cli
 
-      - name: Stub frontend + pi-install resource paths
-        # tauri-build validates that the bundled `pi-install` resource path and
-        # the `frontendDist` (`../out`) directory exist at build-script / macro
-        # time, but their content only matters when bundling — release.yml
-        # builds the real frontend (`pnpm build`) and pi tree
-        # (scripts/build-pi-sidecar.sh, needs Bun) there. Empty dirs keep
-        # check/clippy/test green on a fresh checkout without those builds.
-        run: |
-          mkdir -p out
-          mkdir -p src-tauri/pi-install
-
+      # backend/ (the app addon), backend/host (the Electron host runtime the
+      # backend is written against) and backend/cli (the `cetus` CLI) are
+      # separate crates, each with its own lockfile and target dir.
       - name: Format check
-        working-directory: src-tauri
-        run: cargo fmt --check
+        run: |
+          for crate in backend backend/host backend/cli; do
+            (cd "$crate" && cargo fmt --check)
+          done
 
       - name: Clippy (warnings are errors)
-        working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: |
+          for crate in backend backend/host backend/cli; do
+            (cd "$crate" && cargo clippy --all-targets -- -D warnings)
+          done
 
       - name: Compile check
-        working-directory: src-tauri
+        working-directory: backend
         run: cargo check
 
       - name: Run tests
-        working-directory: src-tauri
-        run: cargo test
+        run: |
+          for crate in backend backend/host backend/cli; do
+            (cd "$crate" && cargo test)
+          done
 
   release-cache:
     name: Rust · warm release cache
@@ -93,19 +94,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: backend
           # rust-cache folds the job id into the key unless `shared-key` is set,
           # so this must stay identical to the value in release.yml.
           shared-key: release-macos-arm64
 
-      - name: Stub frontend + pi-install resource paths
-        # Same reason as the `rust` job above: tauri-build only checks that the
-        # paths exist. The stub bundle this produces is thrown away — only the
-        # cached dependency artifacts matter.
-        run: |
-          mkdir -p out
-          mkdir -p src-tauri/pi-install
-
       - name: Build release dependencies
-        working-directory: src-tauri
+        working-directory: backend
         run: cargo build --release

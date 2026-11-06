@@ -12,8 +12,8 @@
 // "production"). It renders null. Mount it only behind the same env gate.
 
 import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@/lib/host/core";
+import { listen } from "@/lib/host/event";
 
 interface DevtestCommand {
   id: string;

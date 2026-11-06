@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/select";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import { useTranslation } from "@/lib/i18n";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import {
   type BackendId,
   type CliAgentSettings,

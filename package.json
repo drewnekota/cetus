@@ -1,18 +1,19 @@
 {
   "name": "cetus",
-  "version": "0.4.18",
+  "version": "0.5.0",
   "description": "Turn Codex, Claude Code, or your favorite agent runtime into an always-on desktop assistant.",
   "private": true,
+  "cetus": {
+    "appId": "dev.cetus.app"
+  },
   "packageManager": "pnpm@10.27.0",
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
     "dev": "next dev -p 17381",
     "build": "next build",
     "start": "next start",
-    "lint": "tsc --noEmit",
-    "tauri": "tauri",
-    "app": "NEXT_PUBLIC_CETUS_DEVTEST=1 CETUS_DEVTEST=1 CETUS_DEVTEST_SOCK=/tmp/cetus-devtest.sock tauri dev --features devtest",
-    "app:build": "tauri build",
+    "lint": "tsc --noEmit && tsc --noEmit -p electron",
+    "app": "node scripts/electron-dev.mjs",
     "app:signed": "scripts/build-local-signed.sh",
     "app:release": "scripts/build-release.sh",
     "test:chat-scroll": "playwright test --config playwright.chat.config.ts"
@@ -24,9 +25,6 @@
     "@fontsource/old-standard-tt": "^5.2.8",
     "@tailwindcss/postcss": "^4.3.0",
     "@tanstack/react-virtual": "^3.14.11",
-    "@tauri-apps/api": "^2.1.1",
-    "@tauri-apps/plugin-dialog": "^2.0.1",
-    "@tauri-apps/plugin-notification": "^2.3.3",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
@@ -54,16 +52,19 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/typography": "^0.5.19",
-    "@tauri-apps/cli": "^2.1.0",
     "@types/katex": "^0.16.8",
     "@types/node": "^22.10.2",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
+    "electron": "^45.2.3",
+    "esbuild": "^0.28.2",
     "postcss": "^8.4.49",
     "shadcn": "^4.8.2",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.7.2"
-  }
+  },
+  "main": "electron/dist/main.js"
 }

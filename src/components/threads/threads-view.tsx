@@ -137,7 +137,7 @@ export const ThreadsView = memo(function ThreadsView({
             window drag strip — the shell's own header shrinks to a sliver in
             this view. */}
         <div
-          data-tauri-drag-region
+          data-drag-region
           className="flex h-10 shrink-0 items-center gap-2.5 border-b border-border/70 px-6"
         >
           <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />

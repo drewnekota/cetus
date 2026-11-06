@@ -5,7 +5,7 @@
  *  Detection is by exact text, which covers both the live `message_start`
  *  event and reloads replaying the persisted row. */
 
-/** Keep in sync with `CLI_AUTO_RETRY_PROMPT` in src-tauri/src/cli_backend.rs. */
+/** Keep in sync with `CLI_AUTO_RETRY_PROMPT` in backend/src/cli_backend.rs. */
 export const CLI_AUTO_RETRY_PROMPT =
   "The previous turn stopped early due to a transient provider error (rate limited or " +
   "overloaded). This is an automatic retry: review what has already been done in this " +

@@ -20,7 +20,7 @@ describe("coordinator-tools extension", () => {
   async function load() {
     process.env.CETUS_COORDINATOR = "1";
     const { default: register } = await import(
-      "../../src-tauri/cetus-extensions/coordinator-tools.ts"
+      "../../backend/cetus-extensions/coordinator-tools.ts"
     );
     const tools = [];
     const commands = [];
@@ -56,7 +56,7 @@ describe("coordinator-tools extension", () => {
 const sendPrompt = mock(async () => {});
 const appListeners = [];
 const replies = [];
-mock.module("@/lib/tauri", () => ({
+mock.module("@/lib/api", () => ({
   api: {
     sendPrompt,
     extensionUiRespond: async (_cid, _rid, { value }) => replies.push(JSON.parse(value)),

@@ -58,11 +58,11 @@ const SCROLL_TO_BOTTOM_BUTTON_VIEWPORT_RATIO = 0.5;
 
 // The turn navigator occupies the left 48px from `sm` upward. Before the
 // max-w-4xl reading column has enough viewport space to center itself clear of
-// that rail (1024px), reserve the rail explicitly so its ticks never overlap
+// that rail (1152px), reserve the rail explicitly so its ticks never overlap
 // message text. At wider sizes the column's normal centering provides the gap.
 // `selection-shell` keeps these layout wrappers from painting selection gaps
 // (see globals.css).
-const MESSAGE_ROW_GUTTER_CLASS = "selection-shell px-4 sm:pl-14 min-[1024px]:px-4";
+const MESSAGE_ROW_GUTTER_CLASS = "selection-shell px-4 sm:pl-14 min-[1152px]:px-4";
 
 /** Reading position per conversation, so a half-read history resumes where it
  *  was left instead of snapping to the newest turn. Only conversations the
@@ -753,7 +753,8 @@ export function MessageList({
       <QuoteSelectionToolbar scroller={scroller} onQuote={onQuote} />
       <ChatVirtualList
         // Each conversation mounts with its own saved position or newest turn.
-        key={convId ?? "new"}
+        // Prefixed: TurnNavigator below is a sibling keyed by the same id.
+        key={`list:${convId ?? "new"}`}
         ref={listRef}
         scrollerRef={setScrollerRef}
         data={items}
@@ -788,7 +789,7 @@ export function MessageList({
       <TurnNavigator
         // A fresh navigator per conversation: no hover/pan state carried over,
         // and no slide from the previous conversation's window position.
-        key={convId ?? "new"}
+        key={`nav:${convId ?? "new"}`}
         convId={convId}
         userTurns={userTurns}
         topIndex={topIndex}
@@ -1083,7 +1084,7 @@ function ScrollToBottomButton({
       aria-label={t("pane.scrollToBottom")}
       title={t("pane.scrollToBottom")}
       onClick={scrollToBottom}
-      className={`fade-layer absolute bottom-4 right-[max(1rem,calc((100%-48rem)/2))] z-30 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] transition-all panel-motion hover:bg-muted ${
+      className={`fade-layer absolute bottom-4 right-[max(1rem,calc((100%-56rem)/2))] z-30 flex size-9 items-center justify-center rounded-full border border-border bg-popover text-foreground shadow-[0_4px_14px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.08)] transition-all panel-motion hover:bg-muted ${
         opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
       } ${
         show

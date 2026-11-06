@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import {
   loadHiddenWorkspaces,
   loadRecentWorkspaces,

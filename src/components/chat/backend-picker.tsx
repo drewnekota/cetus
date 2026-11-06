@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Settings2 } from "lucide-react";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { useChatStore } from "@/lib/chat-store";
 import type {
   BackendId,

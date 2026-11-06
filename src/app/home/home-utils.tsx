@@ -17,7 +17,7 @@ import {
   type WorkspaceLayout,
 } from "@/components/workspace/workspace-panel";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { useChatStore } from "@/lib/chat-store";
 import { buildAttachmentRefs } from "@/lib/attachments";
 import { type Automation, type Conversation } from "@/lib/types";

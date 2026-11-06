@@ -23,7 +23,7 @@ import {
   remarkTrimAutolinkCjk,
 } from "@/lib/markdown";
 import { Check, Copy, FileText, GitFork } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/host/core";
 import type { RenderedBlock } from "@/lib/types";
 import { ArtifactView } from "./artifact-view";
 import { ContextCard } from "./context-card";

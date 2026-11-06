@@ -1,4 +1,4 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@/lib/host/core";
 
 /**
  * Payload the cetus send_artifact pi extension returns in tool result `details`.
@@ -31,7 +31,7 @@ export function artifactsFromDetails(details: unknown): ArtifactDetails[] {
   return [];
 }
 
-/** Tauri asset:// URL for an absolute local path — streams without bouncing through Rust. */
+/** asset:// URL for an absolute local path — streams without bouncing through Rust. */
 export function artifactUrl(path: string): string {
   return convertFileSrc(path);
 }

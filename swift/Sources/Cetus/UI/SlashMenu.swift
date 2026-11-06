@@ -3,7 +3,7 @@ import SwiftUI
 
 // The composer's `/` menu, after Cetus's slash-menu.tsx, composer.tsx
 // (slashItems / applySlash), composer-utils.tsx and slash-command-dialog.tsx,
-// plus the pre-session runtime catalog probe (src-tauri cli_backend/catalog.rs
+// plus the pre-session runtime catalog probe (backend cli_backend/catalog.rs
 // probe_cli_commands, cetus-bridge probe_codex_skills).
 
 /// One row: a command (expands to a prompt) or a skill (inserts its token).

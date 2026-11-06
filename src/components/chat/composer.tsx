@@ -37,7 +37,7 @@ import {
 import { splitLeadingQuote } from "@/lib/user-quote";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeroPlaceholder } from "@/lib/chat-flavor";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { composeWithAmbient } from "@/lib/quick-context";
 import { prepareImageAttachment } from "@/lib/image-attachment";
 import { readDroppedFiles } from "@/lib/dropped-files";
@@ -588,7 +588,11 @@ export function Composer({
       catalogProbeRef.current = { key, request };
       void request
         .then((commands) => {
-          catalogCheckedAtRef.current.set(key, Date.now());
+          // Only a real probe counts as "checked": the prewarm is served from
+          // the app-lifetime cache, and stamping it would skip the refresh
+          // when `/` opens right after a new chat mounts — so skills installed
+          // since launch never appear.
+          if (forceRefresh) catalogCheckedAtRef.current.set(key, Date.now());
           // A slower probe for a previously selected runtime must not replace
           // the current runtime's catalog.
           if (catalogProbeRef.current?.request === request) {

@@ -2,7 +2,7 @@
  * Shared host/extension bridge protocol for Cetus-compatible pi extensions.
  *
  * Extension packages can import these helpers directly. Cetus keeps a small
- * re-export shim under `src-tauri/cetus-extensions/bridge/protocol.ts` so the
+ * re-export shim under `backend/cetus-extensions/bridge/protocol.ts` so the
  * host extension scanner only sees top-level extension entrypoints.
  */
 

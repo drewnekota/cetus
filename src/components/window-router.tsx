@@ -19,7 +19,7 @@ export function WindowRouter({ children }: { children: React.ReactNode }) {
   const [label, setLabel] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    import("@tauri-apps/api/window")
+    import("@/lib/host/window")
       .then(({ getCurrentWindow }) => {
         if (alive) setLabel(getCurrentWindow().label);
       })

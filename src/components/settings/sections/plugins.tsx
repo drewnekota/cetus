@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/lib/i18n";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import type { PluginEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { SectionHeading } from "../settings-controls";

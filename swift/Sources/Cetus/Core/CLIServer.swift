@@ -1,10 +1,10 @@
 import Foundation
 
 // Port of Cetus's control surface for the `cetus` CLI:
-//  - src-tauri/src/control.rs        always-on Unix socket, newline-delimited JSON, op allowlist
-//  - src-tauri/src/automation_api.rs automation CRUD through the scheduler (validation, next-run)
-//  - src-tauri/src/cli.rs            the std-only CLI client (`Cetus cli …`, see CLIClient)
-//  - src-tauri/src/cli_backend/turns.rs  CETUS_SOCK + the shim dir on child agents' PATH,
+//  - backend/src/control.rs        always-on Unix socket, newline-delimited JSON, op allowlist
+//  - backend/src/automation_api.rs automation CRUD through the scheduler (validation, next-run)
+//  - backend/src/cli.rs            the std-only CLI client (`Cetus cli …`, see CLIClient)
+//  - backend/src/cli_backend/turns.rs  CETUS_SOCK + the shim dir on child agents' PATH,
 //                                        and the one-line AGENT_HINT
 //
 // SECURITY: filesystem socket only (no TCP), chmod 0600.

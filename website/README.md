@@ -37,6 +37,6 @@ Run `npm run deploy` with an authenticated Wrangler CLI. `scripts/stage.mjs` cop
 
 ## Separation from desktop releases
 
-This directory has its own npm dependencies and build. The desktop app exports `src/app` to `out/`; Tauri bundles that export and `src-tauri/pi-install`, not `website/`. Website changes do not require an app version bump or an app release. GitHub’s automatic source archives do include tracked website source.
+This directory has its own npm dependencies and build. The desktop app exports `src/app` to `out/`; the Electron app bundles that export and `backend/pi-install`, not `website/`. Website changes do not require an app version bump or an app release. GitHub’s automatic source archives do include tracked website source.
 
 Only source, public assets, the lockfile, and the prebuilt browser bundle are tracked. `node_modules/`, `dist/`, `.wrangler/`, and local credentials remain ignored. Website deployment is independent of the desktop release workflows.

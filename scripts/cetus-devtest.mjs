@@ -111,8 +111,7 @@ function parseArgs(argv) {
 function defaultSocketPath() {
   if (process.env.CETUS_DEVTEST_SOCK) return process.env.CETUS_DEVTEST_SOCK;
   // `pnpm app` sets CETUS_DEVTEST_SOCK=/tmp/cetus-devtest.sock, which is the
-  // canonical dev path. Fall back to the Tauri app_data_dir location for
-  // builds started without the env (bundle id: dev.cetus.app).
+  // canonical dev path.
   if (process.platform === "darwin") {
     return "/tmp/cetus-devtest.sock";
   }

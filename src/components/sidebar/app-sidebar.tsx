@@ -167,6 +167,7 @@ export const AppSidebar = memo(function AppSidebar({
       newDefaultChat: shortcutDisplay(shortcuts.newDefaultChat),
       archiveChat: shortcutDisplay(shortcuts.archiveChat),
       toggleSidebar: shortcutDisplay(shortcuts.toggleSidebar),
+      openAutomations: shortcutDisplay(shortcuts.openAutomations),
     }),
     [shortcuts],
   );
@@ -333,7 +334,7 @@ export const AppSidebar = memo(function AppSidebar({
       <SidebarHeader className="gap-2">
         {/* Clears the macOS traffic lights (overlay title bar) and doubles as a
             window drag handle, since there's no native title bar to grab. */}
-        <div data-tauri-drag-region className="h-6 w-full shrink-0" />
+        <div data-drag-region className="h-6 w-full shrink-0" />
         <SidebarMenu>
           <SidebarMenuItem>
             {/* Not a destination — it's just the brand mark, so render it as a
@@ -396,6 +397,9 @@ export const AppSidebar = memo(function AppSidebar({
             >
               <Clock />
               <span>{t("nav.automations")}</span>
+              <Kbd className="ml-auto border-transparent">
+                {shortcutLabels.openAutomations}
+              </Kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
           {mode !== "threads" && (

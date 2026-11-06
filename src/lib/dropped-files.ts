@@ -1,10 +1,10 @@
 // Files dropped on a cetus window arrive as OS paths, not as web `File`s: the
-// Tauri runtime installs its own drag-drop handler on the webview, so HTML5
-// `drop` events never fire with a populated `dataTransfer.files`. This module
+// host's drag-drop events (src/lib/host/webview.ts) resolve them at the
+// window level and hand the app paths only. This module
 // turns those paths back into `File` objects so the existing attachment
 // pipelines (image downscaling, size caps, base64 inlining) can be reused
 // unchanged, and reports what had to be referenced by path instead.
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 
 /** Extensions the composer's image pipeline can decode. Anything else rides the
  *  plain-file path — a dropped `.heic` is a file attachment, not a broken

@@ -1,0 +1,19 @@
+[package]
+name = "cetus-host"
+version = "0.1.0"
+edition = "2021"
+description = "Electron host runtime for the Cetus backend: app handle, managed state, events, commands, windows and plugins, with window/UI work forwarded to the Electron main process."
+
+[dependencies]
+cetus-host-macros = { path = "macros" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+url = { version = "2", features = ["serde"] }
+once_cell = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = "0.3"
+base64 = "0.22"
+minisign-verify = "0.2"
+flate2 = "1"
+tar = "0.4"

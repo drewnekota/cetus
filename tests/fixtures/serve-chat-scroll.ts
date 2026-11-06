@@ -1,5 +1,5 @@
 // Small real-DOM fixture: production virtualizer and scroll controller, without
-// Tauri or a user's conversations. Run through pnpm test:chat-scroll.
+// the app host or a user's conversations. Run through pnpm test:chat-scroll.
 const build = await Bun.build({ entrypoints: ['tests/fixtures/chat-scroll.tsx'], target: 'browser' });
 if (!build.success) throw new Error(build.logs.join('\n'));
 const bundle = await build.outputs[0].text();

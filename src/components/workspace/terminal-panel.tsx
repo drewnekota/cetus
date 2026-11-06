@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@/lib/host/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTermTerminal, type ITheme } from "@xterm/xterm";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { TerminalRunRequest } from "./workspace-panel";
 
 /* xterm.js keeps a `_keyDownSeen` flag that swallows `input` events arriving

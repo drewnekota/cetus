@@ -6,6 +6,6 @@ set -e
 files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
 [ -z "$files" ] && exit 0
 command -v rustfmt >/dev/null 2>&1 || { echo "pre-commit: rustfmt not found, skipping format" >&2; exit 0; }
-# --edition matches src-tauri/Cargo.toml; rustfmt.toml (if any) is picked up automatically.
+# --edition matches backend/Cargo.toml; rustfmt.toml (if any) is picked up automatically.
 echo "$files" | xargs rustfmt --edition 2021
 echo "$files" | xargs git add --

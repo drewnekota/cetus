@@ -7,7 +7,7 @@ import {
   onAppEvent,
   onMeetingCaption,
   type MeetingCaption,
-} from "@/lib/tauri";
+} from "@/lib/api";
 import { formatElapsed } from "@/lib/format";
 import { tt } from "@/lib/i18n";
 
@@ -305,7 +305,7 @@ export function MeetingHud() {
       onMouseMove={onMouseMove}
     >
       <div
-        data-tauri-drag-region
+        data-drag-region
         // A press on the capsule opens the card at once. `mousedown` rather
         // than `click`: the drag region hands the mouse to the native
         // window-move loop, which swallows the matching mouseup/click. A drag
@@ -316,7 +316,7 @@ export function MeetingHud() {
         className="flex h-[52px] w-full shrink-0 items-center justify-center"
       >
         <div
-          data-tauri-drag-region
+          data-drag-region
           className="flex h-8 items-center gap-2 rounded-full bg-black pl-3 pr-1.5 shadow-[0_2px_10px_rgba(0,0,0,0.45)]"
         >
           <span className="pointer-events-none relative flex size-2 shrink-0">

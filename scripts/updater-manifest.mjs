@@ -1,9 +1,17 @@
 #!/usr/bin/env node
+// Build and check the updater feed (`latest.json`) that release.yml publishes.
+// The format is the Tauri updater's, which the in-app updater
+// (backend/host/src/updater.rs) reads. Cetus ships for macOS (Apple Silicon)
+// only, so the manifest carries exactly one platform: darwin-aarch64.
+//
+//   node scripts/updater-manifest.mjs create --output <file> --version <x.y.z>
+//     --pub-date <iso> --mac-url <url> --mac-signature-file <file.sig>
+//   node scripts/updater-manifest.mjs verify --manifest <file> --version <x.y.z>
 
 import fs from "node:fs";
 import path from "node:path";
 
-const PLATFORM_KEYS = ["darwin-aarch64", "windows-x86_64"];
+const PLATFORM_KEYS = ["darwin-aarch64"];
 
 function fail(message) {
   process.stderr.write(`updater-manifest: ${message}\n`);
@@ -52,9 +60,9 @@ function validateManifest(manifest, expectedVersion) {
   }
 
   const keys = Object.keys(manifest.platforms ?? {}).sort();
-  if (keys.length === 0 || keys.some((key) => !PLATFORM_KEYS.includes(key))) {
+  if (keys.join(",") !== PLATFORM_KEYS.join(",")) {
     fail(
-      `manifest platforms must contain at least one of: ${PLATFORM_KEYS.join(", ")}`,
+      `manifest platforms must be exactly ${PLATFORM_KEYS.join(", ")}; got ${keys.join(", ") || "none"}`,
     );
   }
 
@@ -75,34 +83,6 @@ function validateManifest(manifest, expectedVersion) {
   }
 }
 
-function validateMergeSource(manifest, expectedVersion, replacedPlatform) {
-  if (!manifest || typeof manifest !== "object") {
-    fail("manifest root must be an object");
-  }
-  if (manifest.version !== expectedVersion) {
-    fail(
-      `manifest version ${JSON.stringify(manifest.version)} does not match ${expectedVersion}`,
-    );
-  }
-  if (!manifest.pub_date || Number.isNaN(Date.parse(manifest.pub_date))) {
-    fail("manifest pub_date is missing or invalid");
-  }
-
-  const preservedPlatform = PLATFORM_KEYS.find(
-    (platform) => platform !== replacedPlatform,
-  );
-  const preservedEntry = manifest.platforms?.[preservedPlatform];
-  if (!preservedEntry?.signature?.trim()) {
-    fail(`${preservedPlatform} must already exist before a single-platform merge`);
-  }
-  try {
-    const url = new URL(preservedEntry.url);
-    if (url.protocol !== "https:") throw new Error("not HTTPS");
-  } catch {
-    fail(`${preservedPlatform} URL is invalid`);
-  }
-}
-
 const { command, values } = parseArgs(process.argv.slice(2));
 
 if (command === "create") {
@@ -117,10 +97,6 @@ if (command === "create") {
         signature: readSignature(required(values, "mac-signature-file")),
         url: required(values, "mac-url"),
       },
-      "windows-x86_64": {
-        signature: readSignature(required(values, "windows-signature-file")),
-        url: required(values, "windows-url"),
-      },
     },
   };
 
@@ -128,49 +104,6 @@ if (command === "create") {
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
   process.stdout.write(`created ${output} for ${version}\n`);
-} else if (command === "create-platform") {
-  const output = required(values, "output");
-  const version = required(values, "version");
-  const platform = required(values, "platform");
-  if (!PLATFORM_KEYS.includes(platform)) {
-    fail(`unsupported platform: ${platform}`);
-  }
-  const manifest = {
-    version,
-    notes: "See the GitHub release page for details.",
-    pub_date: required(values, "pub-date"),
-    platforms: {
-      [platform]: {
-        signature: readSignature(required(values, "signature-file")),
-        url: required(values, "url"),
-      },
-    },
-  };
-
-  validateManifest(manifest, version);
-  fs.mkdirSync(path.dirname(output), { recursive: true });
-  fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
-  process.stdout.write(`created ${output} for ${version} (${platform})\n`);
-} else if (command === "merge") {
-  const file = required(values, "manifest");
-  const output = required(values, "output");
-  const version = required(values, "version");
-  const platform = required(values, "platform");
-  if (!PLATFORM_KEYS.includes(platform)) {
-    fail(`unsupported platform: ${platform}`);
-  }
-
-  const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
-  validateMergeSource(manifest, version, platform);
-  manifest.pub_date = new Date().toISOString();
-  manifest.platforms[platform] = {
-    signature: readSignature(required(values, "signature-file")),
-    url: required(values, "url"),
-  };
-  validateManifest(manifest, version);
-  fs.mkdirSync(path.dirname(output), { recursive: true });
-  fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
-  process.stdout.write(`merged ${platform} into ${output} for ${version}\n`);
 } else if (command === "verify") {
   const file = required(values, "manifest");
   const version = required(values, "version");
@@ -180,5 +113,5 @@ if (command === "create") {
     `verified ${file}: ${version}, ${Object.keys(manifest.platforms).join(", ")}\n`,
   );
 } else {
-  fail("expected command: create, create-platform, merge, or verify");
+  fail("expected command: create or verify");
 }

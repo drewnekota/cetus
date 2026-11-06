@@ -70,10 +70,10 @@ function setNativeZoom(z: number): Promise<void> {
   // floating-ui: the trigger's rect comes back pre-scaled while the portaled
   // content (in <body>, also zoomed) re-applies the scale, so panels drift away
   // from their trigger proportionally to the zoom level.
-  return import("@tauri-apps/api/webview")
+  return import("@/lib/host/webview")
     .then(({ getCurrentWebview }) => getCurrentWebview().setZoom(z))
     .catch(() => {
-      // Browser / non-Tauri fallback (e.g. plain dev server): CSS zoom is the
+      // Plain-browser fallback (e.g. the dev server in a browser tab): CSS zoom is the
       // only lever available. Popovers may drift here, but the desktop app uses
       // the native path above.
       document.documentElement.style.setProperty("zoom", String(z));

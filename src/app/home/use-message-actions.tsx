@@ -7,7 +7,7 @@ import {
   type QueuedMessage,
 } from "@/components/chat/composer";
 import { toast } from "sonner";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { useChatStore } from "@/lib/chat-store";
 import { INTERRUPTED_RESUME_PROMPT } from "@/lib/continuation-prompts";
 import {
@@ -182,8 +182,8 @@ export function useMessageActions({
       return;
     }
     store.userSent(convId, text, out.localImages, out.savedFiles);
-    // Reclaim focus so the next prompt is one keystroke away — Tauri's
-    // webview steals focus away from the textarea after a submit on macOS.
+    // Reclaim focus so the next prompt is one keystroke away — the textarea
+    // can lose focus after a submit.
     setFocusToken((t) => t + 1);
     try {
       await api.sendPrompt(convId, out.piMessage, out.piImages);

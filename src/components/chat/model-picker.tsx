@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Check, ChevronDown, Server, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { DsModel, ModelChoice, ReasoningLevel } from "@/lib/types";
-import { api, type CustomProviderView } from "@/lib/tauri";
+import { api, type CustomProviderView } from "@/lib/api";
 import {
   DropdownMenu,
   DropdownMenuContent,

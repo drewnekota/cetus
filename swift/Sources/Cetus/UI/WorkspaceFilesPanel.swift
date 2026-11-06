@@ -16,7 +16,7 @@ struct WorkspaceEntry: Identifiable, Hashable {
     var id: String { path }
 }
 
-/// Directory listing / search / git status, after src-tauri commands/workspace.rs.
+/// Directory listing / search / git status, after backend commands/workspace.rs.
 enum WorkspaceListing {
     static let maxChildren = 500
 

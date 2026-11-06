@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # Code-sign (and optionally notarize) a cetus macOS bundle.
 #
-# WHY THIS EXISTS, NOT just Tauri's built-in signer: the app bundles a
+# WHY THIS EXISTS, NOT a packager's built-in signer: the app bundles a
 # bun-compiled `pi` executable plus several native `.node` modules under
-# Contents/Resources/pi-install/. Tauri signs the .app shell and its main
-# binary, but does NOT sign arbitrary Mach-O files living under resources/.
-# Apple's notary service rejects any bundle containing an unsigned or
+# Contents/Resources/pi-install/, and the `pi` sidecar needs entitlements
+# that differ from the app's. Apple's notary service rejects any bundle containing an unsigned or
 # non-hardened-runtime executable, so we sign every nested Mach-O ourselves,
-# inside-out (deepest first), giving the JIT'ing `pi` sidecar its own looser
-# entitlements. Then we seal the .app last.
+# then the nested bundles inside-out, giving the JIT'ing `pi` sidecar its own
+# looser entitlements. Then we seal the .app last.
 #
 # Usage:
 #   APPLE_SIGNING_IDENTITY="..." scripts/macos-sign.sh <Cetus.app | Cetus.dmg> [--harden] [--notarize]
@@ -28,8 +27,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_ENTITLEMENTS="$SCRIPT_DIR/../src-tauri/entitlements.plist"
-PI_ENTITLEMENTS="$SCRIPT_DIR/../src-tauri/entitlements-pi.plist"
+APP_ENTITLEMENTS="$SCRIPT_DIR/../backend/entitlements.plist"
+PI_ENTITLEMENTS="$SCRIPT_DIR/../backend/entitlements-pi.plist"
 
 TARGET="${1:-}"
 HARDEN=0
@@ -110,19 +109,41 @@ case "$TARGET" in
   *.app|*.app/)
     APP="${TARGET%/}"
     MAIN_BIN_DIR="$APP/Contents/MacOS"
-    # Every Mach-O under the bundle, deepest path first, EXCLUDING the main
-    # binary in Contents/MacOS/ (sealed when we sign the .app itself below).
-    while IFS= read -r f; do
-      case "$f" in "$MAIN_BIN_DIR"/*) continue ;; esac
-      if file -b "$f" | grep -q "Mach-O"; then
-        printf '%s\t%s\n' "$(awk -F/ '{print NF}' <<<"$f")" "$f"
-      fi
-    done < <(find "$APP" -type f) | sort -rn | cut -f2- | while IFS= read -r f; do
-      case "$f" in
-        */pi-install/pi) echo "  sign (pi sidecar): ${f#$APP/}"; sign_one "$f" "$PI_ENTITLEMENTS" ;;
-        *)               echo "  sign: ${f#$APP/}";              sign_one "$f" ;;
-      esac
-    done
+    # Every Mach-O file under the bundle, EXCLUDING the main binary in
+    # Contents/MacOS/ (sealed when we sign the .app itself below). Found by
+    # magic number (one `file` per file took minutes over ~10k files), and
+    # signed in parallel: they're all plain files, so order doesn't matter —
+    # only the bundle seals below have to come after their contents. Each
+    # --timestamp signature waits on Apple's timestamp server.
+    export APPLE_SIGNING_IDENTITY HARDEN PI_ENTITLEMENTS APP
+    find "$APP" -type f ! -path "$MAIN_BIN_DIR/*" -print0 |
+      perl -0ne 'chomp; open(my $h, "<", $_) or next; read($h, my $m, 8) == 8 or next;
+        my ($magic, $n) = unpack("a4 N", $m);
+        print "$_\0" if $magic =~ /^(\xcf\xfa\xed\xfe|\xce\xfa\xed\xfe|\xfe\xed\xfa\xcf|\xfe\xed\xfa\xce)$/
+          || ($magic eq "\xca\xfe\xba\xbe" && $n > 0 && $n < 20);' |
+      xargs -0 -n 1 -P 8 bash -c '
+        f="$1"
+        args=(--force --sign "$APPLE_SIGNING_IDENTITY")
+        [ "$HARDEN" = 1 ] && args+=(--options runtime --timestamp)
+        case "$f" in
+          */pi-install/pi)
+            echo "  sign (pi sidecar): ${f#$APP/}"
+            [ "$HARDEN" = 1 ] && args+=(--entitlements "$PI_ENTITLEMENTS") ;;
+          *) echo "  sign: ${f#$APP/}" ;;
+        esac
+        codesign "${args[@]}" "$f"' _
+    # Then the nested bundles Electron ships (frameworks, helper apps), deepest
+    # first, so each one's seal covers the binaries signed above. Helper apps
+    # run renderer/GPU code and need the same JIT entitlements as the app.
+    if [ -d "$APP/Contents/Frameworks" ]; then
+      find "$APP/Contents/Frameworks" -depth \( -name '*.framework' -o -name '*.app' \) -print |
+        while IFS= read -r b; do
+          case "$b" in
+            *.app) echo "  seal helper: ${b#$APP/}"; sign_one "$b" "$APP_ENTITLEMENTS" ;;
+            *)     echo "  seal framework: ${b#$APP/}"; sign_one "$b" ;;
+          esac
+        done
+    fi
     # Seal the bundle last (this signs Contents/MacOS/<main> with app entitlements).
     echo "→ Sealing $APP"
     sign_one "$APP" "$APP_ENTITLEMENTS"

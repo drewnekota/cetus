@@ -1,6 +1,6 @@
 import Foundation
 
-// Port of src-tauri/src/cli.rs: the `cetus` CLI, entered as `Cetus cli …` (the shim
+// Port of backend/src/cli.rs: the `cetus` CLI, entered as `Cetus cli …` (the shim
 // in <data>/bin execs that). Parse argv → one JSON-lines request over $CETUS_SOCK →
 // print the response. `cron edit` get-merges a partial patch.
 

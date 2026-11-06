@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build pi as a single-file binary and assemble its full runtime tree under
-# src-tauri/pi-install/.
+# backend/pi-install/.
 #
 # Why a tree, not just a binary: pi's Bun-compiled executable resolves several
 # resources (package.json, theme/*.json, assets/*) relative to its binary's
@@ -8,8 +8,8 @@
 # only the binary breaks startup (see pi issue notes in TROUBLESHOOTING). The
 # install tree mirrors the npm tarball so every relative-path read resolves.
 #
-# Output: src-tauri/pi-install/
-#   pi / pi.exe               — the bun-compiled executable
+# Output: backend/pi-install/
+#   pi                        — the bun-compiled executable
 #   package.json, dist/, ...  — full npm tarball contents
 #   node_modules/             — runtime deps from `bun install`
 #   theme/, assets/           — symlinks to dist/modes/interactive/{theme,assets}
@@ -18,15 +18,13 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEST_DIR="$REPO_ROOT/src-tauri/pi-install"
+DEST_DIR="$REPO_ROOT/backend/pi-install"
 
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64)       CLIP_PLATFORM="darwin-arm64";       PI_FILENAME="pi" ;;
   Darwin-x86_64)      CLIP_PLATFORM="darwin-x64";         PI_FILENAME="pi" ;;
   Linux-x86_64)       CLIP_PLATFORM="linux-x64";          PI_FILENAME="pi" ;;
   Linux-aarch64)      CLIP_PLATFORM="linux-arm64";        PI_FILENAME="pi" ;;
-  MINGW*-x86_64)      CLIP_PLATFORM="win32-x64-msvc";     PI_FILENAME="pi.exe" ;;
-  MINGW*-aarch64)     CLIP_PLATFORM="win32-arm64-msvc";   PI_FILENAME="pi.exe" ;;
   *)
     echo "Unsupported host platform: $(uname -s) $(uname -m)" >&2
     exit 1 ;;
@@ -78,8 +76,8 @@ mkdir -p "$DEST_DIR"
 cp -R . "$DEST_DIR/"
 # Pi's compiled binary reads `<bindir>/theme/*` and `<bindir>/assets/*` at
 # startup, but in the tarball those live under dist/modes/interactive/. Copy
-# them up — symlinks don't survive Tauri's resource bundler (it dereferences,
-# then the bundled copy has no top-level theme/ dir).
+# them up as real directories so the tree stays self-contained once copied
+# into the app bundle (no symlinks to resolve at runtime).
 cp -R dist/modes/interactive/theme  "$DEST_DIR/theme"
 cp -R dist/modes/interactive/assets "$DEST_DIR/assets"
 chmod 0755 "$DEST_DIR/$PI_FILENAME"
@@ -87,28 +85,28 @@ chmod 0755 "$DEST_DIR/$PI_FILENAME"
 # The app runs pi from a writable copy under app_data. Stamp the bundled tree
 # with both Cetus and pi versions so an app upgrade can tell when that copy must
 # be replaced instead of silently keeping an old binary/model registry forever.
-APP_VERSION="$(node -e 'console.log(require(process.argv[1]).version)' "$REPO_ROOT/src-tauri/tauri.conf.json")"
+APP_VERSION="$(node -e 'console.log(require(process.argv[1]).version)' "$REPO_ROOT/package.json")"
 PI_VERSION="$(node -e 'console.log(require(process.argv[1]).version)' "$DEST_DIR/package.json")"
 printf '%s\n' "cetus=$APP_VERSION pi=$PI_VERSION" > "$DEST_DIR/.cetus-runtime-version"
 
 # Overlay cetus's own pi extensions (native model registration, etc.). These live under
-# version control at src-tauri/cetus-extensions/ and must be re-deployed here on
+# version control at backend/cetus-extensions/ and must be re-deployed here on
 # every sidecar build because this whole tree is wiped (rm -rf above) and is
 # itself gitignored. pi loads `<bindir>/<EXT_DIR>/*.ts` at spawn time
-# (see src-tauri/cetus-bridge/src/pi_rpc.rs), and the host re-syncs this dir into the app's
-# writable install tree on launch (src-tauri/src/lib.rs::sync_cetus_extensions).
+# (see backend/cetus-bridge/src/pi_rpc.rs), and the host re-syncs this dir into the app's
+# writable install tree on launch (backend/src/lib.rs::sync_cetus_extensions).
 # EXT_DIR_NAME MUST match bridge::CETUS_EXTENSIONS_DIR — if you rename it, change
-# it in src-tauri/cetus-bridge/src/bridge.rs, lib.rs (sync), AND here, or the loader reads an
+# it in backend/cetus-bridge/src/bridge.rs, lib.rs (sync), AND here, or the loader reads an
 # empty path and the agent launches with zero of its own tools.
 EXT_DIR_NAME="cetus-extensions"
-CETUS_EXT_SRC="$REPO_ROOT/src-tauri/$EXT_DIR_NAME"
+CETUS_EXT_SRC="$REPO_ROOT/backend/$EXT_DIR_NAME"
 if [ -d "$CETUS_EXT_SRC" ]; then
   cp -R "$CETUS_EXT_SRC" "$DEST_DIR/$EXT_DIR_NAME"
   echo "→ $EXT_DIR_NAME overlaid ($(ls "$CETUS_EXT_SRC" | wc -l | tr -d ' ') file(s))"
 fi
 
 PLUGIN_DIR_NAME="cetus-plugins"
-CETUS_PLUGIN_SRC="$REPO_ROOT/src-tauri/$PLUGIN_DIR_NAME"
+CETUS_PLUGIN_SRC="$REPO_ROOT/backend/$PLUGIN_DIR_NAME"
 if [ -d "$CETUS_PLUGIN_SRC" ]; then
   cp -R "$CETUS_PLUGIN_SRC" "$DEST_DIR/$PLUGIN_DIR_NAME"
   echo "→ $PLUGIN_DIR_NAME overlaid ($(find "$CETUS_PLUGIN_SRC" -name plugin.json | wc -l | tr -d ' ') plugin(s))"
@@ -196,10 +194,9 @@ for dep in typescript @rolldown @esbuild rollup vite \
 done
 
 # Pruning the toolchain orphans the .bin shims that pointed into it (e.g.
-# node_modules/.bin/tsserver -> ../typescript/bin/tsserver). Tauri's resource
-# bundler dereferences every symlink under the bundled tree and ABORTS the build
-# on a dangling one ("resource path pi-install/... doesn't exist"). Sweep broken
-# links so the slimmed tree stays bundleable. (`! -exec test -e {}` matches a
+# node_modules/.bin/tsserver -> ../typescript/bin/tsserver). A dangling link
+# inside the bundled tree breaks packaging and code signing, so sweep broken
+# links to keep the slimmed tree bundleable. (`! -exec test -e {}` matches a
 # symlink whose target no longer resolves.)
 DANGLING="$(find "$DEST_DIR" -type l ! -exec test -e {} \; -print -delete)"
 if [ -n "$DANGLING" ]; then

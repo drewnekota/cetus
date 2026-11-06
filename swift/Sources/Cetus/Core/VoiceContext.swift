@@ -3,7 +3,7 @@ import ApplicationServices
 import NaturalLanguage
 import Vision
 
-// Context around a dictation — ports of src-tauri/src/{ax.rs (wake/identity),
+// Context around a dictation — ports of backend/src/{ax.rs (wake/identity),
 // focused_text.rs, voice_target.rs, biasing.rs, corrections.rs,
 // transcripts.rs, titling.rs (cleanup + zh/en spacing), text_input.rs,
 // capture::ocr_screen_now}. Swift-only state lives under the Swift data dir.

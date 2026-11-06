@@ -29,7 +29,7 @@ import {
   Code as CodeIcon,
   X,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/host/core";
 import {
   Dialog,
   DialogClose,

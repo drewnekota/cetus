@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction, RefObject } from "react";
 import { useCallback } from "react";
 import type { SidebarView } from "@/components/sidebar/view-toggle";
 import { toast } from "sonner";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import {
   useChatStore,
   copyCachedMessages,

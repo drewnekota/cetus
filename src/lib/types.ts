@@ -48,7 +48,7 @@ export interface ModelChoice {
 // ---- Custom model providers -------------------------------------------------
 
 /** One model exposed by a custom provider. Mirrors the Rust `CustomModel`
- *  (src-tauri/src/custom_models.rs). */
+ *  (backend/src/custom_models.rs). */
 export interface CustomModel {
   /** Model id at the provider's endpoint (e.g. "gpt-4o"). */
   id: string;
@@ -477,7 +477,7 @@ export type VoiceGesture = "right_cmd" | "right_option" | "fn" | "caps_lock";
 // ---- Dictation history (voice context) ------------------------------------
 
 /** One saved dictation transcript. Mirrors the Rust `TranscriptEntry`
- *  (src-tauri/src/transcripts.rs). */
+ *  (backend/src/transcripts.rs). */
 export interface TranscriptEntry {
   id: string;
   text: string;
@@ -517,7 +517,7 @@ export interface DevtestDomArgs {
 /** Independent switches for the browser-use / computer-use capability. When a
  *  surface is on, conversations get its control prompt and its `browser_*` /
  *  `computer_*` tools register (gated via env). Mirrors the Rust
- *  `AgentSettings` (src-tauri/src/agent.rs). */
+ *  `AgentSettings` (backend/src/agent.rs). */
 export interface AgentSettings {
   browser: boolean;
   computer: boolean;
@@ -532,7 +532,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
 
 /** One discovered Cetus plugin. A plugin may contribute prompt guidance, skills,
  *  MCP servers, pi extensions, or trusted native capabilities. Mirrors the Rust
- *  `PluginEntry` (src-tauri/src/plugins.rs). */
+ *  `PluginEntry` (backend/src/plugins.rs). */
 export interface PluginEntry {
   id: string;
   displayName: string;
@@ -561,7 +561,7 @@ export type AutoArchiveUnit = "hours" | "days";
 
 /** Settings for auto-archiving idle conversations. When enabled, cetus archives
  *  any conversation left untouched longer than `value` `unit`s. Mirrors the Rust
- *  `AutoArchiveSettings` (src-tauri/src/auto_archive.rs). */
+ *  `AutoArchiveSettings` (backend/src/auto_archive.rs). */
 export interface AutoArchiveSettings {
   /** Master switch. Default OFF — opt-in. */
   enabled: boolean;
@@ -594,7 +594,7 @@ export const DEFAULT_AUTO_ARCHIVE_SETTINGS: AutoArchiveSettings = {
 /** One installed skill. The markdown (a SKILL.md with name/description
  *  frontmatter) lives on disk under `<app_data>/skills/<id>/`; enabled skills
  *  are materialised into pi's agent dir so the model can invoke them. Mirrors
- *  the Rust `SkillEntry` (src-tauri/src/skills.rs). */
+ *  the Rust `SkillEntry` (backend/src/skills.rs). */
 export interface SkillEntry {
   id: string;
   name: string;
@@ -618,7 +618,7 @@ export interface SkillState {
 
 /** A skill auto-discovered from a user or repo `.agents/skills` dir. pi loads
  *  these automatically; cetus shows them read-only.
- *  Mirrors the Rust `DiscoveredSkill` (src-tauri/src/skills.rs). */
+ *  Mirrors the Rust `DiscoveredSkill` (backend/src/skills.rs). */
 export interface DiscoveredSkill {
   /** Stable id used by read/reveal commands. */
   id: string;
@@ -637,7 +637,7 @@ export interface DiscoveredSkill {
 /** A user-defined slash command — a reusable prompt snippet triggered by typing
  *  `/<name>` in the composer. Picking one expands `/<name>` to `prompt`; it never
  *  reaches the agent as a command. Mirrors the Rust `SlashCommand`
- *  (src-tauri/src/slash_commands.rs). */
+ *  (backend/src/slash_commands.rs). */
 export interface SlashCommand {
   id: string;
   /** The bare trigger, no leading `/`. */
@@ -665,7 +665,7 @@ export interface SlashCommandInput {
 export type McpTransport = "stdio" | "http";
 
 /** One configured MCP server. Fields for the other transport are left empty.
- *  Mirrors the Rust `McpConnector` (src-tauri/src/mcp.rs). */
+ *  Mirrors the Rust `McpConnector` (backend/src/mcp.rs). */
 export interface McpConnector {
   id: string;
   name: string;
@@ -712,7 +712,7 @@ export type McpImportSource =
   | "opencode";
 
 /** Opt-in loading of skills + MCP managed outside cetus. Mirrors Rust
- *  `DiscoverySettings` (src-tauri/src/discovery.rs). */
+ *  `DiscoverySettings` (backend/src/discovery.rs). */
 export interface DiscoverySettings {
   /** Load SKILL.md folders from `skillsFolder` plus standard runtime roots. */
   skillsLoadDiscovered: boolean;
@@ -749,7 +749,7 @@ export interface McpTestResult {
 export type MemorySource = "user" | "agent";
 
 /** One durable note injected into the agent's context every turn. Mirrors the
- *  Rust `MemoryEntry` (src-tauri/src/memory.rs) and the memory.ts extension. */
+ *  Rust `MemoryEntry` (backend/src/memory.rs) and the memory.ts extension. */
 export interface MemoryEntry {
   id: string;
   content: string;
@@ -927,7 +927,7 @@ export type AssistantMessageEvent =
   | { type: "error"; reason: "aborted" | "error"; message?: string };
 
 // Automations: a saved prompt that fires on a schedule. Mirrors the Rust
-// `Automation` / `AutomationSchedule` in src-tauri/src/automation.rs.
+// `Automation` / `AutomationSchedule` in backend/src/automation.rs.
 export type AutomationSchedule =
   // One-shot at an absolute epoch-ms instant.
   | { kind: "once"; atMs: number }
@@ -1035,7 +1035,7 @@ export type AppEvent =
     };
 
 /** Which conversation coordinates each folder, and which threads it started.
- *  Mirrors src-tauri/src/coordinator.rs. */
+ *  Mirrors backend/src/coordinator.rs. */
 export interface CoordinatorRegistry {
   /** Folder → coordinator conversation id. */
   coordinators: Record<string, string>;

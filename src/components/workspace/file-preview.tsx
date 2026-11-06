@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { TextFileEditor } from "./text-file-editor";
 import { Spinner } from "@/components/ui/spinner";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@/lib/host/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly";
@@ -28,7 +28,7 @@ import {
   markdownUrlTransform,
   remarkTrimAutolinkCjk,
 } from "@/lib/markdown";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import type { WorkspaceFileEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 

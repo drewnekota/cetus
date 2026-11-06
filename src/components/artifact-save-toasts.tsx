@@ -1,7 +1,7 @@
 "use client";
 import { useEffect } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@/lib/host/event";
+import { invoke } from "@/lib/host/core";
 import { toast } from "sonner";
 
 import { useTranslation } from "@/lib/i18n";

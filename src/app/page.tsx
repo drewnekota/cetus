@@ -5,7 +5,7 @@ import {
   type ComposerAttachment,
   type ComposerRuntimeSelection,
 } from "@/components/chat/composer";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "@/lib/host/event";
 import { toast } from "sonner";
 import {
   folderSessions,
@@ -14,7 +14,7 @@ import {
   threadWalkOrder,
 } from "@/lib/folder-sessions";
 import { useInputIds } from "@/lib/session-activity";
-import { api, onUpdateAvailable, onUpdateReady } from "@/lib/tauri";
+import { api, onUpdateAvailable, onUpdateReady } from "@/lib/api";
 import {
   installChatPersistence,
   loadCachedMessages,
@@ -1269,7 +1269,7 @@ export default function Home() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    import("@tauri-apps/api/event")
+    import("@/lib/host/event")
       .then(({ listen }) =>
         listen<QuickLaunchPayload>("quick-launch", (e) => {
           void quickLaunchRef.current(e.payload);
@@ -1290,7 +1290,7 @@ export default function Home() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    import("@tauri-apps/api/event")
+    import("@/lib/host/event")
       .then(({ listen }) =>
         listen("open-settings", () => setSettingsOpen(true)),
       )

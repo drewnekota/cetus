@@ -8,7 +8,7 @@
 
 import type { ComponentType } from "react";
 import { Accessibility, Bell, HardDrive, Mic, Monitor } from "lucide-react";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { ensurePermission, refreshPermission } from "@/lib/notifications";
 
 /** `granted` — usable now. `needed` — not yet authorized (or denied). `unknown`

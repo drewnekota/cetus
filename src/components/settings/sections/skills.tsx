@@ -28,7 +28,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslation } from "@/lib/i18n";
-import { api, onAppEvent } from "@/lib/tauri";
+import { api, onAppEvent } from "@/lib/api";
 import type {
   DiscoverySettings,
   SkillEntry,

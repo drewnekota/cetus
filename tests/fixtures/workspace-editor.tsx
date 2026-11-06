@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { TextFileEditor } from '../../src/components/workspace/text-file-editor';
-import { api } from '../../src/lib/tauri';
+import { api } from '../../src/lib/api';
 
 const disk: Record<string, string> = { '/repo/.env.local': 'VALUE=old\r\n', '/repo/LICENSE': 'License\n' };
 let delay = 0;

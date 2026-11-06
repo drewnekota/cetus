@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 
 // Global push-to-talk / hands-free dictation — port of the voice parts of
-// src-tauri/src/hotkey.rs (listen-only CGEventTap, PTT monitor, serialized
+// backend/src/hotkey.rs (listen-only CGEventTap, PTT monitor, serialized
 // worker, finish_ptt) and caps_remap.rs.
 
 // MARK: - Caps Lock → F18 remap (caps_remap.rs)

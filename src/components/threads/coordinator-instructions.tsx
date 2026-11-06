@@ -14,7 +14,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslation } from "@/lib/i18n";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 
 /** Header button + dialog for the user's standing instructions to every
  *  coordinator. The coordinator re-reads them each turn, so saving applies to

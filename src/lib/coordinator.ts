@@ -1,7 +1,7 @@
 // A folder's coordinator: one ordinary pi conversation (DeepSeek Flash) that
 // takes the user's stream of work, answers quick questions itself, and runs
 // the rest as threads — ordinary sessions in the same folder on any runtime.
-// Its thread tools (src-tauri/cetus-extensions/coordinator-tools.ts) and
+// Its thread tools (backend/cetus-extensions/coordinator-tools.ts) and
 // `cetus thread …` tunnel here. Nothing is posted back into the coordinator:
 // the user reads each thread on its card in the Threads view.
 
@@ -24,7 +24,7 @@ export const COORDINATOR_TITLE = "Cetus";
  *  carry; still rendered, no longer written. */
 export const STARTED_NOTE_TYPE = "thread_started";
 
-/** Request ids of `cetus thread …` CLI calls (src-tauri/src/coordinator.rs). */
+/** Request ids of `cetus thread …` CLI calls (backend/src/coordinator.rs). */
 export const CLI_REQUEST_PREFIX = "cli-";
 
 export type ThreadStatus = "working" | "needs_input" | "error" | "finished" | "idle";

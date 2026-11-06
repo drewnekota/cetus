@@ -2,9 +2,10 @@
 // Window-level backstop for link handling. Every anchor the app renders is
 // individually intercepted and routed to the OS (see `openMarkdownLink`), but
 // interception at the component level only covers plain left clicks. The
-// remaining input paths all end the same way — WKWebView navigates the app
-// webview in place, which replaces the UI and is unrecoverable from the page
-// (see the navigation-guard comment in lib.rs):
+// remaining input paths all end the same way — the app webview navigates in
+// place, which replaces the UI and is unrecoverable from the page (the
+// Electron main process also blocks such navigations; see `will-navigate`
+// in electron/main.ts):
 //
 //  - middle click fires `auxclick`, which component `onClick` never sees;
 //  - a link click that drifts a few pixels becomes a WebKit link drag, and
@@ -75,10 +76,10 @@ export function LinkGuard() {
       if (hasSelectionAt(e.target)) return;
       e.preventDefault();
     };
-    // Cancelling `drop` cancels WebKit's default navigation to the dropped
-    // URL. Editable targets keep their native drop (text into the composer);
-    // file drops are unaffected — they are consumed via Tauri's drag-drop
-    // events (see FileDropHost), not HTML5 ones.
+    // Cancelling `drop` cancels the webview's default navigation to the
+    // dropped URL. Editable targets keep their native drop (text into the
+    // composer); file drops are unaffected — they are consumed via the host's
+    // drag-drop events (see FileDropHost).
     const onDragOver = (e: DragEvent) => {
       if (!isEditable(e.target)) e.preventDefault();
     };

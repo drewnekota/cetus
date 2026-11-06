@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslation } from "@/lib/i18n";
-import { api, onPiEvent } from "@/lib/tauri";
+import { api, onPiEvent } from "@/lib/api";
 import type { MemoryEntry, MemoryState } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {

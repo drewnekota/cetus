@@ -21,9 +21,9 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { ZOOM_EVENT } from "@/hooks/use-zoom";
 import { useTranslation } from "@/lib/i18n";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "@/lib/host/event";
 
 const URL_HISTORY_STORAGE_KEY = "cetus:browserUrlHistory";
 const MAX_SAVED_URLS = 80;

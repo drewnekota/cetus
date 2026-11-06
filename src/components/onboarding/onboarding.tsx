@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useTranslation } from "@/lib/i18n";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { CetusIcon } from "@/components/brand-icons";
 import { BACKENDS } from "@/components/chat/backend-picker";
 import type { BackendId } from "@/lib/types";

@@ -1,4 +1,4 @@
-// Generated from src-tauri/src/commands/browser.rs (BROWSER_ANNOTATION_SCRIPT), verbatim.
+// Generated from backend/src/commands/browser.rs (BROWSER_ANNOTATION_SCRIPT), verbatim.
 enum WorkspaceBrowserScript {
     static let annotation = #"""
 (function () {

@@ -2,7 +2,7 @@
 
 import type { Dispatch, SetStateAction, RefObject } from "react";
 import { useCallback } from "react";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { useChatStore, loadCachedMessages } from "@/lib/chat-store";
 import { renderStartsMidConversation } from "@/lib/continuation-prompts";
 import {

@@ -3,11 +3,11 @@ const nextConfig = {
   output: "export",
   // Pin the Turbopack workspace root to this project. Otherwise Next 16 infers
   // it (wrongly resolving to src/app here), which crashes `pnpm dev` mid-run
-  // with "couldn't find next/package.json" and takes the Tauri frontend down.
+  // with "couldn't find next/package.json" and takes the app frontend down.
   turbopack: { root: import.meta.dirname },
   images: { unoptimized: true },
   trailingSlash: true,
-  // Tauri serves the bundle from a custom protocol; relative asset paths keep it portable.
+  // Electron serves the bundle from a custom protocol (app://); relative asset paths keep it portable.
   assetPrefix: "",
   reactStrictMode: true,
   // Hide Next's dev-mode badge. It's injected into EVERY window in `next dev`,

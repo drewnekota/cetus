@@ -11,7 +11,7 @@ import { Check, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/lib/i18n";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { SectionHeading } from "../settings-controls";
 
 // cetus is a DeepSeek-only desktop client; keep the key surface minimal.

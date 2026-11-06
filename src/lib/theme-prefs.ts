@@ -3,7 +3,7 @@
 // no-FOUC script in layout.tsx) and applied by toggling the `.dark` class on
 // <html> (globals.css swaps the design-token vars off that class).
 
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { applySkin, getSkinPreference } from "@/lib/skin-prefs";
 
 export type ThemePreference = "system" | "light" | "dark";

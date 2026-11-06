@@ -2,7 +2,7 @@
 import { memo, useMemo } from "react";
 import { ChevronDown, ChevronRight, Wrench, AlertCircle, CheckCircle2, CircleSlash, Bot, Check, FileDiff, FileText } from "lucide-react";
 import { toolActivityStatus } from "@/lib/tool-status";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/host/core";
 import { Spinner } from "@/components/ui/spinner";
 import { AnsiText } from "@/components/ui/ansi-text";
 import { fileExtension, highlightSource, HLJS_THEME_CLASS, languageForExtension } from "@/lib/highlight";

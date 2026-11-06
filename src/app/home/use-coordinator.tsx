@@ -2,7 +2,7 @@
 
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useRef } from "react";
-import { api, onAppEvent } from "@/lib/tauri";
+import { api, onAppEvent } from "@/lib/api";
 import { loadCachedMessages, useChatStore } from "@/lib/chat-store";
 import { chatReducer, emptyChatState } from "@/lib/chat-state";
 import { holdsActivity } from "@/lib/turn-notify";

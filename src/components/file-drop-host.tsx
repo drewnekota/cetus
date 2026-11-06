@@ -4,12 +4,11 @@
 // on screen — not just the ~60px of composer that used to (nominally) accept
 // drops.
 //
-// The drop has to be read from the Tauri runtime rather than from HTML5 `drop`
-// events: the runtime installs its own drag-drop handler on the webview and
-// answers the OS itself, so the webview never sees a `drop` with files on it.
-// That is also why the composer's own HTML5 handlers were dead code. The
-// upside is that these events carry real filesystem paths, which lets a file
-// too large to inline be referenced by path instead of dropped on the floor.
+// The drop is read from the host's drag-drop events (`onDragDropEvent` in
+// src/lib/host/webview.ts), which capture OS file drags at the window level —
+// that is why the composer has no HTML5 drop handlers of its own. These
+// events carry real filesystem paths, which lets a file too large to inline
+// be referenced by path instead of dropped on the floor.
 //
 // Routing: whichever `[data-file-drop-target]` is visible takes the drop, last
 // one in DOM order first so a portalled dialog's composer beats the chat
@@ -46,7 +45,7 @@ export function FileDropHost() {
       active = el;
     };
 
-    void import("@tauri-apps/api/webview")
+    void import("@/lib/host/webview")
       .then(({ getCurrentWebview }) =>
         getCurrentWebview().onDragDropEvent(({ payload }) => {
           if (payload.type === "enter") {
@@ -80,7 +79,7 @@ export function FileDropHost() {
         else unlisten = off;
       })
       .catch(() => {
-        // Not running under Tauri (or the webview is gone): no drops to route.
+        // Not running inside the app (or the webview is gone): no drops to route.
       });
 
     return () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { api } from "./tauri";
+import { api } from "./api";
 
 const HEARTBEAT_INTERVAL_MS = 3_000;
 

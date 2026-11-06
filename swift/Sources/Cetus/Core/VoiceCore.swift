@@ -3,7 +3,7 @@ import Foundation
 
 // Global voice dictation — shared building blocks: settings, session ownership,
 // HUD event bus, logging, and the Volcano Engine (Doubao) streaming ASR client.
-// Faithful port of src-tauri/src/{quick.rs (voice settings), voice_session.rs,
+// Faithful port of backend/src/{quick.rs (voice settings), voice_session.rs,
 // doubao.rs}.
 
 // MARK: - Logging

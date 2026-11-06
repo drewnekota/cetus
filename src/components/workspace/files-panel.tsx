@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { formatBytes } from "@/lib/artifact";
 import { useTranslation } from "@/lib/i18n";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import type { WorkspaceFileEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FilePreview } from "./file-preview";

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/host/core";
 import { Activity } from "lucide-react";
 import {
   Popover,

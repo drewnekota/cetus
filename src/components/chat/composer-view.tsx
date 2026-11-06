@@ -41,7 +41,7 @@ import {
   type MentionRef,
 } from "@/lib/mentions";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import type { BackendId, ModelChoice } from "@/lib/types";
 import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import { LONG_PASTE_CHARS } from "./composer-utils";
@@ -239,8 +239,8 @@ export function renderComposer({
       ref={rootRef}
       data-chat-composer
       // Claims drops made anywhere in the window; FileDropHost delivers them
-      // here. There are no HTML5 drag handlers on purpose — the Tauri runtime
-      // answers the OS drag itself, so `drop` never fires on the webview.
+      // here. There are no HTML5 drag handlers on purpose — the host's
+      // drag-drop events capture OS file drags at the window level.
       data-file-drop-target
       data-streaming={streaming && !bashMode ? "true" : undefined}
       data-backend={backend}

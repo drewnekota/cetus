@@ -1,6 +1,6 @@
 "use client";
 
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import type { BackendId, CliDefaults } from "@/lib/types";
 
 export type CliBackendId = Exclude<BackendId, "pi">;

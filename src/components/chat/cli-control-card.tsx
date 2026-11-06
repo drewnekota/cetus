@@ -31,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { blobToBase64, prepareImageAttachment } from "@/lib/image-attachment";
 import { useChatStore, useControlRequests } from "@/lib/chat-store";
 import { useTranslation } from "@/lib/i18n";

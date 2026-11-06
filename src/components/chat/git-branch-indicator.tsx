@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 
 export function GitBranchIndicator({
   conversationId,

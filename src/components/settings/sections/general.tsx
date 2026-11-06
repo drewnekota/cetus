@@ -28,7 +28,7 @@ import {
   setConversationAutoSort,
   useConversationAutoSort,
 } from "@/lib/conversation-order";
-import { api, onUpdateDownloadProgress, onUpdateReady } from "@/lib/tauri";
+import { api, onUpdateDownloadProgress, onUpdateReady } from "@/lib/api";
 import type { UpdateMeta, UpdateDownloadProgress } from "@/lib/types";
 import { DEFAULT_QUICK_SETTINGS, type QuickSettings } from "@/lib/types";
 import {
@@ -106,7 +106,7 @@ export function GeneralSection() {
         setCheckState("installing");
       })
       .catch(() => {});
-    import("@tauri-apps/api/app")
+    import("@/lib/host/app")
       .then(({ getVersion }) => getVersion())
       .then(setAppVersion)
       .catch(() => {});

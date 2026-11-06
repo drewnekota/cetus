@@ -8,14 +8,14 @@
 //
 // Preferences live in localStorage (mirroring cetus:lastModelChoice) and are
 // exposed through a small Zustand store so the Settings page stays reactive.
-// The OS permission round-trip goes through @tauri-apps/plugin-notification.
+// The OS permission round-trip goes through the host (src/lib/host).
 
 import { create } from "zustand";
 import {
   isPermissionGranted,
   requestPermission,
-} from "@tauri-apps/plugin-notification";
-import { api } from "@/lib/tauri";
+} from "@/lib/host/notification";
+import { api } from "@/lib/api";
 
 /** By-event catalog. Each kind is an independent toggle in the settings page.
  *

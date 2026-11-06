@@ -1,8 +1,8 @@
 "use client";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { listen } from "@/lib/host/event";
+import { getCurrentWindow } from "@/lib/host/window";
+import { getCurrentWebview } from "@/lib/host/webview";
 import { ArrowUp, Check, File, Globe, ImageOff, Paperclip, TextSelect, X } from "lucide-react";
 import { formatBytes } from "@/lib/artifact";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n";
 import {
   DEFAULT_MODEL_CHOICE,
@@ -722,8 +722,8 @@ export function QuickPanel() {
     <div
       ref={rootRef}
       // Takes file drops made anywhere in the launcher window; FileDropHost
-      // delivers them here (the Tauri runtime answers the OS drag itself, so
-      // there is no HTML5 `drop` to listen for).
+      // delivers them here (the host's drag-drop events capture OS file drags
+      // at the window level).
       data-file-drop-target
       className={cn(
         "flex h-screen w-screen flex-col overflow-hidden rounded-[16px] bg-[color-mix(in_oklab,var(--surface),transparent_42%)] font-medium text-foreground dark:bg-[color-mix(in_oklab,var(--card),transparent_45%)] dark:ring-1 dark:ring-inset dark:ring-white/[0.07] dark:[text-shadow:0_1px_2px_rgb(0_0_0_/_0.35)] [&_[data-slot=select-trigger]]:!h-7 [&_[data-slot=select-trigger]]:!text-xs [&_[data-slot=select-trigger]:hover]:!bg-black/5 dark:[&_[data-slot=select-trigger]:hover]:!bg-white/[0.08] [&_[data-slot=select-trigger]_svg]:!size-3 [&_kbd]:h-5 [&_kbd]:border-black/[0.06] [&_kbd]:bg-black/5 [&_kbd]:text-xs dark:[&_kbd]:border-white/[0.08] dark:[&_kbd]:bg-white/[0.06]",

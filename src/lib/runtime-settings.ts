@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { api, onCliAgentSettingsChanged } from "./tauri";
+import { api, onCliAgentSettingsChanged } from "./api";
 import {
   RUNTIME_SLOT_SHORTCUT_IDS,
   shortcutDisplay,

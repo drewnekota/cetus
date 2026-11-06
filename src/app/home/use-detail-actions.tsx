@@ -7,7 +7,7 @@ import {
   type QueuedMessage,
 } from "@/components/chat/composer";
 import { toast } from "sonner";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { useChatStore } from "@/lib/chat-store";
 import {
   type Conversation,

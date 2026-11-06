@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { toast } from "sonner";
-import { onWorkspaceMoved } from "@/lib/tauri";
+import { onWorkspaceMoved } from "@/lib/api";
 import { tt } from "@/lib/i18n";
 import { loadRecentWorkspaces } from "@/lib/recent-workspaces";
 import { checkFolders, rebasePath, rebaseStoredFolders } from "@/lib/folder-health";

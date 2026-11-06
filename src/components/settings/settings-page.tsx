@@ -257,7 +257,7 @@ export const SettingsPage = memo(function SettingsPage({
       {/* `pl-20` clears the macOS traffic lights (Overlay title bar floats them
           over the top-left); the bar also doubles as a window drag handle. */}
       <header
-        data-tauri-drag-region
+        data-drag-region
         className="flex h-12 shrink-0 items-center gap-2 border-b border-border pl-20 pr-3"
       >
         <Button variant="ghost" size="sm" onClick={onClose} className="gap-1.5">

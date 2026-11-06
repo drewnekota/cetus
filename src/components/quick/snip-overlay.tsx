@@ -1,7 +1,7 @@
 "use client";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "@/lib/host/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 
 /** Region-select overlay for the contextful quick launcher: the `snip` window
  *  covers the cursor's screen (sized by Rust, see snip.rs) as a dimmed sheet.

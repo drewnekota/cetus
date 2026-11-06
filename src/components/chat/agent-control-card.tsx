@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/host/core";
 import { Globe, MonitorCog, Square } from "lucide-react";
 
-import { onAppEvent } from "@/lib/tauri";
+import { onAppEvent } from "@/lib/api";
 import type { AppEvent } from "@/lib/types";
 import { useChatStore } from "@/lib/chat-store";
 import { cn } from "@/lib/utils";

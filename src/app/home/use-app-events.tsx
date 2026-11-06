@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { type QueuedMessage } from "@/components/chat/composer";
 import type { SidebarView } from "@/components/sidebar/view-toggle";
 import { REVIEW_TOOL_NAME } from "@/lib/review";
-import { api, onAppEvent } from "@/lib/tauri";
+import { api, onAppEvent } from "@/lib/api";
 import { useChatStore } from "@/lib/chat-store";
 import { dispatchNotification } from "@/lib/notifications";
 import { createTurnNotifier } from "@/lib/turn-notify";
@@ -369,6 +369,18 @@ export function useAppEvents({
                 ? dirs
                 : [...dirs, evt.conversation.workspaceDir],
             );
+            // Seed the prompt bubble. The run streams into the chat store before
+            // anyone opens it, so onSelect later takes the hydrated fast path and
+            // never loads the persisted user row — the chat would open on bare
+            // assistant output. Same guard as run-now (which seeds it too).
+            {
+              const existing = chatStore.getState().chats[evt.conversation.id];
+              if (!existing || existing.messages.length === 0) {
+                chatStore
+                  .getState()
+                  .userSent(evt.conversation.id, evt.automation.prompt, [], []);
+              }
+            }
             break;
           case "meeting_event": {
             // Meeting capture lifecycle → localized OS notification. "started"

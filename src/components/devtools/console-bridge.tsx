@@ -1,15 +1,15 @@
 "use client";
 import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/host/core";
 
 /// Forward webview console errors + uncaught exceptions to the Rust tracing
 /// stream so a single terminal tails everything. Hooks once on mount; safe to
-/// keep in production (silent on non-Tauri builds because invoke just rejects).
+/// keep in production (silent outside the app because invoke just rejects).
 export function ConsoleBridge() {
   useEffect(() => {
     // Rate-limit the IPC: a component that warns in a render loop (or KaTeX
     // grumbling mid-stream) would otherwise turn every console call into a
-    // Tauri round-trip and jank the UI. 20 lines/sec, then dropped with one
+    // IPC round-trip and jank the UI. 20 lines/sec, then dropped with one
     // marker line; the webview console still gets everything.
     const WINDOW_MS = 1000;
     const MAX_PER_WINDOW = 20;

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/lib/i18n";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 
 // Keep unsaved buffers across file selection and panel/tab remounts. Contents
 // (including .env secrets) stay in memory, never in browser storage.

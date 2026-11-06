@@ -8,9 +8,11 @@ out
 *.tsbuildinfo
 next-env.d.ts
 
-# tauri / rust
-src-tauri/target
-src-tauri/gen
+# rust backend + electron host
+backend/target
+backend/*/target
+electron/dist
+electron/native
 
 # os
 .DS_Store
@@ -22,9 +24,9 @@ src-tauri/gen
 
 # pi install tree (~260 MB, platform-specific). Rebuild via
 # scripts/build-pi-sidecar.sh on each developer machine.
-src-tauri/pi-install/
-# Legacy locations from the previous sidecar approach.
-src-tauri/binaries/
+backend/pi-install/
+# Legacy location from the old Tauri sidecar approach.
+backend/binaries/
 
 # In-repo clones used only for code reading (e.g. deepseek-tui).
 research/

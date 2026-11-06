@@ -7,13 +7,13 @@
 // context; closed with Back or Esc).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@/lib/host/core";
 import { ArrowLeft, FileText, FolderOpen, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { api, type AmbientEntry, type Screenshot } from "@/lib/tauri";
+import { api, type AmbientEntry, type Screenshot } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n";
 
 type TFn = (key: string, vars?: Record<string, string | number>) => string;
@@ -210,7 +210,7 @@ export function ScreenHistoryPage({ open, onClose, initialQuery, initialFrame }:
       {/* `pl-20` clears the macOS traffic lights (Overlay title bar floats them
           over the top-left); the bar also doubles as a window drag handle. */}
       <header
-        data-tauri-drag-region
+        data-drag-region
         className="flex h-12 shrink-0 items-center gap-2 border-b border-border pl-20 pr-3"
       >
         <Button variant="ghost" size="sm" onClick={onClose} className="gap-1.5">

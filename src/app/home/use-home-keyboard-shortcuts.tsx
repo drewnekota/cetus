@@ -133,8 +133,8 @@ export function useHomeKeyboardShortcuts({
   //   ⌃⇥    — tap: previous chat; hold ⌃: MRU switcher over recent chats
   //           (⇥ / ⇧⇥ step, release ⌃ to switch, esc to cancel)
   //   ⌃1…⌃3 — switch the current chat's runtime (Cetus / Claude Code / Codex)
-  //   ⌘⇧S   — collapse / expand the left sidebar
-  //   ⌘B    — toggle workspace
+  //   ⌘B    — collapse / expand the left sidebar
+  //   ⌘\    — toggle workspace
   //   ⌘J    — toggle Terminal in the workspace
   //   ⌘T    — open a Browser tab in the right workspace
   //   ⌘P    — open a Files tab in the right workspace
@@ -143,7 +143,7 @@ export function useHomeKeyboardShortcuts({
   //   ⌥⌘↑/↓, ⇧⌘[/] — switch to the previous / next chat
   //   ⌘1…⌘8 — open the nth visible chat in the sidebar (hold ⌘ to see them)
   //   ⌘9    — switch to the last chat in the sidebar
-  //   ⌘⇧A   — toggle artifacts panel (chat view, when artifacts exist)
+  //   ⇧⌘A   — open Automations; again to go back to the current mode
   // Live modifier state, so the switcher can tell a tap from a hold once its
   // reveal delay is up.
   const heldModifiersRef = useRef("");
@@ -396,6 +396,9 @@ export function useHomeKeyboardShortcuts({
       } else if (shortcut("openSettings")) {
         e.preventDefault();
         setSettingsOpen(true);
+      } else if (shortcut("openAutomations")) {
+        e.preventDefault();
+        setView((v) => (v === "automations" ? mode : "automations"));
       } else if (
         (view === "chat" || view === "threads") &&
         runtimeForShortcut(e, keyboardShortcuts, runtimeSlotsRef.current) !==

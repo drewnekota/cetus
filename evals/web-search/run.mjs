@@ -58,7 +58,7 @@ async function fetchJson(url, init) {
   }
 }
 
-// --- Tavily: mirrors src-tauri/cetus-extensions/web-search.ts exactly --------
+// --- Tavily: mirrors backend/cetus-extensions/web-search.ts exactly --------
 async function tavilySearch(query) {
   const t0 = performance.now();
   try {

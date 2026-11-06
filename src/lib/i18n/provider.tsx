@@ -24,7 +24,7 @@ import {
   setLocalePreference,
 } from "./config";
 import { MESSAGES, type Namespace } from "./messages";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 
 interface I18nContextValue {
   /** The concrete language being rendered (preference resolved against the OS). */

@@ -225,7 +225,7 @@ export function ChatPane({
       <WallpaperFrame className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <GlyphBackdrop />
         <div
-          className={`relative z-10 w-full max-w-2xl space-y-5 panel-motion transition-[translate] ${
+          className={`relative z-10 w-full max-w-3xl space-y-5 panel-motion transition-[translate] ${
             opticalCenter ? "xl:-translate-x-10 2xl:-translate-x-12" : ""
           }`}
         >

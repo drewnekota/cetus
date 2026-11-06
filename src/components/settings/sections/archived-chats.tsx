@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTranslation } from "@/lib/i18n";
-import { api, onAppEvent } from "@/lib/tauri";
+import { api, onAppEvent } from "@/lib/api";
 import type { AutoArchiveSettings, Conversation } from "@/lib/types";
 import { DEFAULT_AUTO_ARCHIVE_SETTINGS } from "@/lib/types";
 import { cn } from "@/lib/utils";

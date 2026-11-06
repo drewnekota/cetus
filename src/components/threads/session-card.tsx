@@ -40,7 +40,7 @@ import {
 } from "@/lib/thread-activity";
 import { toolActivityStatus, type ToolActivityStatus } from "@/lib/tool-status";
 import { useTranslation } from "@/lib/i18n";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { useSessionTimeline } from "./session-timeline";
 import type { BackendId, CliControlRequest, Conversation } from "@/lib/types";
 

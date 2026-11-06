@@ -9,6 +9,7 @@ export type ShortcutId =
   | "newDefaultChat"
   | "archiveChat"
   | "openSettings"
+  | "openAutomations"
   | "previousThread"
   | "nextThread"
   | "switchPreviousView"
@@ -136,6 +137,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: "Open settings",
     description: "Open the settings page",
     defaultAccelerator: "Cmd+Comma",
+  },
+  {
+    id: "openAutomations",
+    label: "Open automations",
+    description: "Open the Automations page, or go back to where you were",
+    defaultAccelerator: "Shift+Cmd+A",
   },
   {
     id: "previousThread",
@@ -279,8 +286,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 export type ShortcutPlatform = "mac" | "windows";
 
 /** Synchronous on purpose: shortcuts are consumed by keydown handlers before
- *  any async Tauri OS query could resolve. Tauri's Windows WebView reports
- *  Win32 in navigator.platform and macOS reports MacIntel. */
+ *  any async OS query could resolve. macOS reports MacIntel in
+ *  navigator.platform; anything else gets the Ctrl-based table. */
 export function shortcutPlatform(): ShortcutPlatform {
   if (typeof navigator === "undefined") return "mac";
   const nav = navigator as Navigator & {

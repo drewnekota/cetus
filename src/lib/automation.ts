@@ -1,6 +1,6 @@
 // Frontend helpers for rendering automations: human-readable schedule
 // descriptions and run-time formatting. The schedule shapes mirror the Rust
-// `AutomationSchedule` in src-tauri/src/automation.rs.
+// `AutomationSchedule` in backend/src/automation.rs.
 
 import { tt } from "@/lib/i18n";
 import type { AutomationSchedule } from "./types";

@@ -3,7 +3,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { type ComposerAttachment } from "@/components/chat/composer";
 import type { SidebarView } from "@/components/sidebar/view-toggle";
-import { api } from "@/lib/tauri";
+import { api } from "@/lib/api";
 import { useChatStore } from "@/lib/chat-store";
 import {
   type Conversation,

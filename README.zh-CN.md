@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="最新版本" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdrewnekota%2Fcetus%2Fmain%2Fsrc-tauri%2Ftauri.conf.json&query=%24.version&prefix=v&label=release&color=blue" /></a>
+  <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="最新版本" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdrewnekota%2Fcetus%2Fmain%2Fpackage.json&query=%24.version&prefix=v&label=release&color=blue" /></a>
   <a href="https://github.com/drewnekota/cetus/releases"><img alt="下载量" src="https://img.shields.io/github/downloads/drewnekota/cetus/total" /></a>
   <a href="https://github.com/drewnekota/cetus/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/drewnekota/cetus/ci.yml" /></a>
   <a href="https://github.com/drewnekota/cetus/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/drewnekota/cetus" /></a>
@@ -101,7 +101,7 @@ Cetus 支持 **Apple Silicon** Mac，同一个 app 有两个版本：
 
 | 版本 | 下载 | 系统要求 |
 | --- | --- | --- |
-| **Cetus** —— 最早的版本，基于 Tauri | [Cetus.dmg](https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg) | macOS 13+ |
+| **Cetus** —— 最早的版本，基于 Electron | [Cetus.dmg](https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg) | macOS 13+ |
 | **Cetus Swift**（Beta）—— 原生 SwiftUI 版本，仍在打磨中 | [Cetus-Swift.dmg](https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg) | macOS 15+ |
 
 两个版本都会自动更新。然后：

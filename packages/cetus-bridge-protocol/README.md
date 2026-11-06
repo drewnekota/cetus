@@ -10,7 +10,7 @@ The package exports:
 - host tunnel TypeScript types
 
 Cetus extensions import this through
-`src-tauri/cetus-extensions/bridge/protocol.ts`, a shim kept under the extension
+`backend/cetus-extensions/bridge/protocol.ts`, a shim kept under the extension
 directory so the host scanner only loads top-level extension entrypoints.
 
 ## Verify

@@ -14,7 +14,7 @@ import {
   type ConversationMode,
   type SidebarView,
 } from "@/components/sidebar/view-toggle";
-import { api, type Screenshot } from "@/lib/tauri";
+import { api, type Screenshot } from "@/lib/api";
 import {
   useChatStore,
   useChatError,

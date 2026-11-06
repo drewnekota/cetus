@@ -36,13 +36,9 @@ for arg in "$@"; do
 done
 SIGN_FLAGS=(--harden); [ "$NOTARIZE" = 1 ] && SIGN_FLAGS=(--notarize)
 
-[ -d src-tauri/pi-install ] || scripts/build-pi-sidecar.sh
-
 echo "→ Building app bundle (unsigned; we sign nested binaries ourselves)…"
-env -u APPLE_SIGNING_IDENTITY pnpm tauri build --bundles app
-
-APP="$(/usr/bin/find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
-[ -n "$APP" ] || { echo "no .app produced" >&2; exit 1; }
+APP="$(node scripts/package-electron.mjs | tail -1)"
+[ -d "$APP" ] || { echo "no .app produced by scripts/package-electron.mjs" >&2; exit 1; }
 
 # Mirrors release.yml: the app is only hardened here, and the single Apple
 # submission is the dmg — which notarizes the .app it carries too, so the .app's
@@ -50,8 +46,8 @@ APP="$(/usr/bin/find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.
 echo "→ Signing the app (--harden)…"
 scripts/macos-sign.sh "$APP" --harden
 
-VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-DMG="src-tauri/target/release/bundle/Cetus_${VERSION}_aarch64.dmg"
+VERSION="$(node -p "require('./package.json').version")"
+DMG="backend/target/electron/Cetus_${VERSION}_aarch64.dmg"
 echo "→ Packaging $DMG"
 scripts/package-dmg.sh "$APP" "$DMG"
 echo "→ Signing the dmg (${SIGN_FLAGS[*]})…"

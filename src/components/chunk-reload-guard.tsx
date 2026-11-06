@@ -1,5 +1,5 @@
 "use client";
-// Auto-recover from stale code-split chunks. The Tauri webview is long-lived, so
+// Auto-recover from stale code-split chunks. The app's webviews are long-lived, so
 // after the dev server recompiles a lazily-imported chunk (or after a prod
 // deploy while a window stays open) the in-memory module graph can still point
 // at an old chunk URL that no longer exists — `next/dynamic`'s loader then

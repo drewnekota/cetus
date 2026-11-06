@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { api, onAppEvent } from "@/lib/tauri";
+import { api, onAppEvent } from "@/lib/api";
 import { dispatchNotification } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import type { ExtensionUIRequest, ExtensionUIResponseBody } from "@/lib/types";

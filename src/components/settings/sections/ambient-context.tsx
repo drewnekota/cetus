@@ -12,7 +12,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/lib/i18n";
-import { api, type AmbientSettings } from "@/lib/tauri";
+import { api, type AmbientSettings } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { SectionHeading, ToggleRow } from "../settings-controls";
 

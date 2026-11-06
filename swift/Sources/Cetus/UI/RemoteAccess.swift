@@ -4,10 +4,10 @@ import CryptoKit
 import Foundation
 import Observation
 
-// Port of src-tauri/src/remote.rs: the authenticated mobile companion served on
+// Port of backend/src/remote.rs: the authenticated mobile companion served on
 // localhost (127.0.0.1:17382) and published through Tailscale Serve. Only
 // conversation operations are exposed; files, terminal, secrets and settings never
-// enter this API. The web client (src-tauri/remote/*) is served verbatim.
+// enter this API. The web client (backend/remote/*) is served verbatim.
 
 /// `RemoteSettings` (get_remote_settings / set_remote_enabled / … return value).
 struct RemoteSnapshot: Equatable {

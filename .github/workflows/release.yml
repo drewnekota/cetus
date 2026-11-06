@@ -1,9 +1,10 @@
-name: Release (macOS + Windows)
+name: Release (macOS)
 
-# Releases macOS by default. Windows is built only when explicitly selected.
-# The Windows-only compatibility workflow still merges into an existing
-# same-version manifest, while a macOS-only publish replaces the release with
-# macOS assets and a macOS-only updater manifest.
+# Builds, signs, notarizes and publishes the macOS (Apple Silicon) app. Cetus
+# ships for macOS only; the release version comes from package.json.
+# The updater feed keeps the Tauri updater format (latest.json + a
+# minisign-signed Cetus.app.tar.gz), so the last Tauri builds (<= 0.4.18)
+# update straight into the Electron app.
 #
 # Required repository secrets:
 #
@@ -16,7 +17,7 @@ name: Release (macOS + Windows)
 #   APPLE_TEAM_ID
 #   KEYCHAIN_PASSWORD
 #
-# Tauri updater signing (shared by macOS and Windows):
+# Updater signing (minisign key; the names date from the Tauri builds):
 #   TAURI_SIGNING_PRIVATE_KEY
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 
@@ -29,34 +30,9 @@ on:
         description: GitHub release tag to create or replace
         required: true
         default: release
-      platform:
-        description: Platforms to build
-        required: true
-        type: choice
-        options:
-          - macos
-          - both
-          - windows
-        default: macos
       publish:
         description: Publish to GitHub Release (otherwise keep Actions artifacts only)
         required: true
-        type: boolean
-        default: true
-  workflow_call:
-    inputs:
-      tag:
-        description: GitHub release tag to create or replace
-        required: true
-        type: string
-      platform:
-        description: Platforms to build
-        required: false
-        type: string
-        default: macos
-      publish:
-        description: Publish to GitHub Release
-        required: false
         type: boolean
         default: true
 
@@ -69,21 +45,15 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-      RELEASE_PLATFORM: ${{ inputs.platform || 'both' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify source versions match
+      - name: Verify the release version format
         run: |
           set -euo pipefail
-          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
-          TAURI_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          if [[ "$PACKAGE_VERSION" != "$TAURI_VERSION" ]]; then
-            echo "package.json ($PACKAGE_VERSION) and tauri.conf.json ($TAURI_VERSION) versions differ" >&2
-            exit 1
-          fi
-          if [[ ! "$TAURI_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release version must use numeric major.minor.patch format: $TAURI_VERSION" >&2
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must use numeric major.minor.patch format: $VERSION" >&2
             exit 1
           fi
 
@@ -91,7 +61,7 @@ jobs:
         if: github.event_name == 'push' || inputs.publish
         run: |
           set -euo pipefail
-          CURRENT_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          CURRENT_VERSION="$(node -p "require('./package.json').version")"
           PUBLISHED_MANIFEST="$RUNNER_TEMP/published-latest.json"
           HTTP_STATUS="$(curl --location --silent --show-error \
             --output "$PUBLISHED_MANIFEST" \
@@ -108,8 +78,8 @@ jobs:
           fi
 
           PUBLISHED_VERSION="$(node -p "require(process.argv[1]).version" "$PUBLISHED_MANIFEST")"
-          node - "$CURRENT_VERSION" "$PUBLISHED_VERSION" "$RELEASE_PLATFORM" <<'NODE'
-          const [current, published, platform] = process.argv.slice(2);
+          node - "$CURRENT_VERSION" "$PUBLISHED_VERSION" <<'NODE'
+          const [current, published] = process.argv.slice(2);
           const parse = (version) => {
             if (!/^\d+\.\d+\.\d+$/.test(version)) {
               throw new Error(`invalid release version: ${version}`);
@@ -125,28 +95,17 @@ jobs:
             return 0;
           };
 
-          const difference = compare(current, published);
-          if (platform === "windows") {
-            if (difference !== 0) {
-              throw new Error(
-                `Windows-only publishing must use the existing release version ${published}; got ${current}`,
-              );
-            }
-            console.log(`Windows-only release version matches ${published}.`);
-          } else {
-            if (difference <= 0) {
-              throw new Error(
-                `Version must be bumped above published version ${published}; got ${current}`,
-              );
-            }
-            console.log(`Release version increased from ${published} to ${current}.`);
+          if (compare(current, published) <= 0) {
+            throw new Error(
+              `Version must be bumped above published version ${published}; got ${current}`,
+            );
           }
+          console.log(`Release version increased from ${published} to ${current}.`);
           NODE
 
   macos:
     name: Build macOS arm64
     needs: version-check
-    if: github.event_name == 'push' || inputs.platform == 'both' || inputs.platform == 'macos'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -162,7 +121,7 @@ jobs:
           targets: aarch64-apple-darwin
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: backend
           # Read-only reuse of the cache ci.yml warms on main. Actions caches
           # are ref-scoped, so a cache saved here (under `refs/tags/vX`) could
           # never be read by the next tag — saving it just costs ~44s per run.
@@ -197,7 +156,11 @@ jobs:
           rm -f "$RUNNER_TEMP/cert.p12"
 
       - name: Build app bundle
-        run: pnpm tauri build --bundles app
+        run: |
+          set -euo pipefail
+          APP="$(node scripts/package-electron.mjs | tail -1)"
+          test -d "$APP"
+          echo "APP=$APP" >> "$GITHUB_ENV"
 
       # One Apple round-trip, not two. The notary service notarizes everything
       # inside a submitted container, so submitting the dmg covers the .app it
@@ -210,7 +173,6 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
-          APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
           scripts/macos-sign.sh "$APP" --harden
 
       - name: Package, sign, and notarize DMG
@@ -221,8 +183,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
-          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          VERSION="$(node -p "require('./package.json').version")"
           DMG="$RUNNER_TEMP/Cetus_${VERSION}_aarch64.dmg"
           scripts/package-dmg.sh "$APP" "$DMG"
           scripts/macos-sign.sh "$DMG" --notarize
@@ -231,7 +192,6 @@ jobs:
       - name: Staple the app bundle
         run: |
           set -euo pipefail
-          APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
           scripts/macos-sign.sh "$APP" --staple-only
 
       - name: Package and sign macOS updater
@@ -240,10 +200,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          APP="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
           UPDATER="$RUNNER_TEMP/Cetus.app.tar.gz"
           tar -C "$(dirname "$APP")" -czf "$UPDATER" "$(basename "$APP")"
-          pnpm tauri signer sign \
+          pnpm dlx @tauri-apps/cli@2 signer sign \
             -k "$TAURI_SIGNING_PRIVATE_KEY" \
             -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
             "$UPDATER"
@@ -269,74 +228,10 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  windows:
-    name: Build Windows x64
-    needs: version-check
-    if: inputs.platform == 'both' || inputs.platform == 'windows'
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - uses: oven-sh/setup-bun@v2
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install JS deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Build pi sidecar tree
-        shell: bash
-        run: scripts/build-pi-sidecar.sh
-
-      - name: Build and sign NSIS installer + updater
-        # PowerShell strips the quotes out of the inline JSON, so run this in
-        # bash — tauri rejects `{bundle:{...}}` as invalid JSON.
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: >-
-          pnpm tauri build --bundles nsis
-          --config '{"bundle":{"createUpdaterArtifacts":true}}'
-
-      - name: Stage Windows release assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          INSTALLER="$(find src-tauri/target/release/bundle/nsis -maxdepth 1 -name '*-setup.exe' | head -1)"
-          test -n "$INSTALLER"
-          test -s "$INSTALLER"
-          test -s "$INSTALLER.sig"
-          mkdir release-assets
-          cp "$INSTALLER" "release-assets/Cetus_${VERSION}_x64-setup.exe"
-          cp "$INSTALLER.sig" "release-assets/Cetus_${VERSION}_x64-setup.exe.sig"
-
-      - name: Upload Windows release assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: cetus-release-windows
-          path: release-assets/*
-          if-no-files-found: error
-          retention-days: 3
-
   publish:
     name: Publish updater release
-    needs: [macos, windows]
-    if: >-
-      always() &&
-      !cancelled() &&
-      (github.event_name == 'push' || inputs.publish) &&
-      needs.macos.result != 'failure' &&
-      needs.windows.result != 'failure' &&
-      (needs.macos.result == 'success' || needs.windows.result == 'success')
+    needs: macos
+    if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-24.04
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
@@ -346,64 +241,21 @@ jobs:
       - name: Download signed release assets
         uses: actions/download-artifact@v4
         with:
-          pattern: cetus-release-*
+          name: cetus-release-macos
           path: release-assets
-          merge-multiple: true
 
-      - name: Build or merge updater manifest
+      - name: Build updater manifest
         run: |
           set -euo pipefail
-          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          WINDOWS_ASSET="Cetus_${VERSION}_x64-setup.exe"
-          MAC_BUILT=false
-          WINDOWS_BUILT=false
-          test ! -s "release-assets/Cetus.app.tar.gz" || MAC_BUILT=true
-          test ! -s "release-assets/$WINDOWS_ASSET" || WINDOWS_BUILT=true
-
-          if [[ "$MAC_BUILT" == true && "$WINDOWS_BUILT" == true ]]; then
-            test -s "release-assets/Cetus.app.tar.gz.sig"
-            test -s "release-assets/$WINDOWS_ASSET.sig"
-            node scripts/updater-manifest.mjs create \
-              --output release-assets/latest.json \
-              --version "$VERSION" \
-              --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-              --mac-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.app.tar.gz" \
-              --mac-signature-file release-assets/Cetus.app.tar.gz.sig \
-              --windows-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${WINDOWS_ASSET}" \
-              --windows-signature-file "release-assets/$WINDOWS_ASSET.sig"
-            echo "PUBLISH_MODE=replace" >> "$GITHUB_ENV"
-          elif [[ "$MAC_BUILT" == true ]]; then
-            test -s "release-assets/Cetus.app.tar.gz.sig"
-            node scripts/updater-manifest.mjs create-platform \
-              --output release-assets/latest.json \
-              --version "$VERSION" \
-              --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-              --platform darwin-aarch64 \
-              --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.app.tar.gz" \
-              --signature-file release-assets/Cetus.app.tar.gz.sig
-            echo "PUBLISH_MODE=replace" >> "$GITHUB_ENV"
-          else
-            EXISTING="$RUNNER_TEMP/existing-latest.json"
-            curl --fail --location --retry 3 --retry-all-errors \
-              "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/latest.json?run=${GITHUB_RUN_ID}" \
-              --output "$EXISTING"
-
-            if [[ "$WINDOWS_BUILT" == true ]]; then
-              test -s "release-assets/$WINDOWS_ASSET.sig"
-              node scripts/updater-manifest.mjs merge \
-                --manifest "$EXISTING" \
-                --output release-assets/latest.json \
-                --version "$VERSION" \
-                --platform windows-x86_64 \
-                --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${WINDOWS_ASSET}" \
-                --signature-file "release-assets/$WINDOWS_ASSET.sig"
-            else
-              echo "No platform release assets were downloaded" >&2
-              exit 1
-            fi
-            echo "PUBLISH_MODE=merge" >> "$GITHUB_ENV"
-          fi
-
+          VERSION="$(node -p "require('./package.json').version")"
+          test -s release-assets/Cetus.app.tar.gz
+          test -s release-assets/Cetus.app.tar.gz.sig
+          node scripts/updater-manifest.mjs create \
+            --output release-assets/latest.json \
+            --version "$VERSION" \
+            --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --mac-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.app.tar.gz" \
+            --mac-signature-file release-assets/Cetus.app.tar.gz.sig
           node scripts/updater-manifest.mjs verify \
             --manifest release-assets/latest.json \
             --version "$VERSION"
@@ -413,42 +265,36 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ "$PUBLISH_MODE" == replace ]]; then
-            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-              gh release delete "$RELEASE_TAG" --yes
-            fi
-            VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-            SWIFT_VERSION="$(tr -d '[:space:]' < swift/VERSION)"
-            cat > "$RUNNER_TEMP/notes.md" <<NOTES
+          # Replaces the whole release: every asset on the old one (including
+          # any Windows installer left from the Tauri era) is dropped.
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release delete "$RELEASE_TAG" --yes
+          fi
+          VERSION="$(node -p "require('./package.json').version")"
+          SWIFT_VERSION="$(tr -d '[:space:]' < swift/VERSION)"
+          cat > "$RUNNER_TEMP/notes.md" <<NOTES
           ## Download
 
           | Build | File | Requires |
           | --- | --- | --- |
-          | **Cetus** ${VERSION} (Tauri) | [Cetus.dmg](https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.dmg) | Apple Silicon, macOS 13+ |
+          | **Cetus** ${VERSION} | [Cetus.dmg](https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.dmg) | Apple Silicon, macOS 13+ |
           | **Cetus Swift** ${SWIFT_VERSION} (Beta, native) | [Cetus-Swift.dmg](https://github.com/${GITHUB_REPOSITORY}/releases/download/swift/Cetus-Swift.dmg) | Apple Silicon, macOS 15+ |
 
           Both builds update themselves. Cetus Swift is in beta; its releases are published under the [swift](https://github.com/${GITHUB_REPOSITORY}/releases/tag/swift) tag.
 
           NOTES
-            gh release create "$RELEASE_TAG" \
-              release-assets/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "Cetus ${VERSION}" \
-              --notes-file "$RUNNER_TEMP/notes.md" \
-              --generate-notes \
-              --latest
-          else
-            gh release view "$RELEASE_TAG" >/dev/null
-            gh release upload "$RELEASE_TAG" \
-              release-assets/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
-          fi
+          gh release create "$RELEASE_TAG" \
+            release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Cetus ${VERSION}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --generate-notes \
+            --latest
 
       - name: Verify published updater endpoints
         run: |
           set -euo pipefail
-          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          VERSION="$(node -p "require('./package.json').version")"
           PUBLISHED="$RUNNER_TEMP/latest.json"
           curl --fail --location --retry 5 --retry-all-errors \
             "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/latest.json?run=${GITHUB_RUN_ID}" \

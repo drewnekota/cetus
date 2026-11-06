@@ -1,6 +1,6 @@
 import Foundation
 
-// Dictation lifecycle — port of src-tauri/src/voice.rs. The mic is captured by
+// Dictation lifecycle — port of backend/src/voice.rs. The mic is captured by
 // the same Swift speech helper Tauri uses (`cetus-speech-helper-v6`, spawned
 // through the TCC-disclaim shim); it streams JSONL ({"pcm"}, {"level"},
 // {"ready"}, {"speech"}, {"pcm_end"} / {"partial"}, {"final"}) which we parse

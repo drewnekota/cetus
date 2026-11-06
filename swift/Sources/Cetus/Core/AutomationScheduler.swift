@@ -1,6 +1,6 @@
 import Foundation
 
-// Port of Cetus's src-tauri/src/automation.rs (schedule math + validation),
+// Port of Cetus's backend/src/automation.rs (schedule math + validation),
 // automation_api.rs (create / update / set-enabled / delete semantics) and
 // scheduler.rs (20s tick, advance-before-fire, run-now, in-flight guard).
 

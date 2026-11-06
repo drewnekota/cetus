@@ -22,17 +22,12 @@ cd "$REPO_ROOT"
 [ -f scripts/signing.env ] && source scripts/signing.env
 : "${APPLE_SIGNING_IDENTITY:?set APPLE_SIGNING_IDENTITY in scripts/signing.env (see scripts/signing.env.example)}"
 
-# Assemble the pi sidecar tree if it's missing (gitignored, ~144 MB).
-[ -d src-tauri/pi-install ] || scripts/build-pi-sidecar.sh
-
 echo "→ Building app bundle (unsigned)…"
-# --bundles app: we only want the .app for local install; skip dmg packaging.
-# No APPLE_SIGNING_IDENTITY is passed to tauri here on purpose — we sign manually
-# below so the nested pi/.node binaries get signed too.
-env -u APPLE_SIGNING_IDENTITY pnpm tauri build --bundles app
-
-APP="$(/usr/bin/find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
-[ -n "$APP" ] || { echo "no .app produced under target/release/bundle/macos" >&2; exit 1; }
+# package-electron.mjs assembles the pi sidecar tree itself if it's missing,
+# and prints the .app path on its last stdout line. Signing happens below so
+# the nested pi/.node binaries get signed too.
+APP="$(node scripts/package-electron.mjs | tail -1)"
+[ -d "$APP" ] || { echo "no .app produced by scripts/package-electron.mjs" >&2; exit 1; }
 
 echo "→ Signing $APP with: $APPLE_SIGNING_IDENTITY"
 APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" scripts/macos-sign.sh "$APP"
