@@ -13,7 +13,7 @@
 //   native/       cetus.node — the Rust backend addon
 //   bin/cetus     the `cetus` CLI agents shell out to
 //   out/          the static Next export, served as app://cetus/
-//   icons/        tray icon
+//   icons/        app icon
 //   pi-install/   the bundled pi runtime (scripts/build-pi-sidecar.sh)
 
 import { spawnSync } from "node:child_process";
@@ -78,7 +78,7 @@ fs.copyFileSync(path.join(backendDir, "cli", "target", "release", "cetus"), path
 fs.chmodSync(path.join(bin, "cetus"), 0o755);
 const icons = path.join(resDir, "icons");
 fs.mkdirSync(icons);
-for (const f of ["tray.png", "tray@2x.png", "icon.png"]) {
+for (const f of ["icon.png"]) {
   fs.copyFileSync(path.join(backendDir, "icons", f), path.join(icons, f));
 }
 

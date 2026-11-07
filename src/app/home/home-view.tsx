@@ -7,6 +7,7 @@ import type {
   SetStateAction,
   RefObject,
   JSX,
+  ReactNode,
 } from "react";
 import type { ShortcutMap } from "@/lib/keyboard-shortcuts";
 import dynamic from "next/dynamic";
@@ -216,6 +217,8 @@ export function renderHome({
   heroHeadline,
   isStreaming,
   renderWorkspaceDock,
+  renderMainTabStrip,
+  renderMainTabs,
 }: {
   chatSwitcher: ChatSwitcherState | null;
   closeChatSwitcher: (id: string | null) => void;
@@ -372,6 +375,8 @@ export function renderHome({
   heroHeadline: string;
   isStreaming: boolean;
   renderWorkspaceDock: (layout: WorkspaceLayout) => JSX.Element | null;
+  renderMainTabStrip: (chatTitle: string) => ReactNode;
+  renderMainTabs: (content: ReactNode) => ReactNode;
 }) {
   // One session surface, two hosts: the Kanban detail dialog and the Threads
   // view's side pane. Both drive the same detailId state.
@@ -454,8 +459,7 @@ export function renderHome({
       retrying={retrying}
       queued={activeId ? queued[activeId] : undefined}
       onQueue={(text, atts, runtime, beforeIds) => {
-        if (activeId)
-          enqueueMessage(activeId, text, atts, runtime, beforeIds);
+        if (activeId) enqueueMessage(activeId, text, atts, runtime, beforeIds);
       }}
       onSteerQueued={(id) => {
         if (activeId) steerQueued(activeId, id);
@@ -684,10 +688,7 @@ export function renderHome({
               {!sidebarOpen && (
                 <>
                   {shortcutPlatform() === "mac" && (
-                    <div
-                      data-drag-region
-                      className="h-full w-14 shrink-0"
-                    />
+                    <div data-drag-region className="h-full w-14 shrink-0" />
                   )}
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -711,6 +712,10 @@ export function renderHome({
                   </Tooltip>
                 </>
               )}
+              {view === "chat" &&
+                renderMainTabStrip(
+                  conversations.find((c) => c.id === activeId)?.title ?? "",
+                )}
               <div data-drag-region className="h-full flex-1" />
               {!piReady && (
                 <span className="text-muted-foreground/70">○ connecting…</span>
@@ -773,7 +778,9 @@ export function renderHome({
                     </TooltipTrigger>
                     <TooltipContent side="bottom">
                       <span>{t("workspacePanel.openBottom")}</span>
-                      <Kbd>{shortcutDisplay(keyboardShortcuts.toggleTerminal)}</Kbd>
+                      <Kbd>
+                        {shortcutDisplay(keyboardShortcuts.toggleTerminal)}
+                      </Kbd>
                     </TooltipContent>
                   </Tooltip>
                 </>
@@ -839,52 +846,56 @@ export function renderHome({
                 onApproveReview={onApproveReview}
                 onRequestChanges={onRequestChanges}
               />
-            ) : loadingChatId !== null &&
-              loadingChatId === activeId &&
-              !hasMessages ? (
-              <ChatLoadingPane
-                opticalCenter={sidebarOpen && !sideWorkspace.open}
-              />
-            ) : hasMessages ? (
-              renderChatPane(sidebarOpen && !sideWorkspace.open)
             ) : (
-              <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
-                <GlyphBackdrop />
-                <div
-                  className={`relative z-10 w-full max-w-3xl space-y-6 panel-motion transition-[translate] ${
-                    !sidebarOpen || sideWorkspace.open
-                      ? ""
-                      : "xl:-translate-x-10 2xl:-translate-x-12"
-                  }`}
-                >
-                  <h1 className="text-center font-serif text-4xl italic tracking-tight text-foreground">
-                    {heroHeadline}
-                  </h1>
-                  <Composer
-                    variant="hero"
-                    focusToken={focusToken}
-                    draftKey={activeId ? `chat:${activeId}` : "chat:new"}
-                    disabled={!piReady}
-                    streaming={isStreaming}
-                    modelChoice={modelChoice}
-                    onModelChange={onModelChange}
-                    conversationId={activeId}
-                    workspaceDir={workspaceDir}
-                    defaultWorkspace={defaultWorkspace}
-                    onWorkspaceChange={onWorkspaceChange}
-                    onSend={onSend}
-                    onBash={onBash}
-                    onAbort={onAbort}
-                    pendingBackend={pendingBackend}
-                    onPendingBackendChange={setPendingBackend}
-                    pendingCliModel={pendingCliModel}
-                    pendingCliEffort={pendingCliEffort}
-                    onPendingTuningChange={onPendingTuningChange}
-                    backendSwitch={backendSwitch}
-                    onRequestBackendSwitch={requestBackendSwitch}
+              renderMainTabs(
+                loadingChatId !== null &&
+                  loadingChatId === activeId &&
+                  !hasMessages ? (
+                  <ChatLoadingPane
+                    opticalCenter={sidebarOpen && !sideWorkspace.open}
                   />
-                </div>
-              </div>
+                ) : hasMessages ? (
+                  renderChatPane(sidebarOpen && !sideWorkspace.open)
+                ) : (
+                  <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6">
+                    <GlyphBackdrop />
+                    <div
+                      className={`relative z-10 w-full max-w-3xl space-y-6 panel-motion transition-[translate] ${
+                        !sidebarOpen || sideWorkspace.open
+                          ? ""
+                          : "xl:-translate-x-10 2xl:-translate-x-12"
+                      }`}
+                    >
+                      <h1 className="text-center font-serif text-4xl italic tracking-tight text-foreground">
+                        {heroHeadline}
+                      </h1>
+                      <Composer
+                        variant="hero"
+                        focusToken={focusToken}
+                        draftKey={activeId ? `chat:${activeId}` : "chat:new"}
+                        disabled={!piReady}
+                        streaming={isStreaming}
+                        modelChoice={modelChoice}
+                        onModelChange={onModelChange}
+                        conversationId={activeId}
+                        workspaceDir={workspaceDir}
+                        defaultWorkspace={defaultWorkspace}
+                        onWorkspaceChange={onWorkspaceChange}
+                        onSend={onSend}
+                        onBash={onBash}
+                        onAbort={onAbort}
+                        pendingBackend={pendingBackend}
+                        onPendingBackendChange={setPendingBackend}
+                        pendingCliModel={pendingCliModel}
+                        pendingCliEffort={pendingCliEffort}
+                        onPendingTuningChange={onPendingTuningChange}
+                        backendSwitch={backendSwitch}
+                        onRequestBackendSwitch={requestBackendSwitch}
+                      />
+                    </div>
+                  </div>
+                ),
+              )
             )}
           </div>
           {renderWorkspaceDock("side")}

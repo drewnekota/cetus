@@ -8,7 +8,6 @@ import { AgentControlCard } from "@/components/chat/agent-control-card";
 import { CliControlCard } from "@/components/chat/cli-control-card";
 import { WallpaperFrame } from "@/components/chat/wallpaper-frame";
 import { GlyphBackdrop } from "@/components/chat/glyph-backdrop";
-import { Bot } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Composer,
@@ -19,17 +18,18 @@ import {
   type QueuedMessage,
 } from "@/components/chat/composer";
 import {
-  useBackgroundTasks,
   useCompaction,
   useHasMessages,
   useIsStreaming,
-  useRunningSubagents,
 } from "@/lib/chat-store";
 import { useTranslation } from "@/lib/i18n";
 import { flavorHeadline } from "@/lib/chat-flavor";
 import type { BackendId, ModelChoice } from "@/lib/types";
-import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import { MessageList } from "./message-list";
+import {
+  BackgroundTasksBar,
+  useBackgroundItems,
+} from "./background-tasks-bar";
 import { useSessionTimeline } from "@/components/threads/session-timeline";
 import { QueuedMessages } from "./chat-status";
 
@@ -140,10 +140,22 @@ export function ChatPane({
   onResumeInterrupted,
   onDismissInterrupted,
 }: Props) {
-  const { locale } = useTranslation("chat");
+  const { t, locale } = useTranslation("chat");
   const hasMessages = useHasMessages(convId);
   const timeline = useSessionTimeline();
   const isStreaming = useIsStreaming(convId);
+  // While a run is live, say how much of it is background work — "Agent is
+  // running…" alone reads as one busy model when eight tasks are in flight.
+  const backgroundCount = useBackgroundItems(convId ?? "").length;
+  const runningPlaceholder =
+    isStreaming && backgroundCount > 0
+      ? t(
+          onQueue
+            ? "composer.placeholderQueueBackground"
+            : "composer.placeholderRunningBackground",
+          { count: backgroundCount },
+        )
+      : undefined;
   const compaction = useCompaction(convId);
   const [quoteRequest, setQuoteRequest] = useState<QuoteRequest | null>(null);
   const [queuedDrafts, setQueuedDrafts] = useState<
@@ -284,7 +296,7 @@ export function ChatPane({
           }`}
         >
           {convId ? (
-            <BackgroundAgentsBar convId={convId} backend={backend} />
+            <BackgroundTasksBar convId={convId} />
           ) : null}
           {interrupted && !isStreaming ? (
             <InterruptedBar
@@ -319,6 +331,7 @@ export function ChatPane({
             onWorkspaceChange={onWorkspaceChange}
             onSend={sendFromComposer}
             onQueue={onQueue ? queueFromComposer : undefined}
+            placeholder={runningPlaceholder}
             onSendFirstQueued={
               queued?.[0] && onSteerQueued
                 ? () => onSteerQueued(queued[0].id)
@@ -392,59 +405,3 @@ function InterruptedBar({
   );
 }
 
-/** Awareness strip for background work owned by this conversation: subagents
- *  (for example, a CLI backend's run_in_background Agent/Task) and
- *  session-scoped tasks (Monitors, background Bash) that outlive model turns.
- *  Without it the composer just says "Agent is running…" with no hint of
- *  *what* — or, worse, the conversation looks idle while a Monitor is watching
- *  something and will wake the agent later. Two sources, merged: the bridge's
- *  live task registry (`cli_background_tasks` snapshots — authoritative for
- *  CLI backends, cleared when the session process exits) and the rendered
- *  cards' running-subagent details (covers pi-backend runs). Renders nothing
- *  when both are empty. */
-function BackgroundAgentsBar({
-  convId,
-  backend,
-}: {
-  convId: string;
-  backend: BackendId;
-}) {
-  const { t } = useTranslation("chat");
-  const agents = useRunningSubagents(convId);
-  const tasks = useBackgroundTasks(convId);
-  if (agents.length === 0 && tasks.length === 0) return null;
-  // Prefer the human task description; fall back to the agent/task type.
-  const seen = new Set(tasks.map((task) => `${task.kind}|${task.description}`));
-  const labels = [
-    ...tasks.map((task) => task.description || task.kind),
-    ...agents
-      .filter((a) => !seen.has(`${a.type}|${a.description}`))
-      .map((a) => a.description || a.type),
-  ].filter(Boolean);
-  const shown = labels.slice(0, 3).join(", ");
-  const extra = labels.length - Math.min(labels.length, 3);
-  return (
-    <div
-      style={{
-        ...runtimeThemeStyle(backend),
-        borderColor:
-          "color-mix(in oklab, var(--runtime-color) 30%, transparent)",
-        backgroundColor:
-          "color-mix(in oklab, var(--runtime-color) 6%, transparent)",
-      }}
-      className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs text-muted-foreground"
-    >
-      <Bot className="size-3.5 shrink-0 text-[var(--runtime-color)]" />
-      <Spinner className="size-3 text-[var(--runtime-color)]" />
-      <span className="shrink-0 font-medium text-foreground">
-        {t("pane.backgroundAgents.title", { count: labels.length })}
-      </span>
-      {shown ? (
-        <span className="truncate">
-          {shown}
-          {extra > 0 ? t("pane.backgroundAgents.more", { count: extra }) : ""}
-        </span>
-      ) : null}
-    </div>
-  );
-}

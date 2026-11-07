@@ -1,6 +1,6 @@
 // Electron main process. Hosts the Rust backend (a Node-API addon built from
-// backend/) and owns everything UI-side: windows, child webviews, menus, the
-// tray, global shortcuts, dialogs and the custom protocols.
+// backend/) and owns everything UI-side: windows, child webviews, menus,
+// global shortcuts, dialogs and the custom protocols.
 //
 // The backend talks to this process through `host.call(op, argsJson)` (see
 // `handle` below); renderers talk to the backend through the preload bridge
@@ -13,13 +13,11 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
-  nativeImage,
   nativeTheme,
   Notification,
   protocol,
   screen,
   shell,
-  Tray,
   WebContentsView,
   type Display,
   type MenuItemConstructorOptions,
@@ -859,7 +857,7 @@ function registerProtocols() {
 }
 
 // ---------------------------------------------------------------------------
-// Menu + tray
+// Menu
 // ---------------------------------------------------------------------------
 
 function menuEvent(id: string) {
@@ -915,25 +913,6 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-let tray: Tray | null = null;
-
-function buildTray() {
-  const iconPath = isDev
-    ? path.join(ROOT, "backend", "icons", "tray.png")
-    : path.join(process.resourcesPath, "icons", "tray.png");
-  const icon = nativeImage.createFromPath(iconPath).resize({ width: 22, height: 22 });
-  icon.setTemplateImage(true);
-  tray = new Tray(icon);
-  tray.setToolTip("cetus");
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: "Open cetus", click: () => menuEvent("tray_open") },
-      { label: "Settings", click: () => menuEvent("tray_settings") },
-      { label: "Quit cetus", click: () => menuEvent("tray_quit") },
-    ]),
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -982,7 +961,6 @@ if (!app.requestSingleInstanceLock()) {
 
     for (const spec of APP_WINDOWS) createAppWindow(spec.label, spec.options);
     buildMenu();
-    buildTray();
 
     try {
       native.start();

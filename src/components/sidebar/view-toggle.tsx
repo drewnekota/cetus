@@ -59,9 +59,12 @@ export function ModeSelect({ mode, onChange }: Props) {
           onKeyDown={() => {
             openedByPointer.current = false;
           }}
-          className="flex h-8 w-full items-center gap-2 rounded-lg border border-border bg-card px-2.5 text-left text-sm font-medium text-foreground shadow-[0px_1px_2px_0px_rgba(0,0,0,0.04)] outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-accent/50"
+          // Reads as a plain sidebar row (regular weight, resting sidebar
+          // ink, no card/border/shadow); the up-down chevron is what says
+          // "picker".
+          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-sidebar-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
         >
-          <CurrentIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <CurrentIcon className="size-4 shrink-0" />
           <span className="min-w-0 flex-1 truncate">{t(current.labelKey)}</span>
           <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
         </button>

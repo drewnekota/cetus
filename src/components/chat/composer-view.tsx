@@ -43,7 +43,6 @@ import {
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { BackendId, ModelChoice } from "@/lib/types";
-import { runtimeThemeStyle } from "@/lib/runtime-theme";
 import { LONG_PASTE_CHARS } from "./composer-utils";
 import { GitBranchIndicator } from "./git-branch-indicator";
 import {
@@ -242,17 +241,7 @@ export function renderComposer({
       // here. There are no HTML5 drag handlers on purpose — the host's
       // drag-drop events capture OS file drags at the window level.
       data-file-drop-target
-      data-streaming={streaming && !bashMode ? "true" : undefined}
       data-backend={backend}
-      style={{
-        ...runtimeThemeStyle(backend),
-        ...(!bashMode
-          ? {
-              borderColor:
-                "color-mix(in oklab, var(--runtime-color) 60%, transparent)",
-            }
-          : {}),
-      }}
       className={cn(
         "relative rounded-2xl border border-border",
         // Soft, wide, low-opacity shadow (large blur, ~6% alpha) for a premium
@@ -263,9 +252,9 @@ export function renderComposer({
         // Bash mode: tint the frame so it's unmistakably "running a command",
         // not "messaging the agent".
         bashMode && "border-primary/60 ring-1 ring-primary/40",
-        // Runtime identity is supplied by the shared theme registry. Bash
-        // mode intentionally replaces it with the primary command tint.
-        variant === "hero" ? "bg-card p-2" : "bg-card p-1.5",
+        // The frame stays neutral for every runtime (the picker's icon is
+        // the identity cue).
+        variant === "hero" ? "bg-(--composer) p-2" : "bg-(--composer) p-1.5",
       )}
     >
       {isDragging && (

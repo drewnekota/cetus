@@ -102,7 +102,7 @@ pub struct QuickSettings {
     /// (default fn so an old settings blob keeps the cue rather than silencing it).
     #[serde(default = "default_voice_start_sound")]
     pub voice_start_sound: bool,
-    /// Register cetus as a macOS login item so it starts (in the tray) when the
+    /// Register cetus as a macOS login item so it starts (in the background) when the
     /// user logs in. Off by default. Applied via the host's autostart plugin every
     /// time settings are saved, so the OS login item tracks this flag.
     #[serde(default)]
@@ -113,7 +113,7 @@ pub struct QuickSettings {
     /// toggle takes effect without a relaunch. Release builds only.
     #[serde(default = "default_true")]
     pub auto_update: bool,
-    /// Ask before quitting (Cmd+Q / menu Quit / tray Quit). On by default so a
+    /// Ask before quitting (Cmd+Q / menu Quit). On by default so a
     /// stray Cmd+Q next to Cmd+W can't silently kill every running agent
     /// session. Read at quit time, so toggling takes effect immediately.
     #[serde(default = "default_true")]

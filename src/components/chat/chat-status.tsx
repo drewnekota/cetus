@@ -141,39 +141,47 @@ function QueuedMessageRow({
   );
 }
 
+/** Live "the agent is working" line: three pulsing dots plus the elapsed
+ *  time. The only progress cue while a turn runs — the steps themselves stay
+ *  folded behind the activity summary above it. */
+export function WorkingIndicator({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const s = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const elapsed = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+  return (
+    <div role="status" className="flex items-center gap-3 py-0.5 text-sm text-muted-foreground">
+      <span aria-hidden className="flex items-center gap-[3px]">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="size-[5px] rounded-full bg-current animate-working-dot motion-reduce:animate-none"
+            style={{ animationDelay: `${i * 0.2}s` }}
+          />
+        ))}
+      </span>
+      <span className="tabular-nums">{elapsed}</span>
+    </div>
+  );
+}
+
 /** Shown between the user's send and the first message_start event so the
  *  conversation doesn't feel like it's hanging. For CLI backends
  *  (claude-code / codex) this covers the whole process boot — message_start is
- *  deferred until real content streams — so it reads like the native desktop
- *  apps: a shimmering status word plus an elapsed-seconds counter once the
- *  wait is long enough to notice. */
+ *  deferred until real content streams. */
 export function ThinkingPlaceholder() {
   const { t } = useTranslation("chat");
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    const started = Date.now();
-    const id = window.setInterval(
-      () => setElapsed(Math.floor((Date.now() - started) / 1000)),
-      1000,
-    );
-    return () => window.clearInterval(id);
-  }, []);
+  const [startedAt] = useState(() => Date.now());
   return (
     <div className="flex w-full justify-start py-3">
       <div className="flex max-w-[88%] flex-col gap-2 items-start">
         <div className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
           {t("pane.assistant")}
         </div>
-        <div className="flex items-baseline gap-2 text-sm">
-          <span className="animate-shimmer-text font-medium">
-            {t("pane.thinking")}
-          </span>
-          {elapsed >= 3 && (
-            <span className="text-xs tabular-nums text-muted-foreground/70">
-              {elapsed}s
-            </span>
-          )}
-        </div>
+        <WorkingIndicator startedAt={startedAt} />
       </div>
     </div>
   );

@@ -1,33 +1,20 @@
 "use client";
-import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, CheckCircle2, AlertCircle, CircleSlash } from "lucide-react";
+import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
 import type { ProcessBlock } from "@/lib/assistant-segments";
-import { toolActivityStatus } from "@/lib/tool-status";
 import { useTranslation } from "@/lib/i18n";
 import { useDisclosure } from "@/lib/disclosure";
-import { Spinner } from "@/components/ui/spinner";
-import { ToolUseCard, summarizeArgs, subagentInfo } from "./tool-use-card";
+import { ToolUseCard, isCommandTool } from "./tool-use-card";
 import { ThinkingBlock } from "./thinking-block";
 import { TextBlock } from "./message-blocks";
 
-/** Steps foldable into the activity timeline: thinking, tool calls, and
- *  intermediate narration text the agent emitted between tool runs. */
-
-/** Render a run of the agent's work (thinking + tool calls + intermediate
- *  narration) as a single collapsible activity. Collapsed by default — while
- *  the agent is running the header updates in place to show a live elapsed
- *  timer and the current action (so the list doesn't grow a card per step);
- *  once the turn settles the whole run renders as `plain`: a bare
- *  "Worked for Xs" text line (no card chrome) that expands the full timeline
- *  in place. */
+/** A run of the agent's work (thinking, tool calls, narration between tool
+ *  runs) folded into one summary line — "Ran 3 commands and used 2 other
+ *  tools" — that expands the full timeline in place. Always collapsed by
+ *  default, live or settled; the live "working" cue is the turn's
+ *  WorkingIndicator, not this line. */
 export function ActivityGroup({
   id,
   steps,
-  durationMs,
-  startedAt,
-  active,
-  plain = false,
-  defaultOpen = false,
   relatedIds,
   stepIds,
   showTurnEnded = false,
@@ -36,18 +23,6 @@ export function ActivityGroup({
    *  expanders survive the virtualized list unmounting this turn. */
   id?: string;
   steps: ProcessBlock[];
-  durationMs: number;
-  /** Wall-clock start of the activity; drives the live elapsed timer. */
-  startedAt?: number;
-  /** The whole agent turn is still open and no answer has started after this
-   *  activity. Individual tool blocks settle between calls, so their
-   *  `streaming` flag alone is not a reliable indication of completion. */
-  active: boolean;
-  /** Settled whole-turn fold: render as a bare text disclosure line instead of
-   *  the boxed live activity bar — no extra nesting chrome. */
-  plain?: boolean;
-  /** Keep tool runs following the retained text visible when the turn ends. */
-  defaultOpen?: boolean;
   /** Source-stable ids preserve choices when adjacent groups merge. */
   relatedIds?: string[];
   stepIds?: string[];
@@ -55,28 +30,26 @@ export function ActivityGroup({
   showTurnEnded?: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const [open, toggle] = useDisclosure(id, defaultOpen, relatedIds);
+  const [open, toggle] = useDisclosure(id, false, relatedIds);
 
-  const statuses = steps.flatMap((s) => s.kind === "tool_use" ? [toolActivityStatus(s)] : []);
-  const running = active || statuses.includes("running") || steps.some((s) => s.kind === "thinking" && s.streaming);
-
-  // Live elapsed timer while running; freezes into `durationMs` on settle.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!running) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [running]);
-  const liveDur = running && startedAt ? formatDuration(now - startedAt) : null;
-  const hasError = statuses.includes("error");
-  const incomplete = statuses.includes("incomplete");
-  const hasThinking = steps.some((s) => s.kind === "thinking");
-  const toolCount = steps.reduce((n, s) => (s.kind === "tool_use" ? n + 1 : n), 0);
-  const dur = formatDuration(durationMs);
-
-  // While running: surface what's happening right now in the header.
-  const current = running ? currentAction(steps) : null;
+  let commands = 0;
+  let tools = 0;
+  let thinking = false;
+  for (const s of steps) {
+    if (s.kind === "thinking") thinking = true;
+    if (s.kind !== "tool_use") continue;
+    if (isCommandTool(s.name, s.args)) commands++;
+    else tools++;
+  }
+  const plural = (key: string, count: number) => t(count === 1 ? key : `${key}_plural`, { count });
+  const label =
+    commands && tools
+      ? t("activity.ranAndUsed", { commands: plural("activity.commands", commands), tools: plural("activity.otherTools", tools) })
+      : commands
+        ? t("activity.ran", { commands: plural("activity.commands", commands) })
+        : tools
+          ? t("activity.used", { tools: plural("activity.tools", tools) })
+          : t(thinking ? "activity.thought" : "activity.updates");
 
   const timeline = steps.map((s, i) =>
     s.kind === "thinking" ? (
@@ -92,119 +65,27 @@ export function ActivityGroup({
     ),
   );
 
-  if (plain && !running) {
-    // Settled whole-turn fold: a bare "N steps · Xs" line, no card chrome —
-    // expanding reveals the timeline inline, without adding a nesting level.
-    const label =
-      toolCount > 0
-        ? t(toolCount === 1 ? "agent.step" : "agent.step_plural", { count: toolCount }) +
-          (dur ? ` · ${dur}` : "")
-        : dur
-          ? t("activity.worked", { duration: dur })
-          : t(hasThinking ? "activity.thought" : "activity.updates");
-    return (
-      <div className="w-full max-w-[88%]">
-        <button
-          onClick={toggle}
-          aria-expanded={open}
-          className="flex items-center gap-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          {hasError ? <AlertCircle className="h-3 w-3 text-warning" /> : incomplete ? <CircleSlash className="h-3 w-3" /> : null}
-          <span>{showTurnEnded ? `${t("activity.turnEnded")} · ` : ""}{label}{hasError ? ` · ${t("activity.hasErrors")}` : incomplete ? ` · ${t("activity.incomplete")}` : ""}</span>
-          {open ? (
-            <ChevronDown className="h-3 w-3 shrink-0" />
-          ) : (
-            <ChevronRight className="h-3 w-3 shrink-0" />
-          )}
-        </button>
-        {open && <div className="mt-1 space-y-0.5">{timeline}</div>}
-      </div>
-    );
-  }
-
   return (
-    <div className="w-full max-w-[88%] rounded-md border border-border/60 bg-muted/30">
+    <div className="w-full max-w-[88%]">
       <button
         onClick={toggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+        className="group/activity flex items-center gap-2.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
+        <Wrench className="size-3.5 shrink-0" />
+        <span>
+          {showTurnEnded ? `${t("activity.turnEnded")} · ` : ""}
+          {label}
+        </span>
         {open ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+          <ChevronDown className="size-3.5 shrink-0" />
         ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-        )}
-        {running ? (
-          <Spinner className="size-3.5 text-muted-foreground" />
-        ) : hasError ? (
-          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning" />
-        ) : incomplete ? (
-          <CircleSlash className="h-3.5 w-3.5 shrink-0" />
-        ) : (
-          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
-        )}
-        {running ? (
-          <>
-            <span className="shrink-0 font-medium text-foreground">{t("activity.working")}</span>
-            {liveDur && <span className="shrink-0 tabular-nums">· {liveDur}</span>}
-            {toolCount > 0 && (
-              <span className="shrink-0">
-                · {t(toolCount === 1 ? "agent.step" : "agent.step_plural", { count: toolCount })}
-              </span>
-            )}
-            {current && (
-              <span className="min-w-0 truncate font-mono text-xs">· {current}</span>
-            )}
-          </>
-        ) : (
-          <span className="min-w-0 truncate">
-            <span className="font-medium text-foreground">
-              {toolCount > 0
-                ? t(toolCount === 1 ? "agent.step" : "agent.step_plural", { count: toolCount })
-                : t(hasThinking ? "activity.thought" : "activity.updates")}
-            </span>
-            {dur && <span> · {dur}</span>}
-          </span>
+          <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover/activity:opacity-100" />
         )}
       </button>
-      {open && (
-        <div className="space-y-0.5 border-t border-border/40 px-1.5 py-1.5">{timeline}</div>
-      )}
+      {open && <div className="mt-1 space-y-0.5">{timeline}</div>}
     </div>
   );
-}
-
-/** A short label for the step currently in flight (or the most recent one), used
- *  in the live header: a running tool shows its name + arg preview; thinking
- *  shows the "Thinking" label. */
-function currentAction(steps: ProcessBlock[]): string {
-  // Narration text is content, not an action — skip it when picking the label.
-  const procs = steps.filter((s) => s.kind !== "text");
-  const active = [...procs].reverse().find((s) => s.kind === "tool_use" ? toolActivityStatus(s) === "running" : s.streaming === true) ?? procs[procs.length - 1];
-  if (!active) return "";
-  if (active.kind === "thinking") return "thinking";
-  // A running subagent (claude-code Task/Agent) streams its live status into
-  // the card's result — surface that instead of the frozen launch args, so
-  // the collapsed header tracks what the subagent is doing right now.
-  const sub = subagentInfo(active.result?.details);
-  if (sub) {
-    const content = active.result?.content;
-    const status =
-      Array.isArray(content) && content[0]?.type === "text" ? content[0].text : "";
-    const live = status || sub.description;
-    return live ? `${active.name} ${live}` : active.name || "";
-  }
-  const preview = summarizeArgs(active.args);
-  return preview ? `${active.name} ${preview}` : active.name || "";
-}
-
-function formatDuration(ms: number): string | null {
-  if (!ms || ms < 1000) return null;
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return rem ? `${m}m ${rem}s` : `${m}m`;
 }
 
 export { type ProcessBlock };

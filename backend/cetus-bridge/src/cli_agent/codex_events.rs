@@ -110,15 +110,8 @@ impl EventTranslator {
                         .and_then(Value::as_str)
                         .unwrap_or("Codex")
                         .to_string();
-                    let task = BackgroundTask {
-                        tool_use_id: id.to_string(),
-                        subagent_type,
-                        description: description.clone(),
-                        done: false,
-                        launched: false,
-                        steps: Vec::new(),
-                        status_text: String::new(),
-                    };
+                    let task =
+                        BackgroundTask::new(id.to_string(), subagent_type, description.clone());
                     self.background_tasks
                         .insert(thread_id.to_string(), task.clone());
                     let mut out = self.emit_tool_call(

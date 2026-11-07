@@ -23,12 +23,17 @@ import {
   getTurnPreview,
   useAwaitingAssistant,
   useChatError,
+  toolCallMessageKey,
   useChatStore,
   useMessageKeys,
   useMessageRoles,
 } from "@/lib/chat-store";
 import { toast } from "sonner";
 import { findQuoteSource, quoteRange } from "@/lib/quote-navigation";
+import {
+  REVEAL_TOOL_CALL_EVENT,
+  type RevealToolCallDetail,
+} from "@/components/chat/reveal-tool-call";
 import { FindBar } from "@/components/chat/find-bar";
 import {
   clearFindHighlights,
@@ -635,6 +640,65 @@ export function MessageList({
     },
     [convId, scroller, keys, rows, quoteT],
   );
+
+  // Background-task strip → "show me the card that launched this". The card
+  // may sit inside a folded activity group, in which case the whole row
+  // flashes instead.
+  useEffect(() => {
+    if (!convId || !scroller) return;
+    let frame = 0;
+    let animation: Animation | undefined;
+    const onReveal = (e: Event) => {
+      const detail = (e as CustomEvent<RevealToolCallDetail>).detail;
+      if (detail?.convId !== convId) return;
+      const messageKey = toolCallMessageKey(convId, detail.toolCallId);
+      const rowIndex = messageKey
+        ? rows.findIndex((group) =>
+            group.kind === "assistant"
+              ? group.keys.includes(messageKey)
+              : group.kind === "single" && group.key === messageKey,
+          )
+        : -1;
+      if (rowIndex < 0) return;
+      cancelAnimationFrame(frame);
+      animation?.cancel();
+      setFindOpen(false);
+      followTailRef.current = false;
+      listRef.current?.cancelScroll();
+      listRef.current?.scrollToIndex({ index: rowIndex, align: "center" });
+      let attempts = 0;
+      frame = requestAnimationFrame(function reveal() {
+        const row = scroller.querySelector<HTMLElement>(
+          `[data-find-row="${rowIndex}"]`,
+        );
+        // Let the virtual row mount and measure before refining.
+        if (++attempts < 3 || !row) {
+          if (attempts < 60) frame = requestAnimationFrame(reveal);
+          return;
+        }
+        listRef.current?.cancelScroll();
+        const card =
+          row.querySelector<HTMLElement>(
+            `[data-tool-call-id="${CSS.escape(detail.toolCallId)}"]`,
+          ) ?? row;
+        card.scrollIntoView({ block: "center" });
+        animation = card.animate(
+          [
+            { backgroundColor: "transparent" },
+            { backgroundColor: "rgba(160, 140, 255, 0.22)" },
+            { backgroundColor: "transparent" },
+          ],
+          { duration: 1800 },
+        );
+      });
+    };
+    window.addEventListener(REVEAL_TOOL_CALL_EVENT, onReveal);
+    return () => {
+      window.removeEventListener(REVEAL_TOOL_CALL_EVENT, onReveal);
+      cancelAnimationFrame(frame);
+      animation?.cancel();
+    };
+  }, [convId, scroller, rows]);
 
   const itemContent = useCallback(
     (index: number, item: MessageListItem) => {

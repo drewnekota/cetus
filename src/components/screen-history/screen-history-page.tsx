@@ -206,7 +206,7 @@ export function ScreenHistoryPage({ open, onClose, initialQuery, initialFrame }:
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+    <div data-window-overlay className="fixed inset-0 z-50 flex flex-col bg-background">
       {/* `pl-20` clears the macOS traffic lights (Overlay title bar floats them
           over the top-left); the bar also doubles as a window drag handle. */}
       <header

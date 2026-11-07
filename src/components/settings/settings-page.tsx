@@ -249,6 +249,7 @@ export const SettingsPage = memo(function SettingsPage({
   // [open, load] effects silently refresh in the background — no null flash.
   return (
     <div
+      data-window-overlay
       className={cn(
         "fixed inset-0 z-50 flex flex-col bg-background",
         !open && "hidden",

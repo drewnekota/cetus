@@ -47,6 +47,10 @@ flate2 = "1"
 futures-util = "0.3"
 axum = { version = "0.7", features = ["ws"] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+# Cetus Remote end-to-end encryption (Noise_NK with the phone app) and the
+# device-token hashes stored for paired phones.
+snow = "0.10"
+sha2 = "0.10"
 # Chinese word segmentation + POS tagging for recognition biasing: we mine
 # distinctive proper nouns (人名/地名/机构/专名) out of memory + past transcripts
 # to boost as hotwords. zh has no spaces, so a segmenter is required to pull

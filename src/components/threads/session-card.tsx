@@ -199,7 +199,7 @@ export const SessionCard = memo(function SessionCard({
     >
       {prompt && (
         <div className="flex justify-end pl-10">
-          <div className="min-w-0 rounded-2xl bg-primary/15 px-4 py-2 dark:bg-primary/20">
+          <div className="min-w-0 rounded-3xl bg-foreground/[0.09] px-4 py-2 dark:bg-foreground/10">
             <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
               {plain(prompt)}
             </p>

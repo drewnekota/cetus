@@ -302,7 +302,11 @@ export interface WorkspaceDockState {
   activeId: string | null;
 }
 
-export type WorkspaceDocksState = Record<WorkspaceLayout, WorkspaceDockState>;
+/** "main" holds the tabs beside the chat in the content area; its
+ * `activeId: null` means the chat itself is showing. */
+export type WorkspaceDockKey = WorkspaceLayout | "main";
+
+export type WorkspaceDocksState = Record<WorkspaceDockKey, WorkspaceDockState>;
 
 export type WorkspaceDocksByChatState = Record<string, WorkspaceDocksState>;
 
@@ -327,6 +331,7 @@ export function createInitialWorkspaceDocks(): WorkspaceDocksState {
       ],
       activeId: "terminal-1",
     },
+    main: { open: true, tabs: [], activeId: null },
   };
 }
 

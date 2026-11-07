@@ -13,6 +13,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { ResourcesPopover } from "@/components/sidebar/resources-popover";
+import { UsagePopover } from "@/components/sidebar/usage-popover";
 import {
   Clock,
   MessageSquare,
@@ -331,7 +332,9 @@ export const AppSidebar = memo(function AppSidebar({
         "[&_[data-slot=sidebar-menu-action]]:w-4! [&_[data-slot=sidebar-menu-action]_svg]:size-3.5!",
       )}
     >
-      <SidebarHeader className="gap-2">
+      {/* Three bands, Paseo-style: navigation on top, sessions in the middle,
+          utilities pinned at the bottom — hairlines keep them apart. */}
+      <SidebarHeader className="gap-2 border-b border-sidebar-border">
         {/* Clears the macOS traffic lights (overlay title bar) and doubles as a
             window drag handle, since there's no native title bar to grab. */}
         <div data-drag-region className="h-6 w-full shrink-0" />
@@ -341,7 +344,7 @@ export const AppSidebar = memo(function AppSidebar({
                 plain row (no hover/active state, no pointer cursor). */}
             <SidebarMenuButton
               asChild
-              className="data-[slot=sidebar-menu-button]:gap-1! data-[slot=sidebar-menu-button]:p-1.5! cursor-default hover:bg-transparent hover:text-sidebar-foreground active:bg-transparent active:text-sidebar-foreground"
+              className="data-[slot=sidebar-menu-button]:gap-1! data-[slot=sidebar-menu-button]:p-1.5! cursor-default text-sidebar-accent-foreground hover:bg-transparent hover:text-sidebar-accent-foreground active:bg-transparent active:text-sidebar-accent-foreground"
             >
               <div>
                 <img
@@ -621,7 +624,7 @@ export const AppSidebar = memo(function AppSidebar({
 
       {/* Pinned below the scroll area so Settings is always reachable, even
           with a long conversation list. */}
-      <SidebarFooter>
+      <SidebarFooter className="border-t border-sidebar-border">
         <SidebarMenu>
           {/* Appears only once an update is downloaded and waiting — a one-click
               relaunch to apply it, pinned right above Settings. */}
@@ -648,8 +651,9 @@ export const AppSidebar = memo(function AppSidebar({
               <SettingsIcon />
               <span>{t("nav.settings")}</span>
             </SidebarMenuButton>
-            {/* Resources sits beside Settings as an icon-only monitor — it's
-                a status readout, not a nav destination. */}
+            {/* Usage + Resources sit beside Settings as icon-only readouts —
+                status, not nav destinations. */}
+            <UsagePopover />
             <ResourcesPopover onSelectConversation={onSelect} />
           </SidebarMenuItem>
         </SidebarMenu>

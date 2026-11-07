@@ -736,14 +736,20 @@ export default function Home() {
   const sessionOrder = useCallback((dir: string | null): Conversation[] => {
     if (!dir) return [];
     const { inputIds: input, activityIds: running } = sessionSetsRef.current;
-    return groupSessions(folderSessions(conversationsRef.current, dir), input, running).map(
-      (s) => s.conv,
-    );
+    return groupSessions(
+      folderSessions(conversationsRef.current, dir),
+      input,
+      running,
+    ).map((s) => s.conv);
   }, []);
   const stepThread = useCallback((direction: 1 | -1) => {
     const { filter, detailId: id } = threadNavRef.current;
     if (!filter) return;
-    const next = stepThreadId(threadWalkOrder(conversationsRef.current, filter), id, direction);
+    const next = stepThreadId(
+      threadWalkOrder(conversationsRef.current, filter),
+      id,
+      direction,
+    );
     if (next) setDetailId(next);
   }, []);
   const archiveThread = useCallback((): boolean => {
@@ -783,7 +789,8 @@ export default function Home() {
     // this folder had open if it is still one of its sessions.
     const back = threadByFolderRef.current.get(dir) ?? null;
     setDetailId(
-      back && folderSessions(conversationsRef.current, dir).some((c) => c.id === back)
+      back &&
+        folderSessions(conversationsRef.current, dir).some((c) => c.id === back)
         ? back
         : null,
     );
@@ -869,6 +876,8 @@ export default function Home() {
     toggleTerminalPanel: (...args) => toggleTerminalPanel(...args),
     openWorkspaceTab: (...args) => openWorkspaceTab(...args),
     closeWorkspaceTab: (...args) => closeWorkspaceTab(...args),
+    cycleMainTab: (...args) => cycleMainTab(...args),
+    closeActiveMainTab: () => closeActiveMainTab(),
     boardWorkspaceFilter,
     defaultWorkspace,
     setWorkspaceDir,
@@ -892,6 +901,10 @@ export default function Home() {
     openTerminalWithCommand,
     openWorkspacePanelLayout,
     renderWorkspaceDock,
+    renderMainTabStrip,
+    renderMainTabs,
+    cycleMainTab,
+    closeActiveMainTab,
   } = useWorkspaceActions({
     t,
     activeIdRef,
@@ -968,8 +981,9 @@ export default function Home() {
       markUnread(id, false);
       const m = modeRef.current;
       if (m === "threads") {
-        const dir = conversationsRef.current.find((c) => c.id === id)
-          ?.workspaceDir;
+        const dir = conversationsRef.current.find(
+          (c) => c.id === id,
+        )?.workspaceDir;
         setView("threads");
         if (dir) setBoardWorkspaceFilter(dir);
         setDetailId(id);
@@ -1183,7 +1197,10 @@ export default function Home() {
   }
   function onSend(...args: Parameters<typeof useMessageActionsResult.onSend>) {
     const [text, attachments, runtime] = args;
-    if (activeId && sendDirectFromCetus(activeId, text, attachments ?? [], runtime)) {
+    if (
+      activeId &&
+      sendDirectFromCetus(activeId, text, attachments ?? [], runtime)
+    ) {
       return Promise.resolve();
     }
     return useMessageActionsResult.onSend(...args);
@@ -1198,7 +1215,8 @@ export default function Home() {
     runtime: ComposerRuntimeSelection | undefined,
   ): boolean {
     if (!runtime || runtime.backend === "pi") return false;
-    if (!isCoordinatorId(useCoordinatorStore.getState().registry, convId)) return false;
+    if (!isCoordinatorId(useCoordinatorStore.getState().registry, convId))
+      return false;
     startDirectRef.current(convId, text, attachments, runtime).catch((e) => {
       console.error("[cetus] direct start failed", e);
       toast.error(String(e));
@@ -1341,9 +1359,13 @@ export default function Home() {
           await api.setConversationCliModel(
             id,
             opts.cliModel ?? "",
-            opts.cliEffort ?? (backend === pendingBackend ? pendingCliEffort : ""),
+            opts.cliEffort ??
+              (backend === pendingBackend ? pendingCliEffort : ""),
           );
-        } else if (backend === pendingBackend && (pendingCliModel || pendingCliEffort)) {
+        } else if (
+          backend === pendingBackend &&
+          (pendingCliModel || pendingCliEffort)
+        ) {
           await api.setConversationCliModel(
             id,
             pendingCliModel,
@@ -1599,7 +1621,10 @@ export default function Home() {
       chatStore.getState().userSent(conv.id, a.prompt, [], []);
     }
     // The Threads/Kanban hosts look the run up before the next render lands it.
-    conversationsRef.current = mergeConversation(conversationsRef.current, conv);
+    conversationsRef.current = mergeConversation(
+      conversationsRef.current,
+      conv,
+    );
     onSelectChat(conv.id);
   }
   async function onDeleteAutomation(a: Automation) {
@@ -1613,15 +1638,18 @@ export default function Home() {
     chatStore,
     conversationsRef,
     setConversations,
-    createThread: (text, attachments, dir, opts) => onCreateTask(text, attachments, dir, opts),
-    enqueueMessage: (convId, text) => enqueueMessage(convId, text, [], undefined),
+    createThread: (text, attachments, dir, opts) =>
+      onCreateTask(text, attachments, dir, opts),
+    enqueueMessage: (convId, text) =>
+      enqueueMessage(convId, text, [], undefined),
     defaultBackendRef: pendingBackendRef,
   });
   startDirectRef.current = startDirect;
   // The Cetus conversation of the folder the Threads view shows. The view
   // opens it as the active chat, so the chat pane drives it.
   const [coordinatorId, setCoordinatorId] = useState<string | null>(null);
-  const coordinatorDir = boardWorkspaceFilter ?? workspaceDir ?? defaultWorkspace;
+  const coordinatorDir =
+    boardWorkspaceFilter ?? workspaceDir ?? defaultWorkspace;
   const coordinatorOn = view === "threads";
   useEffect(() => {
     if (!coordinatorOn || !piReady || !coordinatorDir) return;
@@ -1781,5 +1809,7 @@ export default function Home() {
     heroHeadline,
     isStreaming,
     renderWorkspaceDock,
+    renderMainTabStrip,
+    renderMainTabs,
   });
 }

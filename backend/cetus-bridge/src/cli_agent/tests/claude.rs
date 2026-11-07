@@ -581,15 +581,27 @@ fn background_task_changes_emit_strip_snapshots() {
     assert_eq!(snap["tasks"][0]["kind"], json!("Explore"));
     assert_eq!(snap["tasks"][0]["description"], json!("scan repo"));
 
-    let ev = tr.on_line(r#"{"type":"system","subtype":"task_progress","task_id":"bg1","tool_use_id":"tA","description":"Running ls","subagent_type":"Explore"}"#);
+    assert_eq!(snap["tasks"][0]["toolUseId"], json!("tA"));
+    assert!(snap["tasks"][0]["startedAt"].as_u64().unwrap() > 0);
+
+    let ev = tr.on_line(r#"{"type":"system","subtype":"task_progress","task_id":"bg1","tool_use_id":"tA","description":"Running ls","subagent_type":"Explore","usage":{"total_tokens":1200,"tool_uses":3,"duration_ms":4000}}"#);
     let snap = ev
         .iter()
         .find(|e| e["type"] == "cli_background_tasks")
         .unwrap();
     assert_eq!(snap["tasks"][0]["statusText"], json!("Running ls"));
+    assert_eq!(snap["tasks"][0]["toolUses"], json!(3));
+    assert_eq!(snap["tasks"][0]["totalTokens"], json!(1200));
 
-    // A sidechain step changes the card's step list but not the strip —
-    // no redundant snapshot.
+    // A sidechain step is activity too: the strip's step count and
+    // last-activity clock move with it.
+    let ev = tr.on_line(r#"{"type":"assistant","parent_tool_use_id":"tA","message":{"content":[{"type":"tool_use","id":"inner-1","name":"Read","input":{"file_path":"main.rs"}}]}}"#);
+    let snap = ev
+        .iter()
+        .find(|e| e["type"] == "cli_background_tasks")
+        .unwrap();
+    assert_eq!(snap["tasks"][0]["stepCount"], json!(1));
+    // A repeated snapshot line changes nothing — no redundant snapshot.
     let ev = tr.on_line(r#"{"type":"assistant","parent_tool_use_id":"tA","message":{"content":[{"type":"tool_use","id":"inner-1","name":"Read","input":{"file_path":"main.rs"}}]}}"#);
     assert!(!types(&ev).contains(&"cli_background_tasks".to_string()));
 

@@ -61,6 +61,8 @@ export function useHomeKeyboardShortcuts({
   toggleTerminalPanel,
   openWorkspaceTab,
   closeWorkspaceTab,
+  cycleMainTab,
+  closeActiveMainTab,
   boardWorkspaceFilter,
   defaultWorkspace,
   setWorkspaceDir,
@@ -111,6 +113,9 @@ export function useHomeKeyboardShortcuts({
     alwaysNew?: boolean,
   ) => void;
   closeWorkspaceTab: (layout: WorkspaceLayout, id: string) => void;
+  /** Main-area tabs beside the chat; false when there are none to act on. */
+  cycleMainTab: (direction: 1 | -1) => boolean;
+  closeActiveMainTab: () => boolean;
   boardWorkspaceFilter: string | null;
   defaultWorkspace: string;
   setWorkspaceDir: Dispatch<SetStateAction<string | null>>;
@@ -177,7 +182,8 @@ export function useHomeKeyboardShortcuts({
       e.stopPropagation();
       if (e.key === "Escape") closeChatSwitcher(null);
       else if (e.key === "Enter") commitChatSwitcher();
-      else if (e.key === "Tab") stepChatSwitcher(e.shiftKey ? -1 : 1, () => true);
+      else if (e.key === "Tab")
+        stepChatSwitcher(e.shiftKey ? -1 : 1, () => true);
       else if (e.key === "ArrowDown" || e.key === "ArrowRight")
         stepChatSwitcher(1, () => true);
       else if (e.key === "ArrowUp" || e.key === "ArrowLeft")
@@ -259,6 +265,18 @@ export function useHomeKeyboardShortcuts({
         e.preventDefault();
         window.dispatchEvent(new CustomEvent(FIND_IN_CHAT_EVENT));
         return;
+      }
+      if (view === "chat" && shortcut("previousWorkspaceTab")) {
+        if (cycleMainTab(-1)) {
+          e.preventDefault();
+          return;
+        }
+      }
+      if (view === "chat" && shortcut("nextWorkspaceTab")) {
+        if (cycleMainTab(1)) {
+          e.preventDefault();
+          return;
+        }
       }
       if (sideWorkspace.open && shortcut("previousWorkspaceTab")) {
         e.preventDefault();
@@ -353,6 +371,12 @@ export function useHomeKeyboardShortcuts({
       } else if (shortcut("openFilesTab")) {
         e.preventDefault();
         openWorkspaceTab("side", "files");
+      } else if (
+        shortcut("closeWorkspaceTab") &&
+        view === "chat" &&
+        closeActiveMainTab()
+      ) {
+        e.preventDefault();
       } else if (
         shortcut("closeWorkspaceTab") &&
         sideWorkspace.open &&

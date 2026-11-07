@@ -18,12 +18,12 @@
   --foreground: var(--ink);
   --card: var(--surface);
   --muted: color-mix(in oklab, var(--ink) 5%, var(--surface));
-  --muted-foreground: color-mix(in oklab, var(--ink) 52%, var(--surface));
+  --muted-foreground: color-mix(in oklab, var(--ink) 57%, var(--surface));
   --accent: color-mix(in oklab, var(--ink) 6%, var(--surface));
   --border: color-mix(in oklab, var(--ink) 12%, var(--surface));
   --popover: var(--surface);
   --sidebar: #f8f8f9;
-  --sidebar-accent: color-mix(in oklab, var(--ink) 7%, var(--surface));
+  --sidebar-accent: color-mix(in oklab, var(--ink) 10%, var(--surface));
   --radius: 0.625rem;
 }
 
@@ -36,7 +36,7 @@
     --diff-removed: #ff7e78;
     --card: color-mix(in oklab, var(--ink) 7%, var(--surface));
     --muted: color-mix(in oklab, var(--ink) 13%, var(--surface));
-    --muted-foreground: color-mix(in oklab, var(--ink) 56%, var(--surface));
+    --muted-foreground: color-mix(in oklab, var(--ink) 60%, var(--surface));
     --accent: color-mix(in oklab, var(--ink) 14%, var(--surface));
     --border: color-mix(in oklab, var(--ink) 14%, var(--surface));
     --popover: color-mix(in oklab, var(--ink) 7%, var(--surface));

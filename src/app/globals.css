@@ -133,7 +133,7 @@
   --secondary: color-mix(in oklab, var(--ink) calc(5% * var(--k)), var(--surface));
   --secondary-foreground: var(--ink);
   --muted: color-mix(in oklab, var(--ink) calc(5% * var(--k)), var(--surface));
-  --muted-foreground: color-mix(in oklab, var(--ink) calc(52% + (var(--contrast) - 50) * 0.2%), var(--surface));
+  --muted-foreground: color-mix(in oklab, var(--ink) calc(57% + (var(--contrast) - 50) * 0.2%), var(--surface));
   --accent: color-mix(in oklab, var(--ink) calc(6% * var(--k)), var(--surface));
   --accent-foreground: var(--ink);
   --destructive: var(--diff-removed);
@@ -158,12 +158,17 @@
   --chart-5: color-mix(in oklab, var(--ink) 40%, var(--surface));
 
   --sidebar: color-mix(in oklab, var(--ink) calc(2% * var(--k)), var(--surface));
-  --sidebar-foreground: var(--ink);
+  /* Resting sidebar text sits a step under full ink; hover + selected rows
+     switch to --sidebar-accent-foreground (full ink), so the active row is
+     the only one that reads bright. */
+  --sidebar-foreground: color-mix(in oklab, var(--ink) 74%, var(--surface));
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--on-accent);
   /* Hover + selected row: a faint neutral lift off the surface (subtle,
      Linear-style selection — no bold block). */
-  --sidebar-accent: color-mix(in oklab, var(--ink) calc(7% * var(--k)), var(--surface));
+  --sidebar-accent: color-mix(in oklab, var(--ink) calc(10% * var(--k)), var(--surface));
+  /* Composer: a faint well under the page so the input reads as a surface. */
+  --composer: color-mix(in oklab, var(--ink) calc(1.5% * var(--k)), var(--surface));
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: color-mix(in oklab, var(--ink) calc(9% * var(--k)), var(--surface));
   --sidebar-ring: var(--brand);
@@ -190,7 +195,7 @@
   --secondary: color-mix(in oklab, var(--ink) calc(13% * var(--k)), var(--surface));
   --secondary-foreground: var(--ink);
   --muted: color-mix(in oklab, var(--ink) calc(13% * var(--k)), var(--surface));
-  --muted-foreground: color-mix(in oklab, var(--ink) calc(56% + (var(--contrast) - 50) * 0.2%), var(--surface));
+  --muted-foreground: color-mix(in oklab, var(--ink) calc(60% + (var(--contrast) - 50) * 0.2%), var(--surface));
   --accent: color-mix(in oklab, var(--ink) calc(14% * var(--k)), var(--surface));
   --accent-foreground: var(--ink);
   --destructive: var(--diff-removed);
@@ -214,11 +219,12 @@
   --chart-5: color-mix(in oklab, var(--ink) 45%, var(--surface));
 
   --sidebar: color-mix(in oklab, var(--ink) calc(4% * var(--k)), var(--surface));
-  --sidebar-foreground: var(--ink);
+  --sidebar-foreground: color-mix(in oklab, var(--ink) 70%, var(--surface));
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--on-accent);
   /* Hover + selected row: a light neutral lift clearly above the dark surface. */
   --sidebar-accent: color-mix(in oklab, var(--ink) calc(17% * var(--k)), var(--surface));
+  --composer: var(--card);
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: color-mix(in oklab, var(--ink) calc(11% * var(--k)), var(--surface));
   --sidebar-ring: var(--brand);
@@ -234,6 +240,13 @@
     -webkit-app-region: drag;
   }
   [data-drag-region] :is(button, a, input, textarea, select, [role="button"], [role="tab"], [contenteditable="true"]) {
+    -webkit-app-region: no-drag;
+  }
+  /* Chromium collects drag regions in DOM order and ignores z-index, so a
+     strip under a full-window overlay (the sidebar's, rendered after
+     Settings) still wins over the overlay's buttons. While an overlay is
+     showing, only its own drag regions count. */
+  body:has([data-window-overlay]:not(.hidden)) [data-drag-region]:not([data-window-overlay] *) {
     -webkit-app-region: no-drag;
   }
   /* Apple-style continuous corners on everything that has a border-radius.
@@ -292,6 +305,13 @@
      browser's pale blue. Mixing brand into `transparent` keeps it translucent
      so it layers over any surface, and the foreground stays at full ink so
      selected text stays legible. */
+  /* Lucide ships stroke-width 2; 1.5 (Paseo's value) keeps 14–16px glyphs
+     from reading heavier than the 13–14px text beside them. CSS beats the stroke-width
+     attribute (so a strokeWidth prop no longer applies); :where keeps this at
+     zero specificity, so a per-icon `stroke-[…]` class still overrides it. */
+  :where(svg.lucide) {
+    stroke-width: 1.5;
+  }
   ::selection {
     background-color: color-mix(in oklab, var(--brand) 32%, transparent);
     color: var(--foreground);
@@ -404,6 +424,28 @@ html.no-perma-layers [data-message-hover-target] > [data-message-actions] {
   transform: none;
 }
 
+/* Typography ships its own cool-gray palette (body #374151, bullets
+   #d1d5db) that ignores the skin, so answers read a step lighter than the
+   rest of the UI. Point it at the theme tokens; they already flip in dark
+   mode, so prose-invert needs no separate set. */
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--foreground);
+  --tw-prose-links: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-kbd: var(--foreground);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}
+
 /* WebKit can paint an outside ::marker beyond an ol's scrollable overflow
    area even when the list has ample start padding. The first digit of wider
    markers is then clipped (most visibly from 20 onward). Keep the native
@@ -449,6 +491,17 @@ html.no-perma-layers [data-message-hover-target] > [data-message-actions] {
 
 @utility animate-spinner-dash {
   animation: spinner-dash 0.9s linear infinite;
+}
+
+/* Working loader: three dots brightening in turn (Paseo-style), opacity
+   only so it stays on the compositor. */
+@keyframes working-dot {
+  0%, 60%, 100% { opacity: 0.25; }
+  30% { opacity: 1; }
+}
+
+@utility animate-working-dot {
+  animation: working-dot 1.2s ease-in-out infinite;
 }
 
 @utility scrollbar-slim {
@@ -500,77 +553,6 @@ html.no-perma-layers [data-message-hover-target] > [data-message-actions] {
   -webkit-background-clip: text;
   color: transparent;
   animation: shimmer-text 2s linear infinite;
-}
-
-/* Hallmark · component: composer running state · genre: modern-minimal
- * Motion is the status cue: one clear highlight circles the frame while the
- * agent is working, layered over the normal runtime border. */
-@property --composer-border-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@keyframes composer-border-spin {
-  to {
-    --composer-border-angle: 360deg;
-  }
-}
-
-[data-chat-composer][data-streaming="true"] {
-  --composer-runner: var(--runtime-color, var(--primary));
-  /* Confine the ring pseudo's negative z-index to this element so it sits
-     between the composer's own background and its content. */
-  isolation: isolate;
-}
-
-/* No mask here, deliberately: the ring used to be cut out of the conic with
-   the two-layer mask-composite xor/exclude trick, but WebKit intermittently
-   drops mask-composite when it rebuilds the animated composited layer — the
-   raw conic cone then flashes across the whole composer. Instead the pseudo
-   repaints the frame bottom-up with plain opaque background layers: the
-   spinning conic, the runtime border line over it, and a card-colored cover
-   hiding the cone's interior. Nothing left for the compositor to lose. */
-[data-chat-composer][data-streaming="true"]::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  z-index: -1;
-  pointer-events: none;
-  /* Box geometry mirrors the composer: 2px transparent border = the glow
-     ring overhang; the 1px padding gap = the composer's own border line. */
-  border: 2px solid transparent;
-  padding: 1px;
-  /* The composer is rounded-2xl; grow the radius by the overhang so the
-     ring stays concentric with the frame. */
-  border-radius: calc(var(--radius-2xl, 1rem) + 2px);
-  background:
-    linear-gradient(var(--card) 0 0) content-box,
-    linear-gradient(
-        color-mix(in oklab, var(--composer-runner) 60%, var(--card)) 0 0
-      )
-      padding-box,
-    conic-gradient(
-        from var(--composer-border-angle),
-        transparent 0% 48%,
-        color-mix(in oklab, var(--composer-runner) 35%, transparent) 62%,
-        var(--composer-runner) 80%,
-        color-mix(in oklab, var(--composer-runner) 45%, transparent) 92%,
-        transparent 100%
-      )
-      border-box;
-  /* No filter here, deliberately: a drop-shadow on a layer whose background
-     is animated re-runs the whole blur every animation frame (steady GPU
-     work — the ring is small, but the filter forces a separate raster pass
-     plus a window-sized backdrop read on each tick). The moving gradient
-     highlight reads as the glow on its own. */
-  animation: composer-border-spin 2.8s linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  [data-chat-composer][data-streaming="true"]::before {
-    animation: none;
-  }
 }
 
 /* Shared shell motion: keep the sidebar, dock, and chat column in step. */

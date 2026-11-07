@@ -1,6 +1,6 @@
 use super::artifacts::{extracted_artifact_details, normalize_content};
 use super::{
-    am, claude_prompt_tokens, is_background_launch_ack, is_sidechain, summarize_tool_input,
+    am, claude_prompt_tokens, is_background_launch_ack, is_sidechain, now_ms, summarize_tool_input,
     task_kind, BackgroundTask, EventTranslator, LiveBlock, LiveKind,
 };
 use serde_json::{json, Value};
@@ -100,6 +100,16 @@ impl EventTranslator {
     /// instead they accumulate as steps on the launching Agent/Task card so
     /// the user can watch the subagent work.
     fn on_claude_sidechain(&mut self, v: &Value) -> Vec<Value> {
+        let before = self.background_tasks_snapshot();
+        let mut events = self.on_claude_sidechain_inner(v);
+        let after = self.background_tasks_snapshot();
+        if before != after {
+            events.push(json!({ "type": "cli_background_tasks", "tasks": after }));
+        }
+        events
+    }
+
+    fn on_claude_sidechain_inner(&mut self, v: &Value) -> Vec<Value> {
         let parent = v
             .get("parent_tool_use_id")
             .and_then(|p| p.as_str())
@@ -146,6 +156,7 @@ impl EventTranslator {
         if !changed || task.done {
             return Vec::new();
         }
+        task.last_activity_at = now_ms();
         let text = if task.status_text.is_empty() {
             format!(
                 "{} agent running — {}",
@@ -178,20 +189,26 @@ impl EventTranslator {
             .iter()
             .filter_map(|item| {
                 let id = item.get("task_id").and_then(|t| t.as_str())?;
-                let status_text = self
-                    .background_tasks
-                    .get(id)
-                    .map(|t| t.status_text.clone())
-                    .unwrap_or_default();
-                Some(json!({
-                    "taskId": id,
-                    "kind": task_kind(item),
-                    "description": item
-                        .get("description")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("background task"),
-                    "statusText": status_text,
-                }))
+                let description = item
+                    .get("description")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("background task");
+                // A task we tracked from task_started carries timing, usage
+                // and the launching card; one only the fresh process knows
+                // (after a resume) gets what the list item itself offers.
+                let mut out = match self.background_tasks.get(id) {
+                    Some(t) => t.snapshot(id),
+                    None => {
+                        let mut out = json!({ "taskId": id, "statusText": "" });
+                        if let Some(tu) = item.get("tool_use_id").and_then(|t| t.as_str()) {
+                            out["toolUseId"] = json!(tu);
+                        }
+                        out
+                    }
+                };
+                out["kind"] = json!(task_kind(item));
+                out["description"] = json!(description);
+                Some(out)
             })
             .collect();
         vec![json!({ "type": "cli_background_tasks", "tasks": tasks })]
@@ -207,18 +224,7 @@ impl EventTranslator {
             .filter(|(_, t)| !t.done)
             .collect();
         live.sort_by(|a, b| a.0.cmp(b.0));
-        Value::Array(
-            live.into_iter()
-                .map(|(id, t)| {
-                    json!({
-                        "taskId": id,
-                        "kind": t.subagent_type,
-                        "description": t.description,
-                        "statusText": t.status_text,
-                    })
-                })
-                .collect(),
-        )
+        Value::Array(live.into_iter().map(|(id, t)| t.snapshot(id)).collect())
     }
 
     /// Background-task lifecycle system events (claude). Progress is painted
@@ -249,19 +255,14 @@ impl EventTranslator {
                 if !tool_use_id.is_empty() {
                     self.background_tasks.insert(
                         task_id.to_string(),
-                        BackgroundTask {
-                            tool_use_id: tool_use_id.to_string(),
-                            subagent_type: task_kind(v),
-                            description: v
-                                .get("description")
+                        BackgroundTask::new(
+                            tool_use_id.to_string(),
+                            task_kind(v),
+                            v.get("description")
                                 .and_then(|t| t.as_str())
                                 .unwrap_or("background task")
                                 .to_string(),
-                            done: false,
-                            launched: false,
-                            steps: Vec::new(),
-                            status_text: String::new(),
-                        },
+                        ),
                     );
                 }
                 // No event yet: the tool card may not exist until toolcall_end,
@@ -277,6 +278,17 @@ impl EventTranslator {
                     .and_then(|t| t.as_str())
                     .unwrap_or("working…");
                 task.status_text = desc.to_string();
+                task.last_activity_at = now_ms();
+                // usage: { total_tokens, tool_uses, duration_ms } — the
+                // subagent's running totals.
+                if let Some(usage) = v.get("usage") {
+                    if let Some(n) = usage.get("tool_uses").and_then(Value::as_u64) {
+                        task.tool_uses = Some(n);
+                    }
+                    if let Some(n) = usage.get("total_tokens").and_then(Value::as_u64) {
+                        task.total_tokens = Some(n);
+                    }
+                }
                 vec![json!({
                     "type": "tool_execution_update",
                     "toolCallId": task.tool_use_id,

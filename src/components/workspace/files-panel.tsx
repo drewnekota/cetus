@@ -52,9 +52,13 @@ interface VisibleFileRow {
 export function FilesPanel({
   workspaceDir,
   onOpenTerminalCommand,
+  onOpenFile,
 }: {
   workspaceDir: string;
   onOpenTerminalCommand?: (command: string) => void;
+  /** Tree-only mode: files open elsewhere (a main-area tab) instead of in
+   * the inline preview pane. */
+  onOpenFile?: (entry: WorkspaceFileEntry, isRemote: boolean) => void;
 }) {
   const { t } = useTranslation("chat");
   const [directories, setDirectories] = useState<
@@ -268,6 +272,7 @@ export function FilesPanel({
     } else if (event.key === "Enter") {
       event.preventDefault();
       if (row.entry.isDir) toggleDirectory(row.entry);
+      else if (onOpenFile) onOpenFile(row.entry, isRemote);
       else if (!isRemote) void api.openPath(row.entry.path);
     } else if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
@@ -338,8 +343,11 @@ export function FilesPanel({
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] overflow-hidden">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-        <p className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-          {workspaceDir}
+        <p
+          className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground"
+          title={workspaceDir}
+        >
+          {onOpenFile ? baseName(workspaceDir) : workspaceDir}
         </p>
         {isRemote && (
           <span className="rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
@@ -479,9 +487,17 @@ export function FilesPanel({
       >
         {actionError}
       </div>
-      <div className="grid min-h-0 grid-cols-[minmax(210px,36%)_1fr] overflow-hidden">
+      <div
+        className={cn(
+          "grid min-h-0 overflow-hidden",
+          onOpenFile ? "grid-cols-1" : "grid-cols-[minmax(210px,36%)_1fr]",
+        )}
+      >
         <div
-          className="min-h-0 min-w-0 overflow-y-auto border-r border-border py-1"
+          className={cn(
+            "min-h-0 min-w-0 overflow-y-auto py-1",
+            !onOpenFile && "border-r border-border",
+          )}
           role="tree"
           tabIndex={0}
           onKeyDown={onTreeKeyDown}
@@ -509,9 +525,13 @@ export function FilesPanel({
                 selected={row.entry.path === selectedPath}
                 expanded={expanded.has(row.entry.path)}
                 state={directories[row.entry.path]}
-                onSelect={() => setSelectedPath(row.entry.path)}
+                onSelect={() => {
+                  setSelectedPath(row.entry.path);
+                  if (!row.entry.isDir) onOpenFile?.(row.entry, isRemote);
+                }}
                 onToggle={() => toggleDirectory(row.entry)}
                 isRemote={isRemote}
+                compact={!!onOpenFile}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   setSelectedPath(row.entry.path);
@@ -526,11 +546,13 @@ export function FilesPanel({
             </p>
           )}
         </div>
-        <FilePreview
-          file={selected?.isDir ? null : selected}
-          workspaceDir={workspaceDir}
-          isRemote={isRemote}
-        />
+        {!onOpenFile && (
+          <FilePreview
+            file={selected?.isDir ? null : selected}
+            workspaceDir={workspaceDir}
+            isRemote={isRemote}
+          />
+        )}
       </div>
       {contextMenu && selected && (
         <div
@@ -608,6 +630,12 @@ export function FilesPanel({
   );
 }
 
+function baseName(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const slash = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return slash === -1 ? trimmed : trimmed.slice(slash + 1);
+}
+
 function parentFilesystemPath(path: string): string {
   const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   if (slash <= 0) return path;
@@ -622,6 +650,7 @@ function FileTreeRow({
   onSelect,
   onToggle,
   isRemote,
+  compact,
   onContextMenu,
 }: {
   row: VisibleFileRow;
@@ -631,6 +660,7 @@ function FileTreeRow({
   onSelect: () => void;
   onToggle: () => void;
   isRemote: boolean;
+  compact?: boolean;
   onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const { t } = useTranslation("chat");
@@ -685,7 +715,7 @@ function FileTreeRow({
         {entry.gitStatus && entry.gitStatus !== "ignored" && (
           <GitStatusBadge status={entry.gitStatus} />
         )}
-        {!entry.isDir && entry.sizeBytes != null && (
+        {!compact && !entry.isDir && entry.sizeBytes != null && (
           <span className="shrink-0 tabular-nums text-2xs text-muted-foreground">
             {formatBytes(entry.sizeBytes)}
           </span>

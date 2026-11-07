@@ -133,10 +133,10 @@ export const en = {
   "general.title": "General",
   "remote.title": "Remote access",
   "remote.description":
-    "Continue Cetus conversations securely from your phone through Tailscale.",
+    "Continue Cetus conversations from the Cetus iPhone app, end-to-end encrypted.",
   "remote.enable": "Enable mobile companion",
   "remote.enableDescription":
-    "Starts a localhost-only server and configures Tailscale Serve when available.",
+    "Lets paired iPhones reach this Mac through the Cetus relay (it only forwards ciphertext), or over Tailscale when available.",
   "remote.keepAwake.label": "Keep this Mac awake for remote access",
   "remote.keepAwake.description":
     "While the mobile companion is on, hold off system sleep so your phone can always reach this Mac. The display still sleeps and locks.",
@@ -148,6 +148,19 @@ export const en = {
     "Your phone needs the Tailscale app, signed into the same tailnet as this Mac.",
   "remote.proxyHint":
     "Running a proxy app on the phone (Clash, Shadowrocket, Surge…)? Add a DIRECT rule for *.ts.net first — fake-IP DNS hijacks Tailscale addresses and the pairing page won't open.",
+  "remote.app.title": "Scan with Cetus on iPhone",
+  "remote.app.hint":
+    "Open the Cetus app on your iPhone and scan this code. Each code works once and expires after 15 minutes.",
+  "remote.app.copy": "Copy pairing link",
+  "remote.relay.connected": "Connected to relay",
+  "remote.relay.connecting": "Connecting to relay…",
+  "remote.relay.error": "Relay unreachable: {error}",
+  "remote.devices.title": "Paired iPhones",
+  "remote.devices.empty": "No iPhone paired yet.",
+  "remote.devices.online": "Online",
+  "remote.devices.lastSeen": "Last seen {when}",
+  "remote.devices.revoke": "Revoke",
+  "remote.browser.title": "Browser access (Tailscale)",
   "remote.copy": "Copy pairing link",
   "remote.rotate": "Revoke phones",
   "remote.security":
@@ -273,7 +286,7 @@ export const en = {
     "Trigger: {gesture}. Works even when Cetus is in the background.",
   "launcher.startup.label": "Launch on startup",
   "launcher.startup.description":
-    "Start Cetus in the tray automatically when you log in.",
+    "Start Cetus in the background automatically when you log in.",
   "launcher.gesture.doubleCmd": "Double-tap ⌘",
   "launcher.gesture.bothCmd": "Hold both ⌘ keys",
   "launcher.gesture.label": "Trigger gesture",

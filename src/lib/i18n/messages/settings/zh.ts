@@ -55,10 +55,11 @@ export const zh = {
   "nav.remote": "远程访问",
   "general.title": "通用",
   "remote.title": "远程访问",
-  "remote.description": "通过 Tailscale 在手机上安全地继续 Cetus 对话。",
+  "remote.description":
+    "用 Cetus iPhone App 继续这台 Mac 上的对话，全程端到端加密。",
   "remote.enable": "启用手机伴侣",
   "remote.enableDescription":
-    "启动仅监听本机的服务，并在可用时自动配置 Tailscale Serve。",
+    "让已配对的 iPhone 通过 Cetus 中转（只转发密文）连到这台 Mac；装了 Tailscale 时也可直连。",
   "remote.keepAwake.label": "远程访问开启时保持 Mac 唤醒",
   "remote.keepAwake.description":
     "手机伴侣开启期间阻止 Mac 进入睡眠，确保手机随时能连上这台 Mac。屏幕仍会正常关闭并锁定。",
@@ -69,6 +70,18 @@ export const zh = {
     "手机需安装 Tailscale App，并登录与这台 Mac 相同的 tailnet。",
   "remote.proxyHint":
     "手机开着代理（Clash、Shadowrocket、Surge 等）时，请先把 *.ts.net 设为直连——fake-IP DNS 会劫持 Tailscale 域名，导致配对页面打不开。",
+  "remote.app.title": "用 iPhone 上的 Cetus 扫码",
+  "remote.app.hint": "在 iPhone 上打开 Cetus App 扫描此码。每个码只能用一次，15 分钟后失效。",
+  "remote.app.copy": "复制配对链接",
+  "remote.relay.connected": "已连接中转",
+  "remote.relay.connecting": "正在连接中转…",
+  "remote.relay.error": "中转连不上：{error}",
+  "remote.devices.title": "已配对的 iPhone",
+  "remote.devices.empty": "还没有配对的 iPhone。",
+  "remote.devices.online": "在线",
+  "remote.devices.lastSeen": "上次在线 {when}",
+  "remote.devices.revoke": "撤销",
+  "remote.browser.title": "浏览器访问（Tailscale）",
   "remote.copy": "复制配对链接",
   "remote.rotate": "撤销手机访问",
   "remote.security":
@@ -246,7 +259,7 @@ export const zh = {
   "launcher.enable.description":
     "触发方式：{gesture}。即便 Cetus 在后台也能使用。",
   "launcher.startup.label": "开机时启动",
-  "launcher.startup.description": "登录时自动在托盘中启动 Cetus。",
+  "launcher.startup.description": "登录时自动在后台启动 Cetus。",
   "launcher.gesture.doubleCmd": "双击 ⌘",
   "launcher.gesture.bothCmd": "同时按住两个 ⌘ 键",
   "launcher.gesture.label": "触发手势",

@@ -426,9 +426,55 @@ struct BackgroundTask {
     steps: Vec<Value>,
     /// Latest `task_progress` description — the card's one-line status.
     status_text: String,
+    /// Epoch ms the task was registered; the strip's elapsed clock.
+    started_at: u64,
+    /// Epoch ms of the latest progress or subagent step — lets the strip flag
+    /// a task that has gone quiet.
+    last_activity_at: u64,
+    /// `task_progress.usage`: the subagent's tool-call and token totals.
+    tool_uses: Option<u64>,
+    total_tokens: Option<u64>,
 }
 
 impl BackgroundTask {
+    fn new(tool_use_id: String, subagent_type: String, description: String) -> Self {
+        let now = now_ms();
+        Self {
+            tool_use_id,
+            subagent_type,
+            description,
+            done: false,
+            launched: false,
+            steps: Vec::new(),
+            status_text: String::new(),
+            started_at: now,
+            last_activity_at: now,
+            tool_uses: None,
+            total_tokens: None,
+        }
+    }
+
+    /// The strip's view of a live task (`cli_background_tasks` entry).
+    fn snapshot(&self, task_id: &str) -> Value {
+        let mut out = json!({
+            "taskId": task_id,
+            "kind": self.subagent_type,
+            "description": self.description,
+            "statusText": self.status_text,
+            "toolUseId": self.tool_use_id,
+            "startedAt": self.started_at,
+            "lastActivityAt": self.last_activity_at,
+            "stepCount": self.steps.len(),
+        });
+        if let Some(n) = self.tool_uses {
+            out["toolUses"] = json!(n);
+        }
+        if let Some(n) = self.total_tokens {
+            out["totalTokens"] = json!(n);
+        }
+        out
+    }
+
     /// The `details` payload every update/end event on the Agent card carries.
     /// The frontend replaces `result` wholesale per event, so steps must ride
     /// along on all of them or they'd flash away mid-run.
@@ -442,6 +488,13 @@ impl BackgroundTask {
             }
         })
     }
+}
+
+pub(crate) fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Human task kind from a claude task event or `background_tasks_changed`

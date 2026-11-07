@@ -192,7 +192,7 @@ function MessageBubbleView({
           <div
             className={cn(
               "flex min-w-0 w-fit max-w-full flex-col gap-2",
-              isUser && "rounded-2xl bg-primary/15 px-4 py-2 dark:bg-primary/20",
+              isUser && "rounded-3xl bg-foreground/[0.09] px-4 py-2 dark:bg-foreground/10",
             )}
           >
             {blocks.map((b, i) => (

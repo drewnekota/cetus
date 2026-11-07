@@ -309,6 +309,18 @@ export interface CliBackgroundTask {
   description: string;
   /** Latest task_progress line, if any. */
   statusText?: string;
+  /** The launching Agent/Bash tool call — the card the strip jumps to. */
+  toolUseId?: string;
+  /** Epoch ms the task started. The bridge stamps tasks it saw launch; for
+   *  ones it only learned about after a resume, the store stamps first sight. */
+  startedAt?: number;
+  /** Epoch ms of the latest progress line or subagent step. */
+  lastActivityAt?: number;
+  /** Subagent tool calls observed so far. */
+  stepCount?: number;
+  /** Running totals from claude's task_progress.usage. */
+  toolUses?: number;
+  totalTokens?: number;
 }
 
 /** One native slash command reported by a CLI backend's initialize handshake

@@ -7,6 +7,7 @@ import { useTranslation } from "@/lib/i18n";
 import { AnswerBlock, MessageActions } from "./message-blocks";
 import { messageHoverProps } from "./hover-owner";
 import { ActivityGroup } from "./activity-group";
+import { WorkingIndicator } from "./chat-status";
 import { MarkdownWorkspaceContext } from "@/lib/markdown";
 
 interface Props {
@@ -31,8 +32,9 @@ function answerText(messages: RenderedMessage[]): string {
 }
 
 /** A whole assistant turn — one or more consecutive assistant messages rendered
- *  under a single ASSISTANT header. Tool calls + thinking collapse into compact
- *  activity widgets; the natural-language answer stays expanded below. */
+ *  under a single ASSISTANT header. Tool calls + thinking collapse into
+ *  one-line activity summaries; the natural-language answer stays expanded,
+ *  and a running turn ends with the working indicator. */
 export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = false }: Props) {
   const { t } = useTranslation("chat");
   const messages = useMessagesByKeys(convId, keys);
@@ -54,8 +56,8 @@ export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = fa
   if (messages.length === 0) return null;
 
   // No visible content yet: mid-run this is the gap between the message
-  // opening and the first block streaming in — hold the shimmer instead of a
-  // bare ASSISTANT header. A settled empty turn renders nothing at all.
+  // opening and the first block streaming in — hold the working line instead
+  // of a bare ASSISTANT header. A settled empty turn renders nothing at all.
   if (segments.length === 0) {
     if (!active) return null;
     return (
@@ -64,9 +66,7 @@ export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = fa
           <div className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">
             {t("pane.assistant")}
           </div>
-          <span className="animate-shimmer-text text-sm font-medium">
-            {t("pane.thinking")}
-          </span>
+          <WorkingIndicator startedAt={messages[0].createdAt} />
         </div>
       </div>
     );
@@ -88,19 +88,18 @@ export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = fa
           <div className="flex min-w-0 w-full max-w-full flex-col gap-2">
             {segments.map((seg) =>
               seg.type === "activity" ? (
+                // Pure thinking at the live edge has nothing to summarize
+                // yet; the working indicator below already says so.
+                active && seg.trailing && !seg.steps.some((s) => s.kind === "tool_use") ? null : (
                 <ActivityGroup
                   key={seg.key}
                   id={`${convId ?? ""}:activity:${seg.key}`}
                   relatedIds={seg.stepKeys.map((key) => `${convId ?? ""}:activity:${key}`)}
                   stepIds={seg.stepKeys.map((key) => `${convId ?? ""}:block:${key}`)}
                   steps={seg.steps}
-                  durationMs={seg.durationMs}
-                  startedAt={seg.startedAt}
-                  active={active && seg.trailing}
-                  plain={!active}
-                  defaultOpen={seg.defaultOpen}
                   showTurnEnded={!active && seg.trailing}
                 />
+                )
               ) : (
                 // Answer content and activity bars share the same 88% reading
                 // width so the assistant turn keeps a consistent right edge.
@@ -109,6 +108,7 @@ export function AssistantGroup({ convId, workspaceDir, keys, onFork, active = fa
                 </div>
               ),
             )}
+            {active && <WorkingIndicator startedAt={messages[0].createdAt} />}
           </div>
           <MessageActions
             getText={getAnswerText}

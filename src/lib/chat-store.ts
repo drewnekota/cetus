@@ -422,7 +422,7 @@ export const useChatStore = create<ChatsStore>()((set, get) => ({
       if (tasks.length === 0 && !(id in s.backgroundTasks)) return s;
       const backgroundTasks = { ...s.backgroundTasks };
       if (tasks.length === 0) delete backgroundTasks[id];
-      else backgroundTasks[id] = tasks;
+      else backgroundTasks[id] = stampStartTimes(tasks, s.backgroundTasks[id]);
       return { backgroundTasks };
     });
   },
@@ -727,6 +727,68 @@ export function useControlRequests(
 }
 
 const EMPTY_BACKGROUND_TASKS: CliBackgroundTask[] = [];
+
+/** Give every task a start time. A task the bridge only learned about from a
+ *  resumed process's task list arrives without one; keep the time we first
+ *  saw it so its elapsed clock doesn't reset on every snapshot. */
+function stampStartTimes(
+  tasks: CliBackgroundTask[],
+  prev: CliBackgroundTask[] | undefined,
+): CliBackgroundTask[] {
+  if (tasks.every((t) => t.startedAt != null)) return tasks;
+  const now = Date.now();
+  return tasks.map((t) =>
+    t.startedAt != null
+      ? t
+      : {
+          ...t,
+          startedAt:
+            prev?.find((p) => p.taskId === t.taskId)?.startedAt ?? now,
+        },
+  );
+}
+
+/** The rendered tool_use block for `toolCallId`, newest first. Read straight
+ *  off the store (callers subscribe through useToolBlock). */
+function findToolBlock(
+  messages: RenderedMessage[] | undefined,
+  toolCallId: string,
+): { messageKey: string; block: Extract<RenderedBlock, { kind: "tool_use" }> } | null {
+  if (!messages) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    for (const b of messages[i].blocks) {
+      if (b.kind === "tool_use" && b.id === toolCallId)
+        return { messageKey: messages[i].key, block: b };
+    }
+  }
+  return null;
+}
+
+/** Key of the message holding the tool call, or null when it isn't in the
+ *  loaded transcript. */
+export function toolCallMessageKey(
+  convId: string,
+  toolCallId: string,
+): string | null {
+  return (
+    findToolBlock(useChatStore.getState().chats[convId]?.messages, toolCallId)
+      ?.messageKey ?? null
+  );
+}
+
+/** The `details` the launching tool card currently carries (subagent steps
+ *  etc.): null while the card has none yet, undefined when the card isn't in
+ *  the loaded transcript at all. */
+export function useToolBlockDetails(
+  convId: string | null | undefined,
+  toolCallId: string | undefined,
+): unknown {
+  return useChatStore((s) => {
+    if (!convId || !toolCallId) return undefined;
+    const found = findToolBlock(s.chats[convId]?.messages, toolCallId);
+    return found ? (found.block.result?.details ?? null) : undefined;
+  });
+}
 
 /** Live background tasks (Monitors, async agents, background Bash) owned by
  *  `convId`'s CLI session. */

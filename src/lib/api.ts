@@ -185,6 +185,19 @@ export interface RemoteSettings {
   pairingQrSvg: string;
   tailscaleReady: boolean;
   tailscaleMessage: string;
+  /** `cetus://pair#…` for the iOS app (one-time, 15 min), and its QR. */
+  appPairingLink: string;
+  appPairingQrSvg: string;
+  devices: RemoteDevice[];
+  relay: { url: string; connected: boolean; error: string | null };
+}
+
+export interface RemoteDevice {
+  id: string;
+  name: string;
+  pairedAt: number;
+  lastSeenAt: number;
+  online: boolean;
 }
 
 // --- Commands --------------------------------------------------------------
@@ -248,6 +261,9 @@ export const api = {
   setRemoteKeepAwake: (enabled: boolean) =>
     invoke<RemoteSettings>("set_remote_keep_awake", { enabled }),
   rotateRemoteAccess: () => invoke<RemoteSettings>("rotate_remote_access"),
+  /** Forget a paired iPhone; its live session drops immediately. */
+  revokeRemoteDevice: (id: string) =>
+    invoke<RemoteSettings>("revoke_remote_device", { id }),
   /** Worktree path + branch of a CLI-backend conversation (null for pi
    *  conversations and non-git workspaces). */
   conversationWorktree: (id: string) =>

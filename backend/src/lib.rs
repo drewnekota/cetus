@@ -65,6 +65,7 @@ mod prompts;
 mod provider;
 mod quick;
 mod remote;
+mod remote_secure;
 mod resources;
 mod scheduler;
 mod search_index;
@@ -83,11 +84,12 @@ mod text_input;
 mod titling;
 mod transcripts;
 mod updater;
+mod usage;
 mod voice;
 mod webview_health;
 mod window_geom;
 
-use host::{AppHandle, Emitter, Listener, Manager};
+use host::{AppHandle, Listener, Manager};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -291,7 +293,10 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         remote::set_remote_enabled,
         remote::set_remote_keep_awake,
         remote::rotate_remote_access,
+        remote::revoke_remote_device,
+        remote::set_remote_sidebar,
         resources::resources_snapshot,
+        usage::provider_usage,
         cli_backend::get_cli_agent_settings,
         cli_backend::set_cli_agent_settings,
         cli_backend::get_cli_defaults,
@@ -485,7 +490,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Started as a login item (the autostart plugin appends `--autostart`):
-    // keep cetus resident in the tray instead of popping the main window in
+    // keep cetus resident in the background instead of popping the main window in
     // the user's face right after they log in.
     // Same after the idle update restart relaunched a hidden window.
     if std::env::args().any(|a| a == "--autostart" || a == updater::BACKGROUND_RELAUNCH_ARG) {
@@ -673,6 +678,9 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Idle-sleep holds (agent turns, meetings, remote access). Must be
     // live before the remote server starts so its hold registers.
     awake::initialize(app.handle());
+    app.manage(std::sync::Arc::new(remote_secure::SecureState::load(
+        &app.state::<AppState>().store,
+    )));
     let remote_runtime = remote::RemoteRuntime::new(&app.state::<AppState>().store);
     app.manage(remote_runtime);
     remote::initialize(app.handle().clone());
@@ -715,8 +723,8 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     // cetus stays resident in the background so the global launcher
     // keeps working after the main window is closed. Closing any window
-    // just HIDES it; the dock icon, the tray "Open cetus" item, or a dock
-    // reopen bring the main window back. Quit is Cmd+Q or the tray.
+    // just HIDES it; a Dock click (reopen) or the summon hotkey brings the
+    // main window back. Quit is Cmd+Q or the Dock menu.
     // Main window: park it warm on close (keeps its webview from being
     // discarded so reopening after idle doesn't flash). Other windows
     // just hide.
@@ -766,7 +774,7 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Mission Control's own raise (window landed under others) and was
     // removed in favor of stock macOS behavior: activation alone brings
     // nothing back; recall paths are the Dock click (`Reopen` handler),
-    // the summon hotkey, and the tray.
+    // and the summon hotkey.
     //
     // What remains is a WATCH-ONLY probe for the "Mission Control
     // leaves the main window at the bottom" family: every activation /
@@ -824,7 +832,7 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Menu-bar tray + app menu live in the Electron main process;
+    // The app menu lives in the Electron main process;
     // their clicks come back through `electron_app_event`.
 
     // Screen-context collection (Rewind-like). Export the recall-log path
@@ -1003,7 +1011,7 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// App-level events from the Electron main process: menu/tray clicks, Dock
+/// App-level events from the Electron main process: menu clicks, Dock
 /// reopen, and the final exit. Returns true when the event was handled.
 pub fn electron_app_event(app: &AppHandle, kind: &str, payload: &serde_json::Value) -> bool {
     match kind {
@@ -1014,17 +1022,8 @@ pub fn electron_app_event(app: &AppHandle, kind: &str, payload: &serde_json::Val
                 }
                 true
             }
-            "app_quit" | "tray_quit" => {
+            "app_quit" => {
                 request_quit(app);
-                true
-            }
-            "tray_open" => {
-                focus_main(app);
-                true
-            }
-            "tray_settings" => {
-                focus_main(app);
-                let _ = app.emit_to("main", "open-settings", ());
                 true
             }
             _ => false,
@@ -1068,8 +1067,8 @@ pub fn electron_app_event(app: &AppHandle, kind: &str, payload: &serde_json::Val
             notify::activated(app, cid);
             true
         }
-        // Persist the main window's last size/position on quit (Cmd+Q, tray
-        // "Quit", dock-quit). Reads the cached on-screen geometry, so a quit
+        // Persist the main window's last size/position on quit (Cmd+Q,
+        // dock-quit). Reads the cached on-screen geometry, so a quit
         // while the window is parked off-screen still saves the real values.
         "exit" => {
             window_geom::flush(&app.state::<AppState>().store);

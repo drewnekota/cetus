@@ -1,6 +1,10 @@
-//! Authenticated mobile companion served on localhost and published through
-//! Tailscale Serve. The remote surface intentionally exposes only conversation
-//! operations; native files, terminal, secrets and settings never enter this API.
+//! Authenticated mobile companion. Two front doors share one conversation API:
+//! - the Cetus iOS app, over an end-to-end encrypted channel (see
+//!   `remote_secure.rs`) through the relay or the direct `/v1/direct` socket;
+//! - the legacy browser page served on localhost and published through
+//!   Tailscale Serve (cookie auth).
+//! The remote surface intentionally exposes only conversation operations;
+//! native files, terminal, secrets and settings never enter this API.
 
 use axum::{
     body::Body,
@@ -13,7 +17,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use host::{AppHandle, Listener, Manager, State};
+use host::{AppHandle, Emitter, Listener, Manager, State};
 use qrcode::{render::svg, QrCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -33,6 +37,7 @@ const PORT: u16 = 17382;
 pub struct RemoteRuntime {
     token: Arc<Mutex<String>>,
     task: Mutex<Option<host::async_runtime::JoinHandle<()>>>,
+    relay_task: Mutex<Option<host::async_runtime::JoinHandle<()>>>,
     events: tokio::sync::broadcast::Sender<String>,
     pending_controls: Arc<Mutex<HashMap<String, Vec<Value>>>>,
 }
@@ -50,6 +55,7 @@ impl RemoteRuntime {
         Self {
             token: Arc::new(Mutex::new(token)),
             task: Mutex::new(None),
+            relay_task: Mutex::new(None),
             events,
             pending_controls: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -71,6 +77,9 @@ impl RemoteRuntime {
             pending_controls: self.pending_controls.clone(),
         };
         crate::awake::set_remote_active(true);
+        *self.relay_task.lock().unwrap() = Some(host::async_runtime::spawn(
+            crate::remote_secure::run_relay(web.app.clone(), web.clone()),
+        ));
         *task = Some(host::async_runtime::spawn(async move {
             let router = router(web);
             let addr = SocketAddr::from(([127, 0, 0, 1], PORT));
@@ -90,15 +99,18 @@ impl RemoteRuntime {
         if let Some(task) = self.task.lock().unwrap().take() {
             task.abort();
         }
+        if let Some(task) = self.relay_task.lock().unwrap().take() {
+            task.abort();
+        }
         crate::awake::set_remote_active(false);
     }
 }
 
 #[derive(Clone)]
-struct WebState {
-    app: AppHandle,
+pub(crate) struct WebState {
+    pub(crate) app: AppHandle,
     token: Arc<Mutex<String>>,
-    events: tokio::sync::broadcast::Sender<String>,
+    pub(crate) events: tokio::sync::broadcast::Sender<String>,
     pending_controls: Arc<Mutex<HashMap<String, Vec<Value>>>>,
 }
 
@@ -161,6 +173,11 @@ pub struct RemoteSettings {
     pairing_qr_svg: String,
     tailscale_ready: bool,
     tailscale_message: String,
+    /// `cetus://pair#…` for the iOS app, and its QR.
+    app_pairing_link: String,
+    app_pairing_qr_svg: String,
+    devices: Vec<crate::remote_secure::DeviceInfo>,
+    relay: crate::remote_secure::RelayStatus,
 }
 
 #[host::command]
@@ -252,16 +269,26 @@ fn settings(_app: &AppHandle, state: &AppState, runtime: &RemoteRuntime) -> Remo
         == Some("true");
     let (access_url, tailscale_ready, tailscale_message) = tailscale_url();
     let pairing_url = format!("{access_url}/pair?token={}", runtime.token());
-    let pairing_qr_svg = QrCode::new(pairing_url.as_bytes())
-        .map(|code| {
-            code.render::<svg::Color>()
-                .min_dimensions(256, 256)
-                .dark_color(svg::Color("#171717"))
-                .light_color(svg::Color("#ffffff"))
-                .build()
-        })
-        .unwrap_or_default();
+    let pairing_qr_svg = qr_svg(&pairing_url);
+    let secure = _app.state::<Arc<crate::remote_secure::SecureState>>();
+    let relay_url = secure.relay_url(&state.store);
+    let direct = tailscale_ready
+        .then(|| format!("{}/v1/direct", access_url.replacen("https://", "wss://", 1)));
+    let app_pairing_link = secure.pairing_link(
+        &relay_url,
+        direct.as_deref(),
+        &crate::remote_secure::mac_name(),
+    );
+    let app_pairing_qr_svg = qr_svg(&app_pairing_link);
+    let mut relay = secure.relay.lock().unwrap().clone();
+    if relay.url.is_empty() {
+        relay.url = relay_url;
+    }
     RemoteSettings {
+        app_pairing_link,
+        app_pairing_qr_svg,
+        devices: secure.devices(),
+        relay,
         enabled,
         keep_awake,
         port: PORT,
@@ -271,6 +298,54 @@ fn settings(_app: &AppHandle, state: &AppState, runtime: &RemoteRuntime) -> Remo
         tailscale_ready,
         tailscale_message,
     }
+}
+
+fn qr_svg(text: &str) -> String {
+    QrCode::new(text.as_bytes())
+        .map(|code| {
+            code.render::<svg::Color>()
+                .min_dimensions(256, 256)
+                .dark_color(svg::Color("#171717"))
+                .light_color(svg::Color("#ffffff"))
+                .build()
+        })
+        .unwrap_or_default()
+}
+
+const SIDEBAR_SETTING: &str = "remote.sidebar";
+
+/// The desktop sidebar's folder groups as drawn ({defaultWorkspace, dirs,
+/// hidden}). The phone groups chats the same way, so the webview pushes it
+/// whenever the order or the hidden set changes.
+#[host::command]
+pub async fn set_remote_sidebar(state: State<'_, AppState>, sidebar: Value) -> Result<(), String> {
+    state
+        .store
+        .set_setting(SIDEBAR_SETTING, &sidebar.to_string())
+        .map_err(|e| e.to_string())
+}
+
+fn load_sidebar(state: &AppState) -> Value {
+    state
+        .store
+        .get_setting(SIDEBAR_SETTING)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_else(|| json!({ "defaultWorkspace": "", "dirs": [], "hidden": [] }))
+}
+
+/// Forget a paired phone; its live session (if any) is dropped at once.
+#[host::command]
+pub async fn revoke_remote_device(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    runtime: State<'_, RemoteRuntime>,
+    id: String,
+) -> Result<RemoteSettings, String> {
+    app.state::<Arc<crate::remote_secure::SecureState>>()
+        .revoke(&state.store, &id);
+    Ok(settings(&app, &state, &runtime))
 }
 
 fn new_token() -> String {
@@ -371,6 +446,7 @@ fn router(state: WebState) -> Router {
         .route("/api/conversations/:id/messages", post(send_message))
         .route("/api/conversations/:id/abort", post(abort))
         .route("/api/conversations/:id/control", post(control))
+        .route("/v1/direct", get(direct_socket))
         .with_state(state)
 }
 
@@ -651,9 +727,441 @@ async fn event_socket(mut socket: WebSocket, mut rx: tokio::sync::broadcast::Rec
     }
 }
 
+/// Direct WebSocket for the iOS app (Tailscale / localhost). Unauthenticated
+/// at the HTTP layer on purpose: the Noise handshake + `hello` inside it is
+/// the authentication, exactly as over the relay.
+async fn direct_socket(
+    AxumState(web): AxumState<WebState>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.max_message_size(1 << 20).on_upgrade(move |socket| async move {
+        let (in_tx, in_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+        let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+        crate::remote_secure::spawn_session(web.app.clone(), web.clone(), in_rx, out_tx);
+        let (mut sink, mut stream) = futures_util::StreamExt::split(socket);
+        use futures_util::{SinkExt, StreamExt};
+        loop {
+            tokio::select! {
+                msg = stream.next() => match msg {
+                    Some(Ok(Message::Binary(b))) => { if in_tx.send(b).await.is_err() { break; } }
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    _ => {}
+                },
+                out = out_rx.recv() => match out {
+                    Some(b) => { if sink.send(Message::Binary(b)).await.is_err() { break; } }
+                    None => break,
+                },
+            }
+        }
+    })
+}
+
+const TOOL_TEXT_MAX: usize = 4000;
+
+/// Cuts long text inside tool results (and their image payloads) for phones.
+fn trim_tool_output(message: &mut Value) {
+    if message.get("role").and_then(Value::as_str) != Some("toolResult") {
+        return;
+    }
+    let Some(content) = message.get_mut("content") else {
+        return;
+    };
+    let cut = |s: &mut String| {
+        if s.len() > TOOL_TEXT_MAX {
+            let mut end = TOOL_TEXT_MAX;
+            while !s.is_char_boundary(end) {
+                end -= 1;
+            }
+            s.truncate(end);
+            s.push_str("\n… (truncated on phone)");
+        }
+    };
+    match content {
+        Value::String(s) => cut(s),
+        Value::Array(blocks) => {
+            blocks.retain(|b| b.get("type").and_then(Value::as_str) != Some("image"));
+            for b in blocks.iter_mut() {
+                if let Some(Value::String(s)) = b.get_mut("text") {
+                    cut(s);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn param_str(params: &Value, key: &str) -> Option<String> {
+    params.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+fn require_str(params: &Value, key: &str) -> Result<String, String> {
+    param_str(params, key)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| format!("missing {key}"))
+}
+
+/// The conversation API behind the iOS app's encrypted channel. Mirrors the
+/// HTTP routes below; the caller has already authenticated the device.
+pub(crate) async fn rpc(web: &WebState, method: &str, params: Value) -> Result<Value, String> {
+    let app = &web.app;
+    match method {
+        "conversations.list" => {
+            let archived = params
+                .get("archived")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let rows = commands::list_conversations(app.state(), archived).await?;
+            Ok(json!(rows))
+        }
+        "conversations.create" => {
+            let conversation = commands::new_conversation(
+                app.clone(),
+                app.state(),
+                param_str(&params, "workspaceDir"),
+                None,
+            )
+            .await?;
+            if let Some(backend) = param_str(&params, "backend").filter(|b| b != "pi") {
+                commands::set_conversation_backend(app.state(), conversation.id.clone(), backend)
+                    .await?;
+            }
+            Ok(json!(
+                commands::get_conversation(app.state(), conversation.id).await?
+            ))
+        }
+        "conversations.get" => {
+            let id = require_str(&params, "id")?;
+            let snapshot = commands::switch_conversation(app.state(), id.clone()).await?;
+            let controls = web
+                .pending_controls
+                .lock()
+                .unwrap()
+                .get(&id)
+                .cloned()
+                .unwrap_or_default();
+            // Phones get the tail of the history with long tool output cut:
+            // a full agent transcript is megabytes and the Mac's uplink may be
+            // slow. `limit: 0` asks for everything.
+            let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(120) as usize;
+            let mut messages = json!(snapshot.messages);
+            let total = messages.as_array().map_or(0, Vec::len);
+            if let Some(list) = messages.as_array_mut() {
+                if limit > 0 && list.len() > limit {
+                    list.drain(..list.len() - limit);
+                }
+                for m in list.iter_mut() {
+                    trim_tool_output(m);
+                }
+            }
+            Ok(json!({
+                "conversation": snapshot.conversation,
+                "messages": messages,
+                "totalMessages": total,
+                "pendingControls": controls,
+            }))
+        }
+        "conversations.update" => {
+            let id = require_str(&params, "id")?;
+            if let Some(title) = param_str(&params, "title") {
+                commands::rename_conversation(app.state(), id.clone(), title).await?;
+            }
+            if let Some(backend) = param_str(&params, "backend") {
+                commands::set_conversation_backend(app.state(), id.clone(), backend).await?;
+            }
+            if params.get("cliModel").is_some() || params.get("cliEffort").is_some() {
+                commands::set_conversation_cli_model(
+                    app.state(),
+                    id.clone(),
+                    param_str(&params, "cliModel").unwrap_or_default(),
+                    param_str(&params, "cliEffort").unwrap_or_default(),
+                )
+                .await?;
+            }
+            if let Some(archived) = params.get("archived").and_then(Value::as_bool) {
+                commands::archive_conversation(app.state(), id.clone(), archived).await?;
+            }
+            Ok(json!(commands::get_conversation(app.state(), id).await?))
+        }
+        "conversations.send" => {
+            let id = require_str(&params, "id")?;
+            let message = param_str(&params, "message").unwrap_or_default();
+            let images: Option<Vec<commands::ImageAttachment>> = params
+                .get("images")
+                .filter(|v| !v.is_null())
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()
+                .map_err(|e| format!("bad images: {e}"))?;
+            commands::send_prompt(app.state(), id, message, images).await?;
+            Ok(Value::Null)
+        }
+        "conversations.abort" => {
+            commands::abort(app.state(), require_str(&params, "id")?).await?;
+            Ok(Value::Null)
+        }
+        "conversations.control" => {
+            let id = require_str(&params, "id")?;
+            let request_id = params.get("requestId").cloned().unwrap_or(Value::Null);
+            crate::cli_backend::cli_control_respond(
+                app.state(),
+                id.clone(),
+                request_id.clone(),
+                params.get("response").cloned().unwrap_or(Value::Null),
+                param_str(&params, "source"),
+                None,
+            )
+            .await?;
+            if let Some(queue) = web.pending_controls.lock().unwrap().get_mut(&id) {
+                queue.retain(|item| item.get("requestId") != Some(&request_id));
+            }
+            Ok(Value::Null)
+        }
+        "workspaces.list" => Ok(load_sidebar(&app.state::<AppState>())),
+        "workspaces.add" => {
+            let dir = expand_home(&require_str(&params, "dir")?);
+            if !std::path::Path::new(&dir).is_dir() {
+                return Err(format!("{dir} is not a folder"));
+            }
+            // Record it right away so the phone's next list already has it;
+            // the webview then files it into its own recent list and re-syncs.
+            let state = app.state::<AppState>();
+            let mut sidebar = load_sidebar(&state);
+            let default = sidebar["defaultWorkspace"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            if let Some(dirs) = sidebar["dirs"].as_array_mut() {
+                if !dirs.iter().any(|d| d.as_str() == Some(&dir)) {
+                    let at = usize::from(dirs.first().and_then(Value::as_str) == Some(&default));
+                    dirs.insert(at.min(dirs.len()), json!(dir));
+                }
+            }
+            if let Some(hidden) = sidebar["hidden"].as_array_mut() {
+                hidden.retain(|d| d.as_str() != Some(&dir));
+            }
+            let _ = state
+                .store
+                .set_setting(SIDEBAR_SETTING, &sidebar.to_string());
+            let _ = app.emit("remote-workspace-add", dir.clone());
+            Ok(sidebar)
+        }
+        "fs.searchDirs" => {
+            let query = param_str(&params, "query").unwrap_or_default();
+            let known: Vec<String> = load_sidebar(&app.state::<AppState>())["dirs"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|d| d.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let found = tokio::task::spawn_blocking(move || search_dirs(&query, &known))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!(found))
+        }
+        "fs.mkdir" => {
+            let parent = expand_home(&require_str(&params, "parent")?);
+            let name = require_str(&params, "name")?;
+            if name.contains('/') || name == "." || name == ".." {
+                return Err("Folder names can't contain \"/\"".into());
+            }
+            let path = std::path::Path::new(&parent).join(name.trim());
+            std::fs::create_dir(&path)
+                .map_err(|e| format!("Couldn't create {}: {e}", path.display()))?;
+            Ok(json!({ "path": path.to_string_lossy() }))
+        }
+        "usage.get" => {
+            let force = params.get("force").and_then(Value::as_bool);
+            Ok(json!(crate::usage::provider_usage(force).await?))
+        }
+        _ => Err(format!("unknown method {method}")),
+    }
+}
+
+fn home() -> String {
+    std::env::var("HOME").unwrap_or_default()
+}
+
+fn expand_home(path: &str) -> String {
+    let path = path.trim();
+    match path.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("{}{rest}", home()),
+        _ => path.to_string(),
+    }
+}
+
+fn tilde(path: &str) -> String {
+    let home = home();
+    match path.strip_prefix(&home) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => {
+            format!("~{rest}")
+        }
+        _ => path.to_string(),
+    }
+}
+
+fn child_dirs(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<_> = entries
+        .flatten()
+        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    out.sort();
+    out
+}
+
+/// Folder lookup for the phone's "Add folder" sheet. A path (`/…` or `~…`)
+/// completes against its parent's children; plain text matches folder names
+/// among the sidebar folders and the usual project roots.
+fn search_dirs(query: &str, known: &[String]) -> Vec<Value> {
+    const LIMIT: usize = 40;
+    let query = query.trim();
+    let entry = |p: &str| json!({ "path": p, "display": tilde(p) });
+    if query.starts_with('/') || query.starts_with('~') {
+        let full = expand_home(query);
+        let path = std::path::Path::new(&full);
+        let (parent, prefix) = if full.ends_with('/') {
+            (path.to_path_buf(), String::new())
+        } else {
+            (
+                path.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
+                path.file_name()
+                    .map(|n| n.to_string_lossy().to_lowercase())
+                    .unwrap_or_default(),
+            )
+        };
+        let mut out = Vec::new();
+        if path.is_dir() && !full.ends_with('/') {
+            out.push(entry(&full));
+        }
+        for child in child_dirs(&parent) {
+            let name = child
+                .file_name()
+                .map(|n| n.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            let p = child.to_string_lossy().to_string();
+            if name.starts_with(&prefix) && p != full {
+                out.push(entry(&p));
+            }
+            if out.len() >= LIMIT {
+                break;
+            }
+        }
+        return out;
+    }
+    let home = home();
+    let mut candidates: Vec<String> = known.to_vec();
+    let roots = [
+        "",
+        "Developer",
+        "Documents",
+        "Projects",
+        "projects",
+        "code",
+        "Code",
+        "src",
+        "repos",
+        "work",
+        "Desktop",
+    ];
+    for root in roots {
+        let dir = std::path::Path::new(&home).join(root);
+        for child in child_dirs(&dir) {
+            candidates.push(child.to_string_lossy().to_string());
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    candidates.retain(|c| seen.insert(c.clone()));
+    let q = query.to_lowercase();
+    let name_of = |p: &str| p.rsplit('/').next().unwrap_or(p).to_lowercase();
+    let mut hits: Vec<(u8, String)> = candidates
+        .into_iter()
+        .filter_map(|p| {
+            let name = name_of(&p);
+            let rank = if q.is_empty() {
+                if known.contains(&p) {
+                    0
+                } else {
+                    return None;
+                }
+            } else if name == q {
+                0
+            } else if name.starts_with(&q) {
+                1
+            } else if name.contains(&q) {
+                2
+            } else if p.to_lowercase().contains(&q) {
+                3
+            } else {
+                return None;
+            };
+            Some((rank, p))
+        })
+        .collect();
+    hits.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.len().cmp(&b.1.len()))
+            .then(a.1.cmp(&b.1))
+    });
+    hits.into_iter()
+        .take(LIMIT)
+        .map(|(_, p)| entry(&p))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_paths_round_trip() {
+        let h = home();
+        assert_eq!(expand_home("~/x"), format!("{h}/x"));
+        assert_eq!(expand_home("~"), h);
+        assert_eq!(tilde(&format!("{h}/x")), "~/x");
+        assert_eq!(expand_home("~other"), "~other");
+    }
+
+    #[test]
+    fn path_query_lists_children() {
+        let dir =
+            std::env::temp_dir().join(format!("cetus-dirs-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(dir.join("alpha")).unwrap();
+        std::fs::create_dir_all(dir.join("beta")).unwrap();
+        std::fs::create_dir_all(dir.join(".hidden")).unwrap();
+        let q = format!("{}/", dir.display());
+        let names: Vec<String> = search_dirs(&q, &[])
+            .iter()
+            .map(|v| {
+                v["path"]
+                    .as_str()
+                    .unwrap()
+                    .rsplit('/')
+                    .next()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(names, vec!["alpha", "beta"]);
+        let q = format!("{}/al", dir.display());
+        assert_eq!(search_dirs(&q, &[]).len(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    #[test]
+    fn tool_output_is_trimmed_on_char_boundary() {
+        let mut m = json!({"role": "toolResult", "content": [
+            {"type": "text", "text": "好".repeat(3000)},
+            {"type": "image", "data": "xx"}
+        ]});
+        trim_tool_output(&mut m);
+        let blocks = m["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0]["text"].as_str().unwrap().len() < TOOL_TEXT_MAX + 40);
+    }
     #[test]
     fn token_has_enough_entropy() {
         assert_eq!(new_token().len(), 64);

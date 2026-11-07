@@ -18,8 +18,6 @@ describe("runtime-independent folding", () => {
     const segments = build([text("Earlier"), tool("a"), text("Waiting for CI"), tool("b"), tool("c")]);
     expect(segments.map((s) => s.type)).toEqual(["activity", "answer", "activity"]);
     expect(visibleText(segments)).toEqual(["Waiting for CI"]);
-    expect(segments[0].defaultOpen).toBe(false);
-    expect(segments[2].defaultOpen).toBe(true);
     expect(segments[2].steps.map((b) => b.id)).toEqual(["b", "c"]);
   });
 
@@ -32,10 +30,13 @@ describe("runtime-independent folding", () => {
     expect(visibleText(segments)).toEqual(["Answer", "Cleanup"]);
   });
 
-  test("live narration stays visible and completed replies fold only on settle", () => {
+  test("live narration folds into one collapsed group once the next step starts", () => {
     const blocks = [thinking(), text("Progress"), tool("a"), text("Done", "final_answer")];
-    expect(visibleText(build(blocks, true))).toEqual(["Progress", "Done"]);
+    expect(visibleText(build(blocks, true))).toEqual(["Done"]);
     expect(visibleText(build(blocks))).toEqual(["Done"]);
+    const live = build([thinking(), text("Found it"), tool("a"), text("Reading"), tool("b")], true);
+    expect(live.map((s) => s.type)).toEqual(["activity"]);
+    expect(visibleText(build([tool("a"), text("Streaming answer")], true))).toEqual(["Streaming answer"]);
   });
 
   test("artifacts and attachments are never hidden or reordered", () => {
@@ -46,10 +47,10 @@ describe("runtime-independent folding", () => {
     expect(segments.filter((s) => s.type === "answer").map((s) => s.block)).toContain(blocks[5]);
   });
 
-  test("tool-only turns keep their latest operation visible", () => {
+  test("tool-only turns fold into one collapsed group", () => {
     const segments = build([tool("a"), tool("b")]);
-    expect(segments.map((s) => s.defaultOpen)).toEqual([false, true]);
-    expect(segments[1].steps[0].id).toBe("b");
+    expect(segments).toHaveLength(1);
+    expect(segments[0].steps.map((b) => b.id)).toEqual(["a", "b"]);
   });
 
   test("image-only and plain-text replies have no artificial process group", () => {
@@ -63,11 +64,11 @@ describe("runtime-independent folding", () => {
     ["missing result", { result: null }, "incomplete"],
     ["background agent", { result: { content: [], details: { subagent: { status: "running" } } } }, "running"],
     ["cancelled agent", { result: { content: [], details: { subagent: { status: "cancelled" } } } }, "incomplete"],
-  ])("keeps %s visible even before a final reply", (_, overrides, status) => {
+  ])("folds %s with the rest of the run", (_, overrides, status) => {
     const block = tool("attention", overrides);
     const segments = build([tool("a"), block, text("Answer", "final_answer")]);
-    const group = segments.find((s) => s.type === "activity" && s.steps.includes(block));
-    expect(group.defaultOpen).toBe(true);
+    expect(segments.map((s) => s.type)).toEqual(["activity", "answer"]);
+    expect(segments[0].steps).toContain(block);
     expect(toolActivityStatus(block)).toBe(status);
   });
 
@@ -76,7 +77,6 @@ describe("runtime-independent folding", () => {
     const blocks = [tool("a"), failed, text("Retrying"), tool("retry"), text("Done", "final_answer")];
     const segments = build(blocks);
     expect(segments.map((s) => s.type)).toEqual(["activity", "answer"]);
-    expect(segments[0].defaultOpen).toBe(false);
     expect(segments[0].steps).toEqual(blocks.slice(0, -1));
     expect(toolActivityStatus(failed)).toBe("error");
   });
@@ -85,7 +85,6 @@ describe("runtime-independent folding", () => {
     const failed = tool("failed", { result: { content: [], isError: true } });
     const segments = build([text("Trying again"), tool("a"), failed, tool("retry")]);
     expect(segments.map((s) => s.type)).toEqual(["answer", "activity"]);
-    expect(segments[1].defaultOpen).toBe(true);
     expect(segments[1].steps.map((b) => b.id)).toEqual(["a", "failed", "retry"]);
   });
 
@@ -110,7 +109,6 @@ describe("runtime event and historical parity", () => {
     const state = chatReducer(emptyChatState, { type: "reset", messages: raw });
     const segments = buildAssistantSegments(state.messages, false);
     expect(visibleText(segments)).toEqual(["Latest"]);
-    expect(segments.at(-1).defaultOpen).toBe(true);
   });
 
   test("Codex phase survives text_end and historical inflation", () => {

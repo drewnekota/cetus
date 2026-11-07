@@ -340,6 +340,11 @@ function bashCommand(name: string, args: unknown): string | null {
   return null;
 }
 
+/** A shell-command step (counted as "commands" in the activity summary). */
+export function isCommandTool(name: string, args: unknown): boolean {
+  return /bash|shell|exec_command|command/i.test(name) || bashCommand(name, args) !== null;
+}
+
 /** A short, single-line preview of a tool's args — the most useful field
  *  flattened to one line (e.g. a bash command, a file path, a query). Shown
  *  dimmed next to the tool name so a collapsed step still says what it did. */
@@ -466,7 +471,7 @@ export const ToolUseCard = memo(function ToolUseCard({ id, block }: { id?: strin
   const hiddenSteps = steps.length - visibleSteps.length;
 
   return (
-    <div>
+    <div data-tool-call-id={block.id} className="rounded">
       <button
         onClick={toggle}
         className="flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-muted/60"

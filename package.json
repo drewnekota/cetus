@@ -1,6 +1,6 @@
 {
   "name": "cetus",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Turn Codex, Claude Code, or your favorite agent runtime into an always-on desktop assistant.",
   "private": true,
   "cetus": {

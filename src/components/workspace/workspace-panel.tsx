@@ -8,7 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { Folder, Globe, Plus, Terminal, X } from "lucide-react";
+import { FileText, Folder, Globe, Plus, Terminal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import {
@@ -24,8 +24,9 @@ import {
 } from "@/lib/keyboard-shortcuts";
 import { TerminalPanel } from "./terminal-panel";
 import { FilesPanel } from "./files-panel";
+import type { WorkspaceFileEntry } from "@/lib/types";
 
-export type WorkspaceTabKind = "files" | "terminal" | "browser";
+export type WorkspaceTabKind = "files" | "terminal" | "browser" | "file";
 
 export type WorkspaceLayout = "side" | "bottom";
 
@@ -49,6 +50,9 @@ export interface WorkspaceTab {
   terminalRunRequest?: TerminalRunRequest;
   terminalState?: TerminalViewState;
   browserState?: BrowserViewState;
+  /** `file` tabs: the opened entry, and whether it lives on a remote host. */
+  file?: WorkspaceFileEntry;
+  fileRemote?: boolean;
 }
 
 /** Matches the panel's `min-h-56` (14rem) floor. */
@@ -83,6 +87,9 @@ interface Props {
   onUpdateBrowserTab: (id: string, state: BrowserViewState) => void;
   onAnnotate: (message: string) => Promise<void>;
   onOpenTerminalCommand?: (command: string) => void;
+  /** Set for the side dock: files open as tabs in the main area, so the
+   * Files tab shows only the tree. */
+  onOpenFile?: (entry: WorkspaceFileEntry, isRemote: boolean) => void;
   motionState?: "open" | "closed";
   hidden?: boolean;
 }
@@ -101,6 +108,7 @@ export function WorkspacePanel({
   onUpdateBrowserTab,
   onAnnotate,
   onOpenTerminalCommand,
+  onOpenFile,
   motionState,
   hidden,
 }: Props) {
@@ -108,6 +116,8 @@ export function WorkspacePanel({
   const shortcuts = useKeyboardShortcuts();
   const active = tabs.find((t) => t.id === activeId) ?? tabs[0] ?? null;
   const cwd = workspaceDir || defaultWorkspace;
+  const treeOnly =
+    layout === "side" && !!onOpenFile && active?.kind === "files";
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
   const newTabMenuCloseTimerRef = useRef<number | null>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -209,7 +219,11 @@ export function WorkspacePanel({
       style={
         layout === "bottom" && bottomHeight != null
           ? { height: bottomHeight }
-          : undefined
+          : treeOnly && expanded
+            ? // Files open as main-area tabs, so the tree alone needs far
+              // less room than the old tree + preview split.
+              { width: "min(40%, 18rem)" }
+            : undefined
       }
       className={cn(
         "flex flex-col bg-background",
@@ -389,6 +403,7 @@ export function WorkspacePanel({
           <FilesPanel
             workspaceDir={cwd}
             onOpenTerminalCommand={onOpenTerminalCommand}
+            onOpenFile={onOpenFile}
           />
         ) : active.kind === "browser" ? (
           <BrowserView
@@ -430,8 +445,9 @@ function NewTabMenuItem({
   );
 }
 
-function TabIcon({ kind }: { kind: WorkspaceTabKind }) {
+export function TabIcon({ kind }: { kind: WorkspaceTabKind }) {
   if (kind === "files") return <Folder className="size-3.5" />;
+  if (kind === "file") return <FileText className="size-3.5" />;
   if (kind === "terminal") return <Terminal className="size-3.5" />;
   return <Globe className="size-3.5" />;
 }

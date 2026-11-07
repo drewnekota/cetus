@@ -1,0 +1,329 @@
+import CetusRemoteKit
+import Observation
+import SwiftUI
+import UIKit
+
+/// The desktop sidebar's folder layout, pushed by the Mac's webview.
+struct SidebarLayout {
+    var defaultDir = ""
+    var dirs: [String] = []
+    var hidden: Set<String> = []
+    var collapsed: Set<String> = []
+    /// Chats the Mac's sidebar leaves out (Cetus coordinator sessions).
+    var hiddenChats: Set<String> = []
+}
+
+/// One folder section of the chat list (or the global Pinned section).
+struct ChatGroup: Identifiable {
+    var id: String { dir }
+    let dir: String
+    let name: String
+    let items: [Conversation]
+    var isPinned = false
+}
+
+/// A folder suggestion from the Mac.
+struct DirHit: Identifiable, Hashable {
+    var id: String { path }
+    let path: String
+    let display: String
+}
+
+enum ConnectionState: Equatable {
+    case idle
+    case connecting
+    case connected
+    case failed(String)
+    case unpaired
+}
+
+/// App-wide state: paired Macs, the live encrypted connection to the selected
+/// one, and the conversation list it streams.
+@MainActor
+@Observable
+final class RemoteStore {
+    private(set) var hosts: [PairedHost] = []
+    var selectedHostId: String? {
+        didSet {
+            UserDefaults.standard.set(selectedHostId, forKey: "selectedHost")
+            if oldValue != selectedHostId { reconnect() }
+        }
+    }
+    private(set) var state: ConnectionState = .idle
+    private(set) var conversations: [Conversation] = []
+    private(set) var running: Set<String> = []
+    private(set) var sidebar = SidebarLayout()
+    var showArchived = false {
+        didSet { Task { await refreshList() } }
+    }
+
+    /// The chat on screen, fed this connection's events.
+    weak var activeChat: ChatModel?
+
+    private var connection: RemoteConnection?
+    private var eventTask: Task<Void, Never>?
+    private var retryTask: Task<Void, Never>?
+    private var attempt = 0
+
+    let deviceId: String = {
+        if let d = Keychain.data("deviceId"), let s = String(data: d, encoding: .utf8) { return s }
+        let id = UUID().uuidString
+        Keychain.set(Data(id.utf8), for: "deviceId")
+        return id
+    }()
+
+    init() {
+        if let d = Keychain.data("hosts"), let h = try? JSONDecoder().decode([PairedHost].self, from: d) {
+            hosts = h
+        }
+        let saved = UserDefaults.standard.string(forKey: "selectedHost")
+        selectedHostId = hosts.first { $0.sid == saved }?.sid ?? hosts.first?.sid
+    }
+
+    var selectedHost: PairedHost? { hosts.first { $0.sid == selectedHostId } }
+
+    private func saveHosts() {
+        if let d = try? JSONEncoder().encode(hosts) { Keychain.set(d, for: "hosts") }
+    }
+
+    // MARK: Pairing
+
+    func pair(with offer: PairingOffer) async throws {
+        let c = RemoteConnection()
+        try await c.connect(relay: offer.relay, direct: offer.direct, sid: offer.sid, publicKey: offer.pk)
+        let hello = try await c.hello(
+            deviceId: deviceId, deviceName: UIDevice.current.name, token: nil, pairingSecret: offer.ps)
+        await c.close()
+        guard let token = hello.deviceToken else { throw RemoteError.handshakeFailed }
+        let host = PairedHost(offer: offer, macName: hello.macName, deviceToken: token)
+        hosts.removeAll { $0.sid == host.sid }
+        hosts.append(host)
+        saveHosts()
+        selectedHostId = host.sid
+        reconnect()
+    }
+
+    func forget(_ host: PairedHost) {
+        hosts.removeAll { $0.sid == host.sid }
+        saveHosts()
+        if selectedHostId == host.sid {
+            selectedHostId = hosts.first?.sid
+            if hosts.isEmpty { disconnect(); state = .idle; conversations = [] }
+        }
+    }
+
+    // MARK: Connection
+
+    func ensureConnected() {
+        switch state {
+        case .connected, .connecting, .unpaired: return
+        default: reconnect()
+        }
+    }
+
+    func reconnect() {
+        disconnect()
+        guard let host = selectedHost else { state = .idle; return }
+        state = .connecting
+        retryTask = Task { await connect(host) }
+    }
+
+    private func disconnect() {
+        retryTask?.cancel()
+        eventTask?.cancel()
+        let old = connection
+        connection = nil
+        Task { await old?.close() }
+    }
+
+    private func connect(_ host: PairedHost) async {
+        let c = RemoteConnection()
+        do {
+            try await c.connect(relay: host.relay, direct: host.direct, sid: host.sid, publicKey: host.publicKey)
+            let hello = try await c.hello(
+                deviceId: deviceId, deviceName: UIDevice.current.name, token: host.deviceToken, pairingSecret: nil)
+            guard !Task.isCancelled, host.sid == selectedHostId else { await c.close(); return }
+            if hello.macName != host.macName, let i = hosts.firstIndex(where: { $0.sid == host.sid }) {
+                hosts[i].macName = hello.macName
+                saveHosts()
+            }
+            connection = c
+            state = .connected
+            attempt = 0
+            eventTask = Task { [weak self] in
+                for await e in c.events { self?.handle(e) }
+                self?.connectionDropped(c)
+            }
+            await refreshList()
+            await activeChat?.load()
+        } catch RemoteError.unpaired {
+            state = .unpaired
+        } catch {
+            guard !Task.isCancelled else { return }
+            state = .failed(error.localizedDescription)
+            scheduleRetry()
+        }
+    }
+
+    private func connectionDropped(_ c: RemoteConnection) {
+        guard connection === c else { return }
+        connection = nil
+        Task {
+            let reason = await c.closeReason
+            state = .failed((reason ?? .closed).localizedDescription)
+            scheduleRetry()
+        }
+    }
+
+    private func scheduleRetry() {
+        attempt += 1
+        let delay = min(30, pow(2, Double(min(attempt, 5))))
+        retryTask = Task {
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let host = selectedHost else { return }
+            state = .connecting
+            await connect(host)
+        }
+    }
+
+    func request(_ method: String, _ params: JSON = [:]) async throws -> JSON {
+        guard let connection else { throw RemoteError.closed }
+        return try await connection.request(method, params)
+    }
+
+    // MARK: Conversations
+
+    func refreshList() async {
+        async let layout: Void = refreshSidebar()
+        await refreshConversations()
+        await layout
+    }
+
+    private func refreshSidebar() async {
+        guard let j = try? await request("workspaces.list") else { return }
+        applySidebar(j)
+    }
+
+    private func applySidebar(_ j: JSON) {
+        let strings = { (key: String) in (j[key].array ?? []).compactMap(\.string) }
+        sidebar = SidebarLayout(
+            defaultDir: j["defaultWorkspace"].string ?? "",
+            dirs: strings("dirs"),
+            hidden: Set(strings("hidden")),
+            collapsed: Set(strings("collapsed")),
+            hiddenChats: Set(strings("hiddenChats"))
+        )
+    }
+
+    func folderName(_ dir: String) -> String {
+        dir.isEmpty || dir == sidebar.defaultDir ? "Chat" : dir.folderName
+    }
+
+    /// Chats grouped the way the Mac's sidebar draws them: Pinned first, then
+    /// the default "Chat" folder and the user's folders in their order;
+    /// folders the user removed on the Mac stay hidden here too.
+    var groups: [ChatGroup] {
+        var order: [String] = []
+        var map: [String: [Conversation]] = [:]
+        func ensure(_ dir: String) {
+            guard map[dir] == nil, !sidebar.hidden.contains(dir) || dir == sidebar.defaultDir else { return }
+            map[dir] = []
+            order.append(dir)
+        }
+        if !sidebar.defaultDir.isEmpty { ensure(sidebar.defaultDir) }
+        sidebar.dirs.forEach(ensure)
+        let listed = conversations.filter { !sidebar.hiddenChats.contains($0.id) }
+        for c in listed {
+            ensure(c.workspaceDir)
+            if !c.pinned { map[c.workspaceDir]?.append(c) }
+        }
+        var out = order.map { ChatGroup(dir: $0, name: folderName($0), items: map[$0] ?? []) }
+        let pinned = listed.filter { $0.pinned && !sidebar.hidden.contains($0.workspaceDir) }
+        if !pinned.isEmpty {
+            out.insert(ChatGroup(dir: "\u{0}pinned", name: "Pinned", items: pinned, isPinned: true), at: 0)
+        }
+        return out
+    }
+
+    /// Folders a new chat can go in, in sidebar order.
+    var folders: [String] {
+        groups.filter { !$0.isPinned }.map(\.dir)
+    }
+
+    func addFolder(_ dir: String) async throws {
+        let j = try await request("workspaces.add", ["dir": .string(dir)])
+        applySidebar(j)
+    }
+
+    func searchDirs(_ query: String) async throws -> [DirHit] {
+        let j = try await request("fs.searchDirs", ["query": .string(query)])
+        return (j.array ?? []).compactMap { h in
+            h["path"].string.map { DirHit(path: $0, display: h["display"].string ?? $0) }
+        }
+    }
+
+    func makeFolder(in parent: String, named name: String) async throws -> String {
+        let j = try await request("fs.mkdir", ["parent": .string(parent), "name": .string(name)])
+        guard let path = j["path"].string else { throw RemoteError.server("Couldn't create the folder.") }
+        return path
+    }
+
+    private func refreshConversations() async {
+        guard let rows = try? await request("conversations.list", ["archived": .bool(showArchived)]) else { return }
+        var list = (rows.array ?? []).compactMap(Conversation.init)
+        if showArchived { list = list.filter(\.archived) }
+        conversations = list.sorted {
+            if $0.pinned != $1.pinned { return $0.pinned }
+            return $0.updatedAt > $1.updatedAt
+        }
+        running = Set(list.filter { $0.runState == "running" }.map(\.id))
+    }
+
+    func createConversation(runtime: Runtime, workspaceDir: String?) async throws -> Conversation {
+        var params: [String: JSON] = ["backend": .string(runtime.rawValue)]
+        if let workspaceDir { params["workspaceDir"] = .string(workspaceDir) }
+        let r = try await request("conversations.create", .object(params))
+        guard let c = Conversation(r) else { throw RemoteError.server("Couldn't create the chat.") }
+        await refreshList()
+        return c
+    }
+
+    func update(_ id: String, _ patch: [String: JSON]) async throws {
+        var params = patch
+        params["id"] = .string(id)
+        _ = try await request("conversations.update", .object(params))
+        await refreshList()
+    }
+
+    private func handle(_ envelope: JSON) {
+        switch envelope["type"].string {
+        case "conversation_updated", "conversation_created":
+            if let c = Conversation(envelope["conversation"]) {
+                if let i = conversations.firstIndex(where: { $0.id == c.id }) {
+                    conversations[i] = c
+                } else if c.archived == showArchived {
+                    conversations.insert(c, at: 0)
+                }
+                activeChat?.conversationChanged(c)
+            }
+        case "conversation_deleted":
+            conversations.removeAll { $0.id == envelope["id"].string }
+        case "resync":
+            Task {
+                await refreshList()
+                await activeChat?.load()
+            }
+        case "pi_event":
+            guard let id = envelope["conversationId"].string else { return }
+            let e = envelope["event"]
+            switch e["type"].string {
+            case "agent_start": running.insert(id)
+            case "agent_end": running.remove(id)
+            default: break
+            }
+            if activeChat?.conversationId == id { activeChat?.apply(e) }
+        default:
+            break
+        }
+    }
+}

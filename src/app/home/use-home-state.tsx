@@ -8,7 +8,12 @@ import {
   type QueuedMessage,
 } from "@/components/chat/composer";
 import { groupByWorkspace } from "@/components/sidebar/app-sidebar";
-import { threadWorkspaceOrder } from "@/components/sidebar/workspace-grouping";
+import {
+  PINNED_GROUP_DIR,
+  threadWorkspaceOrder,
+} from "@/components/sidebar/workspace-grouping";
+import { invoke } from "@/lib/host/core";
+import { listen } from "@/lib/host/event";
 import {
   isConversationMode,
   type ConversationMode,
@@ -46,7 +51,10 @@ import {
   KEYBOARD_SHORTCUTS_STORAGE_KEY,
   readKeyboardShortcuts,
 } from "@/lib/keyboard-shortcuts";
-import { reconcileTemporaryWorkspaces } from "@/lib/recent-workspaces";
+import {
+  reconcileTemporaryWorkspaces,
+  rememberRecentWorkspace,
+} from "@/lib/recent-workspaces";
 import { listedConversations, useCoordinatorStore } from "@/lib/coordinator";
 import {
   PersistedAppViewState,
@@ -572,6 +580,53 @@ export function useHomeState({
       autoSortConversations,
     ],
   );
+  // The phone app groups chats exactly like this sidebar, so hand the backend
+  // the folder order (minus the Pinned pseudo-group) whenever it changes.
+  const remoteSidebarKey = JSON.stringify([
+    defaultWorkspace,
+    workspaceGroups.map((g) => g.dir).filter((d) => d !== PINNED_GROUP_DIR),
+    hiddenWorkspaces,
+    [...collapsedWorkspaceDirs],
+    // Sessions the sidebar leaves out (Cetus coordinators).
+    (() => {
+      const listed = new Set(
+        listedConversations(conversations, coordinatorRegistry).map(
+          (c) => c.id,
+        ),
+      );
+      return conversations.filter((c) => !listed.has(c.id)).map((c) => c.id);
+    })(),
+  ]);
+  useEffect(() => {
+    const [defaultDir, dirs, hidden, collapsed, hiddenChats] = JSON.parse(
+      remoteSidebarKey,
+    ) as [string, string[], string[], string[], string[]];
+    if (!defaultDir) return;
+    invoke("set_remote_sidebar", {
+      sidebar: {
+        defaultWorkspace: defaultDir,
+        dirs,
+        hidden,
+        collapsed,
+        hiddenChats,
+      },
+    }).catch(() => {});
+  }, [remoteSidebarKey]);
+  // A folder added from the phone joins the recent list like a picked one.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let dead = false;
+    void listen<string>("remote-workspace-add", (e) => {
+      rememberRecentWorkspace(e.payload);
+    }).then((u) => {
+      if (dead) u();
+      else unlisten = u;
+    });
+    return () => {
+      dead = true;
+      unlisten?.();
+    };
+  }, []);
   const orderedChatIds = useMemo(
     () =>
       visibleConversationIds(

@@ -888,10 +888,12 @@ export function BackendPicker({
         <SelectTrigger
           data-testid="runtime-picker-trigger"
           size="sm"
-          style={{ ...runtimeThemeStyle(shown), color: "var(--runtime-color)" }}
-          className="h-7 min-w-0 gap-1.5 border-0 bg-transparent px-2 text-xs shadow-none hover:bg-muted focus-visible:ring-0 data-[size=sm]:h-7"
+          // Neutral label like the other composer chips; only the glyph keeps
+          // the runtime's color as an identity cue.
+          style={runtimeThemeStyle(shown)}
+          className="h-7 min-w-0 gap-1.5 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:ring-0 data-[size=sm]:h-7"
         >
-          <TriggerIcon className="size-3" />
+          <TriggerIcon className="size-3 text-[var(--runtime-color)]" />
           <span className="truncate">{current.label}</span>
         </SelectTrigger>
         <SelectContent align="start" className="min-w-60">
