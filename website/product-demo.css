@@ -20,20 +20,21 @@
 .demo-view-toggle button{display:flex;align-items:baseline;justify-content:center;gap:6px;flex:1;border-radius:99px;font-size:12px;padding:3px 8px;line-height:18px;white-space:nowrap}
 .demo-view-toggle button[aria-pressed=true]{background:var(--app-brand);color:#111}.demo-view-toggle kbd{background:none;padding:0;color:inherit;opacity:.65;font-size:10px}
 .demo-nav-item{display:flex;align-items:center;gap:8px;padding:8px 6px;height:38px;border-radius:6px}.demo-nav-item kbd{margin-left:auto}.demo-nav-item[aria-pressed=true]{background:var(--app-hover)}
-.demo-group-label{display:flex;align-items:center;gap:7px;padding:28px 6px 8px;font-size:12px;color:var(--app-muted)}.demo-group-label .demo-icon{width:13px;height:13px}
+.demo-group-label{display:flex;align-items:center;gap:7px;padding:14px 6px 8px;font-size:12px;color:var(--app-muted)}.demo-group-label .demo-icon{width:13px;height:13px}
 .demo-conversation{display:flex;align-items:center;gap:8px;height:38px;min-height:38px;padding:6px;border-radius:6px;min-width:0}.demo-conversation>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.demo-conversation small{margin-left:auto;color:var(--app-muted);font-size:11px;flex:none}
-.demo-settings{display:flex;align-items:center;gap:8px;margin-top:auto;padding:6px}.demo-settings>span{margin-left:auto;color:var(--app-muted)}
+.demo-settings{display:flex;align-items:center;gap:8px;margin:auto -16px 0 -10px;padding:12px 22px 0 16px;border-top:1px solid var(--app-border)}
+.demo-settings>span{display:flex;gap:12px}.demo-settings>span{margin-left:auto;color:var(--app-muted)}
 .demo-workspace{margin:8px 8px 8px 0;min-width:0;min-height:0;border:1px solid var(--app-border);border-radius:16px;background:var(--app-surface);display:flex;flex-direction:column;overflow:hidden}
 .demo-toolbar{height:40px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px;color:var(--app-muted);font-size:12px}.demo-toolbar>div{display:flex;gap:24px}.demo-toolbar .demo-icon{width:14px;height:14px}
 .demo-panel{position:relative;flex:1;min-height:0}.demo-home{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .demo-app .demo-glyph{position:absolute;width:760px;height:760px;max-width:none;left:50%;top:50%;transform:translate(-50%,-52%);opacity:.24;pointer-events:none;mask-image:radial-gradient(70% 70% at 50% 47%,#000 48%,transparent 86%)}
 .demo-welcome{position:relative;width:704px;transform:translateX(-40px);margin-top:0}
 .demo-welcome h3{font:italic 36px/44px 'Cetus Welcome',Georgia,serif;letter-spacing:-.025em;text-align:center;margin:0 0 28px}
-.demo-composer{background:var(--app-card);border:1px solid color-mix(in oklab,var(--demo-runtime) 60%,transparent);border-radius:16px;padding:16px 16px 12px;box-shadow:0 4px 24px #0000000f,0 1px 2px #0000000a}
+.demo-composer{background:var(--app-card);border:1px solid var(--app-border);border-radius:16px;padding:16px 16px 12px;box-shadow:0 4px 24px #0000000f,0 1px 2px #0000000a}
 .demo-prompt{font-size:14px;line-height:22px;color:var(--app-muted);height:52px;padding:4px}
 .demo-composer-bar{display:flex;align-items:center;gap:20px;height:34px;color:var(--app-muted);font-size:12px;white-space:nowrap}.demo-composer-bar>.demo-icon{width:13px;height:13px;margin:0 6px}
 .demo-folder,.demo-model,.demo-control{display:inline-flex;align-items:center;gap:6px}.demo-folder>.demo-icon,.demo-model>.demo-icon{width:13px;height:13px}.demo-branch{opacity:.7}
-.demo-picker-wrap{position:relative}.demo-app #demo-runtime-toggle{display:flex;align-items:center;gap:6px;padding:4px;border-radius:5px;color:var(--demo-runtime);font-size:12px}#demo-runtime-toggle .demo-icon{width:14px;height:14px}#demo-runtime-toggle img{width:12px;height:12px}
+.demo-picker-wrap{position:relative}.demo-app #demo-runtime-toggle{display:flex;align-items:center;gap:6px;padding:4px;border-radius:5px;color:inherit;font-size:12px}#demo-runtime-toggle .demo-icon{width:14px;height:14px}#demo-runtime-toggle img{width:12px;height:12px}
 .demo-app .demo-send{display:grid;place-items:center;width:32px;height:32px;flex:none;padding:0;background:var(--app-brand);color:#17171a;border-radius:8px;margin-left:auto;opacity:.65}.demo-app .demo-send:hover{opacity:1;background:var(--app-brand)}
 .demo-runtime-menu{position:absolute;top:calc(100% + 8px);left:0;width:232px;max-height:260px;padding:5px;border:1px solid var(--app-border);border-radius:9px;background:var(--app-card);box-shadow:0 8px 25px #0003;overflow:auto;z-index:20}.demo-runtime-menu[data-side=above]{top:auto;bottom:calc(100% + 8px)}
 .demo-runtime-menu button{display:flex;align-items:center;gap:8px;padding:7px 8px;width:100%;border-radius:5px;font-size:13px}.demo-runtime-menu button[aria-pressed=true]{background:var(--app-hover)}.demo-runtime-menu kbd{margin-left:auto;background:none}
@@ -207,11 +208,11 @@
 .demo-step .demo-step-ok{margin-left:auto;color:#65ab75}
 .demo-thread-spin{margin-left:auto;width:11px;height:11px;border-radius:50%;border:1.5px solid color-mix(in srgb,#d9a442 30%,transparent);border-top-color:#d9a442;animation:demo-spin .8s linear infinite;flex:none}
 @keyframes demo-spin{to{transform:rotate(360deg)}}
-.demo-thread-composer{margin:8px 16px 14px;background:var(--app-card);border:1px solid color-mix(in oklab,var(--demo-runtime) 55%,transparent);border-radius:14px;padding:10px 12px 8px;flex:none}
+.demo-thread-composer{margin:8px 16px 14px;background:var(--app-card);border:1px solid var(--app-border);border-radius:14px;padding:10px 12px 8px;flex:none}
 .demo-thread-composer-feed{--demo-runtime:var(--app-brand);margin:12px 20px 14px}
 .demo-thread-composer>p{font-size:13px;color:var(--app-muted);height:30px;padding:2px 4px}
 .demo-thread-composer .demo-composer-bar{gap:14px;height:30px}.demo-thread-composer .demo-send{width:28px;height:28px}
-.demo-thread-rt{display:inline-flex;align-items:center;gap:6px;color:var(--demo-runtime)}.demo-thread-rt img{width:13px;height:13px}.demo-thread-rt .demo-icon,.demo-thread-composer .demo-model .demo-icon,.demo-thread-composer .demo-folder .demo-icon{width:12px;height:12px}
+.demo-thread-rt{display:inline-flex;align-items:center;gap:6px}.demo-thread-rt img{width:13px;height:13px}.demo-thread-rt .demo-icon,.demo-thread-composer .demo-model .demo-icon,.demo-thread-composer .demo-folder .demo-icon{width:12px;height:12px}
 .demo-thread-composer .demo-model{display:inline-flex;align-items:center;gap:4px}
 @media(prefers-reduced-motion:reduce){.demo-thread-badges i,.demo-thread-status i,.demo-thread-spin{animation:none}}
 @media(max-width:700px){
@@ -227,3 +228,25 @@
  .demo-app .demo-thread-ask-actions button{min-height:44px;padding:4px 16px}
  .demo-thread-composer-feed{margin:10px 12px 12px}
 }
+
+/* Sidebar mode select, workspace list and app-style headers. */
+.demo-mode-wrap{position:relative}
+#demo-mode-toggle{width:100%}
+#demo-mode-toggle>span{display:flex;align-items:center;gap:8px}
+#demo-mode-toggle[aria-expanded=true]{background:var(--app-hover)}
+.demo-mode-chevron{margin-left:auto;width:13px;height:13px;color:var(--app-muted)}
+.demo-mode-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;padding:4px;border:1px solid var(--app-border);border-radius:9px;background:var(--app-card);box-shadow:0 8px 25px #0003;z-index:20}
+.demo-mode-menu button{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border-radius:5px;font-size:13px}
+.demo-mode-menu button:hover{background:var(--app-hover)}
+.demo-mode-menu .demo-icon{width:14px;height:14px;color:var(--app-muted)}
+.demo-mode-menu .demo-mode-check{margin-left:auto;color:inherit;visibility:hidden}
+.demo-mode-menu button[aria-pressed=true] .demo-mode-check{visibility:visible}
+.demo-side-rule{border:0;height:1px;background:var(--app-border);margin:8px -16px 0 -10px}
+.demo-space{display:flex;align-items:center;gap:8px;height:34px;padding:6px;border-radius:6px}
+.demo-space .demo-icon{width:13px;height:13px;color:var(--app-muted)}
+.demo-sidebar[data-mode=board] .demo-space[data-space=all],.demo-sidebar[data-mode=threads] .demo-space[data-space=acme-web]{background:var(--app-hover)}
+@media(min-width:701px){.demo-sidebar:not([data-mode=home]) [data-side=chat],.demo-sidebar[data-mode=home] [data-side=spaces],.demo-sidebar[data-mode=threads] [data-side-not=threads]{display:none}}
+.demo-chat-composer{margin:0 12% 20px}
+.demo-auto-new{margin-left:auto;display:flex;align-items:center;gap:6px;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:500;background:var(--app-brand);color:#17171a}
+.demo-auto-new .demo-icon{width:13px;height:13px}
+@media(max-width:700px){.demo-chat-composer{margin:0 12px 12px}}

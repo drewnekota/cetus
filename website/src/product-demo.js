@@ -8,6 +8,12 @@ const sceneTabs = [...demo.querySelectorAll('[data-demo-scene]')];
 const names = { home: '', chat: 'Launch meeting recap', threads: '', board: '', automations: '', quick: '' };
 const storyNames = { meeting: 'Turn a meeting into next steps', screen: 'Find what I was looking at', briefing: 'Start my day with a briefing' };
 let scale = 1;
+// The layout (Chats, Kanban, Threads) is sticky; Automations leaves it untouched.
+let mode = 'threads';
+const sidebar = demo.querySelector('.demo-sidebar');
+const modeToggle = document.getElementById('demo-mode-toggle');
+const modeMenu = document.getElementById('demo-mode-menu');
+function closeModes() { modeMenu.hidden = true; modeToggle.setAttribute('aria-expanded', 'false'); }
 function closePicker(focus = false) {
   menu.hidden = true;
   picker.setAttribute('aria-expanded', 'false');
@@ -22,12 +28,16 @@ function showView(view, story = 'meeting') {
   // Threads draws its own header row, like the app's shell shrinking to a sliver.
   demo.querySelector('.demo-toolbar').hidden = view === 'threads';
   demo.querySelectorAll('[data-demo-view][aria-pressed]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.demoView === scene)));
+  if (scene !== 'automations' && scene !== 'quick') mode = scene;
+  sidebar.dataset.mode = mode;
+  modeToggle.querySelectorAll('[data-demo-mode]').forEach(label => { label.hidden = label.dataset.demoMode !== mode; });
+  modeMenu.querySelectorAll('[data-demo-view]').forEach(item => item.setAttribute('aria-pressed', String(item.dataset.demoView === mode)));
+  closeModes();
   sceneTabs.forEach(tab => {
     tab.setAttribute('aria-selected', String(tab.dataset.demoScene === scene));
     tab.tabIndex = tab.dataset.demoScene === scene ? 0 : -1;
   });
   stage.setAttribute('aria-labelledby', `scene-${scene}`);
-  document.getElementById('demo-breadcrumb').textContent = view === 'chat' ? storyNames[story] : names[view];
   demo.querySelectorAll('[data-demo-story]').forEach(content => {
     content.hidden = content.dataset.demoStory !== story;
     content.scrollTop = 0;
@@ -43,6 +53,8 @@ function showView(view, story = 'meeting') {
 }
 { const list = demo.querySelector('.demo-threads-list'); requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; }); }
 demo.querySelectorAll('[data-demo-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.demoView)));
+sidebar.dataset.mode = mode;
+modeToggle.addEventListener('click', () => { modeMenu.hidden = !modeMenu.hidden; modeToggle.setAttribute('aria-expanded', String(!modeMenu.hidden)); });
 sceneTabs.forEach((tab, index) => {
   tab.addEventListener('click', () => showView(tab.dataset.demoScene));
   tab.addEventListener('keydown', event => {
@@ -84,11 +96,17 @@ menu.querySelectorAll('[data-demo-runtime]').forEach(button => button.addEventLi
   const image = document.getElementById('demo-runtime-icon');
   image.src = `assets/brands/${key}.svg`; image.classList.toggle('dsh-icon', key === 'dsh');
   document.getElementById('demo-model').textContent = models[key];
+  // The conversation composer follows the runtime picked on the home screen.
+  demo.querySelector('[data-demo-runtime-name]').textContent = button.dataset.name;
+  demo.querySelector('[data-demo-runtime-model]').textContent = models[key];
+  const chatIcon = demo.querySelector('[data-demo-runtime-icon]');
+  chatIcon.src = image.src; chatIcon.classList.toggle('dsh-icon', key === 'dsh');
   menu.querySelectorAll('[data-demo-runtime]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
   closePicker(true);
 }));
-document.addEventListener('click', event => { if (!event.target.closest('.demo-picker-wrap')) closePicker(); });
-demo.addEventListener('keydown', event => { if (event.key === 'Escape' && !menu.hidden) { event.preventDefault(); closePicker(true); } });
+document.addEventListener('click', event => { if (!event.target.closest('.demo-picker-wrap')) closePicker(); if (!event.target.closest('.demo-mode-wrap')) closeModes(); });
+demo.addEventListener('keydown', event => { if (event.key === 'Escape' && !menu.hidden) { event.preventDefault(); closePicker(true); }
+  if (event.key === 'Escape' && !modeMenu.hidden) { event.preventDefault(); closeModes(); modeToggle.focus(); } });
 demo.querySelector('[data-demo-approve]').addEventListener('click', event => {
   const card = event.currentTarget.closest('.demo-task');
   card.querySelector('.demo-review-note').remove(); card.querySelector('.demo-review-actions').remove();

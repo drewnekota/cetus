@@ -8,7 +8,6 @@
 
 <p align="center">
   <a href="https://github.com/william-jin-cmu/cetus/releases/latest/download/Cetus.dmg"><img alt="下载 Cetus macOS 版" src="https://img.shields.io/badge/下载-Cetus-111111?style=for-the-badge&logo=apple" /></a>
-  <a href="https://github.com/william-jin-cmu/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="下载 Cetus Swift (Beta) macOS 版" src="https://img.shields.io/badge/下载-Cetus_Swift_(Beta)-555555?style=flat&logo=swift&logoColor=white" /></a>
 </p>
 
 <p align="center">
@@ -21,7 +20,7 @@
 
 <p align="center"><a href="./README.md">English</a> · <strong>简体中文</strong></p>
 
-![Cetus 操作演示 —— 唤起 agent、创建自动化任务并切换 runtime](docs/cetus-demo.gif)
+![Cetus 操作演示 —— 选择 runtime、发出任务、回应权限请求、审批完成的工作](docs/cetus-demo.gif)
 
 ## 社区
 
@@ -97,16 +96,9 @@ Cetus 的其它能力，都是为了缩短你在环里的那一段。
 
 ## 立即使用
 
-Cetus 支持 **Apple Silicon** Mac，同一个 app 有两个版本：
+Cetus 支持 **Apple Silicon** Mac，需要 macOS 13 或更高版本，会自动更新。
 
-| 版本 | 下载 | 系统要求 |
-| --- | --- | --- |
-| **Cetus** —— 最早的版本，基于 Electron | [Cetus.dmg](https://github.com/william-jin-cmu/cetus/releases/latest/download/Cetus.dmg) | macOS 13+ |
-| **Cetus Swift**（Beta）—— 原生 SwiftUI 版本，仍在打磨中 | [Cetus-Swift.dmg](https://github.com/william-jin-cmu/cetus/releases/download/swift/Cetus-Swift.dmg) | macOS 15+ |
-
-两个版本都会自动更新。然后：
-
-1. 打开 DMG，把 Cetus 拖进「应用程序」。
+1. [下载 Cetus.dmg](https://github.com/william-jin-cmu/cetus/releases/latest/download/Cetus.dmg)，打开后把 Cetus 拖进「应用程序」。
 2. 使用内置 runtime，或选择一个已安装并登录的 `claude`、`codex` 或 `dsh`（DeepSeek Harness）CLI。
 3. 选一个工作区，给 agent 布置第一个任务。
 

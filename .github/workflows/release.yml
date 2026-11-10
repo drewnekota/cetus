@@ -271,16 +271,14 @@ jobs:
             gh release delete "$RELEASE_TAG" --yes
           fi
           VERSION="$(node -p "require('./package.json').version")"
-          SWIFT_VERSION="$(tr -d '[:space:]' < swift/VERSION)"
           cat > "$RUNNER_TEMP/notes.md" <<NOTES
           ## Download
 
           | Build | File | Requires |
           | --- | --- | --- |
           | **Cetus** ${VERSION} | [Cetus.dmg](https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/Cetus.dmg) | Apple Silicon, macOS 13+ |
-          | **Cetus Swift** ${SWIFT_VERSION} (Beta, native) | [Cetus-Swift.dmg](https://github.com/${GITHUB_REPOSITORY}/releases/download/swift/Cetus-Swift.dmg) | Apple Silicon, macOS 15+ |
 
-          Both builds update themselves. Cetus Swift is in beta; its releases are published under the [swift](https://github.com/${GITHUB_REPOSITORY}/releases/tag/swift) tag.
+          Cetus updates itself.
 
           NOTES
           gh release create "$RELEASE_TAG" \

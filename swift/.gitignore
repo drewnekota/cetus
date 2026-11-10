@@ -1,6 +1,0 @@
-.build/
-build/
-.swiftpm/
-.DS_Store
-dist/
-release.env

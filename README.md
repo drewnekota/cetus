@@ -8,7 +8,6 @@
 
 <p align="center">
   <a href="https://github.com/william-jin-cmu/cetus/releases/latest/download/Cetus.dmg"><img alt="Download Cetus for macOS" src="https://img.shields.io/badge/Download-Cetus-111111?style=for-the-badge&logo=apple" /></a>
-  <a href="https://github.com/william-jin-cmu/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="Download Cetus Swift (Beta) for macOS" src="https://img.shields.io/badge/Download-Cetus_Swift_(Beta)-555555?style=flat&logo=swift&logoColor=white" /></a>
 </p>
 
 <p align="center">
@@ -21,7 +20,7 @@
 
 <p align="center"><strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a></p>
 
-![Cetus demo — launch an agent, schedule an automation, and switch runtimes](docs/cetus-demo.gif)
+![Cetus demo — pick a runtime, send a task, answer a permission prompt, and approve finished work](docs/cetus-demo.gif)
 
 ## Community
 
@@ -97,16 +96,9 @@ Every capability that touches your screen, mic, or apps is opt-in, and everythin
 
 ## Get started
 
-Cetus runs on **Apple Silicon** Macs. There are two builds of the same app:
+Cetus runs on **Apple Silicon** Macs with macOS 13 or later, and updates itself.
 
-| Build | Download | Requires |
-| --- | --- | --- |
-| **Cetus** — the original app, built with Electron | [Cetus.dmg](https://github.com/william-jin-cmu/cetus/releases/latest/download/Cetus.dmg) | macOS 13+ |
-| **Cetus Swift** (Beta) — a native SwiftUI build, still missing some polish | [Cetus-Swift.dmg](https://github.com/william-jin-cmu/cetus/releases/download/swift/Cetus-Swift.dmg) | macOS 15+ |
-
-Both update themselves. Then:
-
-1. Open the DMG and move Cetus to Applications.
+1. [Download Cetus.dmg](https://github.com/william-jin-cmu/cetus/releases/latest/download/Cetus.dmg), open it, and move Cetus to Applications.
 2. Use the built-in runtime, or pick an installed and signed-in `claude`, `codex`, or `dsh` (DeepSeek Harness) CLI.
 3. Choose a workspace and give the agent its first task.
 
