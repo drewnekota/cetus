@@ -15,7 +15,8 @@ struct ComposerBar<Chip: View>: View {
     @ViewBuilder var chip: Chip
 
     @State private var picked: [PhotosPickerItem] = []
-    @FocusState private var focused: Bool
+    @State private var sends = 0
+    @State private var focused = false
 
     private var canSend: Bool {
         !busy && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty)
@@ -48,13 +49,11 @@ struct ComposerBar<Chip: View>: View {
                     .padding(.horizontal, 2)
                 }
             }
-            TextField(placeholder, text: $text, axis: .vertical)
-                .lineLimit(1...8)
-                .focused($focused)
-                .font(Theme.content)
-                .foregroundStyle(Theme.text)
-                .padding(.horizontal, 6)
-                .padding(.top, 4)
+            ComposerTextView(text: $text, focused: $focused, placeholder: placeholder) { pasted in
+                images += pasted.prefix(max(0, 4 - images.count)).compactMap(OutgoingImage.init)
+            }
+            .padding(.horizontal, 6)
+            .padding(.top, 4)
             HStack(spacing: 6) {
                 PhotosPicker(selection: $picked, maxSelectionCount: 4, matching: .images) {
                     Image(systemName: "plus")
@@ -65,7 +64,10 @@ struct ComposerBar<Chip: View>: View {
                 chip
                 Spacer(minLength: 4)
                 if running && !canSend {
-                    Button(action: onStop) {
+                    Button {
+                        sends += 1
+                        onStop()
+                    } label: {
                         Image(systemName: "stop.fill")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(.white)
@@ -73,7 +75,10 @@ struct ComposerBar<Chip: View>: View {
                             .background(Color(uiColor: UIColor(hex: 0xDC2626)), in: Circle())
                     }
                 } else {
-                    Button(action: onSend) {
+                    Button {
+                        sends += 1
+                        onSend()
+                    } label: {
                         Group {
                             if busy {
                                 ProgressView().controlSize(.small).tint(.white)
@@ -99,6 +104,9 @@ struct ComposerBar<Chip: View>: View {
         .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
         .contentShape(Rectangle())
         .onTapGesture { focused = true }
+        // Swipe the box down to put the keyboard away.
+        .swipeDownDismissesKeyboard()
+        .sensoryFeedback(.impact(weight: .light), trigger: sends)
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             Task {
@@ -120,27 +128,87 @@ struct RuntimeChip: View {
     let backend: String
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: Runtime.symbol(for: backend))
-                .font(.system(size: 12, weight: .medium))
+        HStack(spacing: 6) {
+            RuntimeIcon(id: backend, size: 16)
             Text(Runtime.label(for: backend))
                 .font(Theme.label)
                 .lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Theme.faint)
         }
         .foregroundStyle(Theme.muted)
         .padding(.horizontal, 6)
         .frame(height: 32)
+        .contentShape(Rectangle())
+    }
+}
+
+/// The runtime's brand mark (same artwork as the desktop's public/brands).
+struct RuntimeIcon: View {
+    let id: String
+    var size: CGFloat = 16
+
+    var body: some View {
+        if let ui = Runtime.icon(for: id) {
+            Image(uiImage: ui)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+        } else {
+            Image(systemName: "cpu")
+                .font(.system(size: size * 0.8, weight: .medium))
+                .frame(width: size, height: size)
+        }
+    }
+}
+
+/// Pick a runtime: a pull-down anchored to whatever it wraps, each row with
+/// its brand icon and a check on the current one.
+struct RuntimeMenu<L: View>: View {
+    let selected: String
+    let onPick: (Runtime) -> Void
+    @ViewBuilder var label: L
+
+    var body: some View {
+        Menu {
+            Picker("Runtime", selection: Binding(
+                get: { selected },
+                set: { id in if id != selected, let r = Runtime(rawValue: id) { onPick(r) } }
+            )) {
+                ForEach(Runtime.allCases) { r in
+                    // Menus tint SwiftUI images; a UIImage marked
+                    // .alwaysOriginal keeps the brand colors.
+                    Label {
+                        Text(r.label)
+                    } icon: {
+                        if let ui = Runtime.icon(for: r.rawValue, menu: true) { Image(uiImage: ui) }
+                    }
+                    .tag(r.rawValue)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            label
+        }
+        .menuOrder(.fixed)
     }
 }
 
 extension Runtime {
-    static func symbol(for id: String) -> String {
-        switch Runtime(rawValue: id) {
-        case .claudeCode: "asterisk"
-        case .codex: "chevron.left.forwardslash.chevron.right"
-        case .pi: "circle.hexagongrid"
-        case .dsh, .kimi, .grok, .opencode: "terminal"
-        case nil: "cpu"
+    /// Brand icon from the asset catalog. `menu` returns it pre-sized and
+    /// in original colors for UIMenu rows.
+    static func icon(for id: String, menu: Bool = false) -> UIImage? {
+        let known = Runtime(rawValue: id) != nil ? id : nil
+        guard let known, let img = UIImage(named: "runtime-\(known == "pi" ? "cetus" : known)") else { return nil }
+        guard menu else { return img }
+        let size = CGSize(width: 20, height: 20)
+        let r = UIGraphicsImageRenderer(size: size).image { _ in
+            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 4.5).addClip()
+            img.draw(in: CGRect(origin: .zero, size: size))
         }
+        // The DeepSeek whale is black line art: let the menu tint it.
+        return id == Runtime.dsh.rawValue ? r.withRenderingMode(.alwaysTemplate) : r.withRenderingMode(.alwaysOriginal)
     }
 }

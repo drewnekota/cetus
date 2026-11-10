@@ -39,11 +39,21 @@ struct RootView: View {
 
     var body: some View {
         Group {
+            #if DEBUG
+            if UserDefaults.standard.string(forKey: "demoSnapshot") != nil {
+                NavigationStack { ChatView(conversationId: "demo") }
+            } else if store.hosts.isEmpty {
+                PairView(initialOffer: pendingOffer)
+            } else {
+                ConversationListView()
+            }
+            #else
             if store.hosts.isEmpty {
                 PairView(initialOffer: pendingOffer)
             } else {
                 ConversationListView()
             }
+            #endif
         }
         .sheet(item: Binding(
             get: { store.hosts.isEmpty ? nil : pendingOffer },

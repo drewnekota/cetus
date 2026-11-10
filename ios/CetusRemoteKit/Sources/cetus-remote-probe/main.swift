@@ -7,6 +7,7 @@
 //   cetus-remote-probe send <id> <text> [secs]    send, then print events
 //   cetus-remote-probe usage                      provider usage
 //   cetus-remote-probe big                        request a large reply (chunking)
+//   cetus-remote-probe fold <snapshot.json>       print how the phone folds a history
 //
 // CETUS_PROBE_HOST overrides where the paired host is stored.
 import CetusRemoteKit
@@ -48,6 +49,22 @@ do {
         let host = PairedHost(offer: offer, macName: r.macName, deviceToken: token)
         try JSONEncoder().encode(host).write(to: hostFile)
         print("paired with \(r.macName)")
+    case "fold":
+        let snap = try JSONDecoder().decode(JSON.self, from: Data(contentsOf: URL(fileURLWithPath: args[1])))
+        for item in ChatTimeline(snapshot: snap).items(running: false) {
+            switch item {
+            case .user(let m): print("USER", m.blocks.count, "blocks")
+            case .assistant(let t):
+                print("ASSISTANT")
+                for seg in t.segments {
+                    switch seg {
+                    case .activity(_, let steps, let trailing):
+                        print("  [fold]", AssistantSegment.summary(steps), "(\(steps.count) steps)", trailing ? "trailing" : "")
+                    case .answer(let b): print("  answer:", b.id)
+                    }
+                }
+            }
+        }
     case "list":
         let c = try await connect(loadHost())
         let rows = try await c.request("conversations.list", ["archived": false])

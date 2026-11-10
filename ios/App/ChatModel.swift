@@ -5,14 +5,15 @@ import UIKit
 struct OutgoingImage: Identifiable {
     let id = UUID()
     let preview: UIImage
-    let base64: String
+    let jpeg: Data
+    var base64: String { jpeg.base64EncodedString() }
 
     /// Downscaled JPEG, small enough for the Mac's relay uplink.
     init?(_ image: UIImage) {
         let scaled = image.downscaled(maxSide: 1600)
         guard let data = scaled.jpegData(compressionQuality: 0.8) else { return nil }
         preview = scaled
-        base64 = data.base64EncodedString()
+        jpeg = data
     }
 }
 
@@ -30,6 +31,13 @@ extension RemoteStore {
         }
         _ = try await request("conversations.send", .object(params))
     }
+}
+
+/// A follow-up waiting for the current run to end.
+struct QueuedMessage: Identifiable {
+    let id = UUID()
+    var text: String
+    var images: [OutgoingImage]
 }
 
 /// One open conversation: its timeline plus the actions the chat screen takes.
@@ -56,6 +64,14 @@ final class ChatModel {
     func load() async {
         guard let store else { return }
         do {
+            #if DEBUG
+            // `-demoSnapshot <file>`: render a saved conversations.get reply.
+            if let path = UserDefaults.standard.string(forKey: "demoSnapshot") {
+                timeline = ChatTimeline(snapshot: try JSONDecoder().decode(JSON.self, from: Data(contentsOf: URL(fileURLWithPath: path))))
+                loaded = true
+                return
+            }
+            #endif
             let snapshot = try await store.request("conversations.get", ["id": .string(conversationId)])
             timeline = ChatTimeline(snapshot: snapshot)
             if let c = Conversation(snapshot["conversation"]) { conversation = c }
@@ -82,7 +98,12 @@ final class ChatModel {
         guard !text.isEmpty || !pending.isEmpty, let store else { return }
         draft = ""
         images = []
-        timeline.appendUser(text, images: pending.count)
+        // Mid-run, follow-ups queue (as on the desktop); Steer sends one now.
+        if running {
+            store.enqueue(text, images: pending, for: conversationId)
+            return
+        }
+        timeline.appendUser(text, images: pending.map(\.jpeg))
         do {
             try await store.send(text, images: pending, to: conversationId)
         } catch {
@@ -91,6 +112,28 @@ final class ChatModel {
             images = pending
             await load()
         }
+    }
+
+    var queued: [QueuedMessage] { store?.queued[conversationId] ?? [] }
+
+    /// Optimistic echo of a queued message the store just delivered.
+    func echo(_ item: QueuedMessage) {
+        timeline.appendUser(item.text, images: item.images.map(\.jpeg))
+    }
+
+    func steer(_ item: QueuedMessage) {
+        store?.steerQueued(item.id, in: conversationId)
+    }
+
+    func removeQueued(_ item: QueuedMessage) {
+        store?.removeQueued(item.id, from: conversationId)
+    }
+
+    /// Pull a queued message back into the composer.
+    func editQueued(_ item: QueuedMessage) {
+        removeQueued(item)
+        draft = draft.isEmpty ? item.text : draft + "\n" + item.text
+        images += item.images
     }
 
     func abort() async {

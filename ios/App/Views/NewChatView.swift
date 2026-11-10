@@ -58,24 +58,12 @@ struct NewChatView: View {
                 }
             }
             .buttonStyle(.plain)
-            Menu {
-                ForEach(Runtime.allCases) { r in
-                    Button {
-                        runtime = r.rawValue
-                    } label: {
-                        if r.rawValue == runtime {
-                            Label(r.label, systemImage: "checkmark")
-                        } else {
-                            Text(r.label)
-                        }
-                    }
-                }
+            RuntimeMenu(selected: runtime) { r in
+                runtime = r.rawValue
             } label: {
                 FieldCard(label: "Runtime") {
                     HStack(spacing: 8) {
-                        Image(systemName: Runtime.symbol(for: runtime))
-                            .font(.system(size: 14, weight: .medium))
-                            .frame(width: 20)
+                        RuntimeIcon(id: runtime, size: 20)
                         Text(Runtime.label(for: runtime))
                     }
                 }
@@ -93,9 +81,15 @@ struct NewChatView: View {
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
+        .tapDismissesKeyboard()
+        .swipeDownDismissesKeyboard()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             ComposerBar(text: $text, images: $images, placeholder: "What should it do?", busy: busy, onSend: start) {
-                RuntimeChip(backend: runtime)
+                RuntimeMenu(selected: runtime) { r in
+                    runtime = r.rawValue
+                } label: {
+                    RuntimeChip(backend: runtime)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
@@ -176,6 +170,7 @@ struct FolderPickerSheet: View {
                 }
             }
             .listStyle(.plain)
+            .scrollDismissesKeyboard(.immediately)
             .scrollContentBackground(.hidden)
             .background(Theme.background)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search folders")
@@ -281,6 +276,7 @@ struct AddFolderSheet: View {
                 }
             }
             .listStyle(.plain)
+            .scrollDismissesKeyboard(.immediately)
             .scrollContentBackground(.hidden)
             .background(Theme.background)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search folders or enter a path")

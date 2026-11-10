@@ -57,6 +57,10 @@ final class RemoteStore {
         didSet { Task { await refreshList() } }
     }
 
+    /// Follow-ups typed while a chat's agent runs, per conversation. The next
+    /// one goes out when the run ends; Steer sends one right away.
+    private(set) var queued: [String: [QueuedMessage]] = [:]
+
     /// The chat on screen, fed this connection's events.
     weak var activeChat: ChatModel?
 
@@ -277,6 +281,47 @@ final class RemoteStore {
             return $0.updatedAt > $1.updatedAt
         }
         running = Set(list.filter { $0.runState == "running" }.map(\.id))
+        // A run may have ended while the app was away from the events.
+        for id in queued.keys where !running.contains(id) { drainQueue(id) }
+    }
+
+    // MARK: Follow-up queue
+
+    func enqueue(_ text: String, images: [OutgoingImage], for id: String) {
+        queued[id, default: []].append(QueuedMessage(text: text, images: images))
+    }
+
+    func removeQueued(_ itemId: UUID, from id: String) {
+        queued[id]?.removeAll { $0.id == itemId }
+        if queued[id]?.isEmpty == true { queued[id] = nil }
+    }
+
+    /// Deliver a queued message now: pi and Claude Code inject it into the
+    /// current run, Codex interrupts and resumes.
+    func steerQueued(_ itemId: UUID, in id: String) {
+        guard let item = queued[id]?.first(where: { $0.id == itemId }) else { return }
+        removeQueued(itemId, from: id)
+        deliver(item, to: id)
+    }
+
+    private func drainQueue(_ id: String) {
+        guard !running.contains(id), let next = queued[id]?.first else { return }
+        removeQueued(next.id, from: id)
+        running.insert(id)
+        deliver(next, to: id)
+    }
+
+    private func deliver(_ item: QueuedMessage, to id: String) {
+        if activeChat?.conversationId == id { activeChat?.echo(item) }
+        Task {
+            do {
+                try await send(item.text, images: item.images, to: id)
+            } catch {
+                // Put it back at the front so nothing typed is lost.
+                queued[id, default: []].insert(item, at: 0)
+                if activeChat?.conversationId == id { activeChat?.error = error.localizedDescription }
+            }
+        }
     }
 
     func createConversation(runtime: Runtime, workspaceDir: String?) async throws -> Conversation {
@@ -322,6 +367,7 @@ final class RemoteStore {
             default: break
             }
             if activeChat?.conversationId == id { activeChat?.apply(e) }
+            if e["type"].string == "agent_end" { drainQueue(id) }
         default:
             break
         }

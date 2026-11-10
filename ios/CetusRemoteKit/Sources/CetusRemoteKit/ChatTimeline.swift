@@ -4,11 +4,12 @@ public enum ChatBlock: Hashable, Sendable, Identifiable {
     case text(id: Int, text: String, streaming: Bool)
     case thinking(id: Int, text: String, streaming: Bool)
     case tool(id: Int, callId: String, name: String, arguments: JSON, result: JSON?)
-    case image(id: Int)
+    /// Image bytes as sent (JPEG/PNG), nil when the Mac didn't include them.
+    case image(id: Int, data: Data?)
 
     public var id: Int {
         switch self {
-        case .text(let id, _, _), .thinking(let id, _, _), .tool(let id, _, _, _, _), .image(let id): id
+        case .text(let id, _, _), .thinking(let id, _, _), .tool(let id, _, _, _, _), .image(let id, _): id
         }
     }
 }
@@ -86,7 +87,8 @@ public struct ChatTimeline: Sendable {
             let args = !b["arguments"].isNull ? b["arguments"] : (!b["args"].isNull ? b["args"] : b["input"])
             return .tool(id: newId(), callId: callId, name: b["name"].string ?? "tool", arguments: args, result: results[callId])
         case "image":
-            return .image(id: newId())
+            let data = (b["data"].string ?? b["source"]["data"].string).flatMap { Data(base64Encoded: $0) }
+            return .image(id: newId(), data: data)
         default:
             return nil
         }
@@ -100,8 +102,8 @@ public struct ChatTimeline: Sendable {
     }
 
     /// Optimistic echo of what the phone just sent.
-    public mutating func appendUser(_ text: String, images: Int) {
-        var blocks: [ChatBlock] = (0..<images).map { _ in .image(id: newId()) }
+    public mutating func appendUser(_ text: String, images: [Data]) {
+        var blocks: [ChatBlock] = images.map { .image(id: newId(), data: $0) }
         if !text.isEmpty { blocks.append(.text(id: newId(), text: text, streaming: false)) }
         messages.append(ChatMessage(id: newId(), role: .user, blocks: blocks))
         running = true

@@ -80,6 +80,7 @@ struct PairView: View {
             .padding(.horizontal, 24)
         }
         .scrollDismissesKeyboard(.interactively)
+        .tapDismissesKeyboard()
         .sheet(isPresented: $scanning) {
             QRScannerSheet { code in
                 scanning = false
