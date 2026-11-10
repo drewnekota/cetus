@@ -7,16 +7,16 @@
 <p align="center"><a href="https://cetus.run">官方网站 · cetus.run</a></p>
 
 <p align="center">
-  <a href="https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg"><img alt="下载 Cetus macOS 版" src="https://img.shields.io/badge/下载-Cetus-111111?style=for-the-badge&logo=apple" /></a>
-  <a href="https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="下载 Cetus Swift (Beta) macOS 版" src="https://img.shields.io/badge/下载-Cetus_Swift_(Beta)-555555?style=flat&logo=swift&logoColor=white" /></a>
+  <a href="https://github.com/william-jin-cmu/cetus/releases/latest/download/Cetus.dmg"><img alt="下载 Cetus macOS 版" src="https://img.shields.io/badge/下载-Cetus-111111?style=for-the-badge&logo=apple" /></a>
+  <a href="https://github.com/william-jin-cmu/cetus/releases/download/swift/Cetus-Swift.dmg"><img alt="下载 Cetus Swift (Beta) macOS 版" src="https://img.shields.io/badge/下载-Cetus_Swift_(Beta)-555555?style=flat&logo=swift&logoColor=white" /></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/drewnekota/cetus/releases/latest"><img alt="最新版本" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdrewnekota%2Fcetus%2Fmain%2Fpackage.json&query=%24.version&prefix=v&label=release&color=blue" /></a>
-  <a href="https://github.com/drewnekota/cetus/releases"><img alt="下载量" src="https://img.shields.io/github/downloads/drewnekota/cetus/total" /></a>
-  <a href="https://github.com/drewnekota/cetus/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/drewnekota/cetus/ci.yml" /></a>
-  <a href="https://github.com/drewnekota/cetus/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/drewnekota/cetus" /></a>
-  <a href="LICENSE"><img alt="MIT 协议" src="https://img.shields.io/github/license/drewnekota/cetus" /></a>
+  <a href="https://github.com/william-jin-cmu/cetus/releases/latest"><img alt="最新版本" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fwilliam-jin-cmu%2Fcetus%2Fmain%2Fpackage.json&query=%24.version&prefix=v&label=release&color=blue" /></a>
+  <a href="https://github.com/william-jin-cmu/cetus/releases"><img alt="下载量" src="https://img.shields.io/github/downloads/william-jin-cmu/cetus/total" /></a>
+  <a href="https://github.com/william-jin-cmu/cetus/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/william-jin-cmu/cetus/ci.yml" /></a>
+  <a href="https://github.com/william-jin-cmu/cetus/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/william-jin-cmu/cetus" /></a>
+  <a href="LICENSE"><img alt="MIT 协议" src="https://img.shields.io/github/license/william-jin-cmu/cetus" /></a>
 </p>
 
 <p align="center"><a href="./README.md">English</a> · <strong>简体中文</strong></p>
@@ -101,8 +101,8 @@ Cetus 支持 **Apple Silicon** Mac，同一个 app 有两个版本：
 
 | 版本 | 下载 | 系统要求 |
 | --- | --- | --- |
-| **Cetus** —— 最早的版本，基于 Electron | [Cetus.dmg](https://github.com/drewnekota/cetus/releases/latest/download/Cetus.dmg) | macOS 13+ |
-| **Cetus Swift**（Beta）—— 原生 SwiftUI 版本，仍在打磨中 | [Cetus-Swift.dmg](https://github.com/drewnekota/cetus/releases/download/swift/Cetus-Swift.dmg) | macOS 15+ |
+| **Cetus** —— 最早的版本，基于 Electron | [Cetus.dmg](https://github.com/william-jin-cmu/cetus/releases/latest/download/Cetus.dmg) | macOS 13+ |
+| **Cetus Swift**（Beta）—— 原生 SwiftUI 版本，仍在打磨中 | [Cetus-Swift.dmg](https://github.com/william-jin-cmu/cetus/releases/download/swift/Cetus-Swift.dmg) | macOS 15+ |
 
 两个版本都会自动更新。然后：
 
@@ -110,7 +110,7 @@ Cetus 支持 **Apple Silicon** Mac，同一个 app 有两个版本：
 2. 使用内置 runtime，或选择一个已安装并登录的 `claude`、`codex` 或 `dsh`（DeepSeek Harness）CLI。
 3. 选一个工作区，给 agent 布置第一个任务。
 
-> **早期版本：** Cetus 仍在快速迭代中。遇到问题或缺少某个工作流，欢迎[提 issue](https://github.com/drewnekota/cetus/issues)。
+> **早期版本：** Cetus 仍在快速迭代中。遇到问题或缺少某个工作流，欢迎[提 issue](https://github.com/william-jin-cmu/cetus/issues)。
 
 ## 许可证
 

@@ -15,7 +15,8 @@ use serde::Deserialize;
 
 use crate::{AppHandle, Error, Result};
 
-const ENDPOINT: &str = "https://github.com/drewnekota/cetus/releases/latest/download/latest.json";
+const ENDPOINT: &str =
+    "https://github.com/william-jin-cmu/cetus/releases/latest/download/latest.json";
 /// base64 of the minisign public key file (same key the Tauri builds used).
 const PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM2RDUzQUNCNDJFQTk4MzgKUldRNG1PcEN5enJWeGlNdHFOTWRFMitkckRvS2cvL3RCQUNEMnBuZmxpbi9FSURPSHk3dWVqdDAK";
 

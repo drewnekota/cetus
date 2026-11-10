@@ -24,7 +24,7 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 FEED=""
 if [[ "${CETUS_RELEASE:-}" == 1 ]]; then
   FEED="
-  <key>SUFeedURL</key><string>https://github.com/drewnekota/cetus/releases/download/swift/appcast.xml</string>
+  <key>SUFeedURL</key><string>https://github.com/william-jin-cmu/cetus/releases/download/swift/appcast.xml</string>
   <key>SUPublicEDKey</key><string>/EWL9yZRRygz0ICF7hXLvNPWO6UllsyaLehvBwi9vDk=</string>
   <key>SUEnableInstallerLauncherService</key><false/>
   <key>SUScheduledCheckInterval</key><integer>3600</integer>"

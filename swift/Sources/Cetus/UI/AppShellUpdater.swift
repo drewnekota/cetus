@@ -3,7 +3,7 @@ import Foundation
 import Sparkle
 
 /// Sparkle updates for the Swift build: release bundles carry `SUFeedURL` (the
-/// appcast on the drewnekota/cetus `swift` release), `SUPublicEDKey` and an
+/// appcast on the william-jin-cmu/cetus `swift` release), `SUPublicEDKey` and an
 /// hourly `SUScheduledCheckInterval`; dev bundles from bundle.sh carry none of
 /// them, so they never replace themselves.
 @MainActor

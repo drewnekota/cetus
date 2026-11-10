@@ -2,13 +2,13 @@
 # Build, sign, notarize and (with --publish) ship a Swift release.
 #
 #   ./release.sh              build + sign + notarize into dist/<version>/
-#   ./release.sh --publish    ...then upload to the `swift` release on drewnekota/cetus
+#   ./release.sh --publish    ...then upload to the `swift` release on william-jin-cmu/cetus
 #
 # Version: bump VERSION first; it must be newer than the published appcast.
 # Notes:   optional RELEASE_NOTES (text) or RELEASE_NOTES_FILE.
 # Needs:   the Developer ID cert in the login keychain, a notarytool keychain
 #          profile ($CETUS_NOTARY_PROFILE, default "cetus-notary"), the Sparkle
-#          EdDSA key in the keychain (generate_keys), and `gh` logged in as drewnekota.
+#          EdDSA key in the keychain (generate_keys), and `gh` logged in as william-jin-cmu.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -19,7 +19,7 @@ PUBLISH=0
 VERSION=$(tr -d '[:space:]' < VERSION)
 IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application: QIU JIN (65N4VF5643)}"
 NOTARY_PROFILE="${CETUS_NOTARY_PROFILE:-cetus-notary}"
-REPO=drewnekota/cetus
+REPO=william-jin-cmu/cetus
 TAG=swift
 BASE_URL="https://github.com/$REPO/releases/download/$TAG"
 SPARKLE_BIN=.build/artifacts/sparkle/Sparkle/bin
@@ -42,7 +42,7 @@ if [[ -n "$PUBLISHED" ]]; then
   [[ "$NEWEST" == "$VERSION" && "$PUBLISHED" != "$VERSION" ]] || { echo "VERSION $VERSION is not newer than published $PUBLISHED"; exit 1; }
 fi
 if (( PUBLISH )); then
-  GH_TOKEN=$(gh auth token --user drewnekota 2>/dev/null) || { echo "gh is not logged in as drewnekota"; exit 1; }
+  GH_TOKEN=$(gh auth token --user william-jin-cmu 2>/dev/null) || { echo "gh is not logged in as william-jin-cmu"; exit 1; }
   export GH_TOKEN
 fi
 
