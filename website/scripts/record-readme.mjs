@@ -37,7 +37,8 @@ const stageCss = `
 html,body{overflow:hidden!important;background:#17171a!important}
 .demo-app{position:fixed!important;inset:0!important;width:${WIDTH}px!important;height:${HEIGHT}px!important;zoom:1!important;border-radius:0!important;z-index:9000;margin:0!important}
 .demo-app,.demo-app *{scrollbar-width:none}
-.demo-welcome{transform:translate(-40px,-70px)!important}
+.demo-welcome{transform:translate(-40px,-45px)!important}
+.demo-app .demo-glyph{width:500px!important;height:500px!important;top:calc(50% - 45px)!important}
 .demo-threads-docked .demo-composer-bar .demo-model{display:none}
 #rec-cursor{position:fixed;left:0;top:0;z-index:9999;width:22px;height:22px;pointer-events:none;transition:transform .5s cubic-bezier(.45,.05,.25,1)}
 #rec-cursor svg{display:block;transition:transform .09s}
