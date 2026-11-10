@@ -516,6 +516,7 @@ export const AppSidebar = memo(function AppSidebar({
                     <DragOverlay dropAnimation={null}>
                       {activeDragDir ? (
                         <WorkspaceDragGhost
+                          dir={activeDragDir}
                           label={workspaceName(activeDragDir)}
                         />
                       ) : null}
@@ -612,7 +613,7 @@ export const AppSidebar = memo(function AppSidebar({
                 createPortal(
                   <DragOverlay dropAnimation={null}>
                     {activeDragDir ? (
-                      <WorkspaceDragGhost label={workspaceName(activeDragDir)} />
+                      <WorkspaceDragGhost dir={activeDragDir} label={workspaceName(activeDragDir)} />
                     ) : null}
                   </DragOverlay>,
                   document.body,

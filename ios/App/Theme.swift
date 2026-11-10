@@ -40,18 +40,31 @@ extension UIColor {
 }
 
 /// Rounded-square initial for a folder, its hue derived from the name so a
-/// folder keeps its color everywhere.
+/// folder keeps its color everywhere. The default "Chat" workspace isn't a
+/// folder to the user, so it gets a plain chat glyph instead (as on the Mac).
 struct FolderAvatar: View {
     let name: String
     var size: CGFloat = 22
+    var isDefault = false
 
     private static let palette: [UInt32] = [0xB0577F, 0x4F8A8B, 0x7C6BD6, 0xC27C3E, 0x5A7FC2, 0x6E9A4F, 0xA05BB0, 0x8A7560]
 
     var body: some View {
+        if isDefault {
+            Image(systemName: "bubble.left")
+                .font(.system(size: size * 0.6, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .frame(width: size, height: size)
+        } else {
+            tile
+        }
+    }
+
+    private var tile: some View {
         let initial = name.first.map { String($0).uppercased() } ?? "·"
         let hash = name.unicodeScalars.reduce(UInt32(5381)) { ($0 &<< 5) &+ $0 &+ $1.value }
         let color = Color(uiColor: UIColor(hex: Self.palette[Int(hash % UInt32(Self.palette.count))]))
-        Text(initial)
+        return Text(initial)
             .font(.system(size: size * 0.5, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)

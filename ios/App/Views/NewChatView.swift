@@ -29,7 +29,7 @@ struct NewChatView: View {
             } label: {
                 FieldCard(label: "Folder") {
                     HStack(spacing: 8) {
-                        FolderAvatar(name: store.folderName(chosenFolder), size: 20)
+                        FolderAvatar(name: store.folderName(chosenFolder), size: 20, isDefault: store.isDefaultFolder(chosenFolder))
                         Text(store.folderName(chosenFolder)).lineLimit(1)
                     }
                 }
@@ -150,7 +150,7 @@ struct FolderPickerSheet: View {
                         onPick(dir)
                     } label: {
                         HStack(spacing: 10) {
-                            FolderAvatar(name: store.folderName(dir), size: 22)
+                            FolderAvatar(name: store.folderName(dir), size: 22, isDefault: store.isDefaultFolder(dir))
                             Text(store.folderName(dir))
                                 .foregroundStyle(Theme.text)
                             Text(dir.tildePath)

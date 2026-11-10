@@ -17,6 +17,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   Pin,
+  Smile,
   SquarePen,
   X,
 } from "lucide-react";
@@ -48,6 +49,11 @@ import { PINNED_GROUP_DIR } from "./workspace-grouping";
 import { ConversationRow } from "./conversation-row";
 import { toast } from "sonner";
 import { locateFolder, useMissingFolders } from "@/lib/folder-health";
+import {
+  folderAvatarMenuCloseAutoFocus,
+  requestFolderAvatarEditor,
+} from "@/lib/folder-avatar-prefs";
+import { FolderAvatar } from "./folder-avatar";
 
 function onLocateFolder(dir: string) {
   locateFolder(dir).catch((e) => toast.error(String(e)));
@@ -67,6 +73,40 @@ const ROW_ACTION_CLASS =
   "fade-layer flex size-4 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-hidden transition-opacity " +
   "hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring " +
   "group-hover/project-row:opacity-100 group-has-[[data-state=open]]/project-row:opacity-100 group-has-[:focus-visible]/project-row:opacity-100";
+
+/** A 12px header glyph in a 16px box, so labels line up with the folder
+ *  avatars beside them. */
+function HeaderGlyph({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "mr-1.5 flex size-4 shrink-0 items-center justify-center [&>svg]:size-3",
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** A section header's fold cue, trailing the name like the phone app's:
+ *  always shown while folded (rows are hidden), on hover otherwise. */
+function FoldChevron({ collapsed }: { collapsed: boolean }) {
+  return (
+    <ChevronRight
+      className={cn(
+        "ml-1 !size-3 shrink-0 opacity-60",
+        !collapsed && "hidden rotate-90 group-hover/project-row:block",
+      )}
+    />
+  );
+}
 
 /** A folder's ⋯ menu entries, shared by the Chats list's folder headers and
  *  the Kanban / Threads filter rows. Reveal / Remove are folder actions — the
@@ -93,6 +133,12 @@ function WorkspaceMenuItems({
         <DropdownMenuItem onSelect={() => onRevealWorkspace(dir)}>
           <FolderOpen />
           <span>{t("action.reveal")}</span>
+        </DropdownMenuItem>
+      )}
+      {!isDefault && (
+        <DropdownMenuItem onSelect={() => requestFolderAvatarEditor(dir)}>
+          <Smile />
+          <span>{t("action.changeIcon")}</span>
         </DropdownMenuItem>
       )}
       <DropdownMenuItem
@@ -173,17 +219,11 @@ export function PinnedGroupView({
           }}
           className={cn("cursor-pointer select-none", ROW_ACCENT_CLASS)}
         >
-          {/* Same affordance as a workspace header: folded keeps the chevron
-              visible, expanded swaps the pin glyph for one on hover. */}
-          {collapsed ? (
-            <ChevronRight className="mr-1.5 !size-3" />
-          ) : (
-            <>
-              <Pin className="mr-1.5 !size-3 group-hover/project-row:hidden" />
-              <ChevronDown className="mr-1.5 hidden !size-3 group-hover/project-row:block" />
-            </>
-          )}
+          <HeaderGlyph>
+            <Pin />
+          </HeaderGlyph>
           <span className="truncate">{t("section.pinned")}</span>
+          <FoldChevron collapsed={collapsed} />
         </SidebarGroupLabel>
       </div>
       {!collapsed && (
@@ -309,22 +349,18 @@ export function WorkspaceGroupView({
             handleProps && "touch-none active:cursor-grabbing",
           )}
         >
-          {/* Folded groups always show the chevron (the visible cue that rows
-              are hidden); expanded ones keep their glyph and swap to a chevron
-              on hover, when the toggle affordance matters. */}
-          {collapsed ? (
-            <ChevronRight className="mr-1.5 !size-3" />
+          {/* Folders lead with their avatar (click it to restyle), like the
+              phone app; the Chat section keeps its plain chat glyph. */}
+          {isDefault ? (
+            <HeaderGlyph>
+              <MessageSquare />
+            </HeaderGlyph>
+          ) : missing ? (
+            <HeaderGlyph className="text-destructive">
+              <FolderX />
+            </HeaderGlyph>
           ) : (
-            <>
-              {isDefault ? (
-                <MessageSquare className="mr-1.5 !size-3 group-hover/project-row:hidden" />
-              ) : missing ? (
-                <FolderX className="mr-1.5 !size-3 text-destructive group-hover/project-row:hidden" />
-              ) : (
-                <Folder className="mr-1.5 !size-3 group-hover/project-row:hidden" />
-              )}
-              <ChevronDown className="mr-1.5 hidden !size-3 group-hover/project-row:block" />
-            </>
+            <FolderAvatar dir={group.dir} name={label} editable="click" />
           )}
           <span
             className={cn("truncate", missing && "text-muted-foreground")}
@@ -332,6 +368,7 @@ export function WorkspaceGroupView({
           >
             {label}
           </span>
+          <FoldChevron collapsed={collapsed} />
         </SidebarGroupLabel>
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-2">
           {missing && (
@@ -361,7 +398,12 @@ export function WorkspaceGroupView({
                 <span className="sr-only">{t("action.more")}</span>
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="right" align="start" className="w-52">
+            <DropdownMenuContent
+              side="right"
+              align="start"
+              className="w-52"
+              onCloseAutoFocus={folderAvatarMenuCloseAutoFocus}
+            >
               <WorkspaceMenuItems
                 dir={group.dir}
                 isDefault={!!isDefault}
@@ -559,7 +601,12 @@ export function WorkspaceFilterMenu(
           <span className="sr-only">{t("action.more")}</span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="right" align="start" className="w-52">
+      <DropdownMenuContent
+              side="right"
+              align="start"
+              className="w-52"
+              onCloseAutoFocus={folderAvatarMenuCloseAutoFocus}
+            >
         <WorkspaceMenuItems {...props} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -601,6 +648,7 @@ export function SortableWorkspaceFilterRow({
     >
       <WorkspaceFilterButton
         label={label}
+        icon={<FolderAvatar dir={dir} name={label} editable="anchor" />}
         activity={activity}
         hint={hint}
         active={active}
@@ -614,10 +662,10 @@ export function SortableWorkspaceFilterRow({
 
 /** The folder header that floats under the cursor while dragging (rendered in
  *  dnd-kit's DragOverlay, so it tracks the pointer at 60fps). */
-export function WorkspaceDragGhost({ label }: { label: string }) {
+export function WorkspaceDragGhost({ dir, label }: { dir: string; label: string }) {
   return (
     <div className="flex h-8 cursor-grabbing items-center rounded-md bg-sidebar px-2 text-xs font-medium text-sidebar-accent-foreground shadow-lg ring-1 ring-sidebar-border">
-      <Folder className="mr-1.5 !size-3" />
+      <FolderAvatar dir={dir} name={label} className="mr-1.5" />
       <span className="truncate">{label}</span>
     </div>
   );

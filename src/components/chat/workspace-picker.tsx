@@ -18,6 +18,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { FolderAvatar } from "@/components/sidebar/folder-avatar";
 
 interface Props {
   workspaceDir: string | null;
@@ -128,8 +129,8 @@ export function WorkspacePicker({
         >
           {current === defaultWorkspace && current ? (
             <MessageSquare className="size-3" />
-          ) : current.startsWith("ssh://") || /^[^/:\s]+@?[^/:\s]+:/.test(current) ? (
-            <Server className="size-3" />
+          ) : current ? (
+            <FolderAvatar dir={current} name={shorten(current)} size={14} />
           ) : (
             <Folder className="size-3" />
           )}
@@ -145,10 +146,8 @@ export function WorkspacePicker({
             <SelectItem key={dir} value={dir} className="text-xs">
               {dir === defaultWorkspace ? (
                 <MessageSquare className="size-4" />
-              ) : dir.startsWith("ssh://") || /^[^/:\s]+@?[^/:\s]+:/.test(dir) ? (
-                <Server className="size-4" />
               ) : (
-                <Folder className="size-4" />
+                <FolderAvatar dir={dir} name={shorten(dir)} />
               )}
               <span
                 className="truncate"

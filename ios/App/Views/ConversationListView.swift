@@ -324,7 +324,7 @@ private struct GroupHeader: View {
                             .foregroundStyle(Theme.muted)
                             .frame(width: 22, height: 22)
                     } else {
-                        FolderAvatar(name: group.name)
+                        FolderAvatar(name: group.name, isDefault: group.isDefault)
                     }
                     Text(group.name)
                         .font(Theme.row)

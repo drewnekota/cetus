@@ -1,6 +1,6 @@
 "use client";
 import { memo, useEffect, useMemo, type ReactNode } from "react";
-import { Folder, MessageSquare } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
@@ -17,6 +17,7 @@ import { CoordinatorInstructionsButton } from "./coordinator-instructions";
 import { SessionsPanel } from "./sessions-panel";
 import { SessionTimelineProvider, type SessionTimeline } from "./session-timeline";
 import { threadsOf, useCoordinatorStore } from "@/lib/coordinator";
+import { FolderAvatar } from "@/components/sidebar/folder-avatar";
 
 interface Props {
   /** The folder this view shows. */
@@ -120,7 +121,6 @@ export const ThreadsView = memo(function ThreadsView({
   }, [selectedId, onSelect]);
 
   const isDefault = dir === defaultWorkspace;
-  const FolderIcon = isDefault ? MessageSquare : Folder;
 
   return (
     <div className="flex min-h-0 flex-1 flex-row">
@@ -140,7 +140,11 @@ export const ThreadsView = memo(function ThreadsView({
           data-drag-region
           className="flex h-10 shrink-0 items-center gap-2.5 border-b border-border/70 px-6"
         >
-          <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          {isDefault ? (
+            <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <FolderAvatar dir={dir} name={workspaceName(dir)} size={18} />
+          )}
           <span className="min-w-0 truncate text-sm font-medium text-foreground">
             {isDefault ? t("card.defaultWorkspace") : workspaceName(dir)}
           </span>

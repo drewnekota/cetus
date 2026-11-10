@@ -1,6 +1,6 @@
 "use client";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArchiveRestore, Check, Clock, Folder, Images, MessageCircleQuestion, MessageSquare, RotateCcw } from "lucide-react";
+import { Archive, ArchiveRestore, Check, Clock, Images, MessageCircleQuestion, MessageSquare, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/lib/format";
@@ -17,6 +17,7 @@ import { ArtifactsDialog } from "@/components/board/artifacts-dialog";
 import { useTranslation } from "@/lib/i18n";
 import { workspaceName } from "@/lib/paths";
 import type { Conversation } from "@/lib/types";
+import { FolderAvatar } from "@/components/sidebar/folder-avatar";
 
 interface Props {
   conversations: Conversation[];
@@ -310,7 +311,11 @@ const Card = memo(function Card({
           {conversation.workspaceDir === defaultWorkspace ? (
             <MessageSquare className="size-3 shrink-0" />
           ) : (
-            <Folder className="size-3 shrink-0" />
+            <FolderAvatar
+              dir={conversation.workspaceDir}
+              name={workspaceName(conversation.workspaceDir)}
+              size={14}
+            />
           )}
           <span className="truncate">
             {conversation.workspaceDir === defaultWorkspace

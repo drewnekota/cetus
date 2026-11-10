@@ -20,6 +20,7 @@ struct ChatGroup: Identifiable {
     let name: String
     let items: [Conversation]
     var isPinned = false
+    var isDefault = false
 }
 
 /// A folder suggestion from the Mac.
@@ -219,6 +220,10 @@ final class RemoteStore {
         )
     }
 
+    func isDefaultFolder(_ dir: String) -> Bool {
+        dir.isEmpty || dir == sidebar.defaultDir
+    }
+
     func folderName(_ dir: String) -> String {
         dir.isEmpty || dir == sidebar.defaultDir ? "Chat" : dir.folderName
     }
@@ -241,7 +246,7 @@ final class RemoteStore {
             ensure(c.workspaceDir)
             if !c.pinned { map[c.workspaceDir]?.append(c) }
         }
-        var out = order.map { ChatGroup(dir: $0, name: folderName($0), items: map[$0] ?? []) }
+        var out = order.map { ChatGroup(dir: $0, name: folderName($0), items: map[$0] ?? [], isDefault: isDefaultFolder($0)) }
         let pinned = listed.filter { $0.pinned && !sidebar.hidden.contains($0.workspaceDir) }
         if !pinned.isEmpty {
             out.insert(ChatGroup(dir: "\u{0}pinned", name: "Pinned", items: pinned, isPinned: true), at: 0)
