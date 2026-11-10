@@ -1,10 +1,11 @@
 // Records the README animations from the coded product scenes in index.html,
 // so they follow the sample UI instead of going stale like screen recordings.
 //
-//   node scripts/record-readme.mjs [demo|quick|automation ...]
+//   node scripts/record-readme.mjs [demo|quick|automation|stills ...]
 //
 // Needs Google Chrome, ffmpeg and gifsicle; Playwright comes from the repo root.
-// Writes docs/cetus-demo.gif, docs/quick-launcher.gif and docs/automation.gif.
+// Writes docs/cetus-demo.gif, docs/quick-launcher.gif and docs/automation.gif;
+// `stills` writes the two static README screenshots.
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
@@ -55,7 +56,7 @@ const browser = await chromium.launch({ channel: 'chrome' });
 
 async function record(name, output, play) {
   const frames = mkdtempSync(join(tmpdir(), `cetus-${name}-`));
-  const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: SCALE, colorScheme: 'dark' });
+  const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: output ? SCALE : 2, colorScheme: 'dark' });
   await page.goto(origin);
   await page.addStyleTag({ content: stageCss });
   await page.evaluate(svg => {
@@ -122,8 +123,10 @@ async function record(name, output, play) {
     }
   }
 
-  await play({ page, run, hold, moveTo, click, type, hide, stream });
+  const still = file => page.screenshot({ path: join(docs, file) });
+  await play({ page, run, hold, moveTo, click, type, hide, stream, still });
   await page.close();
+  if (!output) { rmSync(frames, { recursive: true }); return; }
 
   const gif = join(docs, output), palette = join(frames, 'palette.png'), raw = join(frames, 'raw.gif');
   const input = ['-y', '-loglevel', 'error', '-framerate', String(1000 / FRAME_MS), '-i', join(frames, '%05d.png')];
@@ -231,6 +234,21 @@ const scenes = {
     await hold(2200);
   }],
 };
+
+// Static screenshots: the runtime picker and the Threads view.
+scenes.stills = [null, async ({ page, run, still }) => {
+  await run(() => {
+    document.getElementById('rec-cursor').hidden = true;
+    document.querySelector('[data-demo-view="home"]').click();
+    document.getElementById('demo-runtime-toggle').click();
+    document.activeElement?.blur();
+  });
+  await page.waitForTimeout(300);
+  await still('screenshot-runtime-picker.png');
+  await run(() => document.querySelector('#demo-mode-menu [data-demo-view="threads"]').click());
+  await page.waitForTimeout(300);
+  await still('screenshot-threads.png');
+}];
 
 const wanted = process.argv.slice(2);
 for (const [name, [output, play]] of Object.entries(scenes)) {

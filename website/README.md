@@ -29,7 +29,7 @@ Image placeholders have been replaced by coded UI; the previous `media.json` is 
 
 Shortcut copy distinguishes holding both Command keys and holding both Option keys for the screenshot launcher. These actions can be assigned in app Settings; the screenshot launcher is not enabled by default in the current source.
 
-The repository README's animations are recorded from these scenes: `node scripts/record-readme.mjs` drives the hero preview through three short walkthroughs and writes `docs/cetus-demo.gif`, `docs/quick-launcher.gif`, and `docs/automation.gif`. Re-run it after changing the scenes. It needs Google Chrome, ffmpeg, and gifsicle.
+The repository README's animations are recorded from these scenes: `node scripts/record-readme.mjs` drives the hero preview through three short walkthroughs and writes `docs/cetus-demo.gif`, `docs/quick-launcher.gif`, and `docs/automation.gif`, plus the two static screenshots (`docs/screenshot-runtime-picker.png`, `docs/screenshot-threads.png`). Re-run it after changing the scenes. It needs Google Chrome, ffmpeg, and gifsicle.
 
 Run `npm run build` after JavaScript changes and `npm run check` for syntax, references, and local resources.
 
