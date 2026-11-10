@@ -141,9 +141,10 @@ function QueuedMessageRow({
   );
 }
 
-/** Live "the agent is working" line: three pulsing dots plus the elapsed
+/** Live "the agent is working" line: a braille spinner plus the elapsed
  *  time. The only progress cue while a turn runs — the steps themselves stay
- *  folded behind the activity summary above it. */
+ *  folded behind the activity summary above it. The spinner sits in the same
+ *  size-3.5 / gap-2.5 slot as the activity row's wrench so the text lines up. */
 export function WorkingIndicator({ startedAt }: { startedAt: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -153,16 +154,11 @@ export function WorkingIndicator({ startedAt }: { startedAt: number }) {
   const s = Math.max(0, Math.floor((now - startedAt) / 1000));
   const elapsed = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
   return (
-    <div role="status" className="flex items-center gap-3 py-0.5 text-sm text-muted-foreground">
-      <span aria-hidden className="flex items-center gap-[3px]">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="size-[5px] rounded-full bg-current animate-working-dot motion-reduce:animate-none"
-            style={{ animationDelay: `${i * 0.2}s` }}
-          />
-        ))}
-      </span>
+    <div role="status" className="flex items-center gap-2.5 py-0.5 text-sm text-muted-foreground">
+      <span
+        aria-hidden
+        className="flex size-3.5 shrink-0 items-center justify-center font-mono text-[15px] leading-none animate-working-braille"
+      />
       <span className="tabular-nums">{elapsed}</span>
     </div>
   );

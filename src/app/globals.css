@@ -158,10 +158,7 @@
   --chart-5: color-mix(in oklab, var(--ink) 40%, var(--surface));
 
   --sidebar: color-mix(in oklab, var(--ink) calc(2% * var(--k)), var(--surface));
-  /* Resting sidebar text sits a step under full ink; hover + selected rows
-     switch to --sidebar-accent-foreground (full ink), so the active row is
-     the only one that reads bright. */
-  --sidebar-foreground: color-mix(in oklab, var(--ink) 74%, var(--surface));
+  --sidebar-foreground: var(--ink);
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--on-accent);
   /* Hover + selected row: a faint neutral lift off the surface (subtle,
@@ -219,7 +216,7 @@
   --chart-5: color-mix(in oklab, var(--ink) 45%, var(--surface));
 
   --sidebar: color-mix(in oklab, var(--ink) calc(4% * var(--k)), var(--surface));
-  --sidebar-foreground: color-mix(in oklab, var(--ink) 70%, var(--surface));
+  --sidebar-foreground: var(--ink);
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--on-accent);
   /* Hover + selected row: a light neutral lift clearly above the dark surface. */
@@ -493,15 +490,30 @@ html.no-perma-layers [data-message-hover-target] > [data-message-actions] {
   animation: spinner-dash 0.9s linear infinite;
 }
 
-/* Working loader: three dots brightening in turn (Paseo-style), opacity
-   only so it stays on the compositor. */
-@keyframes working-dot {
-  0%, 60%, 100% { opacity: 0.25; }
-  30% { opacity: 1; }
+/* Working loader: a terminal-style braille spinner. Frames are swapped via a
+   discretely animated `content` on ::before, so no React re-render per tick;
+   steps(1) holds each frame for its whole 80ms slot. */
+@keyframes working-braille {
+  0% { content: "⠋"; }
+  10% { content: "⠙"; }
+  20% { content: "⠹"; }
+  30% { content: "⠸"; }
+  40% { content: "⠼"; }
+  50% { content: "⠴"; }
+  60% { content: "⠦"; }
+  70% { content: "⠧"; }
+  80% { content: "⠇"; }
+  90%, 100% { content: "⠏"; }
 }
 
-@utility animate-working-dot {
-  animation: working-dot 1.2s ease-in-out infinite;
+@utility animate-working-braille {
+  &::before {
+    content: "⠋";
+    animation: working-braille 0.8s steps(1, end) infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &::before { animation: none; }
+  }
 }
 
 @utility scrollbar-slim {

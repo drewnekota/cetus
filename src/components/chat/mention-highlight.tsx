@@ -50,9 +50,12 @@ export const MentionHighlight = forwardRef<
             key={i}
             // Horizontal padding is cancelled by a matching negative margin so
             // the span's advance width stays identical to the textarea's text
-            // and the pill keeps lining up under the token. Vertical padding
-            // on an inline span never affects line boxes, so it is free.
-            className="-mx-1 rounded-md bg-primary/35 px-1 py-0.5 [box-decoration-break:clone] dark:bg-primary/45"
+            // and the pill keeps lining up under the token. That padding eats
+            // into the neighbouring space glyph (~4px), so it's split evenly:
+            // 2px inside, ~2px left as a gap to the next word. The ring is
+            // inset so it doesn't widen the pill further. Vertical padding on
+            // an inline span never affects line boxes, so it is free.
+            className="-mx-0.5 rounded-md bg-primary/[0.06] px-0.5 py-0.5 ring-1 ring-inset ring-primary/35 [box-decoration-break:clone] dark:bg-primary/10 dark:ring-primary/45"
           >
             {s.text}
           </span>

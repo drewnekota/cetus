@@ -386,12 +386,15 @@ export const AppSidebar = memo(function AppSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <ModeSelect mode={mode} onChange={onViewChange} />
         {/* Automations is its own page (scheduled prompts), not a layout of
             the conversations: it swaps the main area and leaves the mode —
             and so the list below — alone. New task follows as an action;
-            Threads has none, its feed's composer is where threads start. */}
+            Threads has none, its feed's composer is where threads start.
+            All three share one menu so the rows sit at the same spacing. */}
         <SidebarMenu>
+          <SidebarMenuItem>
+            <ModeSelect mode={mode} onChange={onViewChange} />
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               tooltip={t("nav.automations")}
