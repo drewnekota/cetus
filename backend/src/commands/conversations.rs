@@ -577,6 +577,120 @@ pub async fn workspace_git_branch(workspace_dir: String) -> CmdResult<Option<Str
     )))
 }
 
+/// Where a git workspace's own picture comes from: an icon file checked into
+/// the repo, or failing that its GitHub owner's avatar.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoIcon {
+    path: Option<String>,
+    url: Option<String>,
+}
+
+/// Icon files worth showing as a folder avatar, most specific first. Relative
+/// to the workspace dir, then to the repo root.
+const REPO_ICON_CANDIDATES: &[&str] = &[
+    "icon.png",
+    "icon.svg",
+    "logo.png",
+    "logo.svg",
+    ".github/icon.png",
+    ".github/logo.png",
+    ".github/logo.svg",
+    "public/icon.png",
+    "public/icon.svg",
+    "public/logo.png",
+    "public/logo.svg",
+    "public/favicon.svg",
+    "public/favicon.png",
+    "public/apple-touch-icon.png",
+    "public/favicon.ico",
+    "src/app/icon.png",
+    "src/app/icon.svg",
+    "src/app/favicon.ico",
+    "app/icon.png",
+    "app/icon.svg",
+    "app/favicon.ico",
+    "static/favicon.svg",
+    "static/favicon.png",
+    "static/favicon.ico",
+    "assets/icon.png",
+    "assets/logo.png",
+    "assets/logo.svg",
+    "build/icon.png",
+    "resources/icon.png",
+    "src-tauri/icons/icon.png",
+    "backend/icons/icon.png",
+    "docs/logo.png",
+    "docs/logo.svg",
+    "favicon.svg",
+    "favicon.png",
+    "favicon.ico",
+];
+
+/// Anything bigger is artwork, not an icon; decoding it per sidebar row
+/// would cost more than the avatar is worth.
+const REPO_ICON_MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+fn git_stdout(dir: &Path, args: &[&str]) -> Option<String> {
+    std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// "git@github.com:owner/repo.git" / "https://github.com/owner/repo" → owner.
+fn github_owner(remote_url: &str) -> Option<&str> {
+    let rest = &remote_url[remote_url.find("github.com")? + "github.com".len()..];
+    let owner = rest.trim_start_matches([':', '/']).split('/').next()?;
+    let valid = !owner.is_empty() && owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    valid.then_some(owner)
+}
+
+/// The avatar a git workspace brings with it; null for non-git and remote
+/// workspaces, and for repos with neither an icon file nor a GitHub remote.
+#[host::command]
+pub async fn workspace_repo_icon(workspace_dir: String) -> CmdResult<Option<RepoIcon>> {
+    if cetus_bridge::remote::parse_remote_workspace(&workspace_dir).is_some() {
+        return Ok(None);
+    }
+    let dir = Path::new(&workspace_dir);
+    let Some(root) = git_stdout(dir, &["rev-parse", "--show-toplevel"]) else {
+        return Ok(None);
+    };
+    let root = Path::new(&root);
+    let roots = if root == dir {
+        vec![dir]
+    } else {
+        vec![dir, root]
+    };
+    let file = roots.iter().find_map(|base| {
+        REPO_ICON_CANDIDATES.iter().find_map(|rel| {
+            let path = base.join(rel);
+            let meta = std::fs::metadata(&path).ok()?;
+            (meta.is_file() && meta.len() > 0 && meta.len() <= REPO_ICON_MAX_BYTES)
+                .then(|| path.to_string_lossy().to_string())
+        })
+    });
+    if file.is_some() {
+        return Ok(Some(RepoIcon {
+            path: file,
+            url: None,
+        }));
+    }
+    let url = git_stdout(dir, &["config", "--get", "remote.origin.url"])
+        .as_deref()
+        .and_then(github_owner)
+        .map(|owner| format!("https://github.com/{owner}.png?size=64"));
+    Ok(url.map(|url| RepoIcon {
+        path: None,
+        url: Some(url),
+    }))
+}
+
 #[host::command]
 pub async fn rename_conversation(
     state: State<'_, AppState>,

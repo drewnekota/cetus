@@ -16,11 +16,13 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import {
   autoFolderColor,
+  dropRepoIcon,
   FOLDER_AVATAR_COLORS,
   setFolderAvatarEditing,
   setFolderAvatarStyle,
   useFolderAvatarEditing,
   useFolderAvatarStyle,
+  useRepoIcon,
 } from "@/lib/folder-avatar-prefs";
 
 /** The folder part of a workspace label ("host:repo" → "repo"). */
@@ -39,8 +41,9 @@ interface FolderAvatarProps {
   editable?: "click" | "anchor";
 }
 
-/** Rounded-square folder avatar, like the phone app's: an initial on a color
- *  derived from the name, or the user's own color / emoji. */
+/** Rounded-square folder avatar, like the phone app's: the user's own color /
+ *  emoji, else the repo's icon for a git folder that has one, else an initial
+ *  on a color derived from the name. */
 export function FolderAvatar({
   dir,
   name,
@@ -51,7 +54,19 @@ export function FolderAvatar({
   const style = useFolderAvatarStyle(dir);
   const color = style?.color ?? autoFolderColor(baseName(name));
   const emoji = style?.emoji;
-  const tile = (
+  const repoIcon = useRepoIcon(dir);
+  const tile = repoIcon && !style ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={repoIcon}
+      alt=""
+      aria-hidden={!editable}
+      draggable={false}
+      onError={() => dropRepoIcon(dir)}
+      className={cn("shrink-0 object-cover select-none", className)}
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.26) }}
+    />
+  ) : (
     <span
       aria-hidden={!editable}
       className={cn(
@@ -138,7 +153,10 @@ function EditableTile({
 function FolderAvatarEditor({ dir, name }: { dir: string; name: string }) {
   const { t } = useTranslation("sidebar");
   const style = useFolderAvatarStyle(dir);
-  const color = style?.color ?? autoFolderColor(baseName(name));
+  const repoIcon = useRepoIcon(dir);
+  const autoColor = autoFolderColor(baseName(name));
+  // While the repo icon shows, no swatch is the current one.
+  const color = repoIcon && !style ? undefined : (style?.color ?? autoColor);
   return (
     <div className="flex w-[274px] flex-col">
       <div className="flex items-center gap-2 px-2.5 py-2.5">
@@ -171,8 +189,14 @@ function FolderAvatarEditor({ dir, name }: { dir: string; name: string }) {
       <div className="flex items-center justify-between border-t px-1.5 py-1.5">
         <button
           type="button"
-          disabled={!style?.emoji}
-          onClick={() => setFolderAvatarStyle(dir, { emoji: undefined })}
+          disabled={!style?.emoji && !(repoIcon && !style)}
+          // An explicit color is what keeps the letter over the repo icon.
+          onClick={() =>
+            setFolderAvatarStyle(dir, {
+              emoji: undefined,
+              color: style?.color ?? (repoIcon ? autoColor : undefined),
+            })
+          }
           className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
         >
           {t("avatar.useLetter")}
@@ -183,7 +207,7 @@ function FolderAvatarEditor({ dir, name }: { dir: string; name: string }) {
           onClick={() => setFolderAvatarStyle(dir, null)}
           className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
         >
-          {t("avatar.reset")}
+          {repoIcon ? t("avatar.useRepoIcon") : t("avatar.reset")}
         </button>
       </div>
     </div>

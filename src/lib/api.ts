@@ -271,6 +271,13 @@ export const api = {
   /** Branch checked out in a local workspace; null for non-git/remote dirs. */
   workspaceGitBranch: (workspaceDir: string) =>
     invoke<string | null>("workspace_git_branch", { workspaceDir }),
+  /** A git workspace's own avatar: an icon file in the repo (path), else its
+   *  GitHub owner's avatar (url); null for non-git/remote dirs. */
+  workspaceRepoIcon: (workspaceDir: string) =>
+    invoke<{ path: string | null; url: string | null } | null>(
+      "workspace_repo_icon",
+      { workspaceDir },
+    ),
   /** The CLI's own configured defaults (model / effort / codex model catalog),
    *  read from the vendor config on disk — lets the tuning menu echo what
    *  "Default" resolves to. */

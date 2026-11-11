@@ -288,6 +288,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         commands::set_conversation_backend,
         commands::conversation_worktree,
         commands::workspace_git_branch,
+        commands::workspace_repo_icon,
         commands::set_conversation_cli_model,
         remote::get_remote_settings,
         remote::set_remote_enabled,
