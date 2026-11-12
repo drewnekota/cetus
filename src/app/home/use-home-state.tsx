@@ -57,6 +57,10 @@ import {
 } from "@/lib/recent-workspaces";
 import { listedConversations, useCoordinatorStore } from "@/lib/coordinator";
 import {
+  type FolderAvatarStyle,
+  useFolderAvatarStyles,
+} from "@/lib/folder-avatar-prefs";
+import {
   PersistedAppViewState,
   SIDEBAR_OPEN_KEY,
   WorkspaceDocksByChatState,
@@ -582,6 +586,7 @@ export function useHomeState({
   );
   // The phone app groups chats exactly like this sidebar, so hand the backend
   // the folder order (minus the Pinned pseudo-group) whenever it changes.
+  const folderAvatarStyles = useFolderAvatarStyles();
   const remoteSidebarKey = JSON.stringify([
     defaultWorkspace,
     workspaceGroups.map((g) => g.dir).filter((d) => d !== PINNED_GROUP_DIR),
@@ -596,11 +601,19 @@ export function useHomeState({
       );
       return conversations.filter((c) => !listed.has(c.id)).map((c) => c.id);
     })(),
+    // Colors / emoji picked for folders, so the phone draws the same avatars.
+    folderAvatarStyles,
   ]);
   useEffect(() => {
-    const [defaultDir, dirs, hidden, collapsed, hiddenChats] = JSON.parse(
-      remoteSidebarKey,
-    ) as [string, string[], string[], string[], string[]];
+    const [defaultDir, dirs, hidden, collapsed, hiddenChats, avatars] =
+      JSON.parse(remoteSidebarKey) as [
+        string,
+        string[],
+        string[],
+        string[],
+        string[],
+        Record<string, FolderAvatarStyle>,
+      ];
     if (!defaultDir) return;
     invoke("set_remote_sidebar", {
       sidebar: {
@@ -609,6 +622,7 @@ export function useHomeState({
         hidden,
         collapsed,
         hiddenChats,
+        avatars,
       },
     }).catch(() => {});
   }, [remoteSidebarKey]);

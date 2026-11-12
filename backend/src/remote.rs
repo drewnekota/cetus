@@ -335,6 +335,101 @@ fn load_sidebar(state: &AppState) -> Value {
         .unwrap_or_else(|| json!({ "defaultWorkspace": "", "dirs": [], "hidden": [] }))
 }
 
+/// What the phone needs to know about a folder's repo icon before fetching
+/// it: `v` changes whenever the picture would (other file, edited file, other
+/// GitHub owner), so the phone only downloads what its cache lacks.
+#[derive(Clone)]
+struct PhoneIcon {
+    v: String,
+    path: Option<String>,
+    url: Option<String>,
+}
+
+/// Looking an icon up runs git twice per folder and the phone asks on every
+/// list refresh, so answers are kept for a little while.
+const PHONE_ICON_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+/// 22pt at 3x, with a little headroom.
+const PHONE_ICON_PX: u32 = 72;
+
+type PhoneIconCache = Mutex<HashMap<String, (std::time::Instant, Option<PhoneIcon>)>>;
+
+fn phone_icon_cache() -> &'static PhoneIconCache {
+    static CACHE: std::sync::OnceLock<PhoneIconCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Blocking: runs git.
+fn phone_icon(dir: &str) -> Option<PhoneIcon> {
+    if let Some((at, icon)) = phone_icon_cache().lock().unwrap().get(dir) {
+        if at.elapsed() < PHONE_ICON_TTL {
+            return icon.clone();
+        }
+    }
+    let icon = commands::repo_icon(dir).and_then(|icon| {
+        if let Some(path) = icon.path {
+            let meta = std::fs::metadata(&path).ok()?;
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_millis());
+            Some(PhoneIcon {
+                v: format!("{path}:{mtime}:{}", meta.len()),
+                path: Some(path),
+                url: None,
+            })
+        } else {
+            icon.url.map(|url| PhoneIcon {
+                v: url.clone(),
+                path: None,
+                url: Some(url),
+            })
+        }
+    });
+    phone_icon_cache()
+        .lock()
+        .unwrap()
+        .insert(dir.to_string(), (std::time::Instant::now(), icon.clone()));
+    icon
+}
+
+/// The repo's icon file as a small PNG: the phone's uplink from the Mac is
+/// slow, and it can't decode SVG at all. Blocking: runs sips.
+fn phone_icon_png(path: &str) -> Option<Vec<u8>> {
+    let out = std::env::temp_dir().join(format!("cetus-icon-{}.png", uuid::Uuid::new_v4()));
+    let px = PHONE_ICON_PX.to_string();
+    let done = Command::new("/usr/bin/sips")
+        .args(["-s", "format", "png", "-Z", &px, path, "--out"])
+        .arg(&out)
+        .output()
+        .is_ok_and(|o| o.status.success());
+    let bytes = done.then(|| std::fs::read(&out).ok()).flatten();
+    let _ = std::fs::remove_file(&out);
+    bytes.filter(|b| !b.is_empty())
+}
+
+/// Folders of the sidebar that show a repo icon on the desktop: listed, not
+/// the default "Chat" one, and without a color / emoji of the user's own.
+fn phone_icon_dirs(sidebar: &Value) -> Vec<String> {
+    let default = sidebar["defaultWorkspace"].as_str().unwrap_or_default();
+    let hidden: Vec<&str> = sidebar["hidden"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    sidebar["dirs"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .filter(|d| {
+                    *d != default && !hidden.contains(d) && sidebar["avatars"].get(*d).is_none()
+                })
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Forget a paired phone; its live session (if any) is dropped at once.
 #[host::command]
 pub async fn revoke_remote_device(
@@ -790,6 +885,20 @@ fn trim_tool_output(message: &mut Value) {
     }
 }
 
+/// A GitHub owner avatar (already 64px), or None when GitHub is out of reach.
+async fn fetch_avatar(url: &str) -> Option<Vec<u8>> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .ok()?;
+    let res = client.get(url).send().await.ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let bytes = res.bytes().await.ok()?;
+    (!bytes.is_empty() && bytes.len() <= 512 * 1024).then(|| bytes.to_vec())
+}
+
 fn param_str(params: &Value, key: &str) -> Option<String> {
     params.get(key).and_then(Value::as_str).map(str::to_string)
 }
@@ -916,6 +1025,49 @@ pub(crate) async fn rpc(web: &WebState, method: &str, params: Value) -> Result<V
             Ok(Value::Null)
         }
         "workspaces.list" => Ok(load_sidebar(&app.state::<AppState>())),
+        // dir → { v, url? } for every folder that has a repo icon.
+        "workspaces.icons" => {
+            let dirs = phone_icon_dirs(&load_sidebar(&app.state::<AppState>()));
+            let icons = tokio::task::spawn_blocking(move || {
+                dirs.into_iter()
+                    .filter_map(|dir| {
+                        let icon = phone_icon(&dir)?;
+                        Some((dir, json!({ "v": icon.v, "url": icon.url })))
+                    })
+                    .collect::<serde_json::Map<String, Value>>()
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(Value::Object(icons))
+        }
+        // One folder's icon as { v, data: base64 }. A GitHub avatar is fetched
+        // here (the Mac is the one more likely to reach GitHub); when that
+        // fails the phone still has the url to try itself.
+        "workspaces.icon" => {
+            let dir = require_str(&params, "dir")?;
+            let lookup = dir.clone();
+            let Some(icon) = tokio::task::spawn_blocking(move || phone_icon(&lookup))
+                .await
+                .map_err(|e| e.to_string())?
+            else {
+                return Ok(Value::Null);
+            };
+            let bytes = if let Some(path) = icon.path.clone() {
+                tokio::task::spawn_blocking(move || phone_icon_png(&path))
+                    .await
+                    .map_err(|e| e.to_string())?
+            } else if let Some(url) = &icon.url {
+                fetch_avatar(url).await
+            } else {
+                None
+            };
+            use base64::Engine as _;
+            Ok(json!({
+                "v": icon.v,
+                "url": icon.url,
+                "data": bytes.map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
+            }))
+        }
         "workspaces.add" => {
             let dir = expand_home(&require_str(&params, "dir")?);
             if !std::path::Path::new(&dir).is_dir() {
@@ -1116,6 +1268,31 @@ fn search_dirs(query: &str, known: &[String]) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phone_icon_dirs_skip_default_hidden_and_styled() {
+        let sidebar = json!({
+            "defaultWorkspace": "/chat",
+            "dirs": ["/chat", "/a", "/b", "/c"],
+            "hidden": ["/b"],
+            "avatars": { "/c": { "emoji": "🦊" } },
+        });
+        assert_eq!(phone_icon_dirs(&sidebar), vec!["/a".to_string()]);
+    }
+
+    #[test]
+    fn phone_icon_png_rasterizes_svg() {
+        let svg =
+            std::env::temp_dir().join(format!("cetus-icon-test-{}.svg", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &svg,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="red"/></svg>"#,
+        )
+        .unwrap();
+        let png = phone_icon_png(&svg.to_string_lossy());
+        let _ = std::fs::remove_file(&svg);
+        assert_eq!(&png.unwrap()[..4], b"\x89PNG");
+    }
 
     #[test]
     fn home_paths_round_trip() {

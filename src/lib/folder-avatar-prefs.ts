@@ -62,6 +62,12 @@ export function useFolderAvatarStyle(dir: string): FolderAvatarStyle | undefined
   return useStore((s) => s.styles[dir]);
 }
 
+/** Every folder's override; the phone app is sent these to draw the same. */
+export function useFolderAvatarStyles(): Record<string, FolderAvatarStyle> {
+  useEffect(init, []);
+  return useStore((s) => s.styles);
+}
+
 export function setFolderAvatarStyle(dir: string, patch: FolderAvatarStyle | null) {
   const styles = { ...useStore.getState().styles };
   const next = patch ? { ...styles[dir], ...patch } : {};

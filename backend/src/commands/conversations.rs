@@ -582,8 +582,8 @@ pub async fn workspace_git_branch(workspace_dir: String) -> CmdResult<Option<Str
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoIcon {
-    path: Option<String>,
-    url: Option<String>,
+    pub(crate) path: Option<String>,
+    pub(crate) url: Option<String>,
 }
 
 /// Icon files worth showing as a folder avatar, most specific first. Relative
@@ -654,13 +654,16 @@ fn github_owner(remote_url: &str) -> Option<&str> {
 /// workspaces, and for repos with neither an icon file nor a GitHub remote.
 #[host::command]
 pub async fn workspace_repo_icon(workspace_dir: String) -> CmdResult<Option<RepoIcon>> {
-    if cetus_bridge::remote::parse_remote_workspace(&workspace_dir).is_some() {
-        return Ok(None);
+    Ok(repo_icon(&workspace_dir))
+}
+
+/// Blocking (it runs git); the phone's RPC calls it off the async runtime.
+pub(crate) fn repo_icon(workspace_dir: &str) -> Option<RepoIcon> {
+    if cetus_bridge::remote::parse_remote_workspace(workspace_dir).is_some() {
+        return None;
     }
-    let dir = Path::new(&workspace_dir);
-    let Some(root) = git_stdout(dir, &["rev-parse", "--show-toplevel"]) else {
-        return Ok(None);
-    };
+    let dir = Path::new(workspace_dir);
+    let root = git_stdout(dir, &["rev-parse", "--show-toplevel"])?;
     let root = Path::new(&root);
     let roots = if root == dir {
         vec![dir]
@@ -676,19 +679,19 @@ pub async fn workspace_repo_icon(workspace_dir: String) -> CmdResult<Option<Repo
         })
     });
     if file.is_some() {
-        return Ok(Some(RepoIcon {
+        return Some(RepoIcon {
             path: file,
             url: None,
-        }));
+        });
     }
     let url = git_stdout(dir, &["config", "--get", "remote.origin.url"])
         .as_deref()
         .and_then(github_owner)
         .map(|owner| format!("https://github.com/{owner}.png?size=64"));
-    Ok(url.map(|url| RepoIcon {
+    url.map(|url| RepoIcon {
         path: None,
         url: Some(url),
-    }))
+    })
 }
 
 #[host::command]

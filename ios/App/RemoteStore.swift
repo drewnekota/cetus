@@ -1,4 +1,5 @@
 import CetusRemoteKit
+import CryptoKit
 import Observation
 import SwiftUI
 import UIKit
@@ -11,6 +12,21 @@ struct SidebarLayout {
     var collapsed: Set<String> = []
     /// Chats the Mac's sidebar leaves out (Cetus coordinator sessions).
     var hiddenChats: Set<String> = []
+    /// Colors / emoji the user picked for folders on the Mac, by dir.
+    var avatars: [String: FolderStyle] = [:]
+}
+
+/// A folder avatar the user chose on the Mac: a palette color, an emoji
+/// instead of the initial, or both.
+struct FolderStyle: Equatable {
+    var color: UInt32?
+    var emoji: String?
+
+    init?(_ j: JSON) {
+        if let hex = j["color"].string, hex.hasPrefix("#") { color = UInt32(hex.dropFirst(), radix: 16) }
+        emoji = j["emoji"].string.flatMap { $0.isEmpty ? nil : $0 }
+        if color == nil && emoji == nil { return nil }
+    }
 }
 
 /// One folder section of the chat list (or the global Pinned section).
@@ -54,6 +70,11 @@ final class RemoteStore {
     private(set) var conversations: [Conversation] = []
     private(set) var running: Set<String> = []
     private(set) var sidebar = SidebarLayout()
+    /// Repo icons of git folders (an icon file from the repo, or its GitHub
+    /// owner's avatar), by dir. Kept on disk so they show before the Mac answers.
+    private(set) var folderIcons: [String: UIImage] = [:]
+    private var iconVersions: [String: String] = [:]
+    private var iconTask: Task<Void, Never>?
     var showArchived = false {
         didSet { Task { await refreshList() } }
     }
@@ -128,12 +149,14 @@ final class RemoteStore {
 
     func reconnect() {
         disconnect()
+        loadCachedIcons()
         guard let host = selectedHost else { state = .idle; return }
         state = .connecting
         retryTask = Task { await connect(host) }
     }
 
     private func disconnect() {
+        iconTask?.cancel()
         retryTask?.cancel()
         eventTask?.cancel()
         let old = connection
@@ -207,6 +230,7 @@ final class RemoteStore {
     private func refreshSidebar() async {
         guard let j = try? await request("workspaces.list") else { return }
         applySidebar(j)
+        refreshIcons()
     }
 
     private func applySidebar(_ j: JSON) {
@@ -216,8 +240,62 @@ final class RemoteStore {
             dirs: strings("dirs"),
             hidden: Set(strings("hidden")),
             collapsed: Set(strings("collapsed")),
-            hiddenChats: Set(strings("hiddenChats"))
+            hiddenChats: Set(strings("hiddenChats")),
+            avatars: (j["avatars"].object ?? [:]).compactMapValues(FolderStyle.init)
         )
+    }
+
+    // MARK: Folder icons
+
+    private var iconsKey: String { "folderIcons.\(selectedHostId ?? "")" }
+
+    private func iconFile(_ dir: String) -> URL {
+        let name = SHA256.hash(data: Data("\(selectedHostId ?? "")\u{0}\(dir)".utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let folder = URL.cachesDirectory.appending(path: "folder-icons", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appending(path: name)
+    }
+
+    private func loadCachedIcons() {
+        iconVersions = UserDefaults.standard.dictionary(forKey: iconsKey) as? [String: String] ?? [:]
+        folderIcons = [:]
+        for dir in iconVersions.keys {
+            if let image = UIImage(contentsOfFile: iconFile(dir).path) { folderIcons[dir] = image }
+        }
+    }
+
+    /// Ask the Mac which folders have a repo icon and fetch the ones the
+    /// cache lacks. A Mac too old to know the call just leaves the initials.
+    private func refreshIcons() {
+        iconTask?.cancel()
+        iconTask = Task {
+            guard let listing = try? await request("workspaces.icons").object, !Task.isCancelled else { return }
+            for dir in iconVersions.keys where listing[dir] == nil {
+                iconVersions[dir] = nil
+                folderIcons[dir] = nil
+                try? FileManager.default.removeItem(at: iconFile(dir))
+            }
+            for (dir, info) in listing {
+                guard let v = info["v"].string else { continue }
+                if iconVersions[dir] == v, folderIcons[dir] != nil { continue }
+                guard let data = await fetchIcon(dir, fallback: info["url"].string), !Task.isCancelled,
+                      let image = UIImage(data: data) else { continue }
+                try? data.write(to: iconFile(dir), options: .atomic)
+                folderIcons[dir] = image
+                iconVersions[dir] = v
+            }
+            guard !Task.isCancelled else { return }
+            UserDefaults.standard.set(iconVersions, forKey: iconsKey)
+        }
+    }
+
+    private func fetchIcon(_ dir: String, fallback: String?) async -> Data? {
+        let j = try? await request("workspaces.icon", ["dir": .string(dir)])
+        if let b64 = j?["data"].string, let data = Data(base64Encoded: b64) { return data }
+        // The Mac couldn't reach GitHub; maybe the phone can.
+        guard let url = (j?["url"].string ?? fallback).flatMap(URL.init(string:)) else { return nil }
+        return try? await URLSession.shared.data(from: url).0
     }
 
     func isDefaultFolder(_ dir: String) -> Bool {

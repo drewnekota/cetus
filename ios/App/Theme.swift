@@ -39,13 +39,17 @@ extension UIColor {
     }
 }
 
-/// Rounded-square initial for a folder, its hue derived from the name so a
-/// folder keeps its color everywhere. The default "Chat" workspace isn't a
-/// folder to the user, so it gets a plain chat glyph instead (as on the Mac).
+/// Rounded-square folder avatar, the same one the Mac draws: the color /
+/// emoji picked there, else the repo's icon for a git folder that has one,
+/// else an initial on a hue derived from the name. The default "Chat"
+/// workspace isn't a folder to the user, so it gets a plain chat glyph.
 struct FolderAvatar: View {
+    let dir: String
     let name: String
     var size: CGFloat = 22
     var isDefault = false
+
+    @Environment(RemoteStore.self) private var store
 
     private static let palette: [UInt32] = [0xB0577F, 0x4F8A8B, 0x7C6BD6, 0xC27C3E, 0x5A7FC2, 0x6E9A4F, 0xA05BB0, 0x8A7560]
 
@@ -55,20 +59,31 @@ struct FolderAvatar: View {
                 .font(.system(size: size * 0.6, weight: .medium))
                 .foregroundStyle(Theme.muted)
                 .frame(width: size, height: size)
+        } else if let style = store.sidebar.avatars[dir] {
+            tile(style)
+        } else if let icon = store.folderIcons[dir] {
+            Image(uiImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
         } else {
-            tile
+            tile(nil)
         }
     }
 
-    private var tile: some View {
+    private func tile(_ style: FolderStyle?) -> some View {
         let initial = name.first.map { String($0).uppercased() } ?? "·"
         let hash = name.unicodeScalars.reduce(UInt32(5381)) { ($0 &<< 5) &+ $0 &+ $1.value }
-        let color = Color(uiColor: UIColor(hex: Self.palette[Int(hash % UInt32(Self.palette.count))]))
-        return Text(initial)
-            .font(.system(size: size * 0.5, weight: .semibold))
+        let color = Color(uiColor: UIColor(hex: style?.color ?? Self.palette[Int(hash % UInt32(Self.palette.count))]))
+        let emoji = style?.emoji
+        return Text(emoji ?? initial)
+            .font(.system(size: size * (emoji == nil ? 0.5 : 0.62), weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(color, in: RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
+            // An emoji brings its own colors; a soft tint keeps the shape.
+            .background(color.opacity(emoji == nil ? 1 : 0.22), in: RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
     }
 }
 
