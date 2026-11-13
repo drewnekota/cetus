@@ -236,6 +236,10 @@ export const zh = {
   "notifications.behavior": "行为",
   "notifications.mute.label": "Cetus 处于前台时静音",
   "notifications.mute.description": "仅在窗口处于后台时通知。",
+  "notifications.sound.label": "提示音",
+  "notifications.sound.description": "随每条通知播放。选择一项即可试听。",
+  "notifications.sound.default": "系统默认",
+  "notifications.sound.none": "无",
   "notifications.event.task_finished.label": "任务完成",
   "notifications.event.task_finished.description":
     "一次智能体运行已结束——可能是对话回复、看板任务或定时任务（无论成功或出错）。",

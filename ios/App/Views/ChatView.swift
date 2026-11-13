@@ -139,6 +139,25 @@ private struct ChatContent: View {
                         } label: {
                             RuntimeChip(backend: model.conversation?.backend ?? "pi")
                         }
+                        if let c = model.conversation, let tuning = store.tunings[c.backend], !tuning.isEmpty,
+                           let summary = tuning.summary(model: c.model, effort: c.effort)
+                        {
+                            TuningMenu(tuning: tuning, model: c.model, effort: c.effort) { choice in
+                                choice.save(c.backend)
+                                Task {
+                                    do {
+                                        try await store.update(c.id, store.tuningParams(choice, backend: c.backend))
+                                    } catch {
+                                        model.error = error.localizedDescription
+                                    }
+                                }
+                            } label: {
+                                TuningChip(text: summary)
+                            }
+                            // A new model restarts the runtime's process, which
+                            // would cut a run short.
+                            .disabled(model.running)
+                        }
                     }
                 }
                 .padding(.horizontal, 12)
@@ -146,6 +165,9 @@ private struct ChatContent: View {
                 .padding(.bottom, 6)
                 .background(Theme.background)
             }
+        }
+        .task(id: "\(model.conversation?.backend ?? "") \(store.state == .connected)") {
+            if let backend = model.conversation?.backend { await store.loadTuning(backend) }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.background, for: .navigationBar)

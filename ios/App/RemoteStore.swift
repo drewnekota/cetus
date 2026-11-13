@@ -39,6 +39,34 @@ struct ChatGroup: Identifiable {
     var isDefault = false
 }
 
+/// The model and effort last picked for a runtime on this phone. New chats
+/// start with it. "" = the runtime's own default.
+struct TuningChoice: Equatable {
+    var model = ""
+    var effort = ""
+
+    static func load(_ backend: String) -> TuningChoice {
+        let d = UserDefaults.standard
+        return TuningChoice(
+            model: d.string(forKey: "tuning.\(backend).model") ?? "",
+            effort: d.string(forKey: "tuning.\(backend).effort") ?? "")
+    }
+
+    func save(_ backend: String) {
+        let d = UserDefaults.standard
+        d.set(model, forKey: "tuning.\(backend).model")
+        d.set(effort, forKey: "tuning.\(backend).effort")
+    }
+
+    /// This choice with anything the catalog doesn't list reset to default,
+    /// for a pick remembered from another Mac or an older catalog.
+    func valid(in tuning: RuntimeTuning) -> TuningChoice {
+        let m = tuning.models.contains { $0.id == model } ? model : ""
+        let e = tuning.efforts(forModel: m).contains { $0.id == effort } ? effort : ""
+        return TuningChoice(model: m, effort: e)
+    }
+}
+
 /// A folder suggestion from the Mac.
 struct DirHit: Identifiable, Hashable {
     var id: String { path }
@@ -70,6 +98,9 @@ final class RemoteStore {
     private(set) var conversations: [Conversation] = []
     private(set) var running: Set<String> = []
     private(set) var sidebar = SidebarLayout()
+    /// Model and effort catalogs by runtime, as the selected Mac reports them.
+    private(set) var tunings: [String: RuntimeTuning] = [:]
+    private var tuningLoads: Set<String> = []
     /// Repo icons of git folders (an icon file from the repo, or its GitHub
     /// owner's avatar), by dir. Kept on disk so they show before the Mac answers.
     private(set) var folderIcons: [String: UIImage] = [:]
@@ -176,6 +207,7 @@ final class RemoteStore {
                 saveHosts()
             }
             connection = c
+            tunings = [:]
             state = .connected
             attempt = 0
             eventTask = Task { [weak self] in
@@ -407,8 +439,34 @@ final class RemoteStore {
         }
     }
 
-    func createConversation(runtime: Runtime, workspaceDir: String?) async throws -> Conversation {
+    /// Fetch a runtime's model and effort catalog. The last answer stays on
+    /// screen while a newer one loads. A Mac too old to know the method leaves
+    /// the catalog missing, and the picker hidden.
+    func loadTuning(_ backend: String) async {
+        guard !tuningLoads.contains(backend) else { return }
+        tuningLoads.insert(backend)
+        defer { tuningLoads.remove(backend) }
+        let host = selectedHostId
+        guard let j = try? await request("runtimes.tuning", ["backend": .string(backend)]),
+              host == selectedHostId else { return }
+        tunings[backend] = RuntimeTuning(j)
+    }
+
+    /// Request fields that set a chat's model and effort. The built-in runtime
+    /// takes a concrete pair, the CLI runtimes take "" for their own default.
+    func tuningParams(_ choice: TuningChoice, backend: String) -> [String: JSON] {
+        guard let tuning = tunings[backend], !tuning.isEmpty else { return [:] }
+        if backend == Runtime.pi.rawValue {
+            guard let model = tuning.model(for: choice.model),
+                  let effort = tuning.effort(for: choice.effort, model: choice.model) else { return [:] }
+            return ["model": ["model": .string(model.id), "reasoning": .string(effort.id)]]
+        }
+        return ["cliModel": .string(choice.model), "cliEffort": .string(choice.effort)]
+    }
+
+    func createConversation(runtime: Runtime, workspaceDir: String?, tuning: TuningChoice = TuningChoice()) async throws -> Conversation {
         var params: [String: JSON] = ["backend": .string(runtime.rawValue)]
+        params.merge(tuningParams(tuning, backend: runtime.rawValue)) { _, new in new }
         if let workspaceDir { params["workspaceDir"] = .string(workspaceDir) }
         let r = try await request("conversations.create", .object(params))
         guard let c = Conversation(r) else { throw RemoteError.server("Couldn't create the chat.") }
@@ -419,7 +477,12 @@ final class RemoteStore {
     func update(_ id: String, _ patch: [String: JSON]) async throws {
         var params = patch
         params["id"] = .string(id)
-        _ = try await request("conversations.update", .object(params))
+        let r = try await request("conversations.update", .object(params))
+        // Show the change at once; the list refresh below reorders if needed.
+        if let c = Conversation(r) {
+            if let i = conversations.firstIndex(where: { $0.id == c.id }) { conversations[i] = c }
+            activeChat?.conversationChanged(c)
+        }
         await refreshList()
     }
 

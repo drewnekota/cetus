@@ -899,6 +899,185 @@ async fn fetch_avatar(url: &str) -> Option<Vec<u8>> {
     (!bytes.is_empty() && bytes.len() <= 512 * 1024).then(|| bytes.to_vec())
 }
 
+/// Models and reasoning efforts the phone's picker offers for one runtime:
+/// `{ models: [{ id, label, efforts? }], efforts: [{ id, label }], model, effort }`.
+/// `model` / `effort` are what runs when a conversation carries no override;
+/// a model's own `efforts` narrows the list for that model. Runtimes without
+/// tuning return empty lists. The static tables mirror the desktop picker
+/// (CLI_MODELS / CLI_EFFORTS in backend-picker.tsx, model-picker.tsx for pi)
+/// and live here so a phone build doesn't go stale when they change.
+async fn phone_tuning(state: &AppState, backend: &str) -> Value {
+    fn options(rows: &[(&str, &str)]) -> Vec<Value> {
+        rows.iter()
+            .map(|(id, label)| json!({ "id": id, "label": label }))
+            .collect()
+    }
+    if backend == "pi" {
+        const LEVELS: [(&str, &str); 7] = [
+            ("off", "Off"),
+            ("minimal", "Minimal"),
+            ("low", "Low"),
+            ("medium", "Medium"),
+            ("high", "High"),
+            ("xhigh", "XHigh"),
+            ("max", "Max"),
+        ];
+        let mut models = vec![json!({
+            "id": "flash",
+            "label": "DeepSeek V4.1 Flash",
+            "efforts": ["off", "low", "high", "max"],
+        })];
+        for provider in crate::custom_models::load(&state.store) {
+            for m in &provider.models {
+                let efforts: Vec<&str> = LEVELS
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .filter(|id| m.reasoning && m.thinking_levels.contains_key(*id))
+                    .collect();
+                models.push(json!({
+                    "id": format!("{}/{}", provider.id, m.id),
+                    "label": if m.name.is_empty() { &m.id } else { &m.name },
+                    "efforts": efforts,
+                }));
+            }
+        }
+        let default = crate::model::ModelChoice::default();
+        return json!({
+            "models": models,
+            "efforts": options(&LEVELS),
+            "model": default.model,
+            "effort": default.reasoning,
+        });
+    }
+    let (fallback, efforts): (&[(&str, &str)], &[(&str, &str)]) = match backend {
+        "claude-code" => (
+            &[
+                ("fable", "Fable"),
+                ("opus", "Opus"),
+                ("sonnet", "Sonnet"),
+                ("haiku", "Haiku"),
+            ],
+            &[
+                ("low", "Low"),
+                ("medium", "Medium"),
+                ("high", "High"),
+                ("xhigh", "XHigh"),
+                ("max", "Max"),
+            ],
+        ),
+        "codex" => (
+            &[
+                ("gpt-5.5", "GPT-5.5"),
+                ("gpt-5.4", "GPT-5.4"),
+                ("gpt-5.4-mini", "GPT-5.4-Mini"),
+                ("gpt-5.3-codex-spark", "GPT-5.3-Codex-Spark"),
+            ],
+            &[
+                ("low", "Low"),
+                ("medium", "Medium"),
+                ("high", "High"),
+                ("xhigh", "XHigh"),
+            ],
+        ),
+        "grok" => (
+            &[("grok-4.5", "Grok 4.5")],
+            &[("low", "Low"), ("medium", "Medium"), ("high", "High")],
+        ),
+        "dsh" => (
+            &[("deepseek-flash", "DeepSeek V4.1 Flash")],
+            &[
+                ("off", "Off"),
+                ("low", "Low"),
+                ("high", "High"),
+                ("max", "Max"),
+            ],
+        ),
+        _ => return json!({ "models": [], "efforts": [], "model": null, "effort": null }),
+    };
+    let defaults = crate::cli_backend::get_cli_defaults(backend.to_string())
+        .await
+        .unwrap_or_default();
+    // dsh always offers the static list, as the desktop does.
+    let models: Vec<(String, String)> = match defaults.models.filter(|_| backend != "dsh") {
+        Some(live) if !live.is_empty() => live.into_iter().map(|m| (m.id, m.label)).collect(),
+        _ => fallback
+            .iter()
+            .map(|(id, label)| (id.to_string(), label.to_string()))
+            .collect(),
+    };
+    // The configured default as a catalog id: exact, else by family (claude
+    // reports "claude-opus-4-8[1m]" while the catalog carries "opus[1m]").
+    let model = defaults.model.as_deref().and_then(|raw| {
+        models
+            .iter()
+            .find(|(id, _)| id == raw)
+            .or_else(|| {
+                models.iter().find(|(id, _)| {
+                    let family = id.split('[').next().unwrap_or_default();
+                    !family.is_empty() && raw.contains(family)
+                })
+            })
+            .map(|(id, _)| id.clone())
+    });
+    let effort = defaults
+        .effort
+        .filter(|raw| efforts.iter().any(|(id, _)| id == raw));
+    json!({
+        "models": models
+            .iter()
+            .map(|(id, label)| json!({ "id": id, "label": label }))
+            .collect::<Vec<_>>(),
+        "efforts": options(efforts),
+        "model": model,
+        "effort": effort,
+    })
+}
+
+/// [`phone_tuning`], remembered for a few minutes per runtime: reading a
+/// CLI's catalog can mean starting the CLI, and the phone asks on every
+/// screen that shows the picker.
+async fn phone_tuning_cached(state: &AppState, backend: &str) -> Value {
+    type Cache = Mutex<HashMap<String, (std::time::Instant, Value)>>;
+    static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
+    const TTL: std::time::Duration = std::time::Duration::from_secs(300);
+    let cache = CACHE.get_or_init(Default::default);
+    // pi's list is a settings read and should follow Settings → Models at once.
+    if backend != "pi" {
+        if let Some((at, value)) = cache.lock().unwrap().get(backend) {
+            if at.elapsed() < TTL {
+                return value.clone();
+            }
+        }
+    }
+    let value = phone_tuning(state, backend).await;
+    cache.lock().unwrap().insert(
+        backend.to_string(),
+        (std::time::Instant::now(), value.clone()),
+    );
+    value
+}
+
+/// Apply the model / effort fields of a phone request to a conversation:
+/// `model: { model, reasoning }` for the built-in runtime, `cliModel` +
+/// `cliEffort` (always sent together; "" = the CLI's default) for the others.
+async fn apply_phone_tuning(app: &AppHandle, id: &str, params: &Value) -> Result<(), String> {
+    if let Some(choice) = params.get("model").filter(|v| !v.is_null()) {
+        let choice =
+            serde_json::from_value(choice.clone()).map_err(|e| format!("bad model: {e}"))?;
+        commands::set_model_choice(app.state(), id.to_string(), choice).await?;
+    }
+    if params.get("cliModel").is_some() || params.get("cliEffort").is_some() {
+        commands::set_conversation_cli_model(
+            app.state(),
+            id.to_string(),
+            param_str(params, "cliModel").unwrap_or_default(),
+            param_str(params, "cliEffort").unwrap_or_default(),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 fn param_str(params: &Value, key: &str) -> Option<String> {
     params.get(key).and_then(Value::as_str).map(str::to_string)
 }
@@ -934,6 +1113,7 @@ pub(crate) async fn rpc(web: &WebState, method: &str, params: Value) -> Result<V
                 commands::set_conversation_backend(app.state(), conversation.id.clone(), backend)
                     .await?;
             }
+            apply_phone_tuning(app, &conversation.id, &params).await?;
             Ok(json!(
                 commands::get_conversation(app.state(), conversation.id).await?
             ))
@@ -977,15 +1157,7 @@ pub(crate) async fn rpc(web: &WebState, method: &str, params: Value) -> Result<V
             if let Some(backend) = param_str(&params, "backend") {
                 commands::set_conversation_backend(app.state(), id.clone(), backend).await?;
             }
-            if params.get("cliModel").is_some() || params.get("cliEffort").is_some() {
-                commands::set_conversation_cli_model(
-                    app.state(),
-                    id.clone(),
-                    param_str(&params, "cliModel").unwrap_or_default(),
-                    param_str(&params, "cliEffort").unwrap_or_default(),
-                )
-                .await?;
-            }
+            apply_phone_tuning(app, &id, &params).await?;
             if let Some(archived) = params.get("archived").and_then(Value::as_bool) {
                 commands::archive_conversation(app.state(), id.clone(), archived).await?;
             }
@@ -1023,6 +1195,10 @@ pub(crate) async fn rpc(web: &WebState, method: &str, params: Value) -> Result<V
                 queue.retain(|item| item.get("requestId") != Some(&request_id));
             }
             Ok(Value::Null)
+        }
+        "runtimes.tuning" => {
+            let backend = require_str(&params, "backend")?;
+            Ok(phone_tuning_cached(&app.state::<AppState>(), &backend).await)
         }
         "workspaces.list" => Ok(load_sidebar(&app.state::<AppState>())),
         // dir → { v, url? } for every folder that has a repo icon.

@@ -659,7 +659,11 @@ export const api = {
     title: string;
     body: string;
     conversationId?: string | null;
+    sound?: string;
   }) => invoke<void>("post_notification", p),
+  /** Play a notification sound once (the Settings picker's preview). */
+  playNotificationSound: (sound: string) =>
+    invoke<void>("play_notification_sound", { sound }),
   quickSubmit: (payload: QuickLaunchPayload) =>
     invoke<void>("quick_submit", { payload }),
   /** Report the shared ⌘+/⌘− zoom so the launcher window grows with it. */

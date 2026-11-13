@@ -82,6 +82,14 @@ for (const f of ["icon.png"]) {
   fs.copyFileSync(path.join(backendDir, "icons", f), path.join(icons, f));
 }
 
+// Notification sounds sit at the top of Resources: macOS resolves a
+// notification's sound by file name there, not in a subfolder.
+const soundsDir = path.join(backendDir, "sounds");
+const sounds = fs
+  .readdirSync(soundsDir)
+  .filter((f) => f.endsWith(".aiff"))
+  .map((f) => path.join(soundsDir, f));
+
 const outDir = path.join(backendDir, "target", "electron");
 const [appPath] = await packager({
   dir: appDir,
@@ -104,6 +112,7 @@ const [appPath] = await packager({
     native,
     bin,
     icons,
+    ...sounds,
     path.join(root, "out"),
     path.join(backendDir, "pi-install"),
   ],

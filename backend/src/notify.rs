@@ -14,17 +14,34 @@ pub fn init(app: &AppHandle) {
 }
 
 /// Post a notification. `conversation_id`, when present, is echoed back on click
-/// so the UI can open (or unarchive) that conversation.
+/// so the UI can open (or unarchive) that conversation. `sound` is the user's
+/// pick from Settings (a Cetus sound id, "none", or absent for the default).
 #[host::command]
 pub async fn post_notification(
     app: AppHandle,
     title: String,
     body: String,
     conversation_id: Option<String>,
+    sound: Option<String>,
 ) -> Result<(), String> {
     app.host_call(
         "notify",
-        serde_json::json!({ "title": title, "body": body, "conversationId": conversation_id }),
+        serde_json::json!({
+            "title": title,
+            "body": body,
+            "conversationId": conversation_id,
+            "sound": sound,
+        }),
+    );
+    Ok(())
+}
+
+/// Play a notification sound once, for the picker in Settings.
+#[host::command]
+pub async fn play_notification_sound(app: AppHandle, sound: String) -> Result<(), String> {
+    app.host_call(
+        "play_notification_sound",
+        serde_json::json!({ "sound": sound }),
     );
     Ok(())
 }

@@ -26,7 +26,7 @@ import {
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { Readable } from "node:stream";
 import { APP_WINDOWS } from "./windows";
 import { readWebKitStorage, type StorageItems } from "./webkit-storage";
@@ -155,6 +155,15 @@ const childViews = new Map<string, { view: WebContentsView; parent: string }>();
 const labelByContents = new Map<number, string>();
 let quitting = false;
 const liveNotifications = new Set<Notification>();
+
+/** File name of a bundled Cetus notification sound, or null for the system
+ *  default / silence / anything unknown. Only packaged builds carry the files
+ *  in the bundle, so a dev build posts with the default sound. */
+function notificationSoundFile(sound: unknown): string | null {
+  return typeof sound === "string" && /^(drop|sonar|chime|bloom|tap)$/.test(sound)
+    ? `cetus-${sound}.aiff`
+    : null;
+}
 
 function displayInfo(d: Display) {
   return {
@@ -623,7 +632,15 @@ function handle(op: string, args: any): unknown {
     case "get_login_item":
       return app.getLoginItemSettings().openAtLogin;
     case "notify": {
-      const n = new Notification({ title: args.title, body: args.body });
+      // "none" posts silently, a Cetus sound plays its bundled file, anything
+      // else leaves the system default.
+      const soundFile = notificationSoundFile(args.sound);
+      const n = new Notification({
+        title: args.title,
+        body: args.body,
+        silent: args.sound === "none",
+        ...(soundFile ? { sound: soundFile } : {}),
+      });
       // Keep a reference until it settles so the click handler stays alive.
       liveNotifications.add(n);
       const done = () => liveNotifications.delete(n);
@@ -633,6 +650,16 @@ function handle(op: string, args: any): unknown {
       });
       n.on("close", done);
       n.show();
+      return;
+    }
+    case "play_notification_sound": {
+      // Settings preview. Played directly, since a posted notification can be
+      // held back by Focus or by the app being frontmost.
+      const soundFile = notificationSoundFile(args.sound);
+      if (soundFile) {
+        const dir = isDev ? path.join(ROOT, "backend", "sounds") : process.resourcesPath;
+        execFile("/usr/bin/afplay", [path.join(dir, soundFile)], () => {});
+      }
       return;
     }
     case "dialog_pick_folder":

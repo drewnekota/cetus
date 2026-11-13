@@ -260,6 +260,11 @@ export const en = {
   "notifications.mute.label": "Mute while Cetus is focused",
   "notifications.mute.description":
     "Only notify when the window is in the background.",
+  "notifications.sound.label": "Sound",
+  "notifications.sound.description":
+    "Played with each notification. Pick one to hear it.",
+  "notifications.sound.default": "System default",
+  "notifications.sound.none": "None",
   // Event catalog (notifications.ts).
   "notifications.event.task_finished.label": "Task finished",
   "notifications.event.task_finished.description":

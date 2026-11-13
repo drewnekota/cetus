@@ -141,6 +141,73 @@ struct RuntimeChip: View {
         .padding(.horizontal, 6)
         .frame(height: 32)
         .contentShape(Rectangle())
+        // The model chip beside it gives way first when the row is tight.
+        .fixedSize()
+    }
+}
+
+/// Model and effort label next to the runtime chip ("Fable · High").
+struct TuningChip: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(text)
+                .font(Theme.label)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Theme.faint)
+        }
+        .foregroundStyle(Theme.muted)
+        .padding(.horizontal, 6)
+        .frame(height: 32)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Pick a model and a reasoning effort from a runtime's catalog: efforts on
+/// top, models below, a check on the one that runs. `model` / `effort` are
+/// the stored pick ("" = the runtime's default, shown checked).
+struct TuningMenu<L: View>: View {
+    let tuning: RuntimeTuning
+    let model: String
+    let effort: String
+    let onPick: (TuningChoice) -> Void
+    @ViewBuilder var label: L
+
+    var body: some View {
+        let offered = tuning.efforts(forModel: model)
+        Menu {
+            if !offered.isEmpty {
+                Section("Effort") {
+                    Picker("Effort", selection: Binding(
+                        get: { tuning.effort(for: effort, model: model)?.id ?? "" },
+                        set: { onPick(TuningChoice(model: model, effort: $0)) }
+                    )) {
+                        ForEach(offered) { Text($0.label).tag($0.id) }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+            }
+            if !tuning.models.isEmpty {
+                Section("Model") {
+                    Picker("Model", selection: Binding(
+                        get: { tuning.model(for: model)?.id ?? model },
+                        set: { onPick(TuningChoice(model: $0, effort: effort)) }
+                    )) {
+                        ForEach(tuning.models) { Text($0.label).tag($0.id) }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+            }
+        } label: {
+            label
+        }
+        .menuOrder(.fixed)
     }
 }
 

@@ -16,6 +16,19 @@ struct NewChatView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var pickingFolder = false
+    /// This runtime's remembered model and effort.
+    @State private var tuningChoice = TuningChoice()
+
+    /// The runtime's catalog once the Mac has answered, nil when it has
+    /// nothing to pick.
+    private var tuning: RuntimeTuning? {
+        store.tunings[runtime].flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    private func pickTuning(_ choice: TuningChoice) {
+        tuningChoice = choice
+        choice.save(runtime)
+    }
 
     private var chosenFolder: String {
         folder ?? initialFolder ?? (store.folders.contains(lastFolder) ? lastFolder : store.sidebar.defaultDir)
@@ -69,6 +82,15 @@ struct NewChatView: View {
                 }
             }
             .buttonStyle(.plain)
+            if let tuning {
+                let choice = tuningChoice.valid(in: tuning)
+                TuningMenu(tuning: tuning, model: choice.model, effort: choice.effort, onPick: pickTuning) {
+                    FieldCard(label: "Model") {
+                        Text(tuning.summary(model: choice.model, effort: choice.effort) ?? "Default").lineLimit(1)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
             if let error {
                 Text(error)
                     .font(.footnote)
@@ -90,11 +112,20 @@ struct NewChatView: View {
                 } label: {
                     RuntimeChip(backend: runtime)
                 }
+                if let tuning, case let choice = tuningChoice.valid(in: tuning),
+                   let summary = tuning.summary(model: choice.model, effort: choice.effort)
+                {
+                    TuningMenu(tuning: tuning, model: choice.model, effort: choice.effort, onPick: pickTuning) {
+                        TuningChip(text: summary)
+                    }
+                }
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
             .background(Theme.background)
         }
+        .onChange(of: runtime, initial: true) { tuningChoice = .load(runtime) }
+        .task(id: "\(runtime) \(store.state == .connected)") { await store.loadTuning(runtime) }
         .navigationTitle("New chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.background, for: .navigationBar)
@@ -111,6 +142,7 @@ struct NewChatView: View {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let photos = images
         let dir = chosenFolder
+        let picked = tuning.map(tuningChoice.valid(in:)) ?? TuningChoice()
         busy = true
         error = nil
         Task {
@@ -118,7 +150,8 @@ struct NewChatView: View {
             do {
                 let c = try await store.createConversation(
                     runtime: Runtime(rawValue: runtime) ?? .pi,
-                    workspaceDir: dir.isEmpty ? nil : dir)
+                    workspaceDir: dir.isEmpty ? nil : dir,
+                    tuning: picked)
                 try await store.send(message, images: photos, to: c.id)
                 lastFolder = dir
                 onCreated(c)

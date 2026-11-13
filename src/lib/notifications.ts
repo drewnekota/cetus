@@ -28,11 +28,35 @@ export type NotifyEvent =
   | "awaiting_input" // the agent is blocked on a dialog (confirm/select/input/editor)
   | "meeting"; // meeting capture started / notes saved (the consent surface)
 
+/** What a notification sounds like: the system default, nothing, or one of
+ *  the sounds bundled with Cetus (ids match electron/main.ts). */
+export type NotifySound =
+  | "default"
+  | "none"
+  | "drop"
+  | "sonar"
+  | "chime"
+  | "bloom"
+  | "tap";
+
+/** Picker order. The bundled sounds are proper names and stay untranslated. */
+export const NOTIFY_SOUNDS: { id: NotifySound; label?: string }[] = [
+  { id: "default" },
+  { id: "none" },
+  { id: "drop", label: "Drop" },
+  { id: "sonar", label: "Sonar" },
+  { id: "chime", label: "Chime" },
+  { id: "bloom", label: "Bloom" },
+  { id: "tap", label: "Tap" },
+];
+
 export interface NotificationPrefs {
   /** Master switch — when off, nothing is ever shown. */
   enabled: boolean;
   /** Suppress notifications while the cetus window has OS focus. */
   muteWhenFocused: boolean;
+  /** Sound played with each notification. */
+  sound: NotifySound;
   /** Per-event opt-in. */
   events: Record<NotifyEvent, boolean>;
 }
@@ -65,6 +89,7 @@ export const NOTIFY_EVENTS: {
 const DEFAULT_PREFS: NotificationPrefs = {
   enabled: true,
   muteWhenFocused: false,
+  sound: "default",
   events: {
     task_finished: true,
     awaiting_input: true,
@@ -82,6 +107,10 @@ function loadPrefs(): NotificationPrefs {
     return {
       enabled: parsed.enabled ?? DEFAULT_PREFS.enabled,
       muteWhenFocused: parsed.muteWhenFocused ?? DEFAULT_PREFS.muteWhenFocused,
+      // An id from a build with a different sound set falls back to default.
+      sound: NOTIFY_SOUNDS.some((s) => s.id === parsed.sound)
+        ? (parsed.sound as NotifySound)
+        : DEFAULT_PREFS.sound,
       // Merge so a newly-added event kind picks up its default rather than
       // becoming undefined for users with an older persisted blob.
       events: { ...DEFAULT_PREFS.events, ...(parsed.events ?? {}) },
@@ -97,17 +126,18 @@ interface NotifyStore extends NotificationPrefs {
   permissionGranted: boolean | null;
   setEnabled: (v: boolean) => void;
   setMuteWhenFocused: (v: boolean) => void;
+  setSound: (v: NotifySound) => void;
   setEvent: (id: NotifyEvent, v: boolean) => void;
   setPermissionGranted: (v: boolean) => void;
 }
 
 export const useNotificationPrefs = create<NotifyStore>((set, get) => {
   const persist = () => {
-    const { enabled, muteWhenFocused, events } = get();
+    const { enabled, muteWhenFocused, sound, events } = get();
     try {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ enabled, muteWhenFocused, events }),
+        JSON.stringify({ enabled, muteWhenFocused, sound, events }),
       );
     } catch {
       // best-effort; private mode / quota failures are fine.
@@ -122,6 +152,10 @@ export const useNotificationPrefs = create<NotifyStore>((set, get) => {
     },
     setMuteWhenFocused: (v) => {
       set({ muteWhenFocused: v });
+      persist();
+    },
+    setSound: (v) => {
+      set({ sound: v });
       persist();
     },
     setEvent: (id, v) => {
@@ -205,6 +239,7 @@ export async function dispatchNotification(
       title: opts.title,
       body: opts.body ?? "",
       conversationId: opts.conversationId,
+      sound: store.sound,
     });
   } catch (e) {
     console.error("postNotification failed:", e);

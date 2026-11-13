@@ -464,6 +464,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         plugins::reveal_plugin,
         plugins::delete_plugin,
         notify::post_notification,
+        notify::play_notification_sound,
         bash::run_bash,
         terminal::terminal_start,
         terminal::terminal_write,

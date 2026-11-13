@@ -8,9 +8,20 @@
 // ⌘, ; closed with Back or Esc.
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { api } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n";
 import {
   NOTIFY_EVENTS,
+  NOTIFY_SOUNDS,
+  type NotifySound,
   ensurePermission,
   refreshPermission,
   useNotificationPrefs,
@@ -27,10 +38,12 @@ export function NotificationsSection() {
   const {
     enabled,
     muteWhenFocused,
+    sound,
     events,
     permissionGranted,
     setEnabled,
     setMuteWhenFocused,
+    setSound,
     setEvent,
   } = useNotificationPrefs();
 
@@ -43,6 +56,12 @@ export function NotificationsSection() {
     setEnabled(v);
     // Turning it on is the natural moment to ask for OS permission.
     if (v) await ensurePermission();
+  }
+
+  function onPickSound(v: NotifySound) {
+    setSound(v);
+    // Let the pick be heard right away; default and none have no file to play.
+    api.playNotificationSound(v).catch(() => {});
   }
 
   const blocked = enabled && permissionGranted === false;
@@ -108,10 +127,36 @@ export function NotificationsSection() {
         </h3>
         <div
           className={cn(
-            "mt-2 rounded-lg border border-border",
+            "mt-2 divide-y divide-border rounded-lg border border-border",
             !enabled && "pointer-events-none opacity-50",
           )}
         >
+          <div className="flex items-center justify-between gap-4 px-3 py-3">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="notif-sound" className="font-medium">
+                {t("notifications.sound.label")}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {t("notifications.sound.description")}
+              </p>
+            </div>
+            <Select
+              value={sound}
+              onValueChange={(v) => onPickSound(v as NotifySound)}
+              disabled={!enabled}
+            >
+              <SelectTrigger id="notif-sound" className="w-40 shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {NOTIFY_SOUNDS.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.label ?? t(`notifications.sound.${s.id}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <ToggleRow
             id="notif-mute-focused"
             label={t("notifications.mute.label")}

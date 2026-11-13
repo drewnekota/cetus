@@ -165,7 +165,6 @@ export const AppSidebar = memo(function AppSidebar({
   const shortcutLabels = useMemo(
     () => ({
       newChat: shortcutDisplay(shortcuts.newChat),
-      newDefaultChat: shortcutDisplay(shortcuts.newDefaultChat),
       archiveChat: shortcutDisplay(shortcuts.archiveChat),
       toggleSidebar: shortcutDisplay(shortcuts.toggleSidebar),
       openAutomations: shortcutDisplay(shortcuts.openAutomations),
@@ -388,7 +387,7 @@ export const AppSidebar = memo(function AppSidebar({
         </SidebarMenu>
         {/* Automations is its own page (scheduled prompts), not a layout of
             the conversations: it swaps the main area and leaves the mode —
-            and so the list below — alone. New task follows as an action;
+            and so the list below — alone. New chat/task follows as an action;
             Threads has none, its feed's composer is where threads start.
             All three share one menu so the rows sit at the same spacing. */}
         <SidebarMenu>
@@ -410,27 +409,16 @@ export const AppSidebar = memo(function AppSidebar({
           </SidebarMenuItem>
           {mode !== "threads" && (
             <SidebarMenuItem>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <SidebarMenuButton
-                    onClick={onNewTask}
-                    // Plain nav row (no standalone fill) so it sits flush with the
-                    // other sidebar actions; the hover/active states come from the
-                    // default SidebarMenuButton treatment.
-                    className="min-w-8"
-                  >
-                    <PlusCircle />
-                    <span>{t("new.task")}</span>
-                    <Kbd className="ml-auto border-transparent">
-                      {shortcutLabels.newChat}
-                    </Kbd>
-                  </SidebarMenuButton>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <span>{t("new.chat")}</span>
-                  <Kbd>{shortcutLabels.newDefaultChat}</Kbd>
-                </TooltipContent>
-              </Tooltip>
+              {/* No hover tooltip: the row already carries its label and
+                  shortcut, like its neighbours. Kanban creates a task; the
+                  chat list starts a chat. */}
+              <SidebarMenuButton onClick={onNewTask} className="min-w-8">
+                <PlusCircle />
+                <span>{t(mode === "board" ? "new.task" : "new.chat")}</span>
+                <Kbd className="ml-auto border-transparent">
+                  {shortcutLabels.newChat}
+                </Kbd>
+              </SidebarMenuButton>
             </SidebarMenuItem>
           )}
         </SidebarMenu>
