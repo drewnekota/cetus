@@ -68,12 +68,20 @@ struct ComposerBar<Chip: View>: View {
                         sends += 1
                         onStop()
                     } label: {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
+                        // A drawn square, not the SF Symbol: a glyph sits on
+                        // the text baseline and drifts off the disc's center
+                        // with the system's text size and weight settings.
+                        Circle()
+                            .fill(Color(uiColor: UIColor(hex: 0xDC2626)))
                             .frame(width: 36, height: 36)
-                            .background(Color(uiColor: UIColor(hex: 0xDC2626)), in: Circle())
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                                    .fill(.white)
+                                    .frame(width: 12, height: 12)
+                            }
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Stop")
                 } else {
                     Button {
                         sends += 1

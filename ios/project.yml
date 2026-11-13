@@ -15,8 +15,8 @@ settings:
     DEVELOPMENT_TEAM: 65N4VF5643
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.10"
-    MARKETING_VERSION: "0.1.3"
-    CURRENT_PROJECT_VERSION: "5"
+    MARKETING_VERSION: "0.1.4"
+    CURRENT_PROJECT_VERSION: "6"
 targets:
   Cetus:
     type: application

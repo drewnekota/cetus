@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<title>Privacy Policy — Cetus</title>
+<meta name="description" content="What Cetus and Cetus Remote do with your data: nothing is collected, and traffic between your phone and your Mac is end-to-end encrypted.">
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="styles.css">
+<style>
+.policy{max-width:640px;margin:0 auto;padding-bottom:96px}
+.policy .back{display:inline-flex;align-items:center;gap:10px;color:var(--muted);font-size:13px}
+.policy .back:hover{color:var(--ink)}
+.policy .back img{width:24px;height:24px}
+.policy h1{font-size:26px;line-height:1.2;letter-spacing:-.03em;margin-top:48px}
+.policy .updated{color:var(--muted);font-size:12px;margin-top:8px}
+.policy h2{font-size:16px;letter-spacing:-.02em;margin-top:40px}
+.policy p,.policy li{font-size:14px;line-height:1.65;color:var(--muted);margin-top:12px}
+.policy ul{padding-left:20px}
+.policy li{margin-top:8px}
+.policy strong{color:var(--ink);font-weight:500}
+.policy a.link{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+</style>
+<script>(function(){var mode='system';try{var saved=localStorage.getItem('cetus-site-theme-mode');if(saved==='light'||saved==='dark')mode=saved}catch(e){}var dark=mode==='system'?matchMedia('(prefers-color-scheme: dark)').matches:mode==='dark';document.documentElement.classList.toggle('dark',dark);document.querySelector('meta[name="theme-color"]').content=dark?'#0d0d0f':'#ffffff'})();</script>
+</head>
+<body>
+<main>
+<article class="policy">
+<a class="back" href="/"><img src="assets/logo.png" width="24" height="24" alt="">Cetus</a>
+<h1>Privacy Policy</h1>
+<p class="updated">Last updated November 13, 2026</p>
+
+<p>This policy covers <strong>Cetus</strong>, the Mac app, and <strong>Cetus Remote</strong>, its iPhone companion. In short: we don't collect your data. There are no accounts, no analytics and no advertising, and we can't read what passes between your phone and your Mac.</p>
+
+<h2>What we collect</h2>
+<p>Nothing. Neither app has a sign-in, and neither sends usage statistics, crash reports or identifiers to us or to any analytics or advertising service.</p>
+
+<h2>What stays on your devices</h2>
+<ul>
+<li><strong>On your Mac:</strong> your conversations, settings and anything Cetus records at your request (such as screen history or meeting notes) are stored locally in the app's data folder.</li>
+<li><strong>On your iPhone:</strong> Cetus Remote keeps the pairing with your Mac (a device token in the iOS Keychain), your preferences, and a small cache of folder icons. Conversations are loaded from your Mac when you open them.</li>
+</ul>
+
+<h2>How the phone reaches your Mac</h2>
+<p>Cetus Remote connects to the Cetus app on your own Mac through a relay at <strong>relay.cetus.run</strong>, hosted on Cloudflare. Everything sent between the two is end-to-end encrypted with the Noise protocol; the keys exist only on your phone and your Mac, so the relay forwards data it cannot read.</p>
+<p>The relay stores one thing per paired Mac: a hash of that Mac's relay key, so no one else can claim its address. It keeps no messages and no conversation content. Like any internet service, the relay and Cloudflare see the IP addresses that connect to them.</p>
+
+<h2>Permissions on iPhone</h2>
+<ul>
+<li><strong>Camera:</strong> used only to scan the pairing QR code shown on your Mac. Nothing is recorded or uploaded.</li>
+<li><strong>Photos:</strong> used only when you choose a photo to attach to a message. The photo goes to your Mac over the encrypted connection.</li>
+</ul>
+
+<h2>Services you connect yourself</h2>
+<p>Cetus on the Mac runs the agents and models you set up, such as Claude Code, Codex or a model provider you add an API key for. What you send to those services is governed by their own privacy policies. The Mac app also checks GitHub for new versions of Cetus.</p>
+
+<h2>Children</h2>
+<p>Cetus is a tool for software developers and is not directed at children under 13.</p>
+
+<h2>Changes</h2>
+<p>If this policy changes, the new version will be posted on this page with a new date.</p>
+
+<h2>Contact</h2>
+<p>Questions about privacy? Open an issue at <a class="link" href="https://github.com/william-jin-cmu/cetus/issues">github.com/william-jin-cmu/cetus</a>.</p>
+</article>
+</main>
+</body>
+</html>

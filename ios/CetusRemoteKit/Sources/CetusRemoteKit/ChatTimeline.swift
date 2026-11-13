@@ -3,6 +3,9 @@ import Foundation
 public enum ChatBlock: Hashable, Sendable, Identifiable {
     case text(id: Int, text: String, streaming: Bool)
     case thinking(id: Int, text: String, streaming: Bool)
+    /// `name` is empty until the model finishes writing the call. `result`
+    /// is `{content, details, isError}`; a tool that is still reporting
+    /// progress carries `partial: true` in it.
     case tool(id: Int, callId: String, name: String, arguments: JSON, result: JSON?)
     /// Image bytes as sent (JPEG/PNG), nil when the Mac didn't include them.
     case image(id: Int, data: Data?)
@@ -30,6 +33,17 @@ public struct ChatTimeline: Sendable {
     public var running = false
     /// The Mac sent only the tail of a longer history.
     public private(set) var truncated = false
+    /// When the open turn began, for the elapsed-time line.
+    public private(set) var turnStartedAt: Date?
+    /// Stream events numbered up to this are already part of the snapshot.
+    public private(set) var liveSeq = 0
+    /// Text blocks a runtime marked as the final answer: never folded.
+    public private(set) var finalAnswers: Set<Int> = []
+    /// Why the Mac is compacting the context right now, nil when it isn't.
+    public private(set) var compacting: String?
+    /// A failure the stream reported; the screen takes it with `takeError`.
+    private var failure: String?
+    private var aborted = false
     private var nextId = 0
 
     public init() {}
@@ -45,6 +59,7 @@ public struct ChatTimeline: Sendable {
         for m in raw where m["role"].string == "toolResult" {
             if let id = m["toolCallId"].string { results[id] = m }
         }
+        var lastUserAt: Date?
         for m in raw {
             guard m["display"].bool != false else { continue }
             let role: ChatMessage.Role
@@ -59,7 +74,13 @@ public struct ChatTimeline: Sendable {
             }
             if blocks.isEmpty { continue }
             messages.append(ChatMessage(id: newId(), role: role, blocks: blocks))
+            if role == .user { lastUserAt = m["timestamp"].number.map { Date(timeIntervalSince1970: $0 / 1000) } }
         }
+        if running { turnStartedAt = lastUserAt ?? Date() }
+        // The open turn: a CLI runtime's history holds none of it until the
+        // turn ends, so the Mac sends its stream events to replay.
+        for e in snapshot["liveEvents"].array ?? [] { _ = apply(e) }
+        liveSeq = snapshot["liveSeq"].int ?? 0
     }
 
     private mutating func newId() -> Int {
@@ -78,7 +99,9 @@ public struct ChatTimeline: Sendable {
             var text = b["text"].string ?? ""
             if isUser { text = Self.stripContextFence(text) }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            return .text(id: newId(), text: text, streaming: false)
+            let id = newId()
+            if b["phase"].string == "final_answer" { finalAnswers.insert(id) }
+            return .text(id: id, text: text, streaming: false)
         case "thinking":
             let t = b["thinking"].string ?? b["text"].string ?? ""
             return t.isEmpty ? nil : .thinking(id: newId(), text: t, streaming: false)
@@ -106,7 +129,15 @@ public struct ChatTimeline: Sendable {
         var blocks: [ChatBlock] = images.map { .image(id: newId(), data: $0) }
         if !text.isEmpty { blocks.append(.text(id: newId(), text: text, streaming: false)) }
         messages.append(ChatMessage(id: newId(), role: .user, blocks: blocks))
+        // A steered follow-up joins the run in progress: its clock keeps going.
+        if !running || turnStartedAt == nil { turnStartedAt = Date() }
         running = true
+    }
+
+    /// The failure reported since the last call, if any.
+    public mutating func takeError() -> String? {
+        defer { failure = nil }
+        return failure
     }
 
     public mutating func removeControl(_ key: String) {
@@ -117,26 +148,109 @@ public struct ChatTimeline: Sendable {
     public mutating func apply(_ e: JSON) -> Effect {
         switch e["type"].string {
         case "agent_start":
+            if !running || turnStartedAt == nil { turnStartedAt = Date() }
             running = true
+            aborted = false
+        case "compaction_start":
+            compacting = e["reason"].string.flatMap { $0.isEmpty ? nil : $0 } ?? "context"
+        case "compaction_end":
+            compacting = nil
+            if e["aborted"].bool == true { failure = "Context compaction failed. The conversation is unchanged." }
         case "agent_end":
-            running = false
-            controls.removeAll()
+            // A retrying run (auto-retry, compaction, queued follow-up) goes
+            // on by itself; `agent_settled` ends it.
+            if e["willRetry"].bool == true { break }
+            settle()
+            return .refetch
+        case "agent_settled":
+            guard running else { break }
+            settle()
             return .refetch
         case "cli_control_request":
             let c = ControlRequest(e)
             if !controls.contains(where: { $0.requestKey == c.requestKey }) { controls.append(c) }
         case "cli_control_resolved":
             removeControl(e["requestId"].compactText)
-        case "message_start" where e["message"]["role"].string == "assistant":
-            messages.append(ChatMessage(id: newId(), role: .assistant, blocks: []))
+        case "message_start":
+            switch e["message"]["role"].string {
+            case "assistant":
+                messages.append(ChatMessage(id: newId(), role: .assistant, blocks: []))
+            case "user":
+                // A steered follow-up or a prompt the Mac started by itself.
+                // What the phone sent is already on screen as the last row.
+                if messages.last?.role == .user { break }
+                var blocks: [ChatBlock] = []
+                for b in Self.contentBlocks(e["message"]) {
+                    if let block = block(from: b, results: [:], isUser: true) { blocks.append(block) }
+                }
+                if !blocks.isEmpty { messages.append(ChatMessage(id: newId(), role: .user, blocks: blocks)) }
+            default:
+                break
+            }
+        case "message_end":
+            stopStreams(last: 1)
         case "message_update":
-            delta(e["assistantMessageEvent"])
+            let inner = e["assistantMessageEvent"]
+            // The user's own Stop arrives as an error event.
+            if inner["type"].string == "error", inner["reason"].string == "aborted" { aborted = true }
+            delta(inner)
+        case "tool_execution_update":
+            let partial = e["partialResult"]
+            attach(
+                result: ["content": partial["content"], "details": partial["details"], "partial": true],
+                to: e["toolCallId"].string ?? "")
         case "tool_execution_end":
-            attach(result: e["result"], to: e["toolCallId"].string ?? "")
+            let result = e["result"]
+            attach(
+                result: ["content": result["content"], "details": result["details"], "isError": e["isError"]],
+                to: e["toolCallId"].string ?? "")
         default:
             break
         }
         return .none
+    }
+
+    private mutating func settle() {
+        // A turn that ends with thinking only, or nothing, produced no
+        // answer: say so instead of stopping on a blank reply.
+        var sawAssistant = false
+        var hasContent = false
+        for m in messages.reversed() {
+            if m.role == .user { break }
+            sawAssistant = true
+            hasContent = m.blocks.contains { b in
+                switch b {
+                case .text(_, let t, _): !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                case .tool, .image: true
+                case .thinking: false
+                }
+            }
+            if hasContent { break }
+        }
+        if running, sawAssistant, !hasContent, !aborted {
+            failure = "The model returned an empty response — no answer was produced. Tap Retry to try again."
+        }
+        compacting = nil
+        running = false
+        turnStartedAt = nil
+        controls.removeAll()
+        stopStreams(last: .max)
+    }
+
+    /// Clears the streaming flags of the trailing assistant messages.
+    private mutating func stopStreams(last count: Int) {
+        var left = count
+        for mi in messages.indices.reversed() {
+            guard messages[mi].role == .assistant, left > 0 else { break }
+            left -= 1
+            messages[mi].blocks = messages[mi].blocks.map { b in
+                switch b {
+                case .text(let id, let t, true): .text(id: id, text: t, streaming: false)
+                case .thinking(let id, let t, true): .thinking(id: id, text: t, streaming: false)
+                default: b
+                }
+            }
+        }
     }
 
     private mutating func lastAssistantIndex() -> Int {
@@ -150,8 +264,9 @@ public struct ChatTimeline: Sendable {
         let mi = lastAssistantIndex()
         let i = d["contentIndex"].int ?? 0
         var blocks = messages[mi].blocks
-        while blocks.count <= i { blocks.append(.text(id: newId(), text: "", streaming: true)) }
+        while blocks.count <= i { blocks.append(.text(id: newId(), text: "", streaming: false)) }
         let id = blocks[i].id
+        if d["phase"].string == "final_answer" { finalAnswers.insert(id) }
         switch type {
         case "text_start":
             blocks[i] = .text(id: id, text: "", streaming: true)
@@ -173,6 +288,9 @@ public struct ChatTimeline: Sendable {
             }
         case "thinking_end":
             blocks[i] = .thinking(id: id, text: d["content"].string ?? blocks[i].plainText, streaming: false)
+        case "toolcall_start":
+            // The id and name land on toolcall_end; hold the row meanwhile.
+            blocks[i] = .tool(id: id, callId: "", name: "", arguments: .null, result: nil)
         case "toolcall_end":
             let call = d["toolCall"]
             blocks[i] = .tool(
@@ -217,16 +335,36 @@ extension JSON {
     public var toolResultText: String {
         let c = self["content"]
         if let s = c.string { return s }
-        if let a = c.array { return a.compactMap { $0["text"].string }.joined(separator: "\n") }
-        return isNull ? "" : prettyText
+        if let a = c.array {
+            return a.map { $0["type"].string == "text" || $0["type"].isNull ? ($0["text"].string ?? "") : "[\($0["type"].string ?? "")]" }
+                .joined(separator: "\n")
+        }
+        return ""
     }
 
-    /// One-line preview of tool arguments.
+    /// One-line preview of tool arguments: the field that says what the
+    /// call did, flattened (the desktop's `summarizeArgs`).
     public var argumentPreview: String {
-        for key in ["command", "path", "file_path", "pattern", "query", "url", "description"] {
-            if let s = self[key].string { return s }
+        func flat(_ s: String) -> String {
+            s.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         }
-        if let first = object?.values.first { return first.compactText }
+        let value = parsedArguments
+        if let s = value.string { return flat(s) }
+        guard let obj = value.object else { return value.isNull ? "" : flat(value.compactText) }
+        for key in ["command", "cmd", "path", "file", "file_path", "query", "url", "pattern", "name"] {
+            if let s = obj[key]?.string, !flat(s).isEmpty { return flat(s) }
+        }
+        for key in obj.keys.sorted() {
+            if let s = obj[key]?.string, !flat(s).isEmpty { return flat(s) }
+        }
         return ""
+    }
+
+    /// Tool arguments as an object even when a runtime sent them as a JSON
+    /// string.
+    public var parsedArguments: JSON {
+        if let s = string, let data = s.data(using: .utf8), let parsed = try? JSON.parse(data),
+           parsed.object != nil { return parsed }
+        return self
     }
 }

@@ -47,7 +47,12 @@ struct PairView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                #if DEBUG
+                // `-demoScan YES`: the simulator has no camera; draw the button enabled.
+                .disabled(busy || !(DataScannerViewController.isSupported || UserDefaults.standard.bool(forKey: "demoScan")))
+                #else
                 .disabled(busy || !DataScannerViewController.isSupported)
+                #endif
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Or paste the pairing link")

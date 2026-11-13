@@ -40,6 +40,110 @@ pub struct RemoteRuntime {
     relay_task: Mutex<Option<host::async_runtime::JoinHandle<()>>>,
     events: tokio::sync::broadcast::Sender<String>,
     pending_controls: Arc<Mutex<HashMap<String, Vec<Value>>>>,
+    live_turns: Arc<Mutex<HashMap<String, LiveTurn>>>,
+}
+
+/// The stream events of a conversation's open turn, kept so a phone that
+/// opens the chat mid-run can replay them: CLI runtimes write a turn to the
+/// transcript only when it ends, so the history alone shows none of the work
+/// done so far. `seq` numbers every event of the conversation; the phone uses
+/// it to drop events its snapshot already holds.
+#[derive(Default)]
+struct LiveTurn {
+    seq: u64,
+    events: Vec<Value>,
+}
+
+impl LiveTurn {
+    fn record(&mut self, event: &Value) {
+        let field = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).map(str::to_string);
+        match event.get("type").and_then(Value::as_str).unwrap_or("") {
+            "agent_start" => {
+                self.events.clear();
+                self.events.push(event.clone());
+            }
+            // A retrying run goes on by itself: its turn is still open.
+            "agent_end" => {
+                if event.get("willRetry").and_then(Value::as_bool) != Some(true) {
+                    self.events.clear();
+                }
+            }
+            "agent_settled" => self.events.clear(),
+            "message_start"
+            | "message_end"
+            | "tool_execution_start"
+            | "compaction_start"
+            | "compaction_end" => self.events.push(event.clone()),
+            "tool_execution_update" => {
+                let mut event = event.clone();
+                if let Some(content) = event.pointer_mut("/partialResult/content") {
+                    trim_tool_content(content);
+                }
+                // Each update replaces the one before it.
+                match self.events.last_mut() {
+                    Some(last)
+                        if field(last, "type").as_deref() == Some("tool_execution_update")
+                            && last.get("toolCallId") == event.get("toolCallId") =>
+                    {
+                        *last = event
+                    }
+                    _ => self.events.push(event),
+                }
+            }
+            "tool_execution_end" => {
+                let mut event = event.clone();
+                if let Some(content) = event.pointer_mut("/result/content") {
+                    trim_tool_content(content);
+                }
+                self.events.push(event);
+            }
+            "message_update" => {
+                let Some(inner) = event.get("assistantMessageEvent") else {
+                    return;
+                };
+                let kind = field(inner, "type").unwrap_or_default();
+                if kind == "toolcall_delta" {
+                    return;
+                }
+                // Token deltas of one block fold into a single event.
+                if kind == "text_delta" || kind == "thinking_delta" {
+                    let delta = inner.get("delta").and_then(Value::as_str).unwrap_or("");
+                    if let Some(last) = self
+                        .events
+                        .last_mut()
+                        .and_then(|e| e.get_mut("assistantMessageEvent"))
+                        .filter(|l| {
+                            field(l, "type").as_deref() == Some(kind.as_str())
+                                && l.get("contentIndex") == inner.get("contentIndex")
+                        })
+                    {
+                        let joined = format!(
+                            "{}{delta}",
+                            last.get("delta").and_then(Value::as_str).unwrap_or("")
+                        );
+                        last["delta"] = Value::String(joined);
+                        return;
+                    }
+                }
+                self.events.push(event.clone());
+            }
+            _ => {}
+        }
+    }
+
+    /// What a snapshot taken now is missing. pi's own history already holds
+    /// every finished message of the turn, so only the open one is replayed.
+    fn replay(&self, cli: bool) -> &[Value] {
+        if cli {
+            return &self.events;
+        }
+        let from = self
+            .events
+            .iter()
+            .rposition(|e| e.get("type").and_then(Value::as_str) == Some("message_end"))
+            .map_or(0, |i| i + 1);
+        &self.events[from..]
+    }
 }
 
 impl RemoteRuntime {
@@ -58,6 +162,7 @@ impl RemoteRuntime {
             relay_task: Mutex::new(None),
             events,
             pending_controls: Arc::new(Mutex::new(HashMap::new())),
+            live_turns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -75,6 +180,7 @@ impl RemoteRuntime {
             token: self.token.clone(),
             events: self.events.clone(),
             pending_controls: self.pending_controls.clone(),
+            live_turns: self.live_turns.clone(),
         };
         crate::awake::set_remote_active(true);
         *self.relay_task.lock().unwrap() = Some(host::async_runtime::spawn(
@@ -112,18 +218,28 @@ pub(crate) struct WebState {
     token: Arc<Mutex<String>>,
     pub(crate) events: tokio::sync::broadcast::Sender<String>,
     pending_controls: Arc<Mutex<HashMap<String, Vec<Value>>>>,
+    live_turns: Arc<Mutex<HashMap<String, LiveTurn>>>,
 }
 
 pub fn initialize(app: AppHandle) {
     let runtime = app.state::<RemoteRuntime>();
     let tx = runtime.events.clone();
     let pending = runtime.pending_controls.clone();
+    let live = runtime.live_turns.clone();
     app.listen("app-event", move |event| {
-        let payload = event.payload().to_string();
-        if let Ok(value) = serde_json::from_str::<Value>(&payload) {
+        let mut payload = event.payload().to_string();
+        if let Ok(mut value) = serde_json::from_str::<Value>(&payload) {
             let conv = value.get("conversationId").and_then(Value::as_str);
             let inner = value.get("event");
+            let mut seq = None;
             if let (Some(conv), Some(inner)) = (conv, inner) {
+                if value.get("type").and_then(Value::as_str) == Some("pi_event") {
+                    let mut live = live.lock().unwrap();
+                    let turn = live.entry(conv.to_string()).or_default();
+                    turn.seq += 1;
+                    turn.record(inner);
+                    seq = Some(turn.seq);
+                }
                 match inner.get("type").and_then(Value::as_str) {
                     Some("cli_control_request") => pending
                         .lock()
@@ -142,6 +258,10 @@ pub fn initialize(app: AppHandle) {
                     }
                     _ => {}
                 }
+            }
+            if let Some(seq) = seq {
+                value["seq"] = json!(seq);
+                payload = value.to_string();
             }
         }
         let _ = tx.send(payload);
@@ -858,9 +978,12 @@ fn trim_tool_output(message: &mut Value) {
     if message.get("role").and_then(Value::as_str) != Some("toolResult") {
         return;
     }
-    let Some(content) = message.get_mut("content") else {
-        return;
-    };
+    if let Some(content) = message.get_mut("content") {
+        trim_tool_content(content);
+    }
+}
+
+fn trim_tool_content(content: &mut Value) {
     let cut = |s: &mut String| {
         if s.len() > TOOL_TEXT_MAX {
             let mut end = TOOL_TEXT_MAX;
@@ -1142,11 +1265,21 @@ pub(crate) async fn rpc(web: &WebState, method: &str, params: Value) -> Result<V
                     trim_tool_output(m);
                 }
             }
+            let cli = cetus_bridge::cli_agent::CliBackend::from_id(&snapshot.conversation.backend)
+                .is_some();
+            let (live_events, live_seq) = match web.live_turns.lock().unwrap().get(&id) {
+                Some(turn) => (turn.replay(cli).to_vec(), turn.seq),
+                None => (Vec::new(), 0),
+            };
             Ok(json!({
                 "conversation": snapshot.conversation,
                 "messages": messages,
                 "totalMessages": total,
                 "pendingControls": controls,
+                // The open turn, to replay on top of `messages`; stream
+                // events numbered up to `liveSeq` are already in it.
+                "liveEvents": live_events,
+                "liveSeq": live_seq,
             }))
         }
         "conversations.update" => {
@@ -1298,12 +1431,53 @@ pub(crate) async fn rpc(web: &WebState, method: &str, params: Value) -> Result<V
                 .map_err(|e| format!("Couldn't create {}: {e}", path.display()))?;
             Ok(json!({ "path": path.to_string_lossy() }))
         }
+        "conversations.retry" => {
+            // Rolls the last turn out of the history; the phone resends `text`.
+            let retry = commands::retry_last_turn(app.state(), require_str(&params, "id")?).await?;
+            Ok(json!({ "text": retry.text }))
+        }
+        "artifacts.read" => {
+            let path = expand_home(&require_str(&params, "path")?);
+            let preview = params.get("preview").and_then(Value::as_bool) == Some(true);
+            host::async_runtime::spawn_blocking(move || read_artifact(&path, preview))
+                .await
+                .map_err(|e| e.to_string())?
+        }
         "usage.get" => {
             let force = params.get("force").and_then(Value::as_bool);
             Ok(json!(crate::usage::provider_usage(force).await?))
         }
         _ => Err(format!("unknown method {method}")),
     }
+}
+
+/// The most a phone may pull over the relay in one file.
+const ARTIFACT_MAX: u64 = 24 * 1024 * 1024;
+const ARTIFACT_PREVIEW_SIDE: u32 = 1400;
+
+/// A file an agent handed to the user, for the phone's artifact card.
+/// `preview` asks for a downscaled JPEG of an image instead of its bytes.
+fn read_artifact(path: &str, preview: bool) -> Result<Value, String> {
+    use base64::Engine as _;
+    let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+    let meta = std::fs::metadata(path).map_err(|e| format!("Couldn't open {path}: {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("{path} is not a file"));
+    }
+    if preview {
+        let image = image::open(path).map_err(|e| format!("Couldn't read the image: {e}"))?;
+        let small = image.thumbnail(ARTIFACT_PREVIEW_SIDE, ARTIFACT_PREVIEW_SIDE);
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(small.to_rgb8())
+            .write_to(&mut out, image::ImageFormat::Jpeg)
+            .map_err(|e| e.to_string())?;
+        return Ok(json!({ "data": encode(out.get_ref()), "mimeType": "image/jpeg" }));
+    }
+    if meta.len() > ARTIFACT_MAX {
+        return Err("This file is too large to open on the phone.".into());
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("Couldn't read {path}: {e}"))?;
+    Ok(json!({ "data": encode(&bytes) }))
 }
 
 fn home() -> String {
@@ -1532,5 +1706,63 @@ mod tests {
             HeaderValue::from_static("cetus_remote=secret-too"),
         );
         assert!(!authorized(&headers, "secret"));
+    }
+}
+
+#[cfg(test)]
+mod live_turn_tests {
+    use super::LiveTurn;
+    use serde_json::json;
+
+    fn delta(kind: &str, index: u64, text: &str) -> serde_json::Value {
+        json!({ "type": "message_update", "assistantMessageEvent": { "type": kind, "contentIndex": index, "delta": text } })
+    }
+
+    #[test]
+    fn keeps_the_open_turn_and_folds_token_deltas() {
+        let mut turn = LiveTurn::default();
+        turn.record(&json!({ "type": "agent_start" }));
+        turn.record(&json!({ "type": "message_start", "message": { "role": "assistant" } }));
+        turn.record(&delta("text_delta", 0, "Hel"));
+        turn.record(&delta("text_delta", 0, "lo"));
+        turn.record(&delta("text_delta", 1, "next"));
+        turn.record(&json!({ "type": "message_update", "assistantMessageEvent": { "type": "toolcall_delta", "contentIndex": 2 } }));
+        turn.record(&json!({ "type": "cli_rate_limit" }));
+        assert_eq!(turn.events.len(), 4);
+        assert_eq!(turn.events[2]["assistantMessageEvent"]["delta"], "Hello");
+
+        // A retrying run stays open; a finished one has nothing to replay.
+        turn.record(&json!({ "type": "agent_end", "willRetry": true }));
+        assert_eq!(turn.events.len(), 4);
+        turn.record(&json!({ "type": "agent_end" }));
+        assert!(turn.events.is_empty());
+    }
+
+    #[test]
+    fn pi_replays_only_the_unfinished_message() {
+        let mut turn = LiveTurn::default();
+        turn.record(&json!({ "type": "agent_start" }));
+        turn.record(&json!({ "type": "message_start", "message": { "role": "assistant" } }));
+        turn.record(&delta("text_delta", 0, "done"));
+        turn.record(&json!({ "type": "message_end" }));
+        turn.record(&json!({ "type": "message_start", "message": { "role": "assistant" } }));
+        turn.record(&delta("thinking_delta", 0, "hm"));
+        assert_eq!(turn.replay(true).len(), 6);
+        assert_eq!(turn.replay(false).len(), 2);
+    }
+
+    #[test]
+    fn progress_updates_replace_each_other_and_long_output_is_cut() {
+        let mut turn = LiveTurn::default();
+        let update = |text: &str| json!({ "type": "tool_execution_update", "toolCallId": "a", "partialResult": { "content": [{ "type": "text", "text": text }] } });
+        turn.record(&update("one"));
+        turn.record(&update("two"));
+        assert_eq!(turn.events.len(), 1);
+        assert_eq!(turn.events[0]["partialResult"]["content"][0]["text"], "two");
+        turn.record(&json!({ "type": "tool_execution_end", "toolCallId": "a", "result": { "content": [{ "type": "text", "text": "x".repeat(9000) }] } }));
+        let kept = turn.events[1]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(kept.len() < 4100);
     }
 }

@@ -49,20 +49,30 @@ private struct ChatContent: View {
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity)
                     }
-                    ForEach(model.timeline.items(running: model.running)) { item in
+                    let items = model.timeline.items(running: model.running)
+                    ForEach(items) { item in
                         switch item {
                         case .user(let m):
                             UserBubble(message: m)
                         case .assistant(let turn):
-                            AssistantTurnView(turn: turn, expanded: $expanded)
+                            AssistantTurnView(turn: turn, startedAt: model.turnStartedAt, expanded: $expanded)
                         }
                     }
-                    if model.running {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small).tint(Theme.muted)
-                            Text("Working…").font(.subheadline).foregroundStyle(Theme.muted)
+                    // Between the send and the first block of the reply; an
+                    // open turn carries the line itself.
+                    if model.running, !(items.last?.isActiveTurn ?? false) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            AssistantLabel()
+                            WorkingIndicator(startedAt: model.turnStartedAt)
                         }
-                        .padding(.leading, 2)
+                    }
+                    if let error = model.error {
+                        MessageErrorRow(
+                            message: error,
+                            retrying: model.retrying,
+                            onRetry: { Task { await model.retry() } },
+                            onDismiss: { model.error = nil }
+                        )
                     }
                     if !model.loaded && model.error == nil {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
@@ -116,12 +126,8 @@ private struct ChatContent: View {
                             Task { await model.respond(control, allow: allow, answers: answers) }
                         }
                     }
-                    if let error = model.error {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .onTapGesture { model.error = nil }
+                    if let reason = model.timeline.compacting {
+                        CompactionBar(reason: reason)
                     }
                     ComposerBar(
                         text: $model.draft,
@@ -226,6 +232,27 @@ private struct ChatContent: View {
                 Task { try? await store.update(model.conversationId, ["title": .string(newTitle)]) }
             }
         }
+        #if DEBUG
+        // `-demoExpand YES` (with `-demoSnapshot`): open every activity group.
+        .task(id: model.loaded) {
+            guard UserDefaults.standard.bool(forKey: "demoExpand") else { return }
+            for case .assistant(let turn) in model.timeline.items(running: model.running) {
+                for case .activity(let key, let steps, _) in turn.segments {
+                    expanded.insert(key)
+                    // `-demoExpandSteps YES`: open the tool rows too.
+                    guard UserDefaults.standard.bool(forKey: "demoExpandSteps") else { continue }
+                    for case .tool(_, let callId, _, _, _) in steps { expanded.insert("st\(callId)") }
+                }
+            }
+        }
+        #endif
+    }
+}
+
+private extension TimelineItem {
+    var isActiveTurn: Bool {
+        if case .assistant(let turn) = self { return turn.active }
+        return false
     }
 }
 
@@ -274,28 +301,35 @@ private struct UserBubble: View {
 /// answer stays open — the desktop's AssistantGroup.
 private struct AssistantTurnView: View {
     let turn: AssistantTurn
+    let startedAt: Date
     @Binding var expanded: Set<String>
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            AssistantLabel()
             ForEach(turn.segments) { seg in
                 switch seg {
                 case .activity(let key, let steps, let trailing):
                     // Pure thinking at the live edge has nothing to sum up
-                    // yet; the Working line below says it.
+                    // yet; the working line below says it.
                     if !(turn.active && trailing && !seg.hasTool) {
                         ActivityGroupView(
                             steps: steps,
                             turnEnded: !turn.active && trailing,
+                            active: turn.active,
                             open: Binding(
                                 get: { expanded.contains(key) },
                                 set: { if $0 { expanded.insert(key) } else { expanded.remove(key) } }
-                            )
+                            ),
+                            expanded: $expanded
                         )
                     }
                 case .answer(let block):
-                    AnswerBlockView(block: block)
+                    StepView(block: block, active: turn.active, expanded: $expanded)
                 }
+            }
+            if turn.active {
+                WorkingIndicator(startedAt: startedAt)
             }
             if !turn.active, !answerText.isEmpty {
                 CopyButton(text: answerText)
@@ -311,6 +345,16 @@ private struct AssistantTurnView: View {
         }
         .joined(separator: "\n\n")
         .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// The small caps line that heads every reply, as on the desktop.
+struct AssistantLabel: View {
+    var body: some View {
+        Text("ASSISTANT")
+            .font(.system(size: 11, weight: .medium))
+            .kerning(0.6)
+            .foregroundStyle(Theme.muted)
     }
 }
 
@@ -339,181 +383,6 @@ private struct CopyButton: View {
     }
 }
 
-private struct AnswerBlockView: View {
-    let block: ChatBlock
-
-    var body: some View {
-        switch block {
-        case .text(_, let text, _):
-            MarkdownText(text: text)
-        case .thinking(_, let text, let streaming):
-            ThinkingView(text: text, streaming: streaming)
-        case .tool(_, _, let name, let args, let result):
-            ToolView(name: name, arguments: args, result: result)
-        case .image(let id, let data):
-            MessageImage(id: id, data: data)
-        }
-    }
-}
-
-private struct ActivityGroupView: View {
-    let steps: [ChatBlock]
-    let turnEnded: Bool
-    @Binding var open: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Button {
-                withAnimation(.snappy(duration: 0.2)) { open.toggle() }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "wrench.adjustable")
-                        .font(.system(size: 12))
-                        .frame(width: 14)
-                    Text((turnEnded ? "Turn ended · " : "") + AssistantSegment.summary(steps))
-                        .font(Theme.label)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Theme.faint)
-                        .rotationEffect(.degrees(open ? 90 : 0))
-                    Spacer(minLength: 0)
-                }
-                .foregroundStyle(Theme.muted)
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if open {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(steps) { step in
-                        switch step {
-                        case .text(_, let text, _):
-                            // Narration between tool runs: muted, still process.
-                            MarkdownText(text: text, color: Theme.muted)
-                                .padding(.vertical, 4)
-                        default:
-                            AnswerBlockView(block: step)
-                        }
-                    }
-                }
-                .padding(.leading, 6)
-                .overlay(alignment: .leading) {
-                    Rectangle().fill(Theme.border).frame(width: 1)
-                }
-                .padding(.leading, 6)
-            }
-        }
-    }
-}
-
-private struct ThinkingView: View {
-    let text: String
-    let streaming: Bool
-    @State private var open = false
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $open) {
-            Text(text)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 4)
-                .textSelection(.enabled)
-        } label: {
-            Label(streaming ? "Thinking…" : "Thought", systemImage: "sparkle")
-                .font(.subheadline)
-                .foregroundStyle(Theme.muted)
-        }
-        .tint(Theme.muted)
-    }
-}
-
-private struct ToolView: View {
-    let name: String
-    let arguments: JSON
-    let result: JSON?
-    @State private var open = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.snappy(duration: 0.2)) { open.toggle() }
-            } label: {
-                HStack(spacing: 8) {
-                    if result == nil {
-                        ProgressView().controlSize(.mini).tint(Theme.muted)
-                    } else {
-                        Image(systemName: ToolView.symbol(for: name))
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.muted)
-                            .frame(width: 14)
-                    }
-                    Text(name)
-                        .font(Theme.label)
-                        .foregroundStyle(Theme.muted)
-                    Text(arguments.argumentPreview)
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(Theme.muted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Theme.faint)
-                        .rotationEffect(.degrees(open ? 90 : 0))
-                }
-                .padding(.vertical, 6)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if open {
-                VStack(alignment: .leading, spacing: 8) {
-                    CodeBox(title: "Arguments", text: arguments.prettyText)
-                    if let result {
-                        CodeBox(title: "Result", text: String(result.toolResultText.prefix(8000)))
-                    }
-                }
-                .padding(10)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-        }
-    }
-
-    static func symbol(for tool: String) -> String {
-        switch tool.lowercased() {
-        case "bash", "shell", "exec_command", "local_shell": "terminal"
-        case "read", "read_file", "view": "doc.text"
-        case "edit", "write", "multiedit", "apply_patch", "str_replace_editor": "pencil"
-        case "grep", "glob", "search", "find": "magnifyingglass"
-        case "webfetch", "websearch", "web_search": "globe"
-        case "task", "agent": "person.2"
-        case "todowrite", "update_plan": "checklist"
-        default: "wrench.and.screwdriver"
-        }
-    }
-}
-
-private struct CodeBox: View {
-    let title: String
-    let text: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.tertiary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(text)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .frame(maxHeight: 280)
-        }
-    }
-}
-
 /// Light Markdown: fenced code and pipe tables as horizontally scrolling
 /// boxes, `#` headings in semibold, rules, quotes and lists, everything
 /// else through Foundation's inline Markdown.
@@ -523,7 +392,7 @@ struct MarkdownText: View {
 
     private enum Part: Hashable {
         case prose(String)
-        case code(String)
+        case code(String, language: String?)
         case table([[String]])
         case rule
     }
@@ -534,6 +403,7 @@ struct MarkdownText: View {
         var code: [Substring] = []
         var table: [[String]] = []
         var inCode = false
+        var language: String?
         func flushProse() {
             // Drop blank edges so spacing comes from the stack, not "\n\n".
             while let f = prose.first, f.trimmingCharacters(in: .whitespaces).isEmpty { prose.removeFirst() }
@@ -549,11 +419,14 @@ struct MarkdownText: View {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("```") {
                 if inCode {
-                    out.append(.code(code.joined(separator: "\n")))
+                    out.append(.code(code.joined(separator: "\n"), language: language))
                     code = []
                 } else {
                     flushProse()
                     flushTable()
+                    // "```ts title=…" names the language first.
+                    language = trimmed.dropFirst(3).split(whereSeparator: { $0 == " " || $0 == "{" || $0 == "," })
+                        .first.map { $0.lowercased() }
                 }
                 inCode.toggle()
             } else if inCode {
@@ -578,7 +451,7 @@ struct MarkdownText: View {
                 prose.append(line)
             }
         }
-        if inCode { out.append(.code(code.joined(separator: "\n"))) }
+        if inCode { out.append(.code(code.joined(separator: "\n"), language: language)) }
         flushTable()
         flushProse()
         return out
@@ -596,9 +469,9 @@ struct MarkdownText: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                case .code(let s):
+                case .code(let s, let language):
                     ScrollView(.horizontal, showsIndicators: false) {
-                        Text(s)
+                        Text(SyntaxHighlighter.attributed(s, language: language))
                             .font(.system(size: 13, design: .monospaced))
                             .foregroundStyle(Theme.text)
                             .textSelection(.enabled)

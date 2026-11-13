@@ -504,16 +504,24 @@ final class RemoteStore {
                 await refreshList()
                 await activeChat?.load()
             }
+        case "pi_error":
+            // The runtime's own complaint about the run on screen.
+            if let id = envelope["conversationId"].string, activeChat?.conversationId == id,
+               let message = envelope["message"].string
+            {
+                activeChat?.error = message
+            }
         case "pi_event":
             guard let id = envelope["conversationId"].string else { return }
             let e = envelope["event"]
-            switch e["type"].string {
-            case "agent_start": running.insert(id)
-            case "agent_end": running.remove(id)
-            default: break
-            }
-            if activeChat?.conversationId == id { activeChat?.apply(e) }
-            if e["type"].string == "agent_end" { drainQueue(id) }
+            // A run that retries by itself is still running; `agent_settled`
+            // is what ends it.
+            let ended = (e["type"].string == "agent_end" && e["willRetry"].bool != true)
+                || (e["type"].string == "agent_settled" && running.contains(id))
+            if e["type"].string == "agent_start" { running.insert(id) }
+            if ended { running.remove(id) }
+            if activeChat?.conversationId == id { activeChat?.apply(e, seq: envelope["seq"].int) }
+            if ended { drainQueue(id) }
         default:
             break
         }

@@ -48,10 +48,18 @@ final class ChatModel {
     private(set) var conversation: Conversation?
     private(set) var timeline = ChatTimeline()
     private(set) var loaded = false
+    /// A failed request or run, shown where the reply would be.
     var error: String?
+    private(set) var retrying = false
+    /// The error on screen is a failed history load; the next good one clears it.
+    private var loadFailed = false
     var draft = ""
     var images: [OutgoingImage] = []
     private weak var store: RemoteStore?
+    /// Snapshot requests in flight, and the stream events that arrived
+    /// meanwhile: the reply decides which of them it already holds.
+    private var loads = 0
+    private var arrived: [(event: JSON, seq: Int?)] = []
 
     init(conversationId: String, store: RemoteStore) {
         self.conversationId = conversationId
@@ -61,30 +69,91 @@ final class ChatModel {
 
     var running: Bool { timeline.running || (store?.running.contains(conversationId) ?? false) }
 
+    /// When the open turn began. A run this screen first saw mid-way counts
+    /// from then.
+    var turnStartedAt: Date { timeline.turnStartedAt ?? seenRunningAt }
+    private let seenRunningAt = Date()
+
     func load() async {
         guard let store else { return }
         do {
             #if DEBUG
             // `-demoSnapshot <file>`: render a saved conversations.get reply.
             if let path = UserDefaults.standard.string(forKey: "demoSnapshot") {
-                timeline = ChatTimeline(snapshot: try JSONDecoder().decode(JSON.self, from: Data(contentsOf: URL(fileURLWithPath: path))))
+                let snapshot = try JSONDecoder().decode(JSON.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+                timeline = ChatTimeline(snapshot: snapshot)
+                error = timeline.takeError()
+                if let c = Conversation(snapshot["conversation"]) { conversation = c }
                 loaded = true
                 return
             }
             #endif
+            loads += 1
+            defer {
+                loads -= 1
+                if loads == 0 { arrived = [] }
+            }
             let snapshot = try await store.request("conversations.get", ["id": .string(conversationId)])
-            timeline = ChatTimeline(snapshot: snapshot)
+            var fresh = ChatTimeline(snapshot: snapshot)
+            // Events newer than the snapshot go on top of it. A Mac that
+            // doesn't number its events can't say which ones those are.
+            var refetch = false
+            for (event, seq) in arrived where seq.map({ $0 > fresh.liveSeq }) ?? false {
+                if fresh.apply(event) == .refetch { refetch = true }
+            }
+            let failure = fresh.takeError()
+            timeline = fresh
             if let c = Conversation(snapshot["conversation"]) { conversation = c }
             loaded = true
-            error = nil
+            // A run's error outlives the reload that follows its end.
+            if loadFailed { error = nil }
+            loadFailed = false
+            if let failure { error = failure }
+            if refetch { Task { await load() } }
         } catch {
             self.error = error.localizedDescription
+            loadFailed = true
         }
     }
 
-    func apply(_ event: JSON) {
-        if timeline.apply(event) == .refetch {
+    func apply(_ event: JSON, seq: Int? = nil) {
+        if loads > 0 { arrived.append((event, seq)) }
+        // Already part of the snapshot on screen.
+        if let seq, seq <= timeline.liveSeq { return }
+        if event["type"].string == "agent_start" { error = nil }
+        let effect = timeline.apply(event)
+        if let failure = timeline.takeError() { error = failure }
+        if effect == .refetch {
             Task { await load() }
+        }
+    }
+
+    /// Roll the last turn out of the history and run it again, so a failed
+    /// or empty turn doesn't stay in the context.
+    func retry() async {
+        guard !retrying, let store else { return }
+        retrying = true
+        defer { retrying = false }
+        let onScreen = timeline.messages.last { $0.role == .user }?.blocks.compactMap { b -> String? in
+            if case .text(_, let t, _) = b { return t }
+            return nil
+        }.joined(separator: "\n\n")
+        do {
+            var text: String
+            do {
+                text = try await store.request("conversations.retry", ["id": .string(conversationId)])["text"].string ?? ""
+                await load()
+            } catch {
+                // The send never reached the session: resend what's on screen.
+                guard error.localizedDescription.contains("nothing to retry"), let onScreen, !onScreen.isEmpty else { throw error }
+                text = onScreen
+            }
+            error = nil
+            loadFailed = false
+            if timeline.messages.last?.role != .user { timeline.appendUser(text, images: []) }
+            try await store.send(text, images: [], to: conversationId)
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 

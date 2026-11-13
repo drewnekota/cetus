@@ -16,6 +16,20 @@ enum Theme {
     static let faint = dynamic(light: 0xA1A1AA, dark: 0x717574)
     static let accent = Color("AccentColor")
     static let success = dynamic(light: 0x299F51, dark: 0x35C264)
+    static let warning = dynamic(light: 0xC2780B, dark: 0xE0A83C)
+    static let danger = dynamic(light: 0xDC2626, dark: 0xF26D6D)
+    static let info = dynamic(light: 0x0284C7, dark: 0x38BDF8)
+    // highlight.js GitHub theme, as on the desktop.
+    static let codeComment = dynamic(light: 0x6E7781, dark: 0x8B949E)
+    static let codeKeyword = dynamic(light: 0xCF222E, dark: 0xFF7B72)
+    static let codeLiteral = dynamic(light: 0x0550AE, dark: 0x79C0FF)
+    static let codeString = dynamic(light: 0x0A3069, dark: 0xA5D6FF)
+    static let codeTitle = dynamic(light: 0x8250DF, dark: 0xD2A8FF)
+    // GitHub's diff colors, as in the desktop's edit card.
+    static let diffAdd = dynamic(light: 0xDAFBE1, dark: 0x033A16).opacity(0.4)
+    static let diffAddText = dynamic(light: 0x116329, dark: 0xAFF5B4)
+    static let diffDel = dynamic(light: 0xFFEBE9, dark: 0x490202).opacity(0.4)
+    static let diffDelText = dynamic(light: 0x82071E, dark: 0xFFDCD7)
 
     // Type ramp: 15 for content, 14 for lists, 12 for meta.
     static let content = Font.system(size: 15)
